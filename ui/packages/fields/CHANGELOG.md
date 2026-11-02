@@ -1,5 +1,591 @@
 # @object-ui/fields
 
+## 18.3.0
+
+### Minor Changes
+
+- 9eaa209: feat(spec,runtime): an organization-scoped `manage_connector_connections` capability gates the connector connection door (ADR-0143 D5)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Connecting a vendor account to an `oauth2` `authorization_code` connector instance is an organization act (ADR-0143 Q1 = A: one connection per instance per organization). The door that does it now asks a capability declared for exactly that act, instead of the platform-scoped `manage_metadata`.
+  
+  - **`@objectstack/spec`**: `PLATFORM_CAPABILITIES` gains `manage_connector_connections` (label "Manage Connector Connections", scope `org`). A permission set may grant it in `systemPermissions`, and a resource may name it in `requiredPermissions`. `ADMIN_FULL_ACCESS_CAPABILITIES` carries it, so platform administrators (`admin_full_access`) hold it by default. No other shipped set carries it: an organization administrator, or anyone else, holds it only by an explicit grant.
+  - **`@objectstack/runtime`**: `GET` / `POST` / `DELETE /api/v1/automation/connectors/:name/connection` and `GET /api/v1/automation/connectors/oauth/callback` require `manage_connector_connections`, fail-closed, with only the system context bypassing. Without it they answer `403 PERMISSION_DENIED` before the automation service is reached. `manage_metadata` alone no longer admits a caller to these four routes. The door first shipped in this same release line gated on `manage_metadata`; no published version served it, so no released caller loses access. A platform administrator on `admin_full_access` is admitted as before.
+  - **`@object-ui/fields`, `@object-ui/i18n`**: the Setup capability picker labels the new capability in all ten locales.
+
+### Patch Changes
+
+- 2302b92: feat(console): ownership queues in the Console — a queue picker reading both sources, a Claim button the server decides, and an "In a queue" list filter
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The server half of ownership queues shipped without a Console face. Now:
+  
+  - **Queue pickers list both sources.** The flow designer's approver Value for a `queue` approver, and a sharing rule's `queue` recipient, list the queues an installed app declares (`GET /api/v1/meta/queue`) together with the organization's own `sys_queue` records, one list by machine name, and store the name. The approver picker follows the binding the server publishes (`registry-and-data`); with no data adapter, or a server that publishes another binding, it keeps the text box.
+  - **Claim.** A record sitting in a queue (no owner, a `queue` named) shows **Claim** in its header only when the explain engine's answer for a transfer of that record carries an admitting `queue_claim` rule; no answer means no button. Claim sends `{ owner_id: <self> }` through the normal update, and a lost race (`409 CONCURRENT_UPDATE`) is reported as "Someone else claimed this record first."
+  - **In a queue.** A list of an object served with the injected `queue` column gains an **In a queue** toggle that narrows the fetch (and an export) to `owner_id` empty and `queue` set. Which of those rows come back is still the server's read filter.
+  - **Docs.** A new authoring guide, *Queues and assignment rules*, covers declaring a queue and an assignment rule, the `load` requirement, what a parked record is and who sees it, how a claim is spelled, and that a queue is not a messaging audience; the approvals, sharing-rule and RLS pages link to it.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 1ed3360: feat(ui): a `record`-mode currency amount shows each record's own currency; the code field is an ISO 4217 select pre-filled with the organization currency; Studio edits the mode and the pointer (ADR-0144 D2, D6, D8 rule 4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` now renders in the currency its record's `currency_code` holds, on every face that holds the record:
+  
+  - **Cells and widgets.** `resolveFieldCurrency(field, tenantDefault, record)` takes the record in scope as an optional third argument. Under `record` mode it reads only that record's code field; no record, or a blank code, resolves to no currency, so the amount shows as a plain number and never in the tenant default. `dynamic` and `fixed` fields resolve exactly as before. The list cell, the form and inline amount box (symbol, decimals and spinner step follow the selected code), formula cells returning `currency`, the record page's summary chips, the dashboard table and record drawer, and Gantt tooltips all pass the record. `recordCurrencyField(field)` names the pointer.
+  - **The code field.** A `text` field declaring `valueDomain: 'iso_4217_currency'` renders a searchable select instead of a free-text box, grouped "Available" (the organization currency, then rated currencies, then the codes the object's records already hold) and "All currencies (ISO 4217)". It offers only codes the value domain accepts. The form reads the used codes once per object, with one grouped query, and hands them to the field on its own metadata (`usedCurrencyCodes`); a data source without grouped queries offers home + the record's own code. The rated group is empty until the exchange-rate table ships. The picker itself is `CurrencyCodePicker` in `@object-ui/components`.
+  - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
+  - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
+  - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+  - **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget, the report table (and its export) and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
+  - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
+- e199adf: fix(fields): an empty currency or percent box shows the field's own placeholder, or none, instead of `0.00` / `0` (#27398)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The edit-mode `CurrencyField` fell back to the placeholder `0.00` whenever the field declared none, so an optional amount nobody had filled in (a public form's Annual Revenue) read as a filled-in zero, and a JPY or KWD field was offered a two-decimal stand-in. It now shows the field's `placeholder` when one is declared and nothing otherwise, as `NumberField` does. It reaches every host that draws the widget: the public form, the record form and the grid's inline editor. A real zero still shows as `0`, and an authored placeholder (including one a form row overrides) is shown as before.
+  
+  The edit-mode `PercentField` had the same fallback, the placeholder `0`, which beside its `%` adornment read as a filled-in 0%; it now shows the field's `placeholder` or nothing, the same way.
+- ddbd08e: fix(console): a refused form submit marks the fields it names; the markdown editor's placeholder takes the sans stack
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`**: the form page (`/f/:slug`, `/forms/:name` and `/apps/:appName/forms/:name`) used to answer every refusal with one banner and one toast and nothing on the inputs. Each refused field is now marked: `aria-invalid` on its control, and the reason under the control, which the control names in `aria-describedby`. The client required check marks each empty required field ("Name is required"). The server's field-level refusals (`400 VALIDATION_FAILED` with `fields[]`, flat or in the wrapped envelope, and `409 UNIQUE_VIOLATION` naming its `field`) mark the fields the form draws, read with `extractFieldErrors` from `@object-ui/react`, the reader the record dialog uses. A faulted `visibleWhen` marks its field and points it at the banner, which already names the field and the rule. A refusal that names no field, or only fields the form does not draw, marks nothing. On a tabbed or wizard form view the first marked field's tab or step opens. Editing a marked field clears its mark. The banner and the toast are unchanged.
+  - **`@object-ui/fields`**: the markdown, html and richtext editor (`RichTextField`) keeps `font-mono` for the source a person types, and its placeholder now uses the sans stack (`placeholder:font-sans`), so a form's "Describe your request" no longer reads as code. This applies on every host.
+- efa2915: fix(fields, components): a date typed in a form the picker cannot read is a field error that refuses submit, not a silent drop (#27483)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Typing `13/45/2026` into a record form's date field and pressing Create saved the record with the date empty (or, on edit, with the old date) and a success toast. The picker never writes text that names no date, so the form value stayed what it was and nothing told the form.
+  
+  - **Now.** The text box is marked invalid as soon as the user leaves it, the field shows the picker's message (the typed text and the expected format) as its form error, and submit is refused the way a missing required value is: the dialog stays open and nothing is sent. Correcting or clearing the text withdraws the error. `datetime` fields behave the same.
+  - **`onInvalidInputChange`** is a new optional widget prop on `FieldWidgetComponentProps`, the widget props type `@object-ui/fields` exports. The key is optional, so every existing widget and host compiles and behaves as before; no consumer breaks. It is fired as follows: a widget that parses typed text fires it with a message when the committed text names no value, and with `null` once it is valid, cleared, or unmounted. The `form` renderer (`@object-ui/components`) turns the message into the field's `invalidInput` validation error and passes the callback to the `date` / `datetime` widgets only. A widget given the callback leaves the message text to the form; hosts that pass none (the grid's inline editor, the action-param dialog) keep the picker's own notice, unchanged.
+- d220b9b: fix(app-shell): the record history "Changes" entry formats a currency, number or percent value the way the record page formats that field, instead of printing the raw stored number
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Before.** Editing a currency field to `4321000` showed `$4,321,000.00` on the record but `— → 4321000` in Activity › Timeline. Number and percent fields printed their raw stored value the same way (`1234.5`, `0.25`).
+  - **Now.** The History tab formats these three types through the record page's own formatters in `@object-ui/fields`: `formatCurrency` with the code `resolveFieldCurrency` resolves, `formatNumberFieldValue` (declared `scale`, grouping hint) and `formatPercent` at the field's declared storage and width, in the viewer's display locale. A fixed-currency field reads `$4,321,000.00`.
+  - **Currency modes.** A `fixed` field shows its declared code. A `dynamic` field shows the tenant default when the History tab's caller passes one (`tenantCurrency` on the format context), and a plain grouped number when it does not. A `record`-mode field shows a plain grouped number: its code lives in a sibling field of the row, which a per-value format call is not handed, and the tenant default is never substituted for it.
+  - **`@object-ui/fields`.** `formatNumberFieldValue` is now exported from the package entry (it was module-internal), and its `locale` parameter is optional like its siblings `formatCurrency` and `formatPercent`. No rendering changes.
+- 50d05cb: fix(fields): a `boolean` field draws a checkbox and a `toggle` field a switch, in the record form, the grid's inline editor and the Studio canvas preview
+  
+  Clause-②: yes (widening) — `@object-ui/fields` gains two public exports, `resolveBooleanControl` and `type BooleanControl`
+  Metadata-protocol: none
+  
+  Studio's type picker offers "Checkbox — shown as a checkbox" (`boolean`) and "Toggle — shown as a switch" (`toggle`), but both types reached the one `field:boolean` widget, which drew a switch unless the field carried `widget: 'checkbox'`. A field authored as Checkbox therefore drew a switch on the Studio canvas and in the runtime create form. `resolveBooleanControl` (exported from `@object-ui/fields`) is now the one answer: `boolean` draws a checkbox, `toggle` a switch, and an explicit `widget` of `checkbox` / `boolean` or `switch` / `toggle` overrides the type. `BooleanField` and the canvas's control preview both read it.
+  
+  Forms that relied on a `boolean` field drawing a switch now draw a checkbox; declare the field as `toggle`, or set `widget: 'switch'`, to keep the switch.
+- d07e8d1: fix(app-shell): Setup reads clearer — one name for the app, a confirm before Disable and before switching a packaged action off, the reason a package is read-only, and a forced password change in the user's words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Suggestions from the 18.3.0 RC Setup walkthrough, each in the console:
+  
+  - **One name for Setup.** Home's link and the app switcher's entry now carry the Setup app's own label, the name its header shows, instead of "System Settings" and "Settings".
+  - **A forced password change** reads in the console's own words, in the user's language: the body says an administrator set a temporary password, and the first field is "Temporary password". An expired password keeps the server's sentence and "Current password".
+  - **The package sheet** says why a read-only package offers no write action (loaded from code, read-only here, or part of the platform), asks before Disable, and calls its delete action "Delete package". Installed Apps has its own subtitle.
+  - **Packaged automation** asks before switching a packaged action off, says in a toast when a switch was accepted, shows each action's object by its label beside the machine name, and fits a phone screen without a sideways scroll.
+  - **Record tab strips** that hold more tabs than fit scroll sideways and fade at the edge that hides a tab.
+  - **A select value of `info` or `warning`** with no declared colour reads blue or yellow, not a hashed alarm orange.
+  - **Setup's header tags** (Admin config, Platform schema, System-managed, Identity) take keyboard focus, which opens their explanation as hover does.
+  - `@object-ui/i18n` adds `auth.remediation.password.resetBody`, `auth.remediation.password.temporary` and five `packagedAutomation.*` keys in all ten locales, and five `engine.packages.*` keys in the Studio namespace (en, zh); `engine.packages.detail.deleteApp` becomes `engine.packages.detail.deletePackage`.
+- 72b08ee: docs(skills): hand-written inventory counts are deleted; the names and the source of truth stay
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-data` counted its field types ("49") in SKILL.md and in `rules/field-types.md`, and its lifecycle events ("8") in SKILL.md and `references/data-hooks.md`; `objectstack-automation` counted its built-in node types ("20"); `objectui/README.md` counted its plugins ("18"); `objectui/guides/schema-expressions.md` counted the formula registry ("30 functions"); `objectstack-query` counted the aggregate functions ("six"). No gate reads any of those numbers against the tree, so each one goes wrong the moment the inventory moves, and a wrong count misleads the reader more than no count.
+  - **Now.** The numbers are gone; every enumeration that taught something (the node-type tables, the plugin names, the function table, the aggregate names) stays, and each page still points at the file or schema that is the source of truth. Deletion only: every touched file shrinks under its unchanged token ceiling.
+  - The same deletion in shipped READMEs and one shipped source comment: `@objectstack/spec` (a `//` comment in `src/kernel/metadata-plugin.zod.ts`, which ships), `@objectstack/metadata` (README), and the `@object-ui/*` READMEs of i18n, plugin-grid, components, fields, types, plugin-form and console. No schema, key or behaviour changes.
+- 2f2c6b9: feat(fields): every record reference shows a hover card with the target's declared highlights, without navigating
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Hovering a record reference for 400 ms, or pressing Space on it, shows a floating card: the target object's icon and label, the record's name as a link that opens it the way a click on the reference does, and the object's declared `highlightFields` minus the name field, at most six, drawn by the same cell renderers a list uses (option labels, currency, dates, lookups). Esc, moving the pointer away or blurring the reference hides it, and one card is open at a time. Focus alone does not show it.
+  
+  - **Where.** Every lookup and master-detail value that links to its record (`LookupCellRenderer`): a relation column in a list, in a related list's table and in its enlarged view, and a lookup in the record's details. On the record page's related column, the name in a compact related row shows the card too, and its title opens the row as the name does.
+  - **What it reads.** Nothing until a card is shown; then one `findOne` for the record, with `$expand` naming only the reference fields the card draws. The answer is kept per record and read again after the data bus says the record changed, so a list of 200 rows reads nothing on render.
+  - **Metadata only.** Only the object's declared `highlightFields` are drawn: a name the object does not define, the name field and a field the viewer may not read are left out. An object that declares none shows the record's name and the object label. A record the viewer cannot read shows the reference's name and the object label.
+  - **Layout.** The card is portalled to the document body, so the row, cell or chip under it keeps its layout.
+  
+  `@object-ui/fields` exports `RecordHoverCard` (with `RecordHoverCardProps` and `RecordHoverCardObjectDef`) for a host that draws a reference of its own: wrap the element that names the record and pass the target's `objectName`, `recordId` and the object definition the host already holds.
+- e15a87c: fix(fields): a user's Permission Sets and Positions tabs show each set's and position's label, not its api name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A text field declaring `widget: 'permission-ref'` or `widget: 'position-ref'` (`sys_user_permission_set.permission_set`, `sys_user_position.position`) now has a read face of its own in list and detail cells: it draws the registry label of the stored name (`Organization Admin` for `organization_admin_no_bypass`), with the name on the cell's `title`. The labels come from the catalog the edit picker already lists (`DataSource.listMetadataItems`, `GET /api/v1/meta/:type`), read once per data source and registry type for every cell. A name the catalog does not hold, or holds without a label, still draws as the name, as does every cell while the catalog loads, when it fails, or when no data source can list a registry. A record page's related list now hands a column's declared `widget` to the cell resolution, as the grid already did, so these columns reach the face there.
+- 7e3822c: fix(core,react): an action's `description`, a param's `helpText` and an `outcomeMessages` entry read the `template` envelope
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack#27948 step 2 types these three as `template` slots, so a served action can carry `{ dialect: 'template', source }` where it carried a string.
+  
+  - **Param dialog.** The runner hands the param-collection handler the action and params with `description` and each `helpText` reduced to their text (`actionCopyText`), so the dialog draws the sentence, never `[object Object]`; a locale map is handed on unchanged for the host to localize.
+  - **Outcome toast.** `useActionTextLocalizer` keeps an `outcomeMessages` envelope's shape (a bundle entry replaces its `source`) instead of collapsing it to the word "template", and the runner fills the envelope's holes as it fills the string's.
+  
+  - **Param fields.** `@object-ui/fields`' `resolveActionParams` reads a param's `helpText` through `actionCopySource`, so an envelope yields its sentence (a field-backed param with no text falls back to the field's own help) and `ActionParam` stays assignable to its `RawActionParam`.
+  
+  - **Studio's action preview** (`@object-ui/app-shell`, unpublished) draws a param's `helpText`, `confirmText` and `successMessage` from the envelope's `source`: it drew `helpText` raw (an object as a React child) and read the other two as a locale map, which showed the word "template".
+  
+  What to do: nothing. `${…}` copy written before the migration keeps reading.
+- ea1751b: feat(fields): a lookup pick fills the fields its `lookupAutofill` declares, in the record form and in the line-item grid
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `FieldSchema.lookupAutofill` (`[{ target, source, overwrite? }]` on a single-value `lookup` / `master_detail`) now has its reader. Picking a record writes each declared `target` of the record being edited from the picked record's `source` — a quote line's `unit_price` from the picked product's `list_price` — before save, where a server hook used to be the only filler.
+  
+  - **The overwrite rule is the spec's.** Without `overwrite: true` a pick fills a target only while it is empty or still holds the value an earlier pick in the same form (or grid row) filled in; a value the user typed, or one the record already stored, stays. A pair declaring `overwrite: true` replaces the target on every pick. A `source` the picked record does not carry (a field the reader may not read is not served) writes nothing.
+  - **Record form.** `LookupField` applies the pairs on every single-value pick path: the dropdown, the keyboard, quick-create and the browse-all dialog. The form renderer hands it a new widget prop, `onAutofill(patch)`, which writes the targets as edits of the form (`setValue`, dirty), so the filled values are saved with the record.
+  - **Line-item grid.** `GridField` takes the child object's pairs through a new host prop, `lookupAutofill` (lookup field name → pairs, built with the new `lookupAutofillByField`), which `MasterDetailForm` and `LineItemsPanel` pass from the child schema they load. The column key `autofill` is unchanged and still governs only the same-named copy; a declared pair applies whatever it says and takes its target out of that copy, so one target has one writer per pick. A pick from the grid's browse-all dialog now reaches the grid once, with its record, so both copies run on that path too.
+  - **Types.** `LookupFieldMetadata.lookupAutofill` is declared by reference to the spec. New exports from `@object-ui/fields`: `declaredLookupAutofillPatch`, `lookupAutofillByField`, `LookupAutofillPair`, `LookupAutofillByField`; `lookupAutofillPatch` takes an optional fourth argument carrying the declared pairs.
+  - **Liveness.** The `lookupAutofill` row of `@objectstack/spec`'s field ledger moves from `planned` to `live`, citing these readers.
+  
+  A master-detail collection whose relationship and every column are authored loads no child schema, so its grid fills only the same-named copy.
+- 700ec85: feat(console): a percent field with `percentDisplay: 'plain'` shows the percentage with no progress bar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `FieldSchema.percentDisplay` (`bar` or `plain`) was declared ahead of its renderer, so every percent field still drew a progress bar, including rates and probabilities such as an opportunity's win probability. The Console now reads it:
+  
+  - **The percent cell.** `PercentCellRenderer` in `@object-ui/fields` prints the formatted percentage alone when the field says `percentDisplay: 'plain'`. An absent key or `bar` keeps the bar beside the number, as before. The number itself is unchanged: same storage reading (`max`), same decimal places (`scale`), same locale.
+  - **Every read-only host.** The list grid, the record page's fields and header chips, the quick-look panel, related lists and gallery cards all draw that one cell. Each builds the cell's field metadata key by key, so each now copies `percentDisplay` beside `useGrouping`: the grid's three configured-column paths, the detail enrichment key list (record page fields and header chips), the quick-look panel, the related list and the gallery card.
+  - **The field form.** The field designer offers a `percentDisplay` select (Bar / Plain) on `percent` fields. Left untouched it writes nothing, and the field keeps the bar.
+  - **The contract.** `percentDisplay`'s describe no longer says the Studio UI does not read it, and its liveness row is `live`, naming those relay sites.
+  
+  Nothing to migrate: a field that already says `plain` now shows it.
+- 3e05ed1: fix(fields): a text field that declares `options` reads the matching option's label in its read-only cell
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The spec allows `options` on every field type, and analytics dimensions and grid group headers already show a declared option's label on any type. The read-only text cell ignored the list, so one declaration read `backlog` in a list or detail cell and `Backlog` in a chart or group header.
+  
+  `TextCellRenderer` (and every field type it draws, such as `textarea`, `code` and `time`) now applies the same test analytics applies, a non-empty `options` array: a stored value that names an option reads that option's label, already translated by the host as a select cell's is. The stored value is untouched, a value that names no option reads as itself, and a field with no list renders exactly as before. Edit inputs and forms are unchanged: a text field with options stays a free text input. The value-to-option match (exact, then case-insensitive) is the one `SelectCellRenderer` used, now shared by both cells.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [2302b92]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [47b6392]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [fc92c62]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [81b4599]
+- Updated dependencies [d7df639]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [ee29ac3]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [48bffe3]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [b223072]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [7614f8f]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [efa2915]
+- Updated dependencies [aa874c8]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [af6ca00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [5da3a8c]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [bf74607]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [55a1feb]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [3702be4]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [8a1f467]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [5c083e8]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [a5d7098]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [946395d]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [b339465]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [f91ab5a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [3ba5206]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [86dc686]
+- Updated dependencies [f23e051]
+- Updated dependencies [aaa5c1d]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [91e4652]
+- Updated dependencies [001c04b]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [9da2f4b]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [768ec4b]
+- Updated dependencies [4bc963c]
+- Updated dependencies [ba0084e]
+- Updated dependencies [a8d2fd7]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [82b29fe]
+- Updated dependencies [8c3f9d9]
+- Updated dependencies [4d278c9]
+- Updated dependencies [d5da45b]
+- Updated dependencies [5114b0e]
+- Updated dependencies [3694d3b]
+- Updated dependencies [d62d973]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [5e879ea]
+- Updated dependencies [1404938]
+- Updated dependencies [9182ff6]
+- Updated dependencies [272fec0]
+- Updated dependencies [693e100]
+- Updated dependencies [7253344]
+- Updated dependencies [da6f0ce]
+- Updated dependencies [0c1829a]
+- Updated dependencies [0aaad18]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [839aae5]
+- Updated dependencies [99a6a78]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [847e424]
+- Updated dependencies [64bc7fa]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @objectstack/spec@18.3.0
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+  - @object-ui/permissions@18.3.0
+  - @object-ui/providers@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

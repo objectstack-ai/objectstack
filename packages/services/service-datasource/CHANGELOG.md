@@ -1,5 +1,488 @@
 # @objectstack/service-external-datasource
 
+## 18.3.0
+
+### Patch Changes
+
+- a315560: fix(service-datasource): Test on a saved datasource whose connect failed answers that connect failure, not "no registered driver"
+  
+  Clause-②: no — no accepted input changes and no request that was served is refused; `POST /api/v1/datasources/NAME/test` keeps its `200 { ok: false, error }` answer, and only the `error` text changes, for a datasource whose last connect failed.
+  Metadata-protocol: none
+  
+  A Postgres datasource created with a wrong host or password answers `status: 'error'` with the connect failure in `statusReason`. Pressing Test then said `Datasource 'NAME' has no registered driver to introspect.`: true of the engine (a failed connect registers no driver), and pointing the admin at installing a driver that is installed. Test now answers the datasource's retained connect verdict, the same `reason` the create answer and the admin list serve as `statusReason`, when the datasource has no live driver and its last connect failed.
+  
+  - One message: Test reads `getConnectionState` on the shared `datasource-connection` service, the store `statusReason` already reads. It builds no second failure text.
+  - Test still does not re-attempt the connect. An edit rebuilds the pool and replaces the verdict: a rebuild that fails again is answered with its own fresh reason, and one that connects is tested through its live driver.
+  - Unchanged: a datasource with no connect verdict and no driver keeps the driver-missing sentence; a connected datasource, the primary datasource, and a datasource whose failed rebuild kept its old pool serving are probed through their live driver as before; a blocked (policy-refused) verdict keeps the engine's answer.
+  - `ExternalDatasourceServiceConfig` gains an optional `connectionState` reader; a host that does not wire it keeps the old answer.
+- e270dab: fix(service-datasource)!: `POST /api/v1/datasources/:name/test` refuses a name that no saved datasource has with `404 RESOURCE_NOT_FOUND`, as the other by-name doors do, instead of answering `200 { ok: false }`
+  
+  Clause-②: no (narrowing) — `POST /api/v1/datasources/:name/test` and the in-process `ExternalDatasourceService.testConnection(name)` refuse a name that resolves no saved datasource with `404 RESOURCE_NOT_FOUND`, which they answered `200 { ok: false }` before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the Test door's request and its { ok, latencyMs, tableCount, error } answer keep their shape, and a name that resolves no saved datasource is now refused instead of answered. A failed probe of a datasource that does not exist had no meaning to keep, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the saved-datasource Test door (`@objectstack/service-datasource`), served at `POST /api/v1/datasources/:name/test`.
+  
+  - **Before.** Testing a saved datasource by a name that no saved datasource has (a typo, a removed datasource, a name from another deployment) was answered `200` with `{ ok: false, error: "[ObjectQL] Datasource '…' has no registered driver to introspect." }`. That is the answer a saved datasource that is down gets, so an admin tool or script could not tell "this datasource is down" from "this datasource does not exist". `GET`, `PATCH` and `DELETE /api/v1/datasources/:name` already answered the same name `404`.
+  - **Now.** That request is refused `404` with `error.code` `RESOURCE_NOT_FOUND` and the message `GET /api/v1/datasources/:name` gives for the same name. Nothing is probed. The name is resolved through the same stored-record read the sibling by-name doors make. In process, `ExternalDatasourceService.testConnection(name)` throws that `404` error instead of returning `{ ok: false }`.
+  - **Unchanged.** A saved datasource that fails its probe still answers `200 { ok: false, error }`, and one that is up still answers `200 { ok: true, … }`. The platform's primary datasource (`default`) is still tested through its live driver, whether or not a datasource record is stored for it. Every other outcome of `testConnection` is still returned, never thrown.
+  - **Who sees it.** A caller holding the platform-settings capability who tests a name that no saved datasource has.
+  
+  **The remedy.** None needed: pick the datasource from `GET /api/v1/datasources`, or check the name. A script that read `ok: false` as "does not exist" now reads `404`.
+- af52253: fix(service-datasource): testing a datasource draft no longer creates its SQLite database file
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  "Test connection" on a datasource draft (`POST /api/v1/datasources/test`) saves nothing, yet for a file-backed SQLite draft it opened the database the way a server boot does, so the file, and every missing directory above it, was created on disk although no datasource was saved. A mistyped path left a stray database wherever the server process could write. Measured on every file-backed driver the default factory builds: `sqlite` / `sqlite3`, `sqlite-wasm`, and `turso` / `libsql` with a `file:` url.
+  
+  - **What the probe answers now.** A draft whose database file does not exist is refused: the probe answers `ok: false` with an error that names the file and says it does not exist. Nothing is created: neither the file nor its directory.
+  - **What still works.** A draft naming an existing database file, or `:memory:`, probes as before. Saving a datasource still creates its file on connect, as do the boot restore and every hot pool: only the probe asks for an existing file.
+  - **Whichever factory builds.** The check is the probe's own and runs before the driver factory is asked for anything, so it holds for a host-registered factory too. Nothing a host or an author can write changes: no exported type or function signature moves.
+- a7c2595: fix(service-datasource, rest): the datasource Sync doors and their federation twins answer a name that no saved datasource has `404 RESOURCE_NOT_FOUND`, as `GET /api/v1/datasources/:name` does, instead of a `400` federation refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `GET /api/v1/datasources/:name/remote-tables`, `POST /api/v1/datasources/:name/object-draft`, and the federation twins under `/api/v1/datasources/:name/external/` (`GET tables`, `POST tables/:remote/draft`, `POST tables/:remote/import`, `POST refresh-catalog`) answered a name that resolves no saved datasource `400 EXTERNAL_DATASOURCE_ERROR` (`EXTERNAL_IMPORT_ERROR` for the import) with "has no datasource definition, so nothing declares it a federation source …". That reads as a malformed request, or as advice to re-declare the datasource `external`, when the datasource does not exist.
+  - **Now.** They answer `404` with `error.code` `RESOURCE_NOT_FOUND` and the message `GET /api/v1/datasources/:name` gives for the same name (`Datasource "NAME" does not exist.`). In process, `ExternalDatasourceService.listRemoteTables`, `generateObjectDraft`, `importObject` and `refreshCatalog` throw that `404` error for such a name. Every by-name datasource door now spells this answer through one helper.
+  - **Unchanged.** A datasource that exists and is not a federation source (a managed one, or the platform's primary datasource) is still refused `400` with the door's code and its reason.
+- 869fa76: fix(service-datasource): a plugin-driver datasource connected or reconnected through the connection service keeps the engine's correctness floor (#27666)
+  
+  Clause-②: yes (narrowing) — `EngineDatasourceDef` (`@objectstack/spec/contracts`) gains an optional `driver` key, and a plugin-driver datasource connected through the datasource-connection service is now held behind the #27277 floor, so its accepted reads and writes narrow as that floor's changeset describes
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authored schema is added, removed, renamed or re-shaped; the new key is on an engine-facing contract that the connection service fills itself. A datasource that now gets the floor needs no metadata change, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a host whose datasource-driver factory builds plugin drivers: those datasources are now floored (a read matching more than 1000 rows answers 422 `EXTERNAL_ROW_CAP_EXCEEDED`, predicate bulk writes and `aggregate` are refused by name), as manifest-declared ones already were.
+  
+  The engine holds a plugin driver on a non-managed datasource behind a correctness floor (row cap, the query re-applied in memory, remote write refusals mapped) when the datasource definition it stores names a driver id that is not built in. Only the engine's own manifest install path carried that id. The datasource-connection service registered the definition without it, and `EngineDatasourceDef` had no such key, so a datasource created at runtime through datasource management was never floored, and one edited and reconnected lost the floor (the eviction drops the stored definition, and the connect that follows had no id to keep). Nothing said so: a driver that ignored `where` could answer rows outside the caller's sharing or row-level scope.
+  
+  - `EngineDatasourceDef` (`@objectstack/spec/contracts`) gains an optional `driver`, the datasource's driver id. An engine never reads an absent key as "built in": a caller that registers only the write-gate facts keeps the id stored before it.
+  - `DatasourceConnectionService.connect` registers the definition with `record.driver`. `reconnect`'s keep-old-pool restore registers the OLD record's driver id (`previous.driver`; `previous` now carries it), not the new record's, because the kept pool was built from the old record.
+  
+  A built-in driver (memory, sqlite, sqlite-wasm, postgres, mysql, mongodb, turso) and a managed datasource are unchanged: the floor engages only for a driver id a server plugin published on a datasource whose `schemaMode` is not `managed`. A host that registers no driver factory for plugin ids (the default) sees no change today.
+  
+  What to do: nothing. A host whose factory builds plugin drivers gets the floor on those datasources from the connection service's next connect.
+- e063a87: feat(service-datasource): a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`
+  
+  Clause-②: yes (widening) — `@objectstack/service-datasource` exports `datasourceEnvCredentialVar`, `resolveDatasourceEnvCredentialsSwitch`, `DATASOURCE_ENV_CREDENTIALS_SWITCH` and the `DatasourceEnvCredentialSource` type, and `DatasourceConnectionServiceConfig` gains the optional `envCredentials`; `@objectstack/spec/data` exports `CODE_DEFINED_CREDENTIAL_ROUTE`. Nothing an author writes is added or refused.
+  Metadata-protocol: none
+  
+  A datasource declared in code (`defineDatasource`, or a package's `*.datasource.ts`) had no way to get its password: the driver contracts refuse `config.password` and a `user:password@` URL, the Setup → Datasources form cannot edit a code datasource, and nothing mints a `sys_secret:` handle for one. Now the credential stays out of the declaration and is read at connect from a variable derived from the datasource name: `warehouse` reads `OS_DATASOURCE_WAREHOUSE_PASSWORD` (upper-cased; every character outside `A-Z0-9` becomes `_`). The value is the connection's secret: the password for postgres, mysql and mongodb, the `authToken` for turso.
+  
+  - **A host switch.** `OS_DATASOURCE_ENV_CREDENTIALS` takes `on` or `off`; any other value refuses the boot with a sentence. `os serve` (and so `os start` and `os dev`) turns it on unless the operator set it. Every other composition leaves it off, so a host that loads several tenants' artifacts into one process never reads the variable.
+  - **Code datasources only, by provenance.** The variable is read on the boot's declared connect, for a name in the host's code-datasource set: the booted artifact's datasources and those of a package installed locally. A datasource created through Setup or the API under the same name never reads it, and neither does the `default` datasource, which keeps `OS_DATABASE_URL`. A record's own `origin` is never consulted.
+  - **A declared credential wins.** With `external.credentialsRef` or `external.connector` declared the variable is not read, and a reference that fails to resolve stays fail-closed.
+  - **Unset.** The connect goes ahead without a secret as before; when the database then refuses, the reason names the variable to set.
+  - **Two names deriving one variable** are refused at their connect.
+  - **Who can read it.** Any code datasource the host registers under a name reads that name's variable, including one in an installed package. Install only packages you trust with the credentials in the process environment.
+  
+  The credential refusals (`config.password`, a URL userinfo password, a credential query parameter, the mongo `options` passthrough) and the two `password` guidance entries on `DatasourceSchema` / `ExternalDatasourceSettingsSchema` end with one shared sentence naming this route, after the Setup and `external.credentialsRef` routes they already name. `planCredentialMigration`'s remedy for a code-defined row names the row's variable.
+- ca54eac: fix(service-datasource): `POST /api/v1/datasources/:name/external/validate` answers a name no saved datasource has `404 RESOURCE_NOT_FOUND`, as `GET /datasources/:name` and the other federation doors do
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, accepted value, stored row, stored shape or export moves. What narrows is one HTTP answer: a validate request for a datasource name that does not exist now gets the 404 the sibling by-name doors already give it, instead of an empty 200 report. There is no metadata for `objectstack migrate meta` to rewrite and nothing to tombstone; the fix for a caller is to stop addressing a datasource that does not exist. -->
+  
+  `ExternalDatasourceService.validateDatasource(name)` selected the federated objects bound to `name` and validated them. For a name with no saved datasource it selected nothing and returned an empty, vacuously `ok` report, so the validate door answered `200 { ok: true, results: [] }` and a caller could not tell "nothing on this datasource is federated" from "this datasource does not exist".
+  
+  It now checks that the datasource exists first, the check `testConnection` makes (#27510): a name that resolves no saved datasource throws the package's one `datasourceNotFoundError` (`404`, `RESOURCE_NOT_FOUND`, `Datasource "NAME" does not exist.`) before anything is listed or introspected, and the REST route relays it as such. Only existence is asked, not the full federation guard: a saved datasource with nothing federated, a managed one included, and the platform's primary datasource (not looked up, as it may have no stored record) keep their `200` empty report.
+  
+  **Side effect.** The runtime's background drift check (`external.validation.checkIntervalMs`) also calls `validateDatasource`. For a datasource that was deleted after its timer was armed, a tick now lands in the check's existing catch (one `warn`, "drift check could not be performed", no events) where it used to return an empty report silently.
+  
+  **BREAKING** for a caller of `POST /api/v1/datasources/:name/external/validate`, or of `validateDatasource`, that addresses a datasource name that does not exist.
+  
+  - **Before.** `200` with `{ ok: true, results: [] }`; `validateDatasource` resolved to `{ ok: true, results: [] }`.
+  - **Now.** `404 RESOURCE_NOT_FOUND`; `validateDatasource` rejects with that error.
+  - **Fix.** Address a saved datasource, or treat the `404` as "no such datasource".
+- 6d9419b: fix(service-datasource): a code object bound to a Setup-created managed datasource gets its table when the datasource's pool opens, on create and after a restart (#27701)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An author declares an object with `datasource: 'warehouse'`, and an admin creates `warehouse` in Setup → Datasources. Boot's schema sync skipped the object, because no `warehouse` driver existed yet, and the pool the admin door opened synced nothing either. The datasource answered `ok`, the table was never created, and every read of the object was a 500 (Postgres `42P01`), the same after every restart.
+  
+  - **Now.** Opening a runtime datasource's pool (the admin create, the boot rehydration, and a peer replica's convergence on a new datasource) syncs the schema of the objects already bound to it, as boot does for a declared datasource. A table that is missing is created; a table that exists is left as the sync leaves it. One object's refused sync is logged at `error` and does not fail the connect, as on the declared path.
+  - ⛔ **Only a managed datasource.** A datasource whose `schemaMode` is `external` or `validate-only` syncs nothing for its objects, so it never gets DDL. Its mode is read as the driver factory reads it.
+  - **Not changed.** An edit that rebuilds the pool (a changed `config`, credential, `schemaMode` or `active`) still syncs nothing.
+- 8f25cee: fix(service-datasource)!: a datasource create may not name a stored credential reference; it stores only the one its own secret is bound under (#27722)
+  
+  Clause-②: no (narrowing) — the datasource admin door's create refuses a draft that names `external.credentialsRef`, where it stored the value as given before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: a create draft value the admin door used to store as given is refused. The fix for a caller is to send the credential as `secret` and leave the key out, which the refusal says; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on the datasource admin door's create (`POST /api/v1/datasources`, `IDatasourceAdminService.createDatasource`), the same rule #27582 set for `secret` fields: a write may only seal a new value or keep its own record's stored reference.
+  
+  - **Before.** A create draft's `external.credentialsRef` was stored as given, beside or instead of the reference a supplied `secret` is bound under.
+  - **Now.** A create has no stored reference of its own, so a draft that names `external.credentialsRef` is refused with `400` before anything is written: no record, no secret, no pool. The message names the key and never the value, and the answer is the same whatever the value names. The only reference a create stores is the one its own `secret` is bound under.
+  - **Unchanged.** An update keeps the record's own reference unless a supplied `secret` rewraps it, as before. A create with a `secret` and no `external.credentialsRef` binds it as before. The Console's datasource form never sends the key, so it is unaffected.
+  - **Who sees it.** A caller of the admin door's create that sends `external.credentialsRef`.
+  
+  **The remedy.** Send the credential as `secret` and leave `external.credentialsRef` out; the door binds it and stores the reference.
+- 07585bf: fix(service-datasource): `DatasourceConnectionService.reconnect` requires `previous`, and the engine's datasource read-back answers the stored driver id (#27727)
+  
+  Clause-②: yes (narrowing) — `DatasourceConnectionService.reconnect` now requires `opts.previous` with its `driver` id and refuses a call without it, and `ObjectQL.listDatasourceDefs` widens its answer by the stored `driver` key
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authored schema is added, removed, renamed or re-shaped: the narrowed parameter is on a host-facing service method, and the widened answer is an engine read-back. A datasource needs no metadata change, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a host that calls `DatasourceConnectionService.reconnect` itself without `previous`: the call is now a type error and, at runtime, rejects before anything is evicted. The in-repo caller (the datasource admin plugin's update path) already passes it.
+  
+  The engine keeps a plugin driver on a non-managed datasource behind its correctness floor only while the stored datasource definition names the driver id. `reconnect` evicts the definition with the driver, and when a rebuild fails it restores the kept pool under a definition built from `previous`. Without `previous` that definition named no driver, so a kept plugin-driver pool was served without the floor, and nothing said so.
+  
+  - `DatasourceConnectionService.reconnect`: `opts.previous` (the record the live pool was built from, including its `driver`) is required. A call without it, or with an empty `driver`, rejects with an error naming what to pass, and the live pool is left untouched.
+  - `ObjectQL.listDatasourceDefs` answers each definition's stored `driver` id when it has one, so a sweep can ask which datasources name a plugin driver. A definition that never named one is still listed without the key.
+  - `IDataEngine.registerDatasourceDef` (`@objectstack/spec/contracts`) now says what the engine already does: last write wins, except an absent `driver` keeps the id stored before it.
+  
+  What to do: a host that calls `reconnect` directly passes the stored record as it was before the update as `previous`. Nothing else changes.
+- d3b0a40: feat(datasource): import objects from an OData datasource's `$metadata` — EDM types map to field types, the key to the id, and navigations to lookups; Studio's datasource page imports several entity sets at once, and MCP gains `list_remote_tables` / `import_object`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Type matrix (`@objectstack/spec/data`).** `SqlDialect` gains `'odata'`, whose aliases map the EDM primitives (`Edm.String`, `Edm.Int16/32/64`, `Edm.Decimal`, `Edm.Double`, `Edm.Boolean`, `Edm.Date`, `Edm.DateTimeOffset`, `Edm.TimeOfDay`, `Edm.Guid`, `Edm.Binary`, `Edm.Stream`, `Collection(…)`) onto the matrix's canonical types. `Edm.Duration`, the geography / geometry families and a service's own enum or complex types stay unknown, so a draft flags them for review. `Edm.Int64` and `Edm.Decimal` take the same verdict as SQL `bigint` / `numeric` (exact for `number`).
+  - **Gate 2 gets looser, for SQL federation too.** `lookup` and `master_detail` are now exact under the `text`, `integer` and `bigint` rows, as they already were under `uuid`: a reference stores the target's id, which on a federated object is the remote key a foreign-key column carries. Before, `isCompatible` refused a lookup over `CustomerID int` or `varchar` as a `type_mismatch` error, so the boot validation (`onMismatch: 'fail'`) refused any federated object that declared one. Nothing that passed before fails now.
+  - **Draft (`@objectstack/service-datasource`).** For an OData datasource (the driver reports dialect `odata-4.0`, read as the `odata` vocabulary) `generateObjectDraft` / `importObject` / `refreshCatalog` and the validation map EDM types through that arm. A column whose name is not a snake_case field name drafts as its snake_case spelling with `external.columnMap` carrying the remote name (`CategoryID` → `category_id`); `rename` overrides now land in `columnMap` too, so a renamed field stays bound to its column. A remote table name drafts the same way (`Products` → `products`; a leading capital used to give `_products`). A single-valued navigation becomes a `lookup` on the column its `ReferentialConstraint` names when the constraint references the target's single key and the target is imported on the same datasource (or is the object itself); every other navigation is left out of the draft and named in `review` with its reason — import the target first.
+  - **Driver (`@objectstack/driver-odata`).** `introspectSchema()` lists each navigation's `referentialConstraints`.
+  - **Studio.** The datasource page's tables tab selects several entity sets and imports them in one go, saving lookup targets before the tables that reference them; the write opt-in is offered only on a datasource that allows writes, and an imported object stays read-only otherwise (single-table dialog included).
+  - **MCP.** `list_remote_tables` and `import_object` reach the same `IExternalDatasourceService` calls, registered only for a token whose scopes name `metadata:write`, and refused by the runtime bridge without the capability the REST twins require (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`, now exported from `@objectstack/rest`).
+- ed8b237: feat: a datasource that names a connector instance in `external.connector` borrows that instance's credential at runtime, and its driver presents it per request
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The runtime half of ADR-0015 amendment D7. A datasource over a vendor API that names a declared connector instance now reads with that instance's credential — the one set under Setup → Connector credentials (or the instance's environment variable, or the host's resolver) — so one credential serves the connector's flow actions and the datasource's virtual objects:
+  
+  ```ts
+  connectors: [{ name: 'sap_s4', type: 'api', provider: 'openapi', providerConfig: { spec: './sap-openapi.json' },
+    auth: { type: 'bearer', credentialRef: 'sap_token' } }],
+  datasources: [{ name: 'sap_orders', driver: 'sap_orders', config: {},
+    schemaMode: 'external', external: { connector: 'sap_s4' } }],
+  // served by createODataDriverPlugin({ name: 'sap_orders', serviceRoot: '…' }), its auth left at 'none'
+  ```
+  
+  - **`@objectstack/service-automation`** registers a `connector-credential-source` service that lends a declared instance's credential (bearer, API key, basic), resolved through the same chain the connector itself uses. A credential set or changed through the credential door is picked up by the datasource's next request, with no restart.
+  - **`@objectstack/service-datasource`** borrows it when such a datasource connects (a plugin driver the engine already adopted from its `driver.<name>` service is judged at that connect too), is probed (Test connection) or is saved from the admin door, and hands the driver factory a credential handle on `DatasourceConnectionSpec.credential`. A datasource whose instance is not declared, is a catalog descriptor, has no `auth` credential or is disabled — or a stack with no automation service to lend it — is refused, fail-closed, with a reason naming the fix: it never connects to fail its first read with an upstream 401.
+  - **`@objectstack/driver-odata`** presents it: a datasource it serves that names `external.connector` borrows the handle at its first request and sends every request through `callWithBorrowedCredential`, in the form the instance's `auth` declares (bearer, basic, or an API key as a header or query parameter). An upstream's error text is stripped of every spelling of the presented credential before it is thrown (`withoutBorrowedCredential`), so an API key sent as a query parameter never reaches an error body through a service that echoes the request URI. `external.credentialsRef` keeps its path; both channels at once, or an `auth.scheme` set on the plugin beside the connector, refuse the request.
+  - **`@objectstack/types`** carries the contract (`IConnectorCredentialSource`, `ConnectorCredentialHandle`, `CONNECTOR_CREDENTIAL_SOURCE_SERVICE`) and `callWithBorrowedCredential`, the one rule a plugin driver presents a borrowed credential by: refreshed when it has expired, refreshed once and retried on a `401`, and a `503 SERVICE_UNAVAILABLE` naming the instance when the fresh one is refused too.
+  
+  Nothing changes for a datasource that binds its own secret with `external.credentialsRef`. The handle answers the grant-bearing kinds (OAuth2 and the app-credential exchange) through the same interface when connector instances can declare them; a driver written against it today needs no change then.
+- 3e039e0: fix(service-datasource): an edit that rebuilds a Setup-created managed datasource's pool gives the objects bound to it their tables on the new pool (#27750)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  #27701 made a runtime managed datasource's pool sync the objects bound to it when the pool opens. An edit that rebuilds the pool still synced nothing: an admin who moved `warehouse` to a new database (a changed `config`) left every code object bound to it without a table there, and every read of it failed until the tables were recreated by hand.
+  
+  - **Now.** The rebuild (`PATCH /api/v1/datasources/:name` → `updateDatasource` → `reregisterPool` → `DatasourceConnectionService.reconnect`) carries the objects bound to the NEW record into the rebuild's connect, so its sync loop gives them their tables, as on create. The same holds when an edit re-activates an inactive datasource. `reconnect` takes them as a new optional `objects` option.
+  - **One gate.** The open (`registerPool`) and the rebuild (`reregisterPool`) read the bound objects through one helper.
+  - ⛔ **Only a managed datasource.** A datasource whose `schemaMode` is `external` or `validate-only` syncs nothing for its objects on the rebuild either, so it never gets DDL.
+  - **Not changed.** When the rebuild fails and the previous pool is kept, nothing is synced: that pool already served those objects.
+- 00c9a0b: fix: a plugin-driver datasource refused at boot for its connector instance's credential recovers on the next granted borrow, and the connector call path withholds the form-encoded spelling of a credential
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-datasource`**: a datasource served by a plugin driver (driver-odata) that names `external.connector`, whose instance could not lend at boot (undeclared, disabled, no `auth`), was recorded `failed-credentials` and marked unavailable until a restart, although the driver borrows again on every request and served as soon as the instance was repaired. The first borrow the lender grants for that instance now retracts the verdict and the engine's unavailable mark, so Setup → Datasources shows it available again with no restart. A grant for any other instance leaves it standing. The degraded-boot banner says which recovery applies; with no lender registered the verdict still lasts until a restart.
+  - **`@objectstack/types`**: `IConnectorCredentialSource` gains an optional `onLent(listener)`, called with the instance's name on every granted borrow and returning the unsubscribe. A source without it keeps working; nothing then retracts such a verdict.
+  - **`@objectstack/service-automation`**: the connector credential source implements `onLent`. The connector call path's `credentialForms` now takes its list from `borrowedCredentialForms`, so an upstream that echoes an API key in a form-encoded query string (a space written `+`) has that spelling withheld from the degraded reason, the stored status and the logs, as a datasource borrowing the same credential already had.
+- a0f8654: fix(service-datasource): an unset env credential is a note after the driver's error, and a failed connect holds no claim on its variable (#28283)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two corrections to the code-defined datasource's env-credential slot (`OS_DATASOURCE_<NAME>_PASSWORD`, #27687):
+  
+  - **The driver's error explains the failure.** When a code datasource's connect failed with the variable unset, the reason read `<driver error> — datasource 'x' is defined in code and reads its credential from OS_DATASOURCE_X_PASSWORD at connect, which is not set on this host` for every failure, so an unreachable host, a missing driver module or a TLS failure read as a missing password. The sentence is now a trailing note: `<driver error> (note: datasource 'x' is defined in code and reads its credential from OS_DATASOURCE_X_PASSWORD at connect, which is not set on this host)`. A login refusal still names the variable to set. The reason is operator-facing text (the connect verdict, Setup → Datasources, the fail-fast boot message); no code or status changes.
+  - **A failed connect releases its variable.** The guard that refuses two datasources deriving one variable recorded the owner before the build and released it only on `disconnect`, so a connect that failed kept it and a later datasource deriving the same variable was refused as a collision against one that never connected. The connect that claimed the variable now releases it when it fails. Two datasources that are both live are still refused.
+- f3d84b3: fix(service-datasource)!: `POST /api/v1/datasources` and `PATCH /api/v1/datasources/:name` refuse a top-level `password` or `connectionString` by name, with the build door's prescription, instead of dropping it and answering success
+  
+  Clause-②: no (narrowing) — a create or edit body that carries `password` or `connectionString` at its top level, which answered 201 / 200 with the key silently dropped, is refused with `400 DATASOURCE_ADMIN_ERROR`. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the admin write doors now refuse two top-level keys that `DatasourceSchema` already refuses at the build door, with that schema's own message. A refused body was never stored (the key was dropped), so there is nothing at rest for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the datasource admin write doors (`@objectstack/service-datasource`).
+  
+  - **Before.** The doors built the stored record from its known keys only, so a `password` or a `connectionString` written at the top level of the body vanished and the write answered success. The author got a datasource that could not connect and no explanation, while `os compile` refused the same datasource by name.
+  - **Now.** Either key at the top level of a create or edit body is refused before anything is read or written, naming the key and never its value. The message is `DatasourceSchema`'s own refusal for that key, the one `os compile` prints: a `password` is bound through the connection form's secret field or `external.credentialsRef`; a `connectionString` belongs in `config` as `url`. An edit is refused even when it touches only `label` or `active`.
+  - **Unchanged.** A credential sent as `secret` is still stored in the secret store and bound at `external.credentialsRef`. `config.password` keeps the driver contract's refusal. Other unknown top-level keys are still dropped as before.
+  
+  **The remedy.** Send the credential as `secret` (the connection form's secret field), or move a connection string into `config.url` without userinfo.
+- 819b101: fix(service-datasource)!: `POST /api/v1/datasources/test`, `POST /api/v1/datasources` and `PATCH /api/v1/datasources/:name` refuse every top-level key `DatasourceSchema` refuses, with that schema's own message, instead of dropping it
+  
+  Clause-②: no (narrowing) — a test, create or edit body carrying a top-level key the datasource schema does not declare (a `password` on the test door; on all three doors a `url` or `host` one level too high, an alias such as `type`, a retired block such as `readReplicas`, or any unknown key), which the test door probed without and the write doors answered 201 / 200 with the key silently dropped, is refused with `400 DATASOURCE_ADMIN_ERROR`. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the datasource admin doors now refuse the top-level keys that `DatasourceSchema` already refuses at the build door, with that schema's own message. A refused body was never stored (the key was dropped), so there is nothing at rest for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the datasource admin doors (`@objectstack/service-datasource`).
+  
+  - **Before.** The unsaved-draft probe and the two write doors built their record from its known keys only. A top-level `password` on the probe vanished, so the probe tested a different connection than the one described. On all three doors any other key the strict schema refuses vanished the same way, and the write answered success.
+  - **Now.** A top-level key `DatasourceSchema` does not declare is refused before anything is read, written or probed, naming the key and never its value. The message is the schema's own refusal, the one `os compile` prints: for example `url` belongs inside `config`, `type` is `driver`, `readReplicas` is retired. The test door answers under the heading `This connection draft is not a valid datasource.`; create and edit under `Invalid datasource 'NAME'.`. This supersedes the "other unknown top-level keys are still dropped as before" line of the #28549 entry.
+  - **Unchanged.** Keys the schema declares pass the check, including the ones the doors do not store (`origin`, `description`, `ssl`, `autoConnect`). A credential sent as `secret` is still split off by the route and bound at `external.credentialsRef`. The probe's other answers (`ok: false` with a reason) are unchanged.
+  
+  **The remedy.** Remove the key, or move it where the message says: connection keys into `config`, the credential into `secret`. Keys copied from a `GET /api/v1/datasources` or `GET /api/v1/datasources/NAME` answer that the schema does not declare (`hasSecret`, `redactedConfigKeys`, `definedIn`, `status`, `statusReason`) are not sent back on an edit.
+- dd6349e: fix(service-datasource)!: the datasource admin doors store `ssl`, `autoConnect` and `description` instead of dropping them, and the connection test probes the same TLS block a Save stores
+  
+  Clause-②: yes (narrowing) — `POST /api/v1/datasources` and `PATCH /api/v1/datasources/:name` now store every top-level key `DatasourceSchema` declares (`ssl`, `autoConnect` and `description` were accepted and dropped), `GET /api/v1/datasources/:name` serves them, `POST /api/v1/datasources/test` hands the draft's `ssl` to the probe, and the exported `DatasourceDraft`, `StoredDatasource`, `ProbeInput` and `ConnectivityBearingFields` types gain those members. One body that used to answer 201 / 200 (with the whole `ssl` block dropped) is now refused with `400 DATASOURCE_ADMIN_ERROR`: an `ssl` block carrying a client private key (`ssl.key`).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the doors now store keys DatasourceSchema already declares. The one refused body (an inline ssl.key) was never stored, because the doors dropped the whole ssl block, so there is nothing at rest for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the datasource admin doors (`@objectstack/service-datasource`): an inline `ssl.key` is refused.
+  
+  - **Before.** Create and edit built the stored record from a hand list of eight keys (`name`, `label`, `driver`, `schemaMode`, `config`, `external`, `pool`, `active`). `ssl`, `autoConnect` and `description` passed the undeclared-key check (the schema declares them) and were then dropped, so a datasource saved with a TLS block was stored, and connected, without one. The connection test probed the same short record.
+  - **Now.** The stored set is read from `DatasourceSchema`'s shape at run time, so a key the schema declares later is stored the day it lands. Create, edit and the test probe use that one projection; an edit that changes `ssl` rebuilds the live connection. A read serves `ssl`, `autoConnect` and `description`.
+  - **Not taken from the body**, by design: `origin` (stamped `runtime`) and the ADR-0010 protection envelope (`_lock*`, `_provenance`, `_packageId`, `_packageVersion`), which only a code package's loader sets.
+  - **`ssl.key`.** The client private key has no sealed channel at this door (a `secret` is the only one, and it takes no TLS key), so storing it would put key material in the datasource row in cleartext. All three doors refuse it by name, never echoing the value; `enabled`, `rejectUnauthorized`, `ca` and `cert` are stored. A read never serves a key a stored row already holds, and an edit that sends back the served `ssl` block keeps that stored key.
+  - This supersedes the line of the #28612 entry that names `description`, `ssl` and `autoConnect` among the keys "the doors do not store".
+  
+  **The remedy.** Leave `ssl.key` out of the request; the rest of the TLS block is honoured.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [1c5fe3c]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [119931d]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [1617b7f]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/driver-memory@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/driver-sql@18.3.0
+  - @objectstack/driver-mongodb@18.3.0
+  - @objectstack/driver-sqlite-wasm@18.3.0
+  - @objectstack/driver-turso@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

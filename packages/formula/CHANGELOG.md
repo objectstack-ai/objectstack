@@ -1,5 +1,389 @@
 # @objectstack/formula
 
+## 18.3.0
+
+### Minor Changes
+
+- 76a1275: feat(formula): `label(record.<field>)` reads a select field's option label in the reader's locale, so a record name composed in a formula renders `v2 · 清稿` to a zh-CN reader and `v2 · Clean` to an en-US one (#26608)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A select field stores its option's value, so a formula `nameField` such as `'v' + string(record.version_no) + ' · ' + record.kind` printed `v2 · clean` to every reader. Wrap the field in `label()` and the name prints the label the select control shows that reader.
+  
+  - **The function (`@objectstack/formula`).** `label(record.<field>)` is a new CEL stdlib function, advertised in `CEL_STDLIB_FUNCTIONS`. It takes exactly `record.<field>`; any other argument is refused when the expression compiles. It reads only data: the new `EvalContext.optionLabels` (field → stored value → label, type `EvalOptionLabels`), which the caller resolves in the reader's locale before evaluating. An empty value reads `''`; a value no option declares reads as itself; a field with no options, a multi-value select, and an evaluation whose context carries no `optionLabels` fail loudly.
+  - **Where it answers (`@objectstack/objectql`).** The engine pins the map for every read and write it serves formula fields on: `find`, `findOne`, and the insert and update responses. The labels are the object's declared `options` with the i18n service's bundle laid over them by `translateObject`, the function `GET /meta/object/:name` serves the object with, in `ExecutionContext.locale` (the request's `Accept-Language`). The field-level key `objects.<object>.fields.<field>.options.<value>` wins over a shared picklist's `picklists.<picklist>.options.<value>`, and both over the declared label. No new keys and no new bundle. A read with no locale, an engine with no i18n service, and an i18n service that throws all read the declared labels.
+  - **Stored values.** A stored computed field (a non-formula field with an `expression`) is computed once, on the write, so it stores the declared label whatever the writer's locale. Search never indexes formula fields, so what search indexes is unchanged.
+  - **`setI18nService`** accepts the optional `getTranslations`, `getFallbackLocale` and `getDefaultLocale` the engine now reads. An `II18nService` already carries all three.
+- 2205863: feat(formula): the mail hole grammar admits `currency:@path`, which reads the ISO 4217 code from the send's data; the in-app template dialect refuses that form by name
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A mail template can now format each record's amount in that record's own currency: `{{ planned_amount | currency:@currency_code }}`. The rule, exported as `CURRENCY_ARGUMENT_RULE`: a `currency` argument is either a literal ISO 4217 code in three capital letters (`currency:EUR`) or, in a mail template only, `@` followed by a path into the send's data whose value is such a code (`currency:@currency_code`).
+  
+  - **Widened:** `parseMailHole` and `judgeMailHoleGrammar` admit `currency:@path` when the path is a dotted path of word characters with no empty segment, written right after the `@` and not in quotes. The parsed hole carries the path as `codePath`.
+  - **Unchanged refusals:** a bare argument is still never read as a path, so `currency:currency_code`, `currency:record.currency_code`, a lowercase or empty code and a double-quoted code stay refused (`currency-code-literal`); so do `currency:@`, `currency:@ x`, `currency:'@x'` and `currency:@a..b`. In the mail dialect that refusal now names the marked form as the way to read a code from the data.
+  - **Declared variables:** `judgeMailHoleGrammar(face, { variables })` refuses a marked path that none of the template's declared variables names, itself or as a root it lies under (`currency-code-path-undeclared`), when the template declares any.
+  - **In-app dialect:** `templateEngine` (flow text slots, action and bulk-action copy, `titleFormat`, `promptTemplate`) refuses `currency:@path` at compile and evaluate with its own rule, `currency-code-path-mail-only`: the doors that judge that text check a hole's path against the roots a slot binds and never read an argument. It was refused there before too, as `currency-code-literal`.
+  - **The value:** `currencyCodeValueRefusal(hole, path, value)` names a resolved value that is not an ISO 4217 code in three capital letters exactly as stored (missing, `null`, `eur`, `' EUR'`, a number). `formatValue('currency', …)` still never reads a path and still throws for a non-code argument; no argument still formats in US dollars.
+  
+  New exports: `CURRENCY_ARGUMENT_RULE`, `currencyCodePath`, `currencyCodeValueRefusal`, and the types `TemplateHoleDialect` and `MailHoleGrammarOptions`. `judgeHoleFormatter` takes an optional fifth argument, the dialect (`'in-app'` by default, `'mail'`), and `TemplateHoleGrammarRule` gains `currency-code-path-mail-only` and `currency-code-path-undeclared`.
+- dabe771: feat(formula)!: a template hole takes one formatter, and the `currency` formatter's argument is a literal ISO 4217 code — both refused at compile, never rendered as formatter syntax or in US dollars
+  
+  Clause-②: no (narrowing) — the in-app template dialect's compile (and so `os validate` and the publish gate for every template slot) refuses a hole with a second formatter (`{{ x | default:0 | number:2 }}`) and a `{{ x | currency:ARG }}` hole whose `ARG` is not three capital letters, both of which it accepted before; `formatValue('currency', value, ARG)` now throws a `RangeError` for such an `ARG`: a path or another argument `Intl` refuses, and an empty one, used to fall back to US dollars, and a lowercase code (`eur`), which `Intl` formatted in that currency, is now refused too. No accept set is widened; the additions are exports only: `judgeHoleFormatter`, `mailHolePattern`, `parseMailHole`, `judgeMailHoleGrammar`, and the types `TemplateHoleGrammarRefusal`, `TemplateHoleGrammarRule`, `ParsedMailHole` and `MailHoleGrammarFinding`.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export is removed: a chained formatter and a currency argument that never rendered as written are now refused where the template is compiled. The refusal names the hole and the rule it breaks, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing in the template dialect, and a new shared mail hole grammar.
+  
+  - **Before, a chained hole.** `{{ record.n | default:0 | number:2 }}` compiled as `default` with the argument `0 | number:2`, and rendered that text.
+  - **Before, a currency path.** `{{ record.amount | currency:currency_code }}` compiled; `Intl` refused the argument and the formatter caught that and used US dollars, so the amount printed in a currency nobody wrote.
+  - **Now.** `templateEngine.compile` / `evaluate` answer a `parse` error naming the hole and the rule. `formatValue('currency', …)` throws a `RangeError` for an argument that is not a code, before it reads the value. A lowercase code (`currency:eur`), which formatted in euros before, is refused the same way. No argument still formats in US dollars.
+  - **Shared grammar.** `judgeHoleFormatter` is the judgement both template dialects use. The mail template grammar is exported once, `mailHolePattern`, `parseMailHole` and `judgeMailHoleGrammar`, and is what `@objectstack/plugin-email`'s renderer, `judgeMailHtmlHoles` and `@objectstack/lint` read; `judgeMailHtmlHoles` no longer keeps a copy of it.
+  - **Who sees it.** A template slot that chained formatters, or wrote a path or a lowercase code as the currency argument. No template shipped in this repository does.
+  
+  **The remedy.** Keep one formatter per hole and decide anything more where the data is assembled. Write the currency code itself (`currency:EUR`), or format the amount where the data is assembled and pass the formatted text.
+- 79ed6f7: feat(formula, plugin-email, messaging, automation, ui)!: a template `currency` hole with no argument formats in the organization's default currency, and with none the render refuses it; nothing formats in US dollars by default any more (#26939)
+  
+  Clause-②: no (narrowing) — a mail send or render (`sendTemplate`, `renderTemplate`, and the messaging email and inbox channels on them), a flow text slot (notify, http, screen, end) and a templated formula evaluation refuse a `{{ amount | currency }}` hole with no argument when no default currency reaches the render, which they formatted in US dollars before. Authoring is unchanged: the hole is still accepted at save and publish. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/automation/email-templates.mdx`, `content/docs/automation/flows.mdx` and `content/docs/data-modeling/formulas.mdx` state the tenant default and the refusal; no skill under `skills/**` taught the dollar default (the formula skill names the formatter grammar only), so no skill line changes.
+  
+  <!-- adr-0087: registered template-currency-no-argument-tenant-default -->
+  
+  **BREAKING** semantic change of the `currency` formatter's no-argument form (`@objectstack/formula`), served by every template dialect: mail templates, flow text slots, and action / bulk-action confirm and success copy.
+  
+  - **Before.** `{{ amount | currency }}` formatted the amount in US dollars (`$1,234.50`) whatever currency the amount was in and whatever the organization's default currency was.
+  - **Now.** It formats in the organization's default currency, the `localization.currency` setting (Setup → Localization) that a currency field and a dashboard measure already display in: `CN¥1,234.50` for an `en-US` reader and `¥1,234.50` for a `zh-CN` reader when the default is CNY. Every server-side read goes through `resolveLocalizationContext` (`@objectstack/core`); the UI reads `useLocalization().currency`.
+  - **With no default currency.** The render refuses the hole by name and names the remedy: set the default, or write `currency:CODE` (a mail template's refusal also names `currency:@path`). A mail send or render fails with `TEMPLATE_INVALID` and nothing is sent; a messaging delivery records it as a permanent failure. A flow node with such a hole in a text slot fails with the refusal, which no fault edge routes. An action's confirm or success sentence is shown as written, the existing fallback for a sentence the template engine refuses.
+  - **How each host hands the default over.** `SendTemplateInput.currency` / `RenderTemplateInput.currency` (`@objectstack/spec/contracts`), filled by the messaging email and inbox channels from the delivery's organization, and by the auth mails (verification, password reset, invitations, magic link, notices) from the organization the mail names or, for identity mail, the deployment-wide setting (`@objectstack/plugin-auth`, once, on the email service it wires); `AutomationContext.currency`, seeded once at run setup from the run's tenant (`AutomationEngine.setTenantCurrencyResolver`, which the automation plugin wires), persisted with a suspended run and inherited by a subflow; `EvalContext.currency` in `@objectstack/formula`, a reserved channel like `locale`, never bound as a root; `ActionRunner.setTenantCurrency` in `@object-ui/core`, installed by the React action providers.
+  - **Unchanged.** `{{ amount | currency:EUR }}` formats in the code it names, with or without a default. A variable, field or root named `currency` is a value, never the default. Compile, `validateExpression` and the publish gates accept the no-argument form as before. A template with no no-argument currency hole needs no default.
+  - **Who sees it.** An organization with a default currency other than USD sees its own code where it saw dollars. An organization with no default currency that sends a mail, runs a flow or shows an action sentence with a no-argument `currency` hole now gets the refusal instead of dollars.
+  
+  **The remedy.** None where the amount is in the organization's default currency: set it in Setup → Localization. Where the amount is in one fixed currency, name it in the hole: `{{ amount | currency:USD }}`. Where a mail template shows each record's amount in that record's own currency, read the code from the send's data: `{{ amount | currency:@currency_code }}`.
+  
+  **Supersedes, in the same release.** The unreleased notes of the mail `currency:@path` and hole-grammar changes (`26660-currency-code-path-formula`, `26660-currency-code-path-plugin-email`, `26660-mail-hole-grammar-formula`, `26660-mail-hole-grammar`) describe a `currency` hole formatting in US dollars, and the first three say a hole with no argument still does. That was true when they were written; this entry moves it, and in this release a no-argument hole formats in the organization's default currency as described above.
+- 40320f1: feat(formula)!: the mail hole grammar refuses a hole whose formatter the whitelist does not name, by name, listing the known formatters
+  
+  Clause-②: no (narrowing) — `judgeHoleFormatter` gains a third rule, `known-formatter`: a hole that names a formatter `TEMPLATE_FORMATTERS` does not hold (`{{ amount | curency:EUR }}`, `{{ due | dat:long }}`) is refused, so `parseMailHole` carries the refusal and `judgeMailHoleGrammar` reports the hole, where both accepted it before. The in-app dialect, which already refused an unknown formatter in its own parse, now also refuses an inherited object key it used to call as a formatter (`{{ x | toString }}`, which printed `[object Object]`). No accept set is widened and no export is added or removed; `TemplateHoleGrammarRule` gains the member `'known-formatter'`.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export is removed: a hole whose formatter never formatted anything is now refused where the template is judged. A conversion cannot know which formatter the author meant, and the refusal names the hole and lists the known formatters, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing in the shared hole grammar.
+  
+  - **Before.** `parseMailHole(' amount | curency:EUR ')` answered a hole with no refusal, and the mail renderer printed the raw value for it (`1234.5`, an ISO timestamp), because `formatValue` knows no such formatter.
+  - **Now.** The hole carries a `known-formatter` refusal whose sentence names the hole and lists `TEMPLATE_FORMATTERS`. Text after the `|` that is not a single word (`{{ x | two words }}`) still names no formatter and is left as written. A chained hole is still refused by the one-formatter rule first.
+  - **In-app.** `templateEngine.compile` keeps its own sentence for an unknown formatter. It now also refuses `toString`, `constructor` and the other inherited object keys, which it used to accept and run as formatters.
+  - **Who sees it.** A template whose hole misspells a formatter or names one that does not exist. No template shipped in this repository does.
+  
+  **The remedy.** Correct the formatter's name to one the refusal lists, or format the value in the caller that supplies the data and pass the finished text as its own variable.
+- 0cd578f: fix(spec)!: a `fixed` currency config needs its code — `currencyConfig.defaultCurrency` loses its `'CNY'` default, and a `dynamic` config parses with no code
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered currency-config-fixed-default-currency-required, currency-config-dynamic-default-currency-removed -->
+  
+  **BREAKING** for one shape: a `currencyConfig` with `currencyMode: 'fixed'` and no `defaultCurrency`, on a currency field or on a formula field whose `returnType` is `currency`. Ruling X on #27119: an amount whose currency is not known takes the tenant default, and nothing guesses.
+  
+  - **Before.** `defaultCurrency` was `.default('CNY')`. `{ currencyMode: 'fixed' }` parsed to `{ currencyMode: 'fixed', defaultCurrency: 'CNY' }`, so the field silently became a yuan field and showed `¥` in a dollar or euro app. Every `dynamic` config's parse output carried that `'CNY'` too, though nothing reads a `dynamic` config's code.
+  - **Now.** A `fixed` config without a code is refused at every door that parses a field (`defineStack`, `os validate`, the object save door), with one `custom` issue at `currencyConfig.defaultCurrency`: "`currencyConfig.currencyMode: 'fixed'` needs `defaultCurrency`, the field's one currency: give its ISO 4217 code (e.g. `defaultCurrency: 'USD'`), or use `currencyMode: 'dynamic'` to display amounts in the tenant default currency (the `localization.currency` setting)." A `dynamic` config (and an empty one) parses to `{ currencyMode: 'dynamic' }`: no code is materialized. An authored code under `dynamic` is still accepted and still unread.
+  - **FROM → TO.** `currencyConfig: { currencyMode: 'fixed' }` → `currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' }` (the code the field is in; until now it displayed CNY), or `currencyMode: 'dynamic'` / no `currencyConfig` for the tenant default currency.
+  - **The one-line fix.** Write the code next to `currencyMode: 'fixed'`.
+  - **Stored rows and built artifacts (ADR-0087).** A built artifact holds the parsed stack, so its `fixed` configs carry the code the old parse filled in and keep it. A `sys_metadata` object row is stored as authored, so a row saved as `{ currencyMode: 'fixed' }` (Studio's Fixed mode with the code left blank, or a `/meta` write) has no code, and nothing converts one in: guessing `'CNY'` is what the ruling forbids. Such a row still loads and is registered unchanged; boot counts it `invalid` and prints `[metadata_spec_invalid] stored object/NAME fails the current spec schema even after conversion (fields.FIELD.currencyConfig.defaultCurrency: …)`, and the next save of that object is refused (422 `INVALID_METADATA` at `fields.FIELD.currencyConfig.defaultCurrency`) until the code is written. Its display does not change: the registry already held the row as stored, and the console reads a `fixed` code only when there is one, so it showed the tenant default before and still does. `@objectstack/formula` now reads a formula over that field as an unproven currency instead of fixed CNY. The D2 conversion `currency-config-dynamic-default-currency-removed` strips the unread code from `dynamic` configs (and configs with no mode) on stored-row rehydration and inside a built artifact's declared-floor window, on objects and object extensions; no display changes. It is retired from the load path, so an authored source is never rewritten. The upgrade guide entry is `currency-config-fixed-default-currency-required`.
+  - **Readers.** None changes what it displays. The console's `resolveFieldCurrency` and the analytics field-currency relay already read the code only under `fixed`. `@objectstack/formula`'s return-type inference reads a field's currency through `CurrencyConfigSchema`; a `fixed` config without a code no longer parses there, so it reads as an unproven currency instead of CNY.
+  - **`@objectstack/platform-objects`.** The field form's `defaultCurrency` help text says the code is required in fixed mode instead of "Defaults to CNY", in en, zh-CN, ja-JP and es-ES.
+  
+  Survey at the change: 11 `fixed` currency configs across `examples/**`, `packages/platform-objects/**`, `packages/qa/**`, seeds and fixtures, none without a code.
+- b445807: feat(formula)!: the mail hole grammar refuses text after a hole's `|` that is not a formatter name, and reads every formatter part exactly as the in-app dialect does
+  
+  Clause-②: no (narrowing) — `parseMailHole` answered `null` for a path followed by `|` whose formatter part failed its own pattern (`{{ due | date-long }}`, `{{ x | two words }}`, `{{ x | }}`), so `judgeMailHoleGrammar` never judged the hole. It now parses the hole and carries a refusal under the new rule `formatter-shape`, which `judgeHoleFormatter` judges for both dialects. One mail spelling is accepted that was refused before: a double-quoted `currency` argument (`currency:"EUR"`) kept its quotes, so `currency-code-literal` refused it, and it now reads `EUR`, publishes and renders, as in-app. The narrowing is the BREAKING arm and decides the level. The formatter parts the in-app dialect accepts and the mail pattern did not (`currency :EUR`, `default:it's`) were accepted unjudged before and are accepted now. `TemplateHoleGrammarRule` gains the member `'formatter-shape'`; the package index exports nothing new.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export is removed: a hole whose formatter part never formatted anything (the renderer printed the hole as written) is now refused where the template is judged. A conversion cannot know which formatter the author meant, and the refusal names the hole and states the shape, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing in the shared hole grammar.
+  
+  - **One tokenizer.** `splitHoleFormatter` (`template-engine.ts`) splits a formatter part at its first `:`, trims both sides and removes one enclosing quote mark at each end of the argument. The in-app `parseHole` and the mail `parseMailHole` both read it, so the two dialects accept exactly the same formatter parts. The mail grammar's own pattern is gone.
+  - **Before.** `parseMailHole(' due | date-long ')` answered `null`: the text was not a hole to any reader, and the mail renderer printed `{{ due | date-long }}` to the recipient. `{{ amount | currency :EUR }}` and `{{ note | default:it's }}` were printed as written too, though the in-app dialect formats them. Every double-quoted argument kept its quotes: `default:"n/a"` supplied `"n/a"`, `date:"long"` and `number:"2"` reached their formatter as `"long"` and `"2"` (so `date` fell back to its short style and `number` to no fixed digits), `truncate:"80"` was not a number, `default:""` supplied `""`, and `currency:"EUR"` was refused by `currency-code-literal`.
+  - **Now.** A name that is not one word is refused by `formatter-shape`, whose sentence names the hole, states the shape (`{{ path | formatter[:arg] }}`, one word optionally followed by `:` and its argument) and lists `TEMPLATE_FORMATTERS`. A chained hole is still refused by `one-formatter` first, and a one-word unknown name by `known-formatter`. `currency :EUR` is `currency` with `EUR`, `default:it's` supplies `it's`, and one enclosing quote mark is removed at each end of every argument, as in-app: `default:"n/a"` supplies `n/a`, `date:"long"` is `long`, `number:"2"` is `2`, `truncate:"80"` is `80`, `default:""` supplies nothing, and `currency:"EUR"` formats in EUR. Brace text whose part before any `|` is not a path (`{{ not a path }}`, `{{ | upper }}`) is still not a hole.
+  - **In-app.** No accept set moves: its compile already refused these holes, and keeps its own sentence.
+  - **Who sees it.** A mail template whose hole writes a formatter that is not one word. No template shipped in this repository does.
+  - **Supersedes, in the same release.** The `known-formatter` entry of this release says text after the `|` that is not a single word "still names no formatter and is left as written". That is no longer so: it is refused, as above.
+  
+  **The remedy.** Write the formatter as one of the names the refusal lists, optionally followed by `:` and its argument (`{{ due | date:long }}`), or format the value in the caller that supplies the data and pass the finished text as its own variable.
+- 86fb645: fix(formula,lint)!: a formula whose `label()` names a field that declares no options is refused at author time
+  
+  `label(record.FIELD)` answers on a field whose definition carries an `options` list; on any other field the evaluator faults on every row, so the formula read `null` forever with a WARN line as the only trace. The `expression-invalid` gate refused `label(record.nope)` (unknown field) and `sqrt(4)` (unregistered function) but admitted `label(record.first)` on a text field. It now refuses that too, at `os validate`, `os build`, `os lint` and every door that runs the active authoring gate (the object save door, per-item publish, history restore and a draft's `_diagnostics`; one evaluation, `runRuntimeAuthoringRules`), in the evaluator's own words (the same sentence its WARN line carries), naming the field and the remedy.
+  
+  Clause-②: no (narrowing) — the object save door and the CLI authoring commands refuse a formula whose `label()` argument names a declared field that declares no options, which they stored before. Nothing is widened.
+  
+  Metadata-protocol: narrowed (a formula field's `expression` may no longer call `label()` on a field that declares no `options`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key is added, removed or renamed. The refused value never worked: the evaluator faults on that call on every row, so a stored formula of this shape reads null for every reader today, and no conversion could give it a label to read. The refusal names the field and the remedy (read the field directly, or point label() at a field that declares options). -->
+  
+  **BREAKING** accept-set narrowing at the authoring gate (`@objectstack/formula`, `@objectstack/lint`), shipped as `minor`.
+  
+  - **Before.** `PUT /api/v1/meta/object/NAME` with a formula `label(record.first)` (`first` a text field), or `label(record.kind) + label(record.first)`, answered 200; every row then read the formula as `null`.
+  - **Now.** The same write answers 422 `expression-invalid` naming `first`, located at the formula field's `expression`; `os validate` / `os build` / `os lint` report the same finding.
+  - **Unchanged.** `label()` on a field that declares options is admitted and evaluates as before: inline `options` on any type (`select`, `multiselect`, `radio`, …), or a `picklist` naming a shared list, which the registry resolves onto the served field. The unknown-field and unregistered-function refusals are unchanged and an unknown field gets no second refusal.
+  - **Who sees it.** An author whose formula calls `label()` on a field without options, a formula that already reads null on every row.
+  
+  **The remedy.** Read the field directly (`record.first`), or point `label()` at a field that declares `options` or names a `picklist`.
+  
+  `validateExpression` gains an opt-in `ExprSchemaHint.optionFields` (the object's option-bearing fields) and the closed refusal-code set gains `label-field-no-options` (`params: { field }`). `@objectstack/formula` exports the two readings of "declares options" side by side: `declaresOptions(def)` on the served form (`@objectstack/objectql` builds `label()`'s map through it) and `declaresOptionsOnceServed(def)` on the authored form (inline `options`, or a `picklist` the registry writes onto the served field), which `@objectstack/lint`'s formula pass hands the validator, so the gate refuses exactly the fields the evaluator faults on.
+
+### Patch Changes
+
+- c13ef04: docs(formula): the README and the package docblock cite ADR-0032 ("one CEL language") instead of `content/docs/concepts/north-star.mdx` "§8 No private expression DSL", a section that page never had (the page is now `concepts/architecture-overview`, which carries no such heading)
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 57c51aa: feat(objectql): a record-currency amount is refused without its code, refused in an ungrouped raw aggregate, and refused under a summary roll-up
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A `record`-mode amount is stored with its currency code (ADR-0144 D8 rule 4).** An insert or update that would store a value in a `currency` field declaring `currencyConfig: { currencyMode: 'record', currencyField }` while that code field is blank (absent, `null` or white space) is refused `ERR_CURRENCY_CODE_REQUIRED` / 400, with `field` naming the code field and `amountField` the amount. The server never fills a currency in. On an update, only a write that carries the amount or its code is judged, against the stored row with the payload laid over it, so an edit of another field never meets it. The `validate()` preview (`validateData`) answers the same refusal as the row's finding for an insert and for a by-id update, so a dry run does not pass a row the write refuses. The code is registered under `@objectstack/objectql` in the ADR-0112 error-code ledger.
+  - **A raw aggregate over a `record`-mode amount groups by its code field (ADR-0144 D6).** `sum`, `avg`, `min` and `max` over such a field through `engine.aggregate` are refused `INVALID_FIELD` / 400 unless `groupBy` names the code field; grouped, each currency totals on its own. `count` and `count_distinct` are not judged. Before, USD 100 and EUR 100 summed to 200 under one label.
+  - **A `summary` roll-up over a `record`-mode amount is refused at registration (ADR-0144 D6).** `sum` / `avg` / `min` / `max` of such a child field is refused `INVALID_METADATA` / 422 (`RecordCurrencySummaryRefusedError`) at whichever object's registration completes the pair. Before, child rows of USD 100 and JPY 15000 rolled up to 15100. Use `count`, or roll up a stored home-currency amount.
+  - **`inferFormulaReturn` carries a record currency (`@objectstack/formula`).** A formula over a `record`-mode amount now declares `returnType: 'currency'` with `currencyConfig: { currencyMode: 'record', currencyField }`, the code field its sources name, instead of a tenant-default (`dynamic`) amount. Two record-mode amounts naming different code fields, or a record-mode amount meeting a `fixed` or `dynamic` one, are not one currency and are not stamped as money.
+  - **Nothing to migrate.** `currencyMode: 'record'` is new; no field declared before it meets any of these refusals.
+- c946cb9: feat(formula): a CEL syntax refusal keeps the engine's own fault code and the source range it points at, so an editor can say what is wrong and where in its own words (#27904)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `validateExpression`'s catch-all CEL refusal, `invalid-cel`, now carries two optional params beside `role` and `detail`:
+  
+  - `celCode` — cel-js's own code for the fault, read off its error object: the parser's for a syntax fault (`unexpected_token` when an operand or the end is missing, `expected_token` when a closing `)` / `]` / `}` is missing, `unexpected_character`, `unterminated_string`, …) or the checker's for a type fault (`no_such_overload`, …).
+  - `pos` — `{ start, end }`, the UTF-16 offsets into `source` that the engine points at (`end` exclusive). A missing `)` reads `start === end === source.length`.
+  
+  Both are absent when the engine reported none, and `pos` is absent when the engine read a source the platform rewrote first (the null-guard ternary lowering), since a range into that text would point at characters the author never wrote. A guessed `0` is never written.
+  
+  `EvalError.pos`, declared before and never filled, is now filled by `celEngine.compile` and `celEngine.evaluate` for a cel-js parse, check or evaluation fault that carries a range, on the same terms.
+  
+  The refusal's `message` is unchanged, byte for byte, and so are the codes and the params of every other refusal.
+- c16040d: fix(objectql,formula): a formula field whose `date()` / `datetime()` is handed text it cannot parse is a reported evaluation fault, not a silent null
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A formula field such as `date(record.first)` on a row whose `first` holds text that is not a date (`"grace"`) read `null`, the same bytes an empty `first` gives, and nothing was logged. `date()` / `datetime()` answer an invalid Date for such text, the evaluator reports that as a success, and the invalid Date serializes to `null`, so the once-per-field formula fault line never fired.
+  
+  - **The field now reports it.** The read path (`find`, `findOne` and a write's response) treats that invalid Date as an evaluation fault: the field reads `null` exactly as before, and the engine's logger gets the one `warn` line per object and field per engine instance that every other formula fault gets. The line says that `date()` / `datetime()` take ISO text, a timestamp or epoch milliseconds. The record's text is not quoted in the log. A date function over the bad value (`addDays(date(record.first), 1)`) reports the same way.
+  - **An empty source is not a fault.** `null`, empty or blank text still reads `null` with no line.
+  - **Predicates are unchanged.** `date()` still answers the same invalid Date, so `date(record.d) == today()` over non-date text is still `false`, and `visibleWhen`, validation rules and filters answer as before. `isoDate()` and `daysBetween()` over it still refuse at evaluation.
+  - **`@objectstack/formula` gains `isUnparseableDate(value)`**: `true` for the invalid Date `date()` / `datetime()` (or `addDays` / `addMonths` over it) answered for non-empty text they could not parse, `false` for everything else, including an invalid Date from an empty source. It reads a weakly held mark and never changes what any function returns.
+  - **What a read returns over the wire does not move.** In process, `ObjectQL#find` now hands back `null` for such a field where it handed back an invalid `Date`; serialized, both are `null`.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/spec@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

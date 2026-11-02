@@ -1,5 +1,449 @@
 # @object-ui/data-objectstack
 
+## 18.3.0
+
+### Minor Changes
+
+- 0027c4a: feat(console): a record page opens from one request, and the record a drawer step shows next is asked ahead (#27627)
+  
+  Clause-②: yes (widening: optional `DataSource.getRecordPage` / `prefetchRecordPage`, new exports; no existing contract changes)
+  Metadata-protocol: added
+  
+  The record page (full page, split pane and drawer) asks `DataSource.getRecordPage` once when it opens, before any of its readers runs, and hands each part of the answer to the reader that used to ask for it:
+  
+  - the record, with the lookups the page resolves;
+  - each related list's total and first rows: the tab badges, collapsed and compact related cards and reference rail cards take them, so no `top=1` count probe and no separate first-rows read goes out;
+  - the header's `update` / `delete` verdicts and Claim's `transfer` decision, the in-place edit blocks' field projection, and the approval rows and lock.
+  
+  Readers still read for themselves after the open (a refresh, a write, a change on the data-invalidation bus), and a page on an adapter without `getRecordPage` reads as before. Lists the page cannot name in the request stay their own read: a list declared through a list view, a list whose filter carries a context token, and lists past the fiftieth. In the drawer, the record a ↑ / ↓ step shows next is asked ahead (`DataSource.prefetchRecordPage`), so stepping opens from an answer already on its way; on such an adapter that replaces the drawer's warm-up of the next record's related counts.
+  
+  - `@object-ui/types`: `DataSource.getRecordPage?` / `prefetchRecordPage?` and the `RecordPageRequest` / `RecordPagePayload` shapes.
+  - `@object-ui/data-objectstack`: both methods; concurrent identical reads share one request, a prefetched answer is taken once, and a write drops them all.
+  - `@object-ui/components`: `RelatedCountStore.seed` / `takeRows`.
+  - `@object-ui/plugin-detail`: `seedRecordVerdict`, `seedRecordFieldAccess`, `seedQueueClaimDecision`, `normalizeRelatedListSort`, `COMPACT_RELATED_ROWS`; a compact related card takes its first rows from the record page's answer. Its `sideEffects` array now names `queueClaim` and `recordFieldAccess` too: each drops a seeded answer on a data change through a bus subscription made at load.
+
+### Patch Changes
+
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 6866e2e: feat(data-objectstack): `ObjectStackAdapter.getRecordFieldAccess` reads `GET /data/:object/:id/field-access`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The adapter implements `DataSource.getRecordFieldAccess` through the client's `data.fieldAccess`. A record the read answers 404 for, and a server without the route (501 `NOT_IMPLEMENTED`), resolve to `null`, so the caller keeps its row-blind answer. Any other refusal is thrown, as a read's is.
+- 38490db: fix(data-objectstack): the metadata client's layered read, item and draft reads, publish and reset name the bundle member they address
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `MetadataClient.layered()`, `get()`, `getDraft()`, `publish()` and `reset()` take an optional `member` and send it as `?member=`, the selector the by-name doors read for a metadata type whose identity is a pair (today only `email_template`, `(name, locale)`). Omitted, every call sends exactly the URL it sent before and the door addresses the canonical member. The parameter is never sent empty.
+  
+  `getDraft()` with a `member` skips the draft read when the pending-drafts ledger lists that name only as another member's draft.
+  
+  Setup's metadata list now shows an email template's locale in its own column and links each row to its own member (`?member=LOCALE`), and the editor passes that member to its layered and draft reads and to its publish, reset and discard, so each language of a template opens and is edited on its own.
+  
+  `@object-ui/i18n`'s `studio` namespace gains the column's label, `engine.list.col.locale` (`Locale` / `语言`).
+- 8a218fc: `ObjectStackAdapter.createView` no longer adds a top-level `data` to a ViewItem envelope (`{ name, object, viewKind, config }`). `data` belongs inside `config` there, and the platform's `view` write door now refuses a top-level key the envelope does not declare (objectstack#26711), so such a create was refused naming `data`. Before, the door dropped the key and the view saved. A flat list view still gets its default `data`, where that shape declares it. The console's own create flow writes through `createRuntimeMetadata` and was not affected.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 8d79bbd: feat(spec): a draft's per-key provenance records writes made through the MCP build door, and the OAuth client that made them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A pending draft's `draftChanges` (the strict draft read's per-key provenance) could tell Studio's AI copilot from a person in Studio and from any other caller, but not an AI agent outside the console building through a deployment's MCP build door. Such a write was recorded as `api`, and nothing said which agent it was.
+  
+  - **Spec.** `MetadataAuthoringSurfaceSchema` gains `mcp`: an AI agent outside the console writing on a person's behalf through the MCP build door. A new `MetadataAuthoringClientSchema` (`{ id, name? }`) is the OAuth client the person consented to. A `draftChanges` entry carries it as an optional `client`, present only beside `by: 'mcp'`. `SaveMetaItemRequestSchema` gains an optional `client`, stated only by the MCP build door, in-process, from the token it verified.
+  - **The save.** A draft save with `surface: 'mcp'` stamps `by: 'mcp'` and its `client` on every key path it changes. A `client` beside any other surface, or of the wrong shape, is refused `400 INVALID_REQUEST` before anything is written. `actor` is still the person the agent writes for.
+  - **The HTTP doors.** `?surface=mcp` is refused `400 VALIDATION_ERROR`, as `?surface=copilot` is: only the MCP build door may state it. No HTTP door reads a `client`.
+  - **Studio.** The properties' draft chip and source line mark an `mcp` write as they mark the copilot's, and name the client: 「由 MCP 客户端「Claude」在 2 分钟前作为草稿加入」 / "Added as a draft by the MCP client "Claude" 2 min ago". A client that registered no name is shown as an unnamed MCP client, never by its id. The pending-changes sheet's drill-in lists which AI tools drafted part of the item, in all ten console locales.
+  
+  Nothing to do for existing callers: a save that states no surface is still recorded as `api`, and an entry without `client` reads as before. The MCP build door starts stating `mcp` and its client in a later change.
+- 9324232: fix(console): a packaged action switched off for this deployment is no longer offered as a live button
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An administrator can switch a packaged action off in Setup › Packaged automation. The action door then refuses it, but the console kept offering the button on the record header, in action bars and in list rows, so a click could only fail. The object reads now serve the names of the switched-off actions beside the object (#27842), and the console stops offering those actions everywhere it already hides an action whose capability the user lacks: the record header, action bars, record quick actions, list and related-list toolbars, row and bulk actions. Turning the action back on in Setup brings the button back.
+  
+  `@object-ui/core` adds four exports for this: `isActionSwitchedOff(action)`, `markSwitchedOffActions(schema, served)`, `markSwitchedOffActionsByObject(objects, served)` and `ACTION_SWITCHED_OFF_KEY`. The data layer stamps a switched-off action entry under that symbol key, which survives a spread and never reaches JSON, so an action handed back to a metadata write never carries it.
+  
+  What to do: nothing. A backend that does not serve the names hides nothing, as before.
+- 968cacf: fix(app-shell): the Studio canvas runs a report or a dashboard widget over a draft dataset before the package publishes (#27585)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A Studio author who created a dataset and bound a report or a chart to it saw "Dataset … is not defined in this environment" on the canvas until the package published, while the dataset pickers beside it already offered the draft. The canvas's dataset query went to the published world, where a draft-only dataset does not exist.
+  
+  - **`queryDataset(dataset, selection, options?)`** in `@object-ui/data-objectstack` takes an optional `{ previewDrafts?: boolean }`. `true` asks for the draft world on that one request (the server resolves draft-overlaid dataset definitions and the pending seed drafts' rows, as `?preview=draft` does), the way `listViews(objectName, { previewDrafts })` asks for draft views. When the option is absent, the page URL's `?preview=draft` decides, as before; when it is given, it wins over the URL. A caller that passes nothing sends exactly the request it sent before.
+  - **The Studio's report and dashboard previews** hand the runtime renderers a data source whose dataset queries carry `previewDrafts`, keyed on the signal the Studio's dataset pickers read (the dataset-authoring context). The query still names the dataset and the server resolves it; there is no second lookup. Setup's editors and every runtime page are unchanged and query the published world, or the one the page URL asks for. The server answers the draft world only to a caller who may read drafts; anyone else gets the published dataset, as if the flag were absent.
+- 40be9b5: perf(console): opening a record no longer re-reads the list under it, asks its field access once, and the bell polls once a minute
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured in the console on app-crm, opening one record from a list and closing it again:
+  
+  - **The list under the drawer is not read again.** The first record opened replaced the list with the route skeleton (the drawer made the route read the whole object registry instead of the app's object scope, and the route waited for it), so the list mounted again and re-read its rows; every later open and close handed the list a different document for its object, which rebuilt its columns and re-ran the list query. The drawer now reads the whole registry beside the route's scope, without holding the route, and the registry joins the scope once it lands with the scope's own documents kept as they are. The list page also holds `columns` and `searchableFields` by value, as it holds the view-type blocks. The record form overlay (`?form=`) still reads the whole registry.
+  - **One field-access request per record.** The record's sections, highlights, form and page each asked `GET /data/:object/:id/field-access` at once; `ObjectStackAdapter.getRecordFieldAccess` now shares one request between concurrent asks for the same record, remembers a 404 for that record until a write to its object, and stops asking a server that answers 501. A settled answer is not cached: the next ask after a save reaches the server.
+  - **The bell polls once a minute.** The inbox and approvals feeds polled every 10 s and 30 s on every console page. With no realtime channel in the platform, they now poll every 60 s in the foreground, every three minutes while the tab is hidden (and not at all once it has been hidden for ten minutes), and stop polling altogether while a host reports an open push channel (a pushed change reads the feed it names). A new inbox message can show up to about a minute later.
+- a9f1452: feat(console): entering an app loads its metadata bundle once, and a record open reads no metadata
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Entering an app now loads that app's metadata bundle (`GET /api/v1/meta/app/{appId}/bundle`) in one request, through the new `ObjectStackAdapter.loadAppBundle(appId)`. The bundle holds the app, the objects its navigation reaches together with the objects that reference them, and their views, pages and dashboards. Re-entering the app sends `If-None-Match` with the held `ETag` exactly as served, and a `304` keeps the bundle the console already holds. The request goes through the client's conditional `meta.getAppBundle(appId, { ifNoneMatch })`. A bundle served `no-store` with no `ETag` answers the reads that waited on it and is not kept.
+  
+  - **Reads of bundled items.** A by-name metadata read of an item the bundle holds is answered from the bundle, as that item's own envelope, and never goes to its by-name route. This covers `getObjectSchema`, `getView`, `getPage`, `getApp`, `getItems`, and every caller of the client's `meta.getItem(type, name)`, including app-shell's `MetadataProvider`. A record open in a warm session therefore sends its page request and no metadata request. A cold open adds at most the one bundle request, sent alongside the page request.
+  - **Reads of everything else.** Items outside the app (Studio's reads, a lookup to `sys_user`, an item the caller may not read) keep their by-name routes. A read with options does too. An item withheld from the caller is absent from the bundle and carries no name there, so its by-name read gives that item's own refusal.
+  - **Staying current.** A metadata write through any of the client's write doors, or a host invalidation that names a bundled item, makes the next bundled read revalidate the bundle first. An answer older than the adapter cache's lifetime is revalidated the same way. A cache clear, which happens on an organization, session or locale switch, downloads the bundle again with no validator.
+  - **No bundle.** If the bundle is refused, the app is unknown, or the server has no such route, every read goes to its by-name route as before.
+- 8ebdd28: fix(data-objectstack): `ObjectStackAdapter` reaches discovery from a `baseUrl` that ends in `/api/vN`, and the objectui skill teaches the server origin
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `new ObjectStackAdapter({ baseUrl: '/api/v1' })` — the form the published `objectui` skill taught — asked for `/api/v1/api/v1/discovery`, so `connect()` failed and every read and write that awaits it failed with it. The adapter's own search, data, export and meta reads already dropped a trailing `/api/vN`; discovery and the wrapped `ObjectStackClient` did not.
+  
+  - The adapter now reads `baseUrl` as the server origin once, where it and its client are built: a trailing slash and a trailing `/api/vN` are dropped, so `''`, `http://host:3000`, `/api/v1` and `http://host:3000/api/v1` all reach `/api/v1/discovery` and the same `/api/v1/...` routes, through the client and through the adapter's raw reads alike. The five per-call suffix checks are gone; nothing else about the URLs changes.
+  - `skills/objectui` (`guides/data-integration.md`, `guides/auth-permissions.md`) and the package README teach the origin form the console passes (`''` behind a same-origin proxy, or the server origin), and the data-integration eval refuses an answer that writes `baseUrl: '/api/v1'`.
+- be646ed: feat(console): a comment author is told, in one sentence, which mentioned users will not be notified
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When a record comment @mentions someone the server's mention gate refuses, the server saves the comment with every mention, withholds that person's notification, and answers their ids to the author's own write as `withheldMentions`. The Console said nothing, so the author believed the colleague had been told. Now:
+  
+  - **One sentence, no reason.** Posting a comment, posting a reply, or saving an edit that adds a mention raises one warning naming the users who will not be notified, by the names the mention picker offered ("Grace Hopper, Linus will not be notified of this comment."). It gives no reason. A write that withheld nobody says nothing. The copy is `detail.mentionsWithheld` in all ten packs.
+  - **The answer reaches the caller.** `ObjectStackAdapter.create` and `.update` take an optional per-call `onMentionsWithheld(ids)` listener (on `update`, beside `ifMatch`). It is called once, after the write succeeded, only when the answer names at least one id; a throwing listener does not fail the write. Both methods still resolve the record, so no other caller sees a change.
+  - **Mention chips.** The comment composer draws the users the text mentions as a row of chips under the editor (labelled `detail.mentionedPeople`), resolved the way the write resolves them, and the preview draws each picked `@name` as one chip, multi-word names whole.
+- b1e1dcf: feat(console): a save's toast shows the notice a hook set on the write, still one toast per write
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A create or update answer can carry a `notice`: one message a hook on the write set for the person who made it, such as "Sent to your manager for approval". The Console now shows it. The record form's save toast (the record dialog, its child-form task and the full-page form), the `object-form` drawer and modal, and the grid's inline-edit saves (the per-row save and "Save All") keep their own message as the title and show the notice under it. The toast stays a success when the notice is the only news, and moves to the warning variant, with the notice leading the lines, when the answer also carried warnings. A write no save surface reports itself, such as the record page's inline edit Save bar, gets one toast from the write-warning channel instead: an info toast with the notice as the hook wrote it, or the notice leading the "Saved — with warnings" lines.
+  
+  - **`@object-ui/data-objectstack`**: `WriteWarningEvent` gains an optional `notice`, read off the single-record create and update answers. The event is now also emitted when the notice is the answer's only news. What `create` and `update` resolve is unchanged.
+  - **`@object-ui/react`**: new type `RecordSaveFeedback` (`warnings`, optional `notice`). `AnswerWarningClaim.take` returns it, `AnswerWarningsEvent` gains `notice`, and `toastRecordSave` takes it as its third argument. These exports have not been released yet, so no released signature changes.
+- 768ec4b: feat(console): a stored view filter's OR group filters the list, and the filter builder saves and reads it
+  
+  Clause-②: yes (widening: `@object-ui/core` adds the export `builderRulesOfSpecFilter` and its result type `BuilderFilterRules`; no schema, accept set or error code changes)
+  Metadata-protocol: none
+  Skills-docs: follow-up #28476 — skills/objectstack-ui/rules/list-views.md, skills/objectstack-ui/evals/views-apps-actions-pages.json (the any-of group is not taught there yet); `content/docs/ui/views.mdx` gains a Base filter section that states it
+  
+  A view filter list may hold an any-of group beside its rules, `{ or: [rule, ...] }` (`ViewFilterOrGroupSchema` in `@objectstack/spec/ui`): the list ANDs its elements and the group ORs its rules. Until now no console reader applied it. The list query passed the group through, the server refused the query as a malformed filter (400 `INVALID_FILTER`), and the view showed no rows.
+  
+  - **Query.** `toFilterNode` (`@object-ui/core`) lowers a group to an `or` node of its rules, one child of the list's AND, so the list, the export, kanban, calendar, gallery, timeline, related lists, line items, the grid and the in-memory `ValueDataSource` all select the records the group names. Each member is lowered exactly like a top-level rule, so the same operator fold and refusals apply inside a group. A group the spec refuses (an empty `or`, a blank-field member, a group inside a group) is not repaired: the server still refuses it.
+  - **Adapter.** `@object-ui/data-objectstack` translates a group in an unlowered view filter list on both `find()` routes, whether it opens the list, follows a rule or is spread into an `and`. A group that does not translate is refused whole with `MalformedFilterError` (`INVALID_FILTER`, 400), never dropped.
+  - **Save.** The filter builder's OR group over two or more rules is saved as one group element, `[{ or: rules }]`, instead of being refused with "a saved view cannot store OR". The `console.objectView.filterOrNotSavable` message is retired in all ten packs.
+  - **Read back.** A stored list that is exactly one group opens in the Studio filter field, and in `toFilterGroup`, as an OR group of its rules. A list with a group beside other conditions cannot be shown by the one-level builder, so the Studio filter field shows it read-only with the reason (`console.objectView.filterOrGroupNotEditable`, in all ten packs) and never saves part of it.
+  - **Override recovery.** The pass that drops unfinished conditions from a stored view override keeps a group, drops only its unfinished members, and drops a group with none left. It used to drop every group as an entry with no `field`, which widened the view.
+- a8d2fd7: feat(runtime,metadata-protocol,client,console): Studio's publish takes a change note, every history row it writes carries it, and the item history names the person who changed it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **The note reaches each item's history.** `POST /packages/:id/publish-drafts` now forwards a string `message` from its body. `publishPackageDrafts` already wrote that note into the package commit; it now also passes it to each item's promote, so every `sys_metadata_history` row the publish writes stores it as `change_note` (the history read returns it as each event's `message`). A publish with no note, or an empty one, keeps the sentence the rows carried before, `publish app package 'PACKAGE_ID'`. The SDK's `packages.publishDrafts(id, opts)` accepts `opts.message`, and the console's `MetadataClient.publishPackageDrafts` sends it only when given, so a caller that names no note sends the same `{}` body as before.
+  
+  **Who published is the signed-in caller.** The door used to record `body.actor` as the publisher, so a caller holding `manage_metadata` could put any name on every history row and on the commit. It now records the user id of the request's authorized execution context, the rule the single-item `/meta` publish door follows, and ignores a body `actor`. A caller with no user id (a system context) records no actor (`NULL`), never the body's. The SDK keeps `opts.actor` in its type, marked deprecated, so existing callers still compile; the door ignores it. The other package write doors (discard, revert, rollback and the rest) are unchanged here.
+  
+  **In Studio.** The publish review (the pending-changes sheet's footer) offers an optional **Change note** where it publishes one package as a batch; the note is sent trimmed, and an empty one sends nothing. The item history panel shows each event's actor by the user's name, read from `sys_user` once per set of ids. An id with no user row behind it (a deleted user), or a directory the viewer cannot read, is shown as the id marked "unresolved user". A write no person made shows no actor. Each event's change note is shown under its row. English and Chinese strings are added to the console i18n bundles (the publish-review strings in all ten locale packs, as the key-parity suite requires).
+- 8c3f9d9: feat(console): the row and record-page Delete confirmations name the objects a delete will cascade into, from the platform's served `cascadeDeleteObjects`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A delete can also delete child records, for example a lead's campaign memberships. The platform serves which objects, by name, beside the by-name object read (`cascadeDeleteObjects`). The Console now shows them:
+  
+  - **The confirmation gains one line.** The row Delete, the selection's bulk Delete and the record page's Delete add one sentence naming those objects by their labels, in the user's language (new key `objectActions.deleteCascade`, in all ten built-in catalogs). An object the Console holds no label for reads by its name.
+  - **Nothing extra when nothing cascades.** A served empty list adds nothing. When the platform served no answer (an older backend, a draft read), the confirmation keeps today's text and says nothing about children. The Console never works the cascade out for itself.
+  - **How the list travels.** `@object-ui/data-objectstack` `getObjectSchema` keeps the envelope's `cascadeDeleteObjects` on the schema it returns, under a non-enumerable symbol, so a schema written back to a metadata endpoint never carries it. `@object-ui/core` exports `attachCascadeDeleteObjects`, `readCascadeDeleteObjects` and `CASCADE_DELETE_OBJECTS_KEY`, and `recordDelete.confirmCopy` takes an optional `cascadeLabels` list. `@object-ui/app-shell` `useObjectActions` takes an optional `objectLabelOf` and resolves the labels itself.
+- 706ac52: perf(console): an app page reads its views, its page and its nav dashboards from the app bundle, and reads the `/meta/view`, `/meta/page` and `/meta/dashboard` lists only for what the bundle does not hold
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Since the app metadata bundle landed, entering an app downloads the app, its objects and their views, pages and dashboards in one request. The console still read the per-type lists beside it. Now:
+  
+  - **`view` is no longer read at mount.** An object the bundle holds is composed with the bundle's views. A route's object scope reads the `/meta/view` list only when a name it asks is outside the bundle, and then only for the objects the bundle does not hold; such a scope waits for the list before it answers. The whole object registry still reads the list beside it.
+  - **The console enters the app's bundle once, at its root**, as soon as the app list names the app, and `AppContent` reuses that entry instead of asking the bundle again. Leaving the app ends the entry, so coming back revalidates it.
+  - **Whether an object exists** (the presence check of the bell and activity surfaces) is asked without views, so it never reads the `/meta/view` list.
+  - **The page a page route opens** (`/apps/APP/page/NAME`), the phone bar's page or dashboard title, a dashboard nav entry's label and a recent page's label are read from the bundle first. A name the bundle does not hold, or a same-named item another package owns, is read from the list as before, prefer-local resolution included. The page route no longer waits for the page list to load.
+  - **The app bar reads views only on an object's view route**, the one title that labels a view.
+  - **New in `@object-ui/data-objectstack`:** `ObjectStackAdapter.peekAppBundle()` reads the active app bundle without waiting (`none` before an app is entered, `pending` while its first answer is on the wire, `ready` with its items), and the types `AppBundlePeek`, `AppBundleItems` and `AppBundleEntry` are exported. A stale bundle is revalidated with `If-None-Match` and keeps answering from what it holds until the revalidation lands.
+  
+  Navigation sync still reads the page and dashboard lists after the first paint; that read is not changed here.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8a12a17]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [47b6392]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [27e4d65]
+- Updated dependencies [81b4599]
+- Updated dependencies [7bb8084]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [4c5023a]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [9324232]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [5c083e8]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [b6db369]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [f91ab5a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [01178c0]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [7eda096]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [9da2f4b]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [768ec4b]
+- Updated dependencies [ba0084e]
+- Updated dependencies [a8d2fd7]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [58cb05d]
+- Updated dependencies [16e7a80]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [82b29fe]
+- Updated dependencies [8c3f9d9]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8afaf12]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [839aae5]
+- Updated dependencies [99a6a78]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/spec@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+  - @objectstack/client@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

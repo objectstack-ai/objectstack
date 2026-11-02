@@ -1,5 +1,924 @@
 # @objectstack/rest
 
+## 18.3.0
+
+### Minor Changes
+
+- f9f27a0: feat(rest): `GET /data/:object/:id/field-access` serves the field projection of one record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A record's edit form can ask which fields it may write on THAT record: the route answers `{ success: true, data: { object, recordId, readable, editable } }` (`GetRecordFieldAccessResponseSchema`), with `editable` judged on the stored row by the write gate through the security service's `getRecordFieldAccess`. The record is read first exactly as `GET /data/:object/:id` reads it, so an absent row or one the caller cannot read answers that route's 404 and the projection discloses nothing more. The route takes no query parameter (a located 400 names any). Without a security service that offers the method it answers 501, and `/auth/me/permissions` remains the row-less reader.
+- 031d97a: feat(spec,rest,cli): a doc book's title and section titles are translatable — `books.<name>` in the translation bundle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A package that ships its docs in two languages showed a half-translated manual: each doc's body followed the reader's locale (`doc.translations`, `<name>.<locale>.md`), but the book title and every sidebar section title stayed in the authoring language. The book's own inline `translations` map was retired in 17.0.0 because nothing read it, and the translation bundle had no key for a book.
+  
+  - **`@objectstack/spec`:** `TranslationData` (and the registered `translation` item and the platform bundle, which share its groups) gains `books`, keyed by the book's `name`: `label`, `description`, and `groups.<key>.label` for each group by its stable `key` (strict: any other key is refused; `name` / `title` point at `label`, and `sections` / `chapters` / `toc` point at `groups`; the singular group spelling `book` points at `books`). A new translator, `translateBook`, overlays them and is registered in the metadata-document dispatch, so `GET /meta/book` (list and item) is served in the request's locale. A key the bundle does not carry keeps the authored string. The rejection for the retired inline `translations` map on a book now names the bundle keys to move the strings to.
+  - **`@objectstack/rest`:** `GET /meta/book/:name/tree` translates the book it resolves through the same dispatch before rendering the spine, so the tree, the book list and the console's docs sidebar agree. `MetaBookTreeSources` gains `resolveI18nService()`, which both transports supply.
+  - **`@objectstack/runtime`:** the dispatcher's book-tree route supplies the same i18n service, so it answers the localized tree `RestServer` answers.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds `books.<name>.label` / `.description` and `books.<name>.groups.<key>.label` from the stack's `books[]`, and `os i18n check` / `os lint` coverage report an untranslated one as `i18n/missing-book`.
+  - **`@objectstack/lint`:** `translation-target-unknown` resolves `books.<name>` against the declared books (a sibling package's included, and a package id for its implicit book) and `books.<name>.groups.<key>` against that book's group `key`s, so a mistyped book name or group key is an error instead of a translation nothing reads.
+  - **`@object-ui/i18n`:** the console's language loader recognises `books` as a translation group, so a served document that carries only book translations is namespaced like any other.
+  
+  Example (`zh-CN` bundle of an English-authored package):
+  
+  ```ts
+  books: {
+    crm_manual: {
+      label: '使用手册',
+      groups: { start: { label: '快速上手' }, pipeline: { label: '销售管道' } },
+    },
+  },
+  ```
+- 0c47e87: feat(metadata): the layered read takes the bundle member selector, so the layers of one locale of an `email_template` can be read
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  `GET /api/v1/meta/:type/:name/layers` and the protocol's `getMetaItemLayered` now accept `member`, the same bundle member selector the by-name read, delete, publish, history and revert already take. Before, the layered view only ever showed the canonical member (`en-US` for `email_template`) and refused `?member=` with 400, so an editor built on it could not open a second locale of a template.
+  
+  - **Named the same way.** `?member=` on the REST route and `member` on `GetMetaItemLayeredRequest` (`@objectstack/spec`), spelled as the member's discriminator value (`zh-CN`). Absent, the canonical member's layers, as before; naming the canonical value is the same request.
+  - **Every layer is that member's.** `code` is the package's artifact for that member, `overlay` the environment's stored row for that member, and `effective` what the by-name read with the same `member` serves. A member with nothing shipped and nothing stored answers `404`, the absent item, never the canonical member's layers.
+  - **Refused as the item read refuses it.** A `member` on a type whose identity is its name alone (every type but `email_template` today), a blank one, or one over 100 characters is a `400 VALIDATION_ERROR` naming the selector. A repeated `?member=` is refused by the multiplicity rule.
+  - **Both transports.** `RestServer`'s route and the runtime dispatcher's `/meta` catch-all judge the route's query through the one shared decision (`metaItemQueryRefusal('layers', …)` in `@objectstack/rest`), whose closed set for the route is now `package` and `member`. `META_ITEM_LAYERS_PARAMS` reads `['package', 'member']`.
+  - **Unchanged.** The deprecated `?layers=` flag on the plain read still refuses a `member` beside it; read one member's layers on `/layers` instead.
+- 8441a01: feat(rest): `GET /api/v1/meta/app/{appId}/bundle` answers an app's metadata in one request, per caller, with an ETag (#27627)
+  
+  Clause-②: yes (widening: a new route and its response shape; no existing route, key or answer changes)
+  Metadata-protocol: added
+  
+  A console working inside one app used to read the app, then one `GET /meta/object/{name}` per object it opened, then the views, pages and dashboards those draw, each as its own request. The new route answers them together (`AppMetadataBundleResponseSchema`, `@objectstack/spec/api`):
+  
+  - **What is in it**: the app with its navigation; every object its navigation reaches (top-level, area and nested entries) and every object with a lookup or master-detail field referencing one of those; the views the navigation names or that bind to a bundled object; the pages the navigation names or that bind to a bundled object; the dashboards the navigation names.
+  - **Every member is the item read it replaces, as the same caller**: the app is `GET /meta/app/{appId}`, and each entry is `GET /meta/{type}/{name}`, envelope included. Audience gates, list-view and dashboard permissions, the field-visibility mask, the translation to the request locale and `sortability` apply exactly as they apply to those reads. An item the caller may not read is absent from the bundle. An app the caller may not read refuses the whole request with the app read's own answer.
+  - **Cached per caller**: a weak `ETag` over the body served to this caller (the `/meta` reads' shared rule), `Cache-Control: private, no-cache`, `Vary: Accept-Language`, and `If-None-Match` answered `304`. Two callers share a validator only when they are served the same body. A member whose field visibility could not be determined serves the bundle `private, no-store` with no `ETag`.
+  - **Server-Timing**: the bundle's metadata reads are timed as a `meta` span beside `db` and `total`, under the existing gate (`OS_SERVER_TIMING=true`, or `X-OS-Debug-Timing: 1` from an admin).
+  - The query-parameter set is closed and empty.
+  - `@objectstack/client` gains `meta.getAppBundle(appId, { ifNoneMatch })`, conditional in `meta.getCached`'s spelling: it answers `{ notModified: false, data, etag }` on a `200` and `{ notModified: true, etag }` on a `304`, and a `304` is not thrown as a failed request.
+  - `meta.getCached` now answers a matching `If-None-Match` / `If-Modified-Since` with `{ notModified: true }` through the same opt-in. Before, the transport threw on the `304` before the method's own `304` branch could run.
+- 0027c4a: feat(rest): `POST /api/v1/data/{object}/{id}/page` answers everything a record page asks when it opens, in one request (#27627)
+  
+  Clause-②: yes (widening: a new route and its request and response shapes; no existing route, key or answer changes)
+  Metadata-protocol: added
+  
+  A record page used to open in two or three stages of requests: the record, the approval list, the access verdicts and each related list's definition first, then the approval lock and one count probe per related list. The new route answers all of it from one request:
+  
+  - **The request names the parts** (`RecordPageRequestSchema`, `@objectstack/spec/api`): `expand` (the record's lookups to resolve), `related` (each related list the page draws: the child object, its relationship field to this record, an optional declared `filter`, `top` first rows, an optional `sort`), `explain` (`update` / `delete` / `transfer`), `fieldAccess` and `approvals`. The body is strict and the query-parameter set is closed and empty.
+  - **Every part is the read it replaces, as the same caller** (`RecordPageResponseSchema`): the record is `GET /data/{object}/{id}`; a related list is `GET /data/{child}` with the parent condition AND the declared filter, and `$count`; `fieldAccess` is `GET /data/{object}/{id}/field-access`; a verdict is `POST /security/explain` with the record id; `approvals` is `GET /approvals/requests` for the record (the pending row enriched as `GET /approvals/requests/{id}`) and the record lock. Object permissions, row-level security, sharing and field-level security therefore apply exactly as they apply to those reads.
+  - **A refusal stays where it belongs.** A record the caller cannot read refuses the whole request with the record read's own answer. A part whose read refuses carries that refusal (`{ code, status, message }`) in place of its answer, and the other parts are answered; a related list the caller may not read carries neither a count nor rows.
+  - **A related entry must be a relationship to this record**: a lookup or master-detail field of the child that references the page's object, or the request is a located `400` before anything is read.
+  - **Server-Timing**: the route's metadata reads are timed as a `meta` span beside `db` and `total`, under the existing gate (`OS_SERVER_TIMING=true`, or `X-OS-Debug-Timing: 1` from an admin).
+  - `@objectstack/client` gains `data.recordPage(object, id, request)`.
+- eeec88d: feat(metadata-protocol): one effective read — every read of a name a code package ships serves its `.custom` pair's declared override, the env-wide list and the export agree with it, and a withdrawn public form stays withdrawn (ADR-0146 D8)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  The `overrides: { package, basedOn }` declaration (ADR-0146 D2) now takes effect on the read. Under the address of a name an installed code package X ships, the item of X's paired `<X>.custom` package that declares `overrides.package = X` is the one document served:
+  
+  - **Every read agrees.** The read naming no package, the read naming X (`?package=X`), the layered read (`code` = X's document, `overlay` = the override, `effective` = the override), the list scoped to X and the env-wide list all serve the override, under X's `_packageId`. A declaration from any package that is not X's pair is ignored, and an undeclared item of the pair stays the pair's own item.
+  - **One predicate.** `isServedOverrideRowOf(row, basePackageId)` (new export, with its `ServedOverrideRow` type) is the one spelling of "is this stored row the served override of X's name": bound to X's pair by the row's own `package_id` (never a body stamp), of an overridable type, declaring `overrides.package = X`.
+  - **The env-wide list joins the one read.** For a name exactly one code package ships, a same-named row bound to another package is no longer listed beside that package's item; it stays that package's own item under its own address. A package-unbound row (the overlay Setup writes) keeps winning over the code item until the migration of ADR-0146 D11. Beside a package-unbound row the declared override is served, because a save naming no package writes the override's row there.
+  - **The per-package layer.** `ObjectStackProtocolImplementation#getMetaItemsPerPackage` (new public method) answers the list as it stood before this change: one item per package that holds a name, each package's own document. `GET /packages/:id/export` reads it, so the base's export carries the base unchanged and `GET /packages/<X>.custom/export` carries the overriding item with its `overrides` block.
+  - **Public forms.** `GET /forms/:slug` and `POST /forms/:slug/submit` offer the forms of the effective list and judge withdrawal against that list beside the per-package layer, so a form withdrawn by any body the doors honoured before stays withdrawn: a dependent package's withdrawing row still closes the base's form, and an override cannot re-open a form the base's own document withdraws. A form that only a body no longer served offered is no longer offered (the doors only narrow).
+  - **Orphans are reported.** A row of X's name stored in X's pair without the declaration, or in a package that depends on X, is reported by the layered read of X's name in `overlay`, with `effective` = X's document, instead of being dropped silently. A row of a package outside X's closure is not.
+  
+  No request or response shape changes.
+
+### Patch Changes
+
+- 8eeb3b3: feat(spec)!: retire the list view's `options` bag; stored bags fold onto the top-level blocks, and the renderers read the blocks alone (#25923)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered list-view-options-bag-folded, ui-list-view-options-bag-folded -->
+  
+  A flattened list view overlay carried every per-kind block twice: as the top-level `kanban`, `calendar`, `gallery`, `timeline`, `gantt`, `map`, `tree` and `chart`, and again under a legacy `options` bag the top-level block won over per key. Each renderer re-implemented that merge. The bag is retired, and each block has one spelling.
+  
+  - **`@objectstack/spec`**: the list overlay's `options` is a removed-key tombstone. The view write door refuses a body that carries it, by name, with the prescription to move each `options.KIND` block to `KIND`. The ADR-0087 D2 conversion `list-view-options-bag-folded` folds a stored bag onto the top-level blocks before a row is served (the top-level value wins per key; for `chart`, whose block replaced the bag whole, a bag beside a block is dropped), and `os migrate meta --from 17` lists the same edits for a source. A bag it cannot fold (an `options.grid`, a non-object block, a bag on a form view) is left in place with a TODO. The D3 entry `ui-list-view-options-bag-folded` names what the fold cannot decide: the bag was judged with every key optional, so a folded block can still miss a key its block requires. The page `list-view` component row shares the tombstone.
+  - **`@object-ui/types`**: `ListViewSchema.options` takes the spec's tombstone by reference, so every published door refuses a bag at `options` with the spec's text, and the TypeScript face has no bag. `NamedListView.options` is a `?: never` tombstone that names the top-level blocks. The dataset-chart filter refusal reads the `chart` block alone, and the page node's flat `options` is refused with the bag's own text rather than pointed at `properties.options`.
+  - **`@object-ui/plugin-list`**: `ListView` reads each kind from its top-level block alone: the render branches, the capability gate, the projection and expand collectors and the fetch effect's dependencies no longer read `options`. The `list-view` registration publishes no `options` input.
+  - **`@object-ui/app-shell`**: the object page relays each per-kind block at the top level of the list schema, held by value per block so an equal rebuild keeps its identity, and no longer forwards a stored bag. The interface page sends one `map` block (its derivation with the authored keys laid over) and no bag. The Studio view preview and the list-view inspector no longer fold a bag; the server does. `storedLegacyOptions` is removed.
+  - **`@object-ui/plugin-view`**: the host list schema carries the active view's blocks at the top level instead of under `options`.
+  - **`@object-ui/plugin-map`**: two development warnings name the view's `map` block instead of `options.map`.
+  - **`@object-ui/console`, `@objectstack/rest`, `@objectstack/metadata-protocol`, `@objectstack/lint`**: test pins only (the registry parity row, the write door's refusal and served fold, and the lint finding), no runtime change.
+  
+  **BREAKING** for a list view body, a page `list-view` node or a `ListView` host that writes `options`.
+  
+  - **Before.** `{ type: 'kanban', columns: ['name'], options: { kanban: { groupByField: 'stage' } } }` was accepted at the view write door and drew a board laned on `stage`, and `ListView` read the bag beside the top-level blocks.
+  - **Now.** The write door and every `@object-ui/types` door refuse `options` by name, and `ListView` reads no bag. A view already stored with one is served folded onto its top-level blocks and renders from them. On the object page those blocks now pass through the same relay defaults as a block written top-level (the kanban `titleField: 'name'` floor, for one), so a folded row can draw differently from its bag where the bag left such a key unset. No reachable source stores a bag (census: 0 rows), and `ObjectView.storedRowParity-10380` pins the folded rendering.
+  - **Fix.** Move each block to the top level: `{ type: 'kanban', columns: ['name'], kanban: { groupByField: 'stage', columns: ['name'] } }`, keeping the top-level value where both set a key, and add any key the block requires that the bag never had (a kanban's `columns`, a gantt's `titleField`, a chart's `dataset` and `values`). A grid's settings are top-level keys of the view. Run `os migrate meta --from 17` for a source, with `--write` to apply the edits it can prove.
+- 1d7816d: fix(rest): `GET /api/v1/data/:object/:id` answers a malformed query `400`, not `404`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The by-id route answered every refusal in the `400` band as `404`, so a malformed query on a record that exists read as "no such record": `?select=nope` and `?expand=nope` answered `404 INVALID_FIELD`, and a blank `?select=` (or `?select=,`) answered `404 VALIDATION_ERROR`. A client, or an AI agent, told `404` concludes the record is missing and stops, when the fault is its own query string. The runtime dispatcher's twin route already answered the same requests `400`.
+  
+  The route now answers the mapped status, as every other Data API route does. The body is unchanged: the same `code`, `error`, `field` and `object` the `404` carried.
+  
+  What still answers `404 RECORD_NOT_FOUND`, unchanged: an id that names no record, and a record the caller's row scope hides. Those two are the same answer by construction (a read that returns no row), and neither ever went through the rewrite. A `400` does not reveal whether a record exists: each one is raised before the record is read, so it is the same for any id.
+- e1ab32e: fix(runtime)!: the package write doors refuse a query parameter they do not read, so `DELETE /packages/:id?keepdata=true` no longer drops the tables the caller asked to keep
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer the package write doors give a request that carries a query parameter they never read: it is refused instead of ignored. The remedy is a request edit (spell the declared flag exactly, or send no query parameter), never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** accept-set narrowing at the package write doors of the runtime dispatcher, and at `RestServer`'s `POST /api/v1/packages/publish`.
+  
+  - **Before.** Each door read the query names it knew and ignored every other one. `DELETE /api/v1/packages/:id?keepdata=true` (or `?keep_data=true`) was not `?keepData=true`, so the uninstall dropped the package's object tables, the ones the caller asked to keep, and answered `200`. Every other write door performed its act whatever names rode on the query string.
+  - **Now.** Each door declares the names it reads and refuses any other `400 VALIDATION_ERROR` before anything is deleted, installed or changed. The message is the one every closed-query door answers (`unknownQueryParamRefusalMessage`, `@objectstack/rest`): it names each parameter it did not understand and lists the ones the door supports. The capability gate still answers first, so a caller without `manage_metadata` keeps its `403`, and a repeated declared flag keeps its `supplied N times` refusal.
+  - **The declared names.** `DELETE /packages/:id`: `keepData`. `POST /packages` (install): `overwrite`. Every other write door takes none: `PATCH /packages/:id`, `PATCH …/enable`, `PATCH …/disable`, `POST …/publish`, `…/publish-drafts`, `…/discard-drafts`, `…/revert`, `…/rollback`, `…/commits/:commitId/revert`, `…/adopt-orphans`, `…/duplicate`, and `RestServer`'s `POST /packages/publish`.
+  - **Unchanged.** A call with no query parameter, and the declared flags (`?keepData=true` / `?keepData=1`, `?overwrite=true`), which is how the Console and the client SDK call these doors. Read-only `GET` doors are not touched.
+  - **Who sees it.** A script, tool or AI agent that misspells a flag or adds any other query parameter to a package write door now gets `400` instead of the act.
+  
+  **The remedy.** Spell the declared flag exactly (`keepData`, `overwrite`), or send the request without query parameters.
+- 67cf0b1: fix(runtime)!: the runtime dispatcher's `GET /data/:object/:id` refuses a query parameter other than `select` / `expand` with `400 VALIDATION_ERROR`, as `RestServer` does, instead of dropping it and answering `200`
+  
+  Clause-②: yes (narrowing) — the dispatcher's by-id read refuses a query parameter it dropped before, and `@objectstack/rest` gains one export (`DATA_RECORD_READ_PARAMS`) so both hosts read one set.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed. `@objectstack/rest` gains one export, `DATA_RECORD_READ_PARAMS`, the closed set its own route already asked. What narrows is one runtime door's query accept set: a parameter the dispatcher's by-id read dropped now answers a located `400 VALIDATION_ERROR`, and the remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** accept-set narrowing at one runtime dispatcher door, the by-id record read served by the `@objectstack/hono` catch-all and `dispatcher-plugin`.
+  
+  - **Before.** `GET /api/v1/data/:object/:id?selct=name` answered `200` with every column on the dispatcher: the branch kept `select` and `expand` and silently dropped every other name. `RestServer` refused the same request `400 VALIDATION_ERROR`, so a typo was ignored on one host and refused on the other.
+  - **Now.** The dispatcher asks the route's closed set, `DATA_RECORD_READ_PARAMS`, imported from `@objectstack/rest`, the same set `RestServer` asks, and refuses any other name `400 VALIDATION_ERROR` with `RestServer`'s sentence: it names each refused parameter and lists `expand, select`. The refusal comes before the read, so it is the same answer for an existing record, a missing id and a row the caller may not read.
+  - **Unchanged.** `select` and `expand` are read as before. An object the API does not expose is answered its exposure refusal first, before the query is judged: the dispatcher's `404 OBJECT_API_DISABLED` with or without the unknown name, and `RestServer` likewise asks its closed set only after `enforceApiAccess`. The other `/data` routes are not touched.
+  
+  **The remedy.** Send only `select` and `expand` to the by-id read. `fields` and `populate` are not synonyms on this route (#8039): spell them `select` and `expand`.
+- b88519e: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(spec): a book's *Uncategorized* group no longer lists the pages a sibling book places (#27091)
+  
+  When two books split one package's docs, for example a user manual and an admin manual gated by `audience: { permissionSet }`, each book's tree used to list the other book's pages under a trailing *Uncategorized* group. `resolveBookTree` judged "claimed" against the book's own groups only. ADR-0046 §6.4 rolls up only the docs "left unplaced", and a doc a sibling book places is placed.
+  
+  - **`resolveBookTree(book, docs, bookPackage?, books?)`** takes an optional fourth argument, every registered book. With it, the *Uncategorized* group holds only the docs of the book's packages that no book claims. The claim judge is `resolveBookClaimedDocs` over each book, the same claim set `resolveDocAudiences` unions audiences over. Without it, the tree is the same as before.
+  - **`GET /meta/book/:name/tree`** passes the books it already reads, so an administrator opening the user manual no longer sees the admin pages under *Uncategorized*. A doc that no book claims still rolls up there.
+  - **The console's docs pages** render the book sidebar with the console's own copy of the resolver (`book-nav.ts`). It takes the same optional fourth argument, and the reader and the book landing pass the authored books, so the sidebar no longer lists a sibling book's pages under *Uncategorized* either.
+  
+  The change only removes entries from the catch-all: a sibling book's docs appear nowhere new, and a doc's effective audience (§6.7) does not change.
+- efdf11a: feat(security): a dismissed or revoked suggested audience binding can be re-opened, back to pending
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Once an admin dismissed a pending audience-binding suggestion, or revoked an accepted one, the row stayed `dismissed` and nothing in the product could take that "no" back: `confirm` accepts only pending rows, and the reconciliation never moves a dismissed row. A new door re-opens it:
+  
+  - **`POST /api/v1/security/suggested-bindings/:id/reopen`** moves a `dismissed` row back to `pending`, exactly as if it had never been answered (`deployment_decision` false, `resolved_by` / `resolved_at` cleared). It is served by both mounts of the family: the REST route and the dispatcher's `/security` domain.
+  - **Re-opening grants nothing.** A pending row is not an acceptance, so a revoked set stays out of the `everyone` anchor's definition until `POST …/:id/confirm` accepts it again, and that accept runs the ADR-0090 D7 high-risk gate like any other.
+  - **Refusals.** The same authority as the other doors (`manage_metadata`; under a walled posture, the platform operator; `403` otherwise), the same walled-host refusal naming `acceptedDefaultPermissionSets` (`409`), `404` for an unknown id, and `409 SUGGESTION_STATE` for a row that is not `dismissed` (the message names its status) or whose set its package no longer suggests. The last keeps the decision on record: a re-opened row with no declaration would be pruned by the next reconciliation.
+  - **Contract.** `ISecurityService` gains the OPTIONAL member `reopenAudienceBindingSuggestion(callerContext, id)`. A security service without it still satisfies the contract; both routes answer `501 NOT_IMPLEMENTED` naming the door, and every dismissal stands. plugin-security serves it and exports `reopenAudienceBindingSuggestion`.
+  - **SDK.** `client.security.suggestedBindings.reopen(id)`.
+- 8d79bbd: feat(spec): a draft's per-key provenance records writes made through the MCP build door, and the OAuth client that made them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A pending draft's `draftChanges` (the strict draft read's per-key provenance) could tell Studio's AI copilot from a person in Studio and from any other caller, but not an AI agent outside the console building through a deployment's MCP build door. Such a write was recorded as `api`, and nothing said which agent it was.
+  
+  - **Spec.** `MetadataAuthoringSurfaceSchema` gains `mcp`: an AI agent outside the console writing on a person's behalf through the MCP build door. A new `MetadataAuthoringClientSchema` (`{ id, name? }`) is the OAuth client the person consented to. A `draftChanges` entry carries it as an optional `client`, present only beside `by: 'mcp'`. `SaveMetaItemRequestSchema` gains an optional `client`, stated only by the MCP build door, in-process, from the token it verified.
+  - **The save.** A draft save with `surface: 'mcp'` stamps `by: 'mcp'` and its `client` on every key path it changes. A `client` beside any other surface, or of the wrong shape, is refused `400 INVALID_REQUEST` before anything is written. `actor` is still the person the agent writes for.
+  - **The HTTP doors.** `?surface=mcp` is refused `400 VALIDATION_ERROR`, as `?surface=copilot` is: only the MCP build door may state it. No HTTP door reads a `client`.
+  - **Studio.** The properties' draft chip and source line mark an `mcp` write as they mark the copilot's, and name the client: 「由 MCP 客户端「Claude」在 2 分钟前作为草稿加入」 / "Added as a draft by the MCP client "Claude" 2 min ago". A client that registered no name is shown as an unnamed MCP client, never by its id. The pending-changes sheet's drill-in lists which AI tools drafted part of the item, in all ten console locales.
+  
+  Nothing to do for existing callers: a save that states no surface is still recorded as `api`, and an entry without `client` reads as before. The MCP build door starts stating `mcp` and its client in a later change.
+- eac6d96: fix(rest)!: `security/explain` refuses an explicit empty `userId` with 400 instead of explaining the caller (#27442)
+  
+  Clause-②: no (narrowing) — `GET`/`POST /api/v1/security/explain` refuses a request whose `userId` is the empty string, which it answered before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the explain door refuses one request value, an empty userId, that it used to drop and answer as the caller. There is no authored or stored shape for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the access-explanation door (`@objectstack/rest`), held by the engine too (`@objectstack/plugin-security`).
+  
+  - **Before.** `POST /api/v1/security/explain` with `"userId": ""` (or `GET …?userId=`) dropped the empty id and answered `200` with an explanation of the CALLER. A client that lost the selected user (an empty picker) got a confident answer about a principal nobody asked about.
+  - **Now.** The door answers `400 VALIDATION_FAILED`, in the same envelope as its other request refusals, and no explanation is computed. On `GET`, `?userId=` names the key, so it counts as explicit and is refused the same way.
+  - **Unchanged.** An omitted `userId` still explains the caller; a `userId` naming another user is explained, refused `403`, or refused `404 RECORD_NOT_FOUND` exactly as before.
+  - **Engine.** `explainAccessForCaller` no longer reads an empty `userId` as "the caller": it goes through the other-user arm, so a direct caller gets the `403` (no right to explain others) or the `404 RECORD_NOT_FOUND` an unknown id gets.
+  
+  **The remedy.** Omit `userId` to explain your own access, or send the id of the user to explain.
+- a3014cb: fix(rest): `GET /api/v1/approvals/requests/:id/actions` answers `404 REQUEST_NOT_FOUND` for a request that does not exist or that the caller cannot see, as its parent door `GET /api/v1/approvals/requests/:id` already did
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the HTTP answer one REST door gives for an approval request the caller cannot read. -->
+  
+  **BREAKING** (a served-set narrowing) for a caller that reads the action trail of an approval request id that does not exist, or of a request it is not allowed to see. That read used to answer `200 { "data": [] }`. It now answers `404 { "code": "REQUEST_NOT_FOUND", "error": "Approval request '<id>' not found" }`, the same status and body the parent door gives for the same id.
+  
+  The actions door listed rows without resolving its parent request first, so "this request has no actions yet" and "there is no such request" got the same empty answer. It now asks the parent door's own lookup first, and answers the parent door's own `404`. Both doors share that one lookup. An unknown id and a request outside the caller's visibility still answer alike, so the door reveals nothing about which requests exist.
+  
+  Unchanged: a request the caller can see keeps its answer, `200 { "data": [...] }` with the same rows in the same order.
+  
+  **What changes for you.** `ObjectStackClient` already throws on any non-2xx answer, so `approvals.listActions(id)` now rejects with the not-found message for such an id, instead of resolving `[]`. Treat that rejection as "no such request". A caller that reads actions only for requests it got from the request list or the request read is not affected.
+- f557d90: fix(rest, core)!: an update or upsert import whose match key names a multi-value or structured field is refused with `400 INVALID_REQUEST` naming the field, instead of failing every row on a raw SQL-binding error (#27465)
+  
+  Clause-②: yes (narrowing) — an update / upsert import request whose `matchFields`, or whose named mapping's `upsertKey`, names a field stored as a JSON column was accepted and then failed every row; it is now refused at the door before any row. The one widening is a new root export of `@objectstack/core`, `multiValueMatchKeyRefusal(matchFields, metaMap, keyedBy?)`, the rule both the door and the runner use.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export is removed or retyped: a request the import door accepted and could never serve is now refused up front, with a refusal that names the field and the remedy. A request that worked before works the same, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the import door (`POST /data/:object/import`, `POST /data/:object/import/jobs`), and the same rule in the shared import runner (`runImport`, `@objectstack/core`).
+  
+  - **Before.** In update or upsert mode, a `matchFields` entry naming a `multiple: true` lookup was accepted. Each row's lookup cell coerced to an id array, the matcher queried `{ field: [ids] }` as an implicit equality, and the SQL driver refused to bind it, so every row of the dry run and of the import failed with `Operator "=" … received an array`.
+  - **Now.** The door refuses the request with `400 INVALID_REQUEST`, before any row is read, matched or written, on the dry run and the import alike. The message names each offending field and its kind (`"work_object" (lookup, multiple: true)`) and says to match on single-value fields. A named mapping's `upsertKey` used as the key is judged the same way, and the message names the mapping.
+  - **Which fields.** Every field stored as a JSON column, as the spec defines it: a multi-capable type flagged `multiple: true` (`lookup`, `user`, `select`, `radio`, `file`, `image`), an inherently multi option type (`multiselect`, `checkboxes`, `tags`), and a structured JSON type (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`). A single-value lookup or file field, and any scalar field, stays a legal key.
+  - **The runner.** A caller that reaches `runImport` without the door (the connector pull, which writes a mapping's `upsertKey` straight through) gets every row failed with `VALIDATION_ERROR` and the same message, naming the field, before any row is coerced, read or written. `multiValueMatchKeyRefusal(matchFields, metaMap)` is the one rule both use, exported from `@objectstack/core`.
+  - **Unchanged.** An insert import matches nothing, so a `matchFields` it carries is not judged. Writing a multi-value field as an ordinary column of an update or upsert keyed on scalar fields works as before.
+  
+  **The remedy.** Match on single-value fields (a code, a name, an email). Measured through the SQL driver, a key naming any of these kinds already failed every row (the array kinds on the engine's implicit-equality refusal, a `json` field on a filter-token refusal), so an import that worked there before works the same now.
+- 86f2afe: fix(metadata-protocol)!: a `searchFields` override naming no field (`$searchFields=`, `$searchFields=,`, `[]`) is refused 400, not read as absent, so a narrowed search no longer runs over the default search fields (#27484)
+  
+  Clause-②: no (narrowing) — the data doors (`GET /data/:object`, `POST /data/:object/query`, `GET /data/:object/export`, and every other caller of `findData`) refuse a `searchFields` value that names no field, which they answered 200 over the default search set before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: a query value that names no field is refused where it was read as absent. The fix for a caller is to send a field name or leave the parameter out, which the refusal says; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the query door (`@objectstack/metadata-protocol`), served by every Data API door.
+  
+  - **Before.** A blank or comma-only `$searchFields` (or `searchFields`), an empty array, or an empty object-form `search.fields` was read as no override, and the search scanned the object's whole default search set: `?$search=initech&$searchFields=` answered the rows `?$search=initech&$searchFields=industry` excludes, under a 200. The export route dropped a blank `searchFields` itself before the query ran.
+  - **Now.** `400 VALIDATION_ERROR`, naming the parameter the caller wrote (`Query parameter '$searchFields' names no field`), the envelope `$select` answers for a projection naming no field (#26644). No row is read. On the list and query doors this holds with or without a `search` term: `?$searchFields=` alone is refused too, as a non-empty override naming an unknown field already is.
+  - **Unchanged.** An absent `searchFields` searches the default set; a named one narrows it; a name outside the searchable set is still `400 INVALID_FIELD`. The engine (`find` / `count` called directly) still reads an empty override as absent. The export route still ignores `searchFields` sent without `search`.
+  - **Not yet narrowed.** The published declarations (`QueryTransportParamsSchema.$searchFields`, `EngineQueryOptionsSchema.searchFields`, `QuerySchema.searchFields`, `FullTextSearchSchema.fields`) still admit `''` and `[]`; the refusal is the door's. So on `POST /data/:object/query` the sibling `select: []` is the body schema's `400 VALIDATION_FAILED` while `searchFields: []` is this `400 VALIDATION_ERROR`. Narrowing the declarations is follow-up #27683.
+  - **Who sees it.** An API caller that sends `searchFields` with no field in it. The Console and the bundled view plugins send the parameter only when it holds at least one field.
+  
+  **The remedy.** Leave the parameter out to search the default fields, or name the fields to search.
+- 524befb: fix(rest)!: the export door refuses an unserved `format`, and the clone door refuses a non-object `overrides`, instead of answering as if they were not sent (#27500, #27489)
+  
+  Clause-②: no (narrowing) — `GET /data/:object/export` refuses a `format` outside csv, json and xlsx, and `POST /data/:object/:id/clone` refuses an `overrides` (or bare body) that is not a JSON object; both used to answer success with the value ignored. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: two REST doors now refuse request values they used to ignore. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at two REST data doors (`@objectstack/rest`).
+  
+  - **Export, before.** Any `format` other than `json` or `xlsx` was answered as csv: `?format=pdf`, `?format=xml` and `?format=` (empty) answered `200` with a csv attachment and `X-Export-Format: csv`.
+  - **Export, now.** A present `format` must be `csv`, `json` or `xlsx` (case-insensitive, surrounding blanks trimmed). Anything else, the empty value included, answers `400` with `error.code: 'VALIDATION_ERROR'`, naming the value and the served set, before any row is read. The spec's `ExportFormat` enum lists more values (for example `jsonl`, `parquet`); this route never served them and refuses them too.
+  - **Clone, before.** `{"overrides": "x"}` (or a number, `true`, `null`) was dropped and the door answered `201` with a plain copy; an array reached the clone and was merged index-wise. A bare array or string body behaved the same way.
+  - **Clone, now.** A nested `overrides`, or a bare body, that is not a JSON object answers `400` with `error.code: 'VALIDATION_ERROR'`, naming `overrides`, before the clone runs. `"overrides": null` is refused, not read as absent.
+  - **Unchanged.** An absent `format` is csv. An object `overrides`, a bare field map, `{}`, and no body at all clone exactly as before. The SDK's `data.clone` and `data.export` send only accepted shapes.
+  - **Who sees it.** An API caller or script that sends an unserved export format, or a clone body whose `overrides` is not an object. Such a request used to succeed while meaning something other than what was sent.
+  
+  **The remedy.** Export: send `csv`, `json` or `xlsx`, or omit `format` for csv. Clone: send `overrides` as an object of field values, or omit it (or send no body) for a plain copy.
+- 81d00a4: fix(rest)!: an async import job for an unregistered object is refused with 404 `OBJECT_NOT_FOUND` before any job is created (#27501)
+  
+  Clause-②: no (narrowing) — `POST /data/:object/import/jobs` now refuses an object name the runtime does not register, where it used to answer `201` and persist a job. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: one REST door now refuses, up front, an object name that every row of its job was already refused for. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at one REST data door (`@objectstack/rest`).
+  
+  - **Before.** `POST /data/no_such_object/import/jobs` answered `201` with a job id and persisted a `sys_import_job` row. The job then ran, every row failed with `OBJECT_NOT_FOUND`, and the job read `succeeded`.
+  - **Now.** The door answers `404` with `error.code: 'OBJECT_NOT_FOUND'`, the same envelope `POST /data/no_such_object` answers, before the body is parsed. No job row is written and no worker runs.
+  - **Unchanged.** A registered object gets `201` and a job exactly as before. A job whose rows partly fail still ends `succeeded`, as before.
+  - **Who sees it.** An import client that sends an object name nothing is behind, for example a typo. Such a request used to look accepted while it could import nothing.
+  - **Also refused up front.** An object of a disabled package now gets the data door's `404 OBJECT_PACKAGE_DISABLED` instead of a job (re-enable the package). A legacy `ns__short` object addressed by its short name alone gets `404 OBJECT_NOT_FOUND`, because the door counts an object only under its own name, as the API-exposure gate does (send the full registered name).
+  
+  **The remedy.** Send the object's registered name, the one `POST /data/:object` accepts.
+- a75ddba: fix(rest): a sandboxed hook's code-less `onError: 'abort'` refusal is no longer logged as `[REST] Unhandled error`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A hook that aborts its write with a business `throw` (`onError: 'abort'`, the default) is a refusal the route already answered: the data door replies with the hook's own sentence at 400. The server still printed `[REST] Unhandled error: SandboxError` and a stack for every such abort, beside the BodyRunner's own `sandboxed hook refused` line, so operators reading the error log could not tell an intended abort from a crash.
+  
+  The route log now recognises that refusal by the sandbox marker every door already reads (the body's unwrapped sentence, which a crash never has) on a 4xx answer from a body that threw no code, and stays quiet for it. Nothing changes on the wire: status, body and envelope are byte-identical. A sandbox crash, a plain un-coded 4xx from any other producer, and a sandboxed body that threw a code (judged as a coded refusal, as before) are still logged.
+- 875d007: fix(rest): `GET /meta/diagnostics` refuses an unknown type, severity or package instead of answering an all-clear, and keys an alias's stats by its canonical type (#27514)
+  
+  Clause-②: no (narrowing — owes one contract-review-tier review before the queue)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The narrowed face is a REQUEST to one read door: query values that were never honoured (an unknown type, severity or package) are now refused instead of answered with an empty sweep, and an alias's stats move to the canonical key the sweep already listed it under. No stored metadata, package source or object definition holds a diagnostics request or response, no schema key or export changes, and the remedy is the caller's own query string, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  `/meta/diagnostics` is the door an author, an agent or CI reads to learn whether metadata is healthy, and three query values it could not honour were answered `200` with zero issues.
+  
+  - **`?type=`** naming no metadata type (`zzz_unknown`) is refused with `400 INVALID_REQUEST`, by the same verdict `GET /meta/:type` uses: the platform's static type spelling, then the types this deployment carries live. A near-miss spelling of a declared type (`viewes`) keeps its existing refusal, which names the spellings it was reaching for.
+  - **`?severity=`** other than `error` or `warning` is refused with `400 INVALID_REQUEST`. An empty value still means the default, `error`.
+  - **`?package=`** naming a package that is not installed, and that no swept item is bound to, is refused with `400 INVALID_REQUEST`. An installed package with no items still answers its zeros, items bound to an uninstalled package are still swept, and `package=all` still sweeps every package.
+  - **An alias** (`?type=views`) is swept and keyed in `stats` and `entries` under its canonical type (`view`), so it answers exactly what `?type=view` answers.
+  - **One envelope.** Every refusal of this route now answers the nested `{ error: { code, message } }` the repeated-parameter refusal already used. The near-miss type refusal used to answer `{ error: '…', code }`.
+- 21c4bdd: fix(rest): a hook that aborts with free text answers the data door with `HOOK_ABORTED` instead of no `code`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Before.** A sandboxed hook body that aborted a write with free text (`throw new Error('…')`, no `code`, no `refusals` catalogue) answered `/api/v1/data` with `400 {"error":"…","object":"…"}` and no `code`, the one refusal on that door a client could not branch on.
+  - **Now.** The same abort answers `400 {"error":"…","code":"HOOK_ABORTED","object":"…"}`; a body that declared a 4xx `status` (or `statusCode`) keeps that status and gains the same code. `HOOK_ABORTED` is registered in the ADR-0112 ledger under `@objectstack/types` (`@objectstack/spec`), stamped by `mapDataError`'s sandbox unwrap door and its wrapper fallback (`@objectstack/types`, exported as `UNDECLARED_HOOK_REFUSAL_CODE`) and by the route door's declared-status passthrough (`@objectstack/rest`).
+  - **Moved.** The same undeclared abort also changes value on doors that already carried a code, from the status-derived `VALIDATION_ERROR` to `HOOK_ABORTED`: the nested refusal envelopes of the sharing rules routes (`POST /api/v1/sharing/rules`, `DELETE /api/v1/sharing/rules/:idOrName`, `POST /api/v1/sharing/rules/:idOrName/evaluate`), the security suggested-bindings routes (`POST /api/v1/security/suggested-bindings/:id/confirm`, `…/dismiss`, `…/reopen`), the approvals request routes (`POST /api/v1/approvals/requests/:id/approve`, `…/reject`, `…/recall`, `…/reassign`, `…/comment`, `…/remind`, `…/request-info`, `…/resubmit`, `…/revise`), and each row of the `failures` list that `POST /api/v1/data/import/jobs/:jobId/undo` returns.
+  - **Unchanged.** A refusal that declared a code keeps it: a `refusals` catalogue entry still answers `declaredCode` beside the status-derived `code`, and a registered code a body throws is still its own wire `code`. A non-hook producer that declared no code still gets none, and a crashed body is still the sanitised `500 INTERNAL_ERROR`. The server log line for the abort is not changed here.
+- 04141a6: fix(rest)!: the public form submit door refuses a value outside a form row's declared `options` subset (#27606)
+  
+  Clause-②: no (narrowing) — `POST /forms/:slug/submit` now refuses a value outside the `options` subset a form entry declares, which it used to store with `201`. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: one REST door now enforces the `options` subset a form entry already declares and `GET /forms/:slug` already serves. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the anonymous public form submit door (`@objectstack/rest`).
+  
+  - **Before.** A form entry such as `{ field: 'priority', options: [low, medium, high] }` narrowed what the form offered, and `GET /forms/:slug` served that subset, but `POST /forms/:slug/submit` judged keys and the form's `required` only. The engine judges a value against the object's options, so a guest could store `critical` through that form with `201`.
+  - **Now.** The door answers `400 VALIDATION_FAILED` before anything is written, naming the field in `fields[]` with the ADR-0114 code `invalid_option`, the catalog's message, and `constraint.allowed` listing the subset's values only. It is the same envelope the form's `required` and file refusals use, so a submission with several problems is told all of them at once. A multi-valued field is judged element by element, the first outside element named.
+  - **Unchanged.** A value inside the subset saves as before. An empty or absent optional value is not judged. An entry that lists no `options` keeps the object's full set, judged by the engine as before, and so does a field that another entry of the same form offers without a subset.
+  - **Who sees it.** A client posting to a published form a value the form does not offer: a script or bot, or the console's public form page, which still lists every option of the field until its renderer reads the row's subset (a separate `domain:ui` change).
+  
+  **The remedy.** Send one of the values the form serves for that field in `GET /forms/:slug`, or remove the entry's `options` to offer the object's full set.
+- a7c2595: fix(service-datasource, rest): the datasource Sync doors and their federation twins answer a name that no saved datasource has `404 RESOURCE_NOT_FOUND`, as `GET /api/v1/datasources/:name` does, instead of a `400` federation refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `GET /api/v1/datasources/:name/remote-tables`, `POST /api/v1/datasources/:name/object-draft`, and the federation twins under `/api/v1/datasources/:name/external/` (`GET tables`, `POST tables/:remote/draft`, `POST tables/:remote/import`, `POST refresh-catalog`) answered a name that resolves no saved datasource `400 EXTERNAL_DATASOURCE_ERROR` (`EXTERNAL_IMPORT_ERROR` for the import) with "has no datasource definition, so nothing declares it a federation source …". That reads as a malformed request, or as advice to re-declare the datasource `external`, when the datasource does not exist.
+  - **Now.** They answer `404` with `error.code` `RESOURCE_NOT_FOUND` and the message `GET /api/v1/datasources/:name` gives for the same name (`Datasource "NAME" does not exist.`). In process, `ExternalDatasourceService.listRemoteTables`, `generateObjectDraft`, `importObject` and `refreshCatalog` throw that `404` error for such a name. Every by-name datasource door now spells this answer through one helper.
+  - **Unchanged.** A datasource that exists and is not a federation source (a managed one, or the platform's primary datasource) is still refused `400` with the door's code and its reason.
+- db44327: feat(rest,plugin-hono-server,cloud-connection): metadata lists, the uncached item reads, `runtime/config` and `auth/me/localization` answer an `ETag` and `304`; every timed response carries `db`, `meta` and `total`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's first reads on every load sent no validator, so each one was a full download every time. Measured against HotCRM on `main`, none of these sent an `ETag`, a `Cache-Control` or a `304`: `GET /runtime/config`, `GET /auth/me/localization`, the type list (`GET /meta`, `GET /meta/types`), every `GET /meta/:type` list, and the item reads the shared item cache never serves (`GET /meta/app/:name`, `/meta/dashboard/:name`, `/meta/doc/:name`, `/meta/book/:name`, and drafts, `?package=` and member-scoped reads). Each of them now answers:
+  
+  - **`ETag`**: a weak validator (`W/"…"`) that hashes the body actually served, after every per-caller step (read gates, the app filter, the field mask, the translation, the host's environment). Two callers whose permissions change what they see get different validators, and one caller's validator never answers `304` for another caller's body.
+  - **`Cache-Control: private, no-cache`**: the browser keeps the body and revalidates it on every use, so a publish, a permission change or a language switch shows on the next read. No shared cache stores it. A schema served under an undetermined field visibility keeps `private, no-store` and gets no validator.
+  - **`304 Not Modified`**, with no body, when `If-None-Match` names the current validator.
+  
+  `metadata.enableCache: false` still switches the `/meta` validators off, as its description says ("Enable HTTP cache headers").
+  
+  `Server-Timing` (still opt-in: `OS_SERVER_TIMING=true`, or an admin's `X-OS-Debug-Timing: 1`):
+  
+  - Every timed response carries `db` and `meta` beside `total`. A request that ran no SQL or read no metadata says so with a zero member (`db;dur=0;desc="0 queries"`), so "nothing spent there" no longer reads like "not measured".
+  - The `/meta` routes count each metadata read into `meta` (`meta;dur=…;desc="N reads"`).
+  - `GET /runtime/config` now opens the timing gate for an admin who sends `X-OS-Debug-Timing`. It resolves the caller only when that header is sent; the payload never depends on who asked.
+  
+  `@objectstack/types` exports the rule the three packages share: `representationEtag(body)`, `ifNoneMatchHits(header, etag)` and `REVALIDATE_PRIVATE_CACHE_CONTROL`.
+- 9cd54fa: fix(rest): `GET /meta/diagnostics` refuses an unknown query parameter name instead of ignoring it and answering the full sweep (#27633)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The narrowed face is a REQUEST to one read door: a query parameter name the route never read (`?typ=view`, `?packageId=`) is now refused instead of silently ignored. No stored metadata, package source or object definition holds a diagnostics request, no schema key or export changes, and the remedy is the caller's own query string, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  `/meta/diagnostics` is the door an author, an agent or CI reads to learn whether metadata is healthy. #27514 made it refuse an unknown VALUE of `type`, `severity` or `package`; an unknown parameter NAME was still dropped, so `?typ=view` answered `200` with every type swept and the caller believed the answer was narrowed to `view`.
+  
+  - The route now declares its closed query-parameter set, `type`, `severity` and `package` (the three it reads and the three both SDKs send), through the shared closed-set decision the converted routes use.
+  - Any other name answers `400 INVALID_REQUEST` in the route's nested `{ error: { code, message } }` envelope. The message names the unknown parameter and lists the supported ones.
+  - Recognition runs before the repeated-parameter refusal, so a request with both faults is told about the unknown name first.
+  
+  **BREAKING** for a caller that sends `GET /meta/diagnostics` a parameter outside `type`, `severity` and `package`: it was ignored and now answers `400 INVALID_REQUEST`. The remedy is to drop the parameter, or to use the supported spelling (`package`, not `packageId`).
+- dd9921e: fix(rest)!: the clone door refuses a body that carries `overrides` beside other top-level keys, instead of cloning with `overrides` alone (#27669)
+  
+  Clause-②: no (narrowing) — `POST /data/:object/:id/clone` refuses a body that mixes the nested `{ "overrides": {...} }` shape with other top-level keys; it used to answer `201` with those keys ignored. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: one REST door now refuses a request shape whose extra keys it used to ignore. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at one REST data door (`@objectstack/rest`).
+  
+  - **Before.** `{ "overrides": { "name": "Copy" }, "status": "draft" }` read `overrides` alone: the clone got the new name, `status` was dropped, and the door answered `201`.
+  - **Now.** A body that carries `overrides` beside any other top-level key answers `400` with `error.code: 'VALIDATION_ERROR'` before the clone runs, naming the stray keys and the two accepted shapes.
+  - **Unchanged.** `{ "overrides": {...} }` alone, a bare field map without an `overrides` key, `{}`, and no body at all clone exactly as before. The SDK's `data.clone` sends only the nested shape.
+  - **Who sees it.** An API caller or script that mixes the two body shapes. Such a request used to succeed while applying only part of what was sent.
+  
+  **The remedy.** Send either `{ "overrides": {...} }` or a bare field map, not both. A record with a real field named `overrides` sets it through the nested shape: `{ "overrides": { "overrides": ... } }`.
+- 2fc3861: fix(types): a hook that aborts with free text answers `HOOK_ABORTED` on package publish and the runtime `/actions` doors too, not `VALIDATION_ERROR`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Since #27597 a sandboxed body that aborts with free text (`throw new Error('…')`, no `code`) answers `/api/v1/data` with `HOOK_ABORTED`. The doors that take their code from `resolveThrownHttpError` (`@objectstack/types`) instead of from the `/data` classification still answered the same abort with the code its `400` derives, `VALIDATION_ERROR`, so a client branching on the code had to know which door the abort came through.
+  - **Now.** `resolveThrownHttpError` answers `UNDECLARED_HOOK_REFUSAL_CODE` (`HOOK_ABORTED`) for a sandboxed body's refusal that declared no code, at a 4xx status. It is the one constant `/data` already reads, now declared beside the resolver. The value moves, from `VALIDATION_ERROR` to `HOOK_ABORTED`, on these doors:
+    - `POST /api/v1/packages/publish` (`@objectstack/rest`);
+    - the runtime `/actions` doors: `POST /api/v1/actions/:object/:action`, `POST /api/v1/actions/:object/:action/:recordId`, `POST /api/v1/actions/global/:action` and `POST /api/v1/actions//:action`, for an action body's own free-text throw, a hook abort relayed through an action body, and an action body's unreadable rejection (`throw ''`, `throw Object.create(null)`) (`@objectstack/runtime`).
+  - **Unchanged.** A code the body declared is kept: a registered code is still its own wire `code`, and an unregistered one (a `refusals` catalogue entry) still rides `declaredCode` beside the status-derived `code`. `declaredCode` stays absent for an undeclared abort. A producer that is not a sandboxed body still derives its code from the status, a crashed body is still the sanitised `500 INTERNAL_ERROR`, and a sandboxed refusal resolved at a 5xx keeps the fault's code. `/api/v1/data` answers exactly as before.
+  - **Moved, not added.** No error code is added; `HOOK_ABORTED` is the one #27597 registered. `sandboxBusinessMessage` moved to its own module so the resolver can read it without an import cycle; `@objectstack/types` exports the same names as before.
+- d5151a7: fix(rest)!: an async import job whose every row failed ends `failed`, not `succeeded` (#27676)
+  
+  Clause-②: no (narrowing) — the async import job's `succeeded` status is no longer emitted for a job that imported nothing; it now reads `failed`. No value, key or shape is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: one already-declared status value (`failed`) is now emitted for a job that created, updated and skipped no row. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** a published status value changes meaning at one REST door (`@objectstack/rest`), per maintainer ruling B (record 6509036166).
+  
+  - **Before.** A job of `POST /data/:object/import/jobs` that was not cancelled and did not throw ended `succeeded`, even when every row failed and nothing was written. The only sign was `errors` equal to `total`.
+  - **Now.** A job that was not cancelled, had at least one row, and created, updated or skipped none of them ends `failed`. Its `error` says every row failed and points at the job's `results`, which still carry each row's reason. A dry run follows the same rule: a dry run whose every row is invalid ends `failed`.
+  - **Unchanged, on purpose.** A job whose rows partly failed still ends `succeeded`. So does a job whose every row was skipped (for example `writeMode: 'update'` with no match), and a job with no rows. A cancel still wins: a cancelled job ends `cancelled` whatever its rows did. Counts and `results` are written as before.
+  - **Who sees it.** A client that polls an import job and branches on `status === 'succeeded'` is now told `failed` for a job that imported nothing. Undo is unaffected: such a job wrote nothing, so it was never undoable.
+  
+  **The remedy.** Read `failed` as "this job imported nothing"; read `errors` and `results` for why. A client that wants to treat such a job as finished can treat `succeeded` and `failed` alike as terminal, as before.
+- 01eab23: fix(rest): a refused `GET /data/:object/export?format=json` answers the 400 envelope, not a truncated 200 stream
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The json export wrote its opening `[` before its first read. The first write commits the response to a streaming 200, so a query that read refused (for example `?search=x&searchFields=nope`, a search over a field the object does not have) reached the client as a 200 whose body was a lone `[`, while `format=csv` answered the 400 envelope.
+  
+  - **Read first.** The bracket is now written after the first page is read, as csv writes its first byte. A refusal on that read answers the same status and body as the csv export.
+  - **A successful export is unchanged.** One page, several pages and no rows produce byte-identical bodies and the same headers.
+  - A refusal on a later page, after rows have been written, still ends the stream; that is not changed here.
+- 03cc871: fix(types): a write to a registered object whose table is missing answers `500 DATABASE_ERROR`, as the read does, instead of `404 OBJECT_NOT_FOUND` "is not registered"
+  
+  Clause-②: no (an existing refusal is re-classified to an existing catalog code; nothing accepted today is refused)
+  Metadata-protocol: none
+  
+  A registered object whose table was never created (a datasource that was never provisioned, schema drift) answered its two data doors differently. `GET /api/v1/data/:object` answered `500 DATABASE_ERROR`, which the SQL driver declares at its read exits. `POST /api/v1/data/:object` answered `404 OBJECT_NOT_FOUND` with "Object '…' is not registered", because the write paths leave the driver's own error undeclared and the shared data-error classification read its missing-relation line (`no such table: …`, Postgres `42P01 relation "…" does not exist`) as an unregistered object whenever the relation named the request's object.
+  
+  No unregistered name reaches a driver: the protocol's registry gate and the engine's name resolution both refuse one first, with the structured `OBJECT_NOT_FOUND` that the classification still answers `404`. So a driver's missing-relation line always means a registered object's storage is missing. The classification now answers it the sanitised, logged `500 DATABASE_ERROR` in every case, and the insert, update and delete doors agree with the read.
+  
+  - **What changes for a caller.** A write to such an object gets `500 {"error":"Internal data error","code":"DATABASE_ERROR"}` instead of a `404`. A bulk-import row that fails this way carries the same verdict. The driver text is withheld from the client and written to the server log, where the `404` used to leave no line.
+  - **Unchanged.** An unregistered object is still `404 OBJECT_NOT_FOUND` on every door. A missing relation that names some other table was already `500 DATABASE_ERROR`.
+- 92493e3: fix(rest): `security/explain` refuses an empty `object` with `400 VALIDATION_FAILED` instead of a `500 EXPLAIN_FAILED` server fault (#27719)
+  
+  Clause-②: no — the request already failed; only its answer moves from `500` to `400`.
+  Metadata-protocol: none
+  
+  - **Before.** `POST /api/v1/security/explain` with `"object": ""` (or `GET …?object=`) passed the request schema, reached the explain engine, and the engine's plain error was answered `500 EXPLAIN_FAILED` and logged as a server fault.
+  - **Now.** The door answers `400 VALIDATION_FAILED` in its own envelope, naming the empty key and its remedy, before any evaluation — the same check, in the same place, that refuses an empty `userId`.
+  - **Unchanged.** A request naming an object is explained exactly as before; an empty `userId` is refused `400 VALIDATION_FAILED` as before; a missing `object` is still refused by the request schema.
+  
+  **The remedy.** Send the name of the object whose access to explain.
+- fdf844c: fix(rest)!: both import doors answer for the object as the data door does — the synchronous import refuses an unregistered object 404, and a legacy short name is the object behind it at every door (#27728, #27729)
+  
+  Clause-②: no (narrowing) — `POST /data/:object/import` no longer answers 200 for an unregistered object or an object of a disabled package; it answers the data door's 404. And on every `/data/:object` route, a legacy `ns__short` object addressed by its short name is now held to its own `enable` settings (404 or 405). No value, key or shape is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: two already-published refusals (404 OBJECT_NOT_FOUND, 404 OBJECT_PACKAGE_DISABLED) are now answered up front by one more door, and the exposure gate judges the object a short name resolves to. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** the synchronous import door refuses what it used to accept with a 200, and the API-exposure gate of every `/data/:object` route now judges a legacy `ns__short` object addressed by its short name (`@objectstack/rest`), per triage 6509235875 (#27728) and 6509225810 (#27729).
+  
+  - **Before.** `POST /data/:object/import` ran no existence check. For a name with no object behind it, it answered 200 and repeated `OBJECT_NOT_FOUND` inside every row's result; for an object of a disabled package it did the same with `OBJECT_PACKAGE_DISABLED`. An importer that reads the status saw success.
+  - **Now.** It answers the data door's own refusal for the name, status and body: 404 `OBJECT_NOT_FOUND`, or 404 `OBJECT_PACKAGE_DISABLED`. It is asked after the API-exposure gate (so a hidden object keeps its 404 and the door is no existence oracle) and before the body is parsed, so nothing is written, dry run included. The async job door (`POST /data/:object/import/jobs`) already refused both; its disabled-package refusal is now pinned with zero job rows.
+  - **One read for existence and exposure.** A legacy `ns__short` object addressed by its short name is the object behind that name at every door, as `registry.getObject` resolves it for the data door. The async job door used to refuse such a name `OBJECT_NOT_FOUND` while the data door served it; it now creates the job. The API-exposure gate used to treat such a name as "no object" and pass it on, so an `ns__short` object with `enable.apiEnabled: false` or an `enable.apiMethods` list was served under its short name; the gate now judges that object's `enable` and refuses the same way it refuses the full name. No shipped object carries a `__` name.
+  - **Who sees it.** A client that imports into a misspelled or unregistered object name, or into an object of a disabled package, now gets a 404 instead of a 200 with per-row errors. A client that addresses a legacy `ns__short` object by its short name on any `/data/:object` route, where that object sets `enable.apiEnabled: false` or an `enable.apiMethods` list that leaves the operation out, now gets that object's 404 `OBJECT_API_DISABLED` or 405 `OBJECT_API_METHOD_NOT_ALLOWED`, which it already got under the full name.
+  
+  **The remedy.** Import into a registered object name (or re-enable the package). A client that already read the per-row `OBJECT_NOT_FOUND` should read the response status and `code` instead. For a restricted `ns__short` object, the short name now answers as the full name does: lift the object's `enable` restriction if the API should serve it.
+- d3b0a40: feat(datasource): import objects from an OData datasource's `$metadata` — EDM types map to field types, the key to the id, and navigations to lookups; Studio's datasource page imports several entity sets at once, and MCP gains `list_remote_tables` / `import_object`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Type matrix (`@objectstack/spec/data`).** `SqlDialect` gains `'odata'`, whose aliases map the EDM primitives (`Edm.String`, `Edm.Int16/32/64`, `Edm.Decimal`, `Edm.Double`, `Edm.Boolean`, `Edm.Date`, `Edm.DateTimeOffset`, `Edm.TimeOfDay`, `Edm.Guid`, `Edm.Binary`, `Edm.Stream`, `Collection(…)`) onto the matrix's canonical types. `Edm.Duration`, the geography / geometry families and a service's own enum or complex types stay unknown, so a draft flags them for review. `Edm.Int64` and `Edm.Decimal` take the same verdict as SQL `bigint` / `numeric` (exact for `number`).
+  - **Gate 2 gets looser, for SQL federation too.** `lookup` and `master_detail` are now exact under the `text`, `integer` and `bigint` rows, as they already were under `uuid`: a reference stores the target's id, which on a federated object is the remote key a foreign-key column carries. Before, `isCompatible` refused a lookup over `CustomerID int` or `varchar` as a `type_mismatch` error, so the boot validation (`onMismatch: 'fail'`) refused any federated object that declared one. Nothing that passed before fails now.
+  - **Draft (`@objectstack/service-datasource`).** For an OData datasource (the driver reports dialect `odata-4.0`, read as the `odata` vocabulary) `generateObjectDraft` / `importObject` / `refreshCatalog` and the validation map EDM types through that arm. A column whose name is not a snake_case field name drafts as its snake_case spelling with `external.columnMap` carrying the remote name (`CategoryID` → `category_id`); `rename` overrides now land in `columnMap` too, so a renamed field stays bound to its column. A remote table name drafts the same way (`Products` → `products`; a leading capital used to give `_products`). A single-valued navigation becomes a `lookup` on the column its `ReferentialConstraint` names when the constraint references the target's single key and the target is imported on the same datasource (or is the object itself); every other navigation is left out of the draft and named in `review` with its reason — import the target first.
+  - **Driver (`@objectstack/driver-odata`).** `introspectSchema()` lists each navigation's `referentialConstraints`.
+  - **Studio.** The datasource page's tables tab selects several entity sets and imports them in one go, saving lookup targets before the tables that reference them; the write opt-in is offered only on a datasource that allows writes, and an imported object stays read-only otherwise (single-table dialog included).
+  - **MCP.** `list_remote_tables` and `import_object` reach the same `IExternalDatasourceService` calls, registered only for a token whose scopes name `metadata:write`, and refused by the runtime bridge without the capability the REST twins require (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`, now exported from `@objectstack/rest`).
+- 2a3dec2: fix(rest): a refused `GET /data/:object/export?format=xlsx` answers the 400 envelope, not a 200 workbook stream
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The xlsx export opened its streaming workbook writer before its first read. Opening the writer commits the response to a streaming 200, so a query that read refused (for example `?search=x&searchFields=nope`, a search over a field the object does not have) reached the client as a 200 workbook download, while `format=csv` and `format=json` answered the 400 envelope.
+  
+  - **Read first.** The workbook writer now opens after the first page is read, as the csv and json exports write their first byte. A refusal on that read answers the same status and body as the csv export.
+  - **A successful export is unchanged.** One page, several pages and no rows produce the same status, headers and workbook cells.
+  - A refusal on a later page, after rows have been written, still ends the stream; that is not changed here.
+- 3e0fd7a: fix: `GET /meta/object` serves which packaged actions are switched off beside the item, and a switched-off action is refused with a plain sentence
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Served beside the object** (`@objectstack/metadata-protocol`, `@objectstack/rest`). `GET /api/v1/meta/object/:name` serves `disabledActions` beside `item`: the names in `item.actions` that the deployment's activation ledger switches off. `GET /api/v1/meta/object` serves the same answer keyed by object name. The default cached door carries it too, read live on every call and kept out of the ETag, so a read that carries it is answered in full rather than `304 Not Modified`. The key is absent where no ledger answered (no engine, or an engine with no ledger attached), on a draft read, and on every type other than `object`. `item.actions` is unchanged. The protocol reads the engine's `getDisabledActions` through the kernel's service table by name and imports no engine.
+  - **The fact it serves** (`@objectstack/objectql`). `ObjectQL.getDisabledActions()` returns the names the engine's activation projection switches off, the same projection both dispatch doors consult before they refuse a call, or `undefined` when no ledger is attached. `listDisabledActions()` is unchanged.
+  - **The refusal sentence** (`@objectstack/objectql`, `@objectstack/runtime`). A switched-off action is still refused 409 `ACTION_DISABLED` at the REST and MCP doors, and the message now reads: "This action is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or you can use another action." It no longer names the ledger table or the ADR. The engine writes those, with the code and the action's name, to an `info` log line each time it refuses one.
+- 119931d: fix(objectql,rest,metadata-core)!: a datasource definition's stored row is served only to datasource administrators, whichever exit reads it (#27884)
+  
+  Clause-②: no (narrowing for readers below datasource administration)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no metadata an author writes changes meaning: a stored datasource definition is written, stored and served to its administrators exactly as before. What narrows is which readers a stored row of a capability-gated type is served to. There is nothing for a migration to rewrite and no tombstone; a reader who needs the definition is granted the capability. -->
+  
+  **BREAKING** read-set narrowing for callers below datasource administration. The metadata read door already served a `datasource` or `external_catalog` definition only to holders of `manage_platform_settings`, the capability the datasource family's own door requires. The stored row each definition lives in now admits the same readers, so one document admits one set of callers at every exit.
+  
+  - **One row.** The type-to-capability table moves to `@objectstack/metadata-core` as `STORED_METADATA_TYPE_READ_CAPABILITIES`, with `storedMetadataTypesWithheldFrom(caller)` and `isCapabilityGatedStoredMetadataType(type)`. `@objectstack/rest` keeps exporting `META_TYPE_READ_CAPABILITIES`, now that same frozen object, and the metadata read door answers exactly as before.
+  - **Now.** A caller-context read of a stored metadata row of a listed type, by a caller without the type's capability, is served no row: a list or count leaves it out, and a read of its id answers as a read of a row that does not exist. Holders of the capability, platform administrators among them, are served everything as before. System reads are unchanged.
+  - **Events.** A record-change event of such a row carries no metadata body to any subscriber; the row's other columns are unchanged.
+  - **Who sees it.** A reader below datasource administration is no longer served stored datasource or federation-catalog rows.
+  
+  **The remedy.** Grant `manage_platform_settings` to a caller that needs a datasource definition, or read it through the datasource admin door (`GET /api/v1/datasources/:name`) as such a caller.
+- 5f6dc96: fix(rest)!: the cross-object batch door judges each op's API exposure on the object the data door serves for its name (#27899)
+  
+  Clause-②: no (narrowing) — on `POST {basePath}/batch`, an op that names a legacy `ns__short` object by its short name is now held to that object's own `enable` settings and refused with the data door's 404 or 405, before the transaction opens. No value, key or shape is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the batch door's exposure gate now reads each op's object the way every /data/:object route's gate already reads it, and answers the two already-published refusals (404 OBJECT_API_DISABLED, 405 OBJECT_API_METHOD_NOT_ALLOWED) those routes answer. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** the cross-object batch door (`POST {basePath}/batch`) refuses an op it used to write (`@objectstack/rest`), per triage 6514615922.
+  
+  - **Before.** The door's per-op exposure gate searched the object list for an item declared under the op's exact name. A legacy `ns__short` object named by its short name was not found there, so the op passed as an unknown object, and the engine, which resolves the short name, then wrote it. `enable.apiEnabled: false` and an `enable.apiMethods` list were not applied to it on this door, while every `/data/:object` route already applied them.
+  - **Now.** The gate reads each op's object through the same by-name read as the `/data/:object` routes' gate, so it judges the object the data door serves for that name. Such an op is refused with the answer those routes give, status and body: 404 `OBJECT_API_DISABLED`, or 405 `OBJECT_API_METHOD_NOT_ALLOWED` for a write the object does not expose in bulk. The whole batch is refused before the transaction opens, so no op in it is written. Each distinct object is read once per request. No shipped object carries a `__` name.
+  - **Who sees it.** A client that sends a batch op naming a legacy `ns__short` object by its short name, where that object sets `enable.apiEnabled: false` or an `enable.apiMethods` list that leaves the write or `bulk` out. The same op under the full name was already refused.
+  
+  **The remedy.** Nothing changes for objects the API exposes. For a restricted `ns__short` object, the short name now answers on the batch door as it does on every `/data/:object` route: lift the object's `enable` restriction if the API should serve it.
+- 6e0b16a: feat: the object read names the objects a delete can cascade into, beside the item
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — `cascadeDeleteObjects` is a served-only key beside the object read with no authorable spelling; no file under `skills/**` teaches the object read's envelope keys (a `git grep` of `skills/` for `cascadeDeleteObjects` and `disabledActions` names nothing), and every taught `deleteBehavior` use stays true.
+  
+  - **Served beside the object** (`@objectstack/metadata-protocol`, `@objectstack/rest`). `GET /api/v1/meta/object/:name` serves `cascadeDeleteObjects` beside `item`: the names of the objects that deleting a record of this object can also delete. That is every object whose relation into it cascades (a `master_detail` by default, a `lookup` or `tree` that declares `deleteBehavior: 'cascade'`), and the objects that cascade into those in turn, each once. A `restrict` or `set_null` relation removes nothing and is not named. The default cached door carries it too, and the list is folded into that door's ETag, so an object registered later that cascades into this one changes the ETag. The key is absent where no engine answered, on a draft read, on the list read and on every type other than `object`; `[]` means nothing cascades. `item` is unchanged. A delete confirmation can now name what else a delete removes without keeping its own copy of the rule.
+  - **The fact it serves** (`@objectstack/objectql`). `ObjectQL.getCascadeDeleteObjects(object)` answers that list from the delete walk's own relation scan, which the delete and this read now share. It reads the registry and no row, so it never says which records or how many. It returns `undefined` for an object the registry does not hold.
+  - **The declaration** (`@objectstack/spec`). `GetMetaItemResponseSchema` and `GetMetaItemCachedResponseSchema` gain the optional `cascadeDeleteObjects` (an array of object names), and `IObjectQLEngine` gains the optional member `getCascadeDeleteObjects(objectName)`, which the metadata read calls through the kernel's service table. Nothing about it is authorable.
+- 11a7f96: fix(rest): a cached `GET /meta/object/:name` that carries `disabledActions` is answered `304 Not Modified` again when nothing changed
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default cached object read serves `disabledActions` beside the item: the names in `item.actions` that the deployment's activation ledger switches off. That list used to be kept out of the ETag, so every such read was answered `200` with the full body and never `304`, and on a default deployment, where the ledger is attached, revalidating an object definition saved nothing.
+  
+  The switched-off list is now part of the object read's ETag. An unchanged object with an unchanged set of switched-off actions is answered `304` on revalidation. When an administrator turns an action off or on under Setup › Packaged automation, the ETag changes and the next revalidation is answered `200` with the new list. `[]` and an absent key give different ETags, so a ledger being attached or detached also changes it. An object with no `disabledActions` key keeps exactly the ETag it had before. The response body is unchanged.
+  
+  The published description of `disabledActions` on the object read response now says the list is folded into the ETag, instead of saying it is never part of it.
+- cd065d3: fix(meta)!: the layered view naming no package refuses a name two packages hold with the package-less writes' own `409 RESOURCE_CONFLICT`, instead of serving one holder's stack picked silently (#28337)
+  
+  Clause-②: no (narrowing) — `GET /meta/:type/:name/layers` and the deprecated `?layers=true` refuse a request with no `?package=` for a name whose active rows two or more packages hold, which they answered `200` before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no stored metadata changes: a read door now answers the refusal the package-less save and delete already answer for the same rows, with the same code, status and holder list. The remedy is the request's (name the package with ?package=), so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** read narrowing at the layered view (`@objectstack/rest`'s shared layered chain, served by `RestServer` and the runtime dispatcher, both spellings).
+  
+  - **Before.** A `sys_metadata` row is keyed by type, name and package, so two installed packages can each hold an item of one name. For such a name, a save or a delete naming no package was refused `409 RESOURCE_CONFLICT` ("Name the package this save is for…", naming the holders), while the layered view naming no package answered `200` with whichever holder's row a package-agnostic lookup met first. The Studio editor and an agent read one holder's layers with no sign that a second holder existed, and the save that followed was refused.
+  - **Now.** The layered view naming no package answers that same refusal, worded for the read: `409 RESOURCE_CONFLICT`, "Name the package this layered read is for, then send it again: on the REST door add ?package= with the package id…", naming every holder. Each transport answers it in the envelope its own save door answers the writes' refusal in.
+  - **Unchanged.** `?package=` with any holder's id reads that holder's stack. A name one package holds, a name only the package-unbound row holds, and a package's row with the package-unbound row beside it answer as before. Every type the writes refuse on is refused here, and no other. The plain item read, `/published` and the protocol's in-process `getMetaItemLayered` (read by the security catalog echo and the packaged-permission-set lock gate) still serve a name two packages hold as they did.
+  - **New export.** `ObjectStackProtocolImplementation.packagelessLayeredReadRefusal(request)` (`@objectstack/metadata-protocol`) answers the refusal or `undefined`; `RestProtocol` and `MetaItemReadGateSources` gain it as an optional member, and `MetaLayeredRequest` gains an optional `member`.
+  - **Who sees it.** A client that reads `/layers` with no `?package=` for a name two installed packages both hold.
+  
+  **The remedy.** Send the read with `?package=` naming the package whose stack you want, as the writes already require.
+- d3fdd46: feat(runtime, rest, plugin-auth): an AI agent connected over OAuth can run `api` actions that forward to identity routes and other same-origin routes, as the agent
+  
+  Clause-②: yes (widening, at the two named cells only)
+  Metadata-protocol: none
+  
+  An `api` action runs by forwarding a request to its `target` inside the server. Until now an agent connected over OAuth was refused by name before that forward unless the target was the MCP endpoint, because its access token is honoured there alone. So the identity actions ADR-0011 exposes to agents (update my profile, the confirmed admin actions) never ran for one.
+  
+  Now, per ADR-0090 D10 rule 5, the forward carries a credential the server mints for that one forward instead of the agent's token. It is bound to the forward's method and route and to the action run, spent by its first use, revoked when the target answers, and redeemable only inside the server's own in-process call. At the target it resolves to the same agent: its scope ceiling, the user it acts for and its client. At the identity routes, the auth library is shown the delegating user for that one request only; no session is created, and the user's own permissions there still decide. Writes the agent makes are recorded with both the agent and its user.
+  
+  What changes, at exactly two cells of the forward table:
+  
+  - an agent at an identity route: refused by name before, now forwarded as the agent;
+  - an agent at any other same-origin route: refused by name before, now forwarded as the agent when the connection holds `actions:execute` and `data:write`.
+  
+  What does not change:
+  
+  - An API key is still refused by name at an identity route.
+  - A state-changing request to the metadata endpoint is never forwarded for an agent; it is refused `403` by name.
+  - An agent without `data:write` is refused `403` by name, and `list_actions` marks those actions the same way.
+  - Nothing the target mints, such as a rotated session token or cookie, comes back to an agent.
+  - An OAuth access token presented directly to the data API or to an identity route is still refused.
+- 93c0a63: feat(rest): the public form submit answer carries the engine-generated fields its thank-you panel names
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `POST /api/v1/forms/:slug/submit` answers `PublicFormSubmitResponseSchema` (`@objectstack/spec/api`): the created record's `id`, as before, plus `fields` when the form's `thank-you` panel names fields of the record as `{{record.field_name}}`. `fields` holds the stored values of exactly the names `thankYouRecordFieldNames(form.submitBehavior)` returns, so a web-to-case visitor can be shown the case number the engine just generated. A form whose panel names no field still answers `{ id }` alone.
+  
+  Nothing else the insert stored is answered: a `beforeInsert` / `afterInsert` hook, an elevated one included, may have derived a stored value from records the anonymous form grant cannot read. So the route re-checks every named field when it answers, and drops a name unless the object declares it with a type in `RUNTIME_OWNED_FIELD_TYPES` (today `autonumber`) and the row the insert answered carries it as a string or a number. That covers an object retyped after the form was published, which the `thank-you-record-field` authoring rule cannot see. `fields` is left out when no name survives.
+  
+  The route ledger now names `PublicFormSubmitResponseSchema` as this route's `responseSchema`.
+- f3f7b62: fix(rest)!: an empty `?id=` on the app list and an empty `?object=` on the view list are refused 400 naming the parameter instead of being read as absent
+  
+  Clause-②: no (narrowing) — `GET /meta/app` / `GET /meta/apps` with an empty `?id=`, and `GET /meta/view` / `GET /meta/views` with an empty `?object=` (on `RestServer` and on the runtime dispatcher, which share the list chain), are refused with `400 VALIDATION_ERROR`; they answered 200 with the caller's whole visible list before. Nothing is widened: no export, answer member, error code or status is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: a list request whose filter names nothing is refused instead of served unfiltered. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on the app and view list reads (`@objectstack/rest`).
+  
+  - **Before.** `?id=` (app list) and `?object=` (view list) with an empty value were read as no filter, so a caller who asked for one app, or for one object's views, by a name that came out blank got every app or every view it may see (the views unsorted, and including views bound to no object).
+  - **Now.** The list chain refuses either after the per-caller visibility gate: `400 VALIDATION_ERROR`, message `Query parameter 'id' names no app; …` or `Query parameter 'object' names no object; …` (the message names the parameter), and no list in the body. This is the answer #27484 gave a blank `$searchFields`.
+  - **Unchanged.** A non-empty value narrows as before (one app or one object's views, or an empty list when it names none, including `' '`); no value lists every item the caller may see; a repeated `id` or `object` is still the arity 400; `?id=` on any type but `app`, and `?object=` on any type but `view`, are still ignored.
+  - **Who sees it.** An API client that sends either parameter empty. `@objectstack/client` and the console send neither on these reads.
+  
+  **The remedy.** Name the app or object, or leave the parameter out to list them all.
+- 1617b7f: fix(lint,metadata-protocol,rest,runtime,types): a roll-up the engine refuses at every recompute is refused at save and publish, and a child write that landed answers its success (#28661)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-data/rules/relationships.md` and `rules/field-types.md` teach `summaryOperations` only with `sum` over a numeric `amount` and `count`; no file under `skills/**` teaches a `sum`/`avg` over a text field, and every taught example stays admitted.
+  
+  **BREAKING** (narrowing) for a `summary` field whose `sum` or `avg` names a child field the engine does not aggregate (and, on `os validate`, `os build` and the runtime object save/publish door, a `min` / `max` whose answer is not a number, which `os lint` already refused).
+  
+  - **Before.** A published `summary` field with `sum` or `avg` over a child `text` field published as valid (`publish-drafts`, the draft's `_diagnostics: { valid: true }`, `os validate`, `os build`). Every later create, update and delete of a child then answered `500 INTERNAL_ERROR`, though the write had landed and the parent's valid roll-ups had recomputed: the recompute's aggregate refuses the pair after the commit. A client that retried a create made a duplicate.
+  - **Now, at the doors.** The roll-up rule moves from `os lint` alone into the authoring-rule registry (`lintSummaryRollups`, gating, on `os validate`, `os build`, `os lint` and the runtime object save/publish door). A `sum` or `avg` over a child field outside the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, the table the engine's aggregate door reads) is refused under `rollup/non-numeric-aggregand`, at `objects.<parent>.fields.<field>.summaryOperations.field`, with the accepted child types and `count` as the fix. The `min`/`max` arm `os lint` already reported keeps its message and now also gates `os validate`, `os build` and the runtime object save/publish door. A child staged as a draft in the same publish batch is judged with it. `os lint` no longer reports the rule a second time.
+  - **Now, after a write.** When a parent's roll-up cannot be recomputed after a child write — a roll-up stored before this gate, or any other recompute failure — `POST`, `PATCH` and `DELETE /api/v1/data/:object[/:id]` answer the write's own success (`201`/`200`, the same body the write answers when every roll-up recomputes), on both `RestServer` and the runtime dispatcher. The stale summary column is logged at `error`, with the fix, once per field per process (the memory is never cleared; a restart reports it again). The protocol's `createData`/`updateData`/`deleteData` still throw `ERR_SUMMARY_RECOMPUTE` carrying `written`, so the import runner and seed loader read it as before. The recogniser and the earned-answer carrier (`isSummaryRecomputeRefusal`, `earnedAnswerOf`, `staleSummaryAnswerLines`) are new exports of `@objectstack/types`, the one package the protocol, `rest` and `runtime` all depend on.
+  - **Not refused.** A `summaryOperations.object` naming no object (the card's `qsf_nope`) is still admitted: an unmanaged install (`install-local --unmanaged`) saves a package's parent before the child its roll-up reads, so a door refusing a missing child would refuse that install.
+  - **Who moves.** No `examples/**` or `hotcrm` roll-up is refused: every `sum`/`avg`/`min`/`max` there aggregates a `number` or `currency` child field.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the diff registers no retirement and no key changes shape: a roll-up summing or averaging a non-numeric child field never answered a value, and the fix is an authoring choice (a numeric child field, or count) that no mechanical rewrite can make -->
+- 04b1402: harden(data): changing an API key through the data door requires a signed-in session
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` names `sys_api_key` or teaches managing a key with an API key, and the docs teach key revocation and rotation from the API Keys list (`content/docs/ai/connect-mcp.mdx`, `content/docs/api/error-catalog.mdx`), a signed-in surface; every taught use stays true.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door: the data doors stop taking writes to `sys_api_key` from a caller an API key authenticated, and the remedy is to make the same change from a signed-in session, never a rewrite of anyone's code or metadata. No exported declaration is removed or narrowed; four names are added to `@objectstack/core`'s entry (the widening this changeset's `yes` declares); all four packages publish; no ADR-0087 id is named or touched. -->
+  
+  **BREAKING** (an accept-set narrowing).
+  
+  Managing API keys is a signed-in-session act on every data door, as minting one through `POST /api/v1/keys` is. An API key keeps acting as its owner for data, automation and MCP.
+  
+  **FROM.** The data doors judged a write to `sys_api_key` by the row and column rules alone, whichever credential authenticated the caller.
+  
+  **TO.** A write to `sys_api_key` from a caller an API key authenticated is refused `403 PERMISSION_DENIED`, and nothing is written, on the REST data routes (`/api/v1/data/sys_api_key`, the bulk routes and the cross-object `POST /api/v1/batch`), on the runtime dispatcher's data faces (`/data`, the `/mcp` HTTP tools, the action doors) and on the stdio MCP transport's `create_record`, `update_record` and `delete_record` tools, whose principal is always the configured `OS_MCP_STDIO_API_KEY`. The message tells the caller to sign in and manage the key from the API Keys page.
+  
+  - **Who is affected.** Only a script, integration or agent that changed `sys_api_key` rows through one of those doors while authenticated with an API key. **Fix:** make the change signed in, from the API Keys list (Account → Developer), or with a session cookie or session bearer token.
+  - **What does not change.** A signed-in session manages its own keys from the list as before, and the existing rule on who restores a key a forced password reset revoked is unchanged. Reading `sys_api_key` is unchanged on every door. System-context writes (the mint, the last-used stamp, the forced reset) are untouched. An operation the object does not expose keeps its `405 OBJECT_API_METHOD_NOT_ALLOWED`.
+  - **Where it is decided.** One rule, `apiKeyManagementCredentialRefusal`, added to `@objectstack/core`'s entry with `API_KEY_MANAGEMENT_READ_OPERATIONS`, `API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE` and the type `ApiKeyManagementCredentialInput`, asked beside each door's exposure gate. The REST and dispatcher doors read which credential authenticated the request from the shared request resolver (`onAdmission`); the stdio transport's credential is its API key by construction. The `ExecutionContext` shape is unchanged.
+  - **Embedders calling `HttpDispatcher` data handlers directly.** The rule is positive on the credential: a context with no `admission` keeps today's answer.
+- 5d759b1: fix(rest)!: the REST email send door requires a send capability and bounds the sender, the custom headers, the organization and identity mail
+  
+  Clause-②: yes (narrowing) — the REST send door refuses callers and bodies it admitted (the breaking half), and the published `IEmailService` contract gains an optional `getDefaultFrom()` (a widening, the same move as `isConfigured()` on the same interface). No spec key, export or config field is removed or renamed.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches `POST /api/v1/email/send`, `client.email.send` or `IEmailService` (a `git grep` of `skills/` for each names nothing), so no skill line changes. The runtime-services page, `content/docs/kernel/runtime-services/email-service.mdx` ("Over HTTP"), states the four bounds in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authorization narrowing at one REST door, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped: SendEmailInput keeps every member, and a caller the bounds admit receives the same answer as before. There is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which HTTP callers and bodies the door serves. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id covers this door and this diff adds none (not registered or already-registered); and IEmailService, the one published interface that moves, gains an optional member and is referenced in code across the workspace (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing of `POST /api/v1/email/send`), shipped as `patch` because no metadata protocol moves.
+  
+  `POST /api/v1/email/send` (and its environment-scoped twin) now applies four bounds after the authentication floor and before anything is sent. Each refusal is `403 PERMISSION_DENIED` in the nested `{ error: { code, message } }` envelope, and the mail service is not called:
+  
+  - **Capability.** The caller must hold `manage_platform_settings`, the capability that already governs the mail settings namespace, the `sys_identity_email` log and the two body columns of `sys_email`. An authenticated caller without it is refused. The check runs before the provider lookup, so a refused caller gets `403` whether or not mail is wired.
+  - **Attribution.** `sentBy` is always the authenticated caller. A body that names another user is refused. A body that names the caller, or names no one, is stamped with the caller.
+  - **Sender.** The envelope sender is the deployment's configured sender (the Mail settings' From address, or `defaultFrom`). A `from` naming any other address is refused. A `from` naming the configured address is accepted, and the configured value is sent in its place. `headers` is accepted only as the contract's `Record<string, string>`: a plain object whose every key is a header field name and whose every value is a single-line string. Any other shape is refused, and so are custom `From`, `Sender` and `Return-Path` headers.
+  - **Organization.** The message is recorded under the caller's active organization: the door sets `organizationId` from the caller's execution context, and the service stamps it onto `sys_email.organization_id`. A body naming another organization is refused, and so is a body naming one when the caller has no active organization. `identityMail` is refused (any value but `false`): identity mail is sent by the server itself. `replyTo` is unchanged; it is the caller's Reply-To address and makes no claim about the sender.
+  
+  Server-internal sends (flows, notifications, auth mail) call `IEmailService.send` directly and are unchanged.
+  
+  `IEmailService` gains an optional `getDefaultFrom()` that returns the configured sender, and plugin-email's `EmailService` implements it. A service that does not implement it still sends through the door, but a caller `from` is refused because the sender cannot be checked.
+  
+  plugin-email's SMTP transport now hands nodemailer custom headers as an explicit list of name/value entries, one per key of the headers map, so every key is read as exactly one header name. A well-formed headers map puts the same headers on the wire as before.
+  
+  What changes for you: an integration that sends through the REST door needs a credential holding `manage_platform_settings`, and should leave `from`, `sentBy`, `organizationId` and `identityMail` out of the body, since the door supplies each of them. Custom headers are sent as a plain object of string values.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [a8ec04d]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [0bf7aaf]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [119931d]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [1e01924]
+- Updated dependencies [2c0a97b]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [1c61f48]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [28c274f]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [9b4d193]
+- Updated dependencies [aa46d14]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [0c03ce2]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [0aaad18]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [1617b7f]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/metadata@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/service-package@18.3.0
+  - @objectstack/observability@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

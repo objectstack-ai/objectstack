@@ -1,5 +1,606 @@
 # @objectstack/cloud-connection
 
+## 18.3.0
+
+### Minor Changes
+
+- d6e0967: **BREAKING** feat(metadata-protocol)!: the override write gate — only a base's paired `<base>.custom` package declares an override, and a dependent's item under a base item's name is refused (ADR-0146 D2, #28410)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no file under `skills/**` teaches the `overrides` declaration, a `<base>.custom` package or the sealed-write sentence; the `content/docs/references/**` pages that show `overrides` are generated from the spec and do not move.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The narrowing is a refusal at the write doors (publish, `os validate`, the marketplace managed install) of item NAMES and of an `overrides` declaration outside the base's paired package: no metadata key, accepted value, export or error code is removed or renamed, and no stored shape changes. The remedy is a rename of an item, or a declaration added in the base's paired `.custom` package, both authoring choices a person makes; there is no mechanical conversion between two metadata versions for `objectstack migrate meta` to apply, and the precondition count on #28410 found no same-named item inside a dependency closure in hotcrm or the repository's examples. The other categories are closed on facts: all three packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); the one `packages/spec/**` file touched is the error-code provenance ledger (`api/error-code-ledger.zod.ts`), two rows naming new emitters of the already-registered `NOT_OVERRIDABLE`, so no schema, type or runtime interface moves (not type-surface-only, not runtime-interface-only); and no export is retired (not runtime-export-retired). -->
+  
+  A dependent package used to be able to ship, publish or install an item under the name an item of a package in its dependency closure already has, and nothing said which one a reader would get. Ruling A on #28390 settles it: only the base's paired `<base>.custom` package declares an override (`overrides: { package: '<base>', basedOn }`), and a dependent's same-named item has one fix, rename.
+  
+  **What is refused**, `403 NOT_OVERRIDABLE` (the code and status the sealed write already answers), each with its own sentence:
+  
+  - **An undeclared same name inside the closure.** A dependent's item bearing the name of an item a read-only (installed) package in its dependency closure ships, on a type a declared override can replace. In `<base>.custom` the sentence says to declare it or rename it; in any other dependent, to rename it.
+  - **`overrides` outside the pair.** A declaration on a package that is not the base's paired `.custom`.
+  - **A declaration the closure cannot back.** `overrides.package` outside the declaring package's dependency closure (the sentence says to declare the dependency), or a base that ships no item of that type and name.
+  - **A type that takes no override.** An excluded type (permission, position, capability, the code-only types…), pointing to creating a new item under a new name; an `object`, pointing to `objectExtensions`.
+  - **A channel not yet open.** A declared `flow` ("flow customization is not yet available") or `action`.
+  
+  **Where.** The save door (`saveMetaItem`, so `PUT /api/v1/meta/:type/:name` and every authoring path through it), the promotion (`publishMetaItem` and `publishPackageDrafts`), `os validate` (each package of the artifact against its closure inside the artifact; exit 1), and the marketplace managed install (`POST /api/v1/marketplace/install-local`, before any write). The undeclared-same-name refusal is asked last at the publish doors, so every refusal those doors already answered keeps its code and status.
+  
+  **Admitted.** The base's paired `.custom` declaring an override of an item its base ships, on an open type: the save and the promotion write it as the pair's own row, and the managed install registers it.
+  
+  **The install answer lists upgrade collisions.** An install of a base whose new version ships a name an installed dependent already holds, undeclared, answers `200` with `overrideCollisions` (`type`, `name`, `packageId`, `rule`, `message`), one row per held item; the key is omitted when there is none. The install is not refused: the dependent's item is the one to rename, or in `.custom`, to declare.
+  
+  **The sealed sentence.** A write over a sealed item of a type a declared override can replace now names the writer's route in place of none. Written from the base's paired `.custom`, or naming no package, it ends "To change it, declare an override from '<base>.custom' (overrides: { package: '<base>', basedOn }), or rename the item."; written from any other package, "To change it, rename the item: only '<base>.custom' may declare an override of '<base>'."
+  
+  **A malformed `overrides` is not a declaration.** A value the spec's `OverrideDeclarationSchema` refuses (null, not an object, no or an empty `package`, no `basedOn`) is not judged by the gate; the save door's schema gate answers it (`422 INVALID_METADATA`), and `os validate` reports it at its schema step.
+  
+  `@objectstack/metadata-protocol` exports the gate's rule, `judgeOverrideWrite`, and its item walk, `overrideWriteItemsOf`, so the three doors ask one judgement.
+  
+  `@objectstack/spec` records the two new emitters of `NOT_OVERRIDABLE` in its error-code provenance ledger (`api/error-code-ledger.zod.ts`, under `@objectstack/cli` and `@objectstack/cloud-connection`). The code was already registered, so the union, casing and every schema are unchanged.
+- d2c4874: fix(cloud-connection)!: every member of an installed bundle is recorded as installed, whatever its entry's `source` states
+  
+  `POST /api/v1/marketplace/install-local` (and `os package install`) now registers every member of a `packages[]` bundle as `source: 'marketplace'`, at the install and at every restart's rehydrate. The `manifest` service stamps an entry's own `source` over the door's, so a member whose entry said `'code'` was recorded as the host's own code, and readers of a package's origin treated it so: the connector materializer let its package-relative file refs read the host's directory.
+  
+  Clause-②: no (narrowing) — at the install-local door a `packages[]` entry's stated `source` no longer decides the member's recorded origin: a member stating `'code'` is recorded `'marketplace'`, as the door states. Nothing is widened.
+  
+  Metadata-protocol: narrowed (an installed bundle member's `source: 'code'` is no longer honoured at the install door)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key is added, removed or renamed and no body is refused: the entry's `source` is still accepted, and still honoured where it means something, the boot of a merged artifact; at the install door the door's own statement wins, and it is the origin of every package this door registers. There is nothing for an author or a migration to rewrite. -->
+  
+  **BREAKING** semantic narrowing at the install-local door (`@objectstack/cloud-connection`), shipped as `minor`.
+  
+  - **Before.** A bundle installed through the door whose second member's entry stated `source: 'code'` recorded that member as `'code'`, and a ledger entry holding such a bundle did so again at every restart.
+  - **Now.** Both members are recorded `'marketplace'`, at the install and at the rehydrate, so a ledger entry written earlier is recorded the same way after the next restart.
+  - **Unchanged.** The `manifest` service's precedence for a boot that registers a merged artifact stating no source of its own: each entry's statement still stands there. An entry stating `'marketplace'` or nothing is handed through as received.
+  - **Who sees it.** A bundle installed through this door whose entry claimed `'code'`. Its members now read as installed everywhere a package's origin is read.
+  
+  **The remedy.** None is owed. Drop the entry's `source` if it was written for this door: the door states the origin of what it installs.
+- 447a2a6: **BREAKING** feat(metadata-protocol)!: `__c` extension fields only in a base's paired `.custom` package, refused at the save, restore and publish doors, `os validate`, the marketplace install and `duplicatePackage` (ADR-0146 D10, #28564)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no file under `skills/**` teaches a field spelled `__c`, an `objectExtensions` field name or a `<base>.custom` package; the measured count below found none.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The narrowing refuses a field NAME spelling at the write doors: a field ending in `__c` outside a base's paired `.custom` package, and an `objectExtensions[].fields` key without the suffix inside one. No metadata key, accepted value of a key, export or error code is removed or renamed, and no stored shape changes. The remedy is a rename of a field, an authoring choice a person makes (which name a vendor or a customer field should carry); there is no mechanical conversion between two metadata versions for `objectstack migrate meta` to apply. Measured at `2678600d57`: 0 fields spelled `[a-z0-9]__c` in `examples/**`, `packages/*/src` and `skills/**` outside tests (7 textual hits, all in doc comments). The other categories are closed on facts: all three packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no `packages/spec/**` file is touched, so no schema, type or runtime interface moves (not type-surface-only, not runtime-interface-only); and no export is retired (not runtime-export-retired). -->
+  
+  ADR-0146 D10 reserves the `__c` field suffix to the customer's layer — maintainer, verbatim: 「扩展字段用 __c 后缀，只有 .custom 包能用。」 So a customer's field on a base object is `region__c`, a vendor's next version can never take that name, and nobody mistakes the customer's field for the vendor's. The reservation was declared in `@objectstack/spec` (`EXTENSION_FIELD_SUFFIX`, `isExtensionFieldName`) and read by no door.
+  
+  **What is refused**, given the package a body is written into:
+  
+  - **(a) `__c` outside a `.custom` pair.** In a package that is not a base's paired `<base>.custom`, every field spelled `__c`, on its own objects or in its `objectExtensions`: "the `__c` suffix is reserved to a base's paired `.custom` package (ADR-0146 D10); rename the field." A field one vendor package adds to another's object keeps the plain spelling.
+  - **(b) An unsuffixed extension field in a `.custom` pair.** Every `objectExtensions[].fields` key without the suffix: "name it `<name>__c`, or change a base field's display properties in the extension's patch (`fieldPatches`)."
+  
+  A `.custom` pair's own new objects are not judged (their fields are its own), and neither is a write bound to no package.
+  
+  **Where**, each door in its own envelope, no new code:
+  
+  - the save door (`saveMetaItem`, so `PUT /api/v1/meta/object/:name`), the restore (`rollbackMetaItem` and `revertCommit`'s restore limb) and the draft promotion (`publishMetaItem`, `publishPackageDrafts`), for an `object` body: `400 VALIDATION_ERROR`, `issues[]` locating each field;
+  - `duplicatePackage`, judged against the target id before the copy writes anything: a copy of a `.custom` pair's `__c` objects into a plain id is refused whole, `400 VALIDATION_ERROR`;
+  - `os validate`: exit 1, each field's path on `errors` (`code: 'VALIDATION_ERROR'`, `rule`, `packageId`, `message`);
+  - the marketplace install (`POST /api/v1/marketplace/install-local`), at the dependency check's position, before the manifest service sees the artifact, on the managed and the unmanaged branch: `422 VALIDATION_ERROR` (the door's existing body refusal), one row per field in `details.refusals`; nothing is registered and no ledger entry is written.
+  
+  `installPackage` needs no call: its manifest (`PackageInstallManifestSchema`) is closed, its `objects` are glob strings and it has no `objectExtensions` key, so a field body never reaches it.
+  
+  **Migration.** None needed for this repository: 0 fields affected (measured above). A package that ships a `__c` field outside `.custom`, or a `.custom` extension field without the suffix, renames the field.
+  
+  `@objectstack/metadata-protocol` exports the judge, `judgeExtensionFieldSuffix`, with the active doors' envelope (`extensionFieldSuffixRefusalError`) and the one-item question those doors ask (`objectBodyExtensionFieldSuffixRefusal`), so every door asks one judgement.
+- e62dcc5: feat(objectql): an object extension's `fieldPatches` is applied on every object read; a patch naming a field or option its target lacks is refused at install and by `os validate`
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  ADR-0146 D10's second rule, live. The per-field display patch an object extension declares (`objectExtensions[].fieldPatches`, added unenforced in the previous release) now reaches the screen:
+  
+  ```ts
+  objectExtensions: [{
+    extend: 'crm_account',
+    fieldPatches: {
+      industry: { label: 'Sector', inlineHelpText: 'The market the account sells into', options: { technology: { label: 'Tech' } } },
+    },
+  }]
+  ```
+  
+  - **Applied, never carried.** The engine's extension registration carries the slot, and the registry merge (`mergeObjectDefinitions`) applies it after the additive merges: the `BASE_FIELD_DISPLAY_WHITELIST` keys (`label`, `description`, `inlineHelpText`, `placeholder`) onto the named field, and `label` onto each option addressed by its stored `value`. The field's type, requiredness, options and values stay the owner's. The list read, the by-name read and the layered view serve the same text, and uninstalling the extension serves the owner's text again.
+  - **Precedence.** A key the tenant has edited keeps the tenant's text (ADR-0029 D9.2a, as for an extension's object `label`). Two extensions patching one key: the higher `priority` wins.
+  - **Refused when it names nothing.** A patch naming a field the target does not have, an option value its field does not have, or an option of a picklist-bound field is refused at `POST /api/v1/marketplace/install-local` (`400 VALIDATION_ERROR`, every refusal located in `error.details.refusals`, nothing installed) and by `os validate` when the target is in the same stack. At boot such a patch is not applied and is named once in the log; the boot carries on.
+  - **New export.** `@objectstack/metadata-core` exports the one judge the three readers share: `fieldPatchTargetMisses`, `fieldPatchTargetRefusals`, `fieldPatchTargetRefusalMessage`.
+  
+  What changes for an existing package: a package that declared `fieldPatches` since the slot landed now sees them applied, and one whose patch names a missing field or option is now refused at install. An extension without `fieldPatches` folds exactly as before.
+- 663b7c0: fix(objectql,cloud-connection)!: an object extension's `fieldPatches` reaches the owner's own fields only, at the registry fold and at the install door alike; the install door refuses a bad patch with 422
+  
+  Clause-②: no (narrowing) — the marketplace install door now refuses a package whose `fieldPatches` names a field only another installed extension adds, which it admitted before, and the registry fold no longer applies such a patch. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export is removed: the published `ObjectExtensionSchema.fieldPatches` sentence already says a patch changes the display of the target object's own fields, and the fold and the install door now read it that way too. No package in this repository patches a field an extension adds, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at `POST /api/v1/marketplace/install-local` (`@objectstack/cloud-connection`) and in the object fold every read serves (`@objectstack/objectql`).
+  
+  - **Before.** A patch of a field another extension adds got three answers. The fold applied it only when the adding extension had a lower `priority` than the patching one; the install door judged the fully resolved object, so it admitted it; `os validate` judged the stack's declared objects, so it refused it. A patch of a field the same extension adds in `fields` was applied by the fold and refused by both doors.
+  - **Now.** A field patch reaches the fields the object's owner declares, and nothing else. The fold skips a patch of any other field, whatever the priorities, and names it once in the log, as it names a patch of a missing field. The install door judges a patch against the owner's declaration (`SchemaRegistry#getObjectOwner`), not the resolved object, so it refuses such a patch; `os validate` already did. The fold judges and patches the record spelling of `fields` only, the spelling the merge reads: a body with array-spelled `fields` handed to `foldObjectExtendersOnto` is not patched, and the patch is named.
+  - **Status.** The install door's field-patch refusal answers `422 VALIDATION_ERROR` (was 400), the status every other body refusal at that door answers. The code, the message and `details.refusals` are unchanged.
+  - **Guidance.** `ObjectExtensionSchema`'s `actions` refusal now says the merge also applies `fieldPatches` (`@objectstack/spec`, prose only).
+  - **Who sees it.** A package that patches a field another extension (or its own `fields`) adds. Measured in this repository: none in `examples/**` or `packages/*/src`.
+  
+  **The remedy.** Set that field's text where the field is declared: in the `fields` entry of the extension that adds it.
+- 5bb7834: fix(metadata-protocol)!: the override write gate judges an email template by its locale, so a `<base>.custom` override of a locale the base does not ship is refused (#28746)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the override write gate (ADR-0146 D2) now counts the packages that ship an email template at the bundle member the body addresses, as the read side already serves it. A stored row this gate would refuse is not converted: it is served as before, and its next save meets the gate's own refusal with its remedy (drop `overrides`). -->
+  
+  **BREAKING** accept-set narrowing at the override write gate, with one widening beside it. An email template is one item per `(name, locale)` (`ITEM_KEY_DISCRIMINATORS`), but the gate asked which packages of the closure ship the template's NAME, across every locale.
+  
+  - **Narrowed.** A `<base>.custom` pair declaring `overrides: { package: <base> }` on a locale the base does not ship is refused `403 NOT_OVERRIDABLE` (`declared_package_ships_no_such_item`, the sentence now naming the locale) at the save door, at the per-item publish (`?member=`) and at a package publish, by `os validate` / `os build`, and at `POST /api/v1/marketplace/install-local`. It was admitted and served as an override, with no base member for drift detection or "Restore package original" to compare against. The remedy is in the sentence: remove `overrides` to keep it as the pair's own locale.
+  - **Widened.** A locale the base does not ship, saved in the pair WITHOUT `overrides`, is the pair's own new member and is admitted at the same doors. It was refused `undeclared_same_name`, which told the author to declare an override of a member that does not exist. The same holds for a dependent package's template of a name its base ships in another locale: it collides with no base member.
+  - **Unchanged.** A declared override of a locale the base ships is admitted; an undeclared same-locale item is still refused `undeclared_same_name`; every other type's identity is its name alone, as before; the read side already served per member.
+  - **At rest.** A pair row stored before this release that declares an override of an unshipped locale keeps being served. Its next save carrying `overrides` is refused with the remedy; saved without `overrides`, it is the pair's own locale.
+  
+  `@objectstack/metadata-protocol` exports `overrideWriteIdentityOf(type, identity, item)`, the one identity the gate's callers compare shipped and incoming items on: an item's name (an action's `<objectName>:<name>`), joined with its bundle member for a pair-identified type. `OverrideWriteItem.identity` (from `overrideWriteItemsOf`) is spelled through it, so an email template's identity now carries its locale.
+
+### Patch Changes
+
+- 7735d1d: feat(cloud-connection): the install-local answer lists the connector credentials the installed package names, and which are not set yet
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `POST /api/v1/marketplace/install-local` answers with `credentialRefs` when the package's connectors name any `auth.credentialRef`. Each entry has the reference, the instances naming it, its `status` from the automation service's credential listing (`set` / `missing` / `rejected`, or `unknown` when that listing cannot be read) and its `source`, never a value. When any of them is not set, a `credentialNote` names them and says how to set them. An unset reference never refuses the install: the instance naming it installs degraded and materializes once the credential is set (#27237). Under the `group` and `isolated` tenancy postures, where the credential routes refuse writes, the note names the environment variable or the host's resolver instead of the `PUT` route. The answer's keys are unchanged for a package whose connectors name no credential.
+- aef631b: fix(cloud-connection): an install-local uninstall withdraws the package's flows from the automation engine at once, and unbinds their triggers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `DELETE /api/v1/marketplace/install-local/:manifestId` withdrew the package from the registry and ran its uninstall cleanups, but never told the running kernel. The automation engine withdraws a flow only when it re-syncs on `metadata:reloaded`, so the uninstalled package's flows stayed registered: `GET /api/v1/meta/flow/NAME` answered 404 while `GET /api/v1/automation/NAME` still answered `active`, `POST /api/v1/automation/NAME/trigger` still ran the flow and wrote a run row, and its record and schedule triggers stayed armed. That lasted until some unrelated reload, such as a view publish or another package's install. The door's note said the package was withdrawn from the running kernel.
+  
+  - **Now.** After the registry withdrawal and the cleanups, the door announces `metadata:reloaded` with `{ changed: ['app/MANIFEST_ID'] }`, the same signal the install door's hot load announces. The engine's re-sync withdraws every flow it had armed that the package no longer provides and unbinds each one's trigger. Right after the `DELETE` returns, `GET /api/v1/automation/NAME` and its trigger door answer 404, and a write to a watched object runs nothing.
+  - **When the re-sync does not run.** If a subscriber throws, or the kernel context cannot announce, the uninstall still answers 200, and `cleanups` carries one failed outcome named `metadata:reloaded`. The note then says the engine can still hold the package's flows until the next restart. The cause goes to the operator log at `warn`, with the restart as the remedy.
+  - **Unchanged.** Nothing is announced when the uninstall did not happen (a refused caller, an id this door never installed, a ledger write that failed), or when the registry refused the withdrawal, because the package is still registered.
+- db44327: feat(rest,plugin-hono-server,cloud-connection): metadata lists, the uncached item reads, `runtime/config` and `auth/me/localization` answer an `ETag` and `304`; every timed response carries `db`, `meta` and `total`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's first reads on every load sent no validator, so each one was a full download every time. Measured against HotCRM on `main`, none of these sent an `ETag`, a `Cache-Control` or a `304`: `GET /runtime/config`, `GET /auth/me/localization`, the type list (`GET /meta`, `GET /meta/types`), every `GET /meta/:type` list, and the item reads the shared item cache never serves (`GET /meta/app/:name`, `/meta/dashboard/:name`, `/meta/doc/:name`, `/meta/book/:name`, and drafts, `?package=` and member-scoped reads). Each of them now answers:
+  
+  - **`ETag`**: a weak validator (`W/"…"`) that hashes the body actually served, after every per-caller step (read gates, the app filter, the field mask, the translation, the host's environment). Two callers whose permissions change what they see get different validators, and one caller's validator never answers `304` for another caller's body.
+  - **`Cache-Control: private, no-cache`**: the browser keeps the body and revalidates it on every use, so a publish, a permission change or a language switch shows on the next read. No shared cache stores it. A schema served under an undetermined field visibility keeps `private, no-store` and gets no validator.
+  - **`304 Not Modified`**, with no body, when `If-None-Match` names the current validator.
+  
+  `metadata.enableCache: false` still switches the `/meta` validators off, as its description says ("Enable HTTP cache headers").
+  
+  `Server-Timing` (still opt-in: `OS_SERVER_TIMING=true`, or an admin's `X-OS-Debug-Timing: 1`):
+  
+  - Every timed response carries `db` and `meta` beside `total`. A request that ran no SQL or read no metadata says so with a zero member (`db;dur=0;desc="0 queries"`), so "nothing spent there" no longer reads like "not measured".
+  - The `/meta` routes count each metadata read into `meta` (`meta;dur=…;desc="N reads"`).
+  - `GET /runtime/config` now opens the timing gate for an admin who sends `X-OS-Debug-Timing`. It resolves the caller only when that header is sent; the payload never depends on who asked.
+  
+  `@objectstack/types` exports the rule the three packages share: `representationEtag(body)`, `ifNoneMatchHits(header, etag)` and `REVALIDATE_PRIVATE_CACHE_CONTROL`.
+- d70e94a: fix(cloud-connection)!: an install-local install connects and records the datasources the package declares, as a boot of its artifact does
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object or datasource definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the install-local door's accept set: a package whose declared datasource name is already held in the target environment is refused `409` where it was installed `200`. Whether a package is refused depends on what the environment already holds, not on the package's metadata, and the package's metadata stays valid as written; the remedy is the author's choice of a datasource name that is not taken, never a mechanical rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed, only added (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** accept-set narrowing at `POST /api/v1/marketplace/install-local`, alongside the widening below (a new `@objectstack/runtime` export and a new field on the install answer).
+  
+  - **Before.** A package declaring a datasource whose name the environment already held (the host's `default`, a datasource created in Setup, another package's) installed `200`, and its declaration was dropped: measured on `main` with a package declaring `showcase_external`, the install answered `200` with `hotLoaded: true`.
+  - **Now.** The same install is refused `409 RESOURCE_CONFLICT`, with `details.datasource` naming the held name, before anything is written. Accepting it now would serve the package's objects from the holder's pool (the connect is idempotent on the name) and, by recording the name as code, make the holder's own datasource read-only.
+  - **Unchanged.** A package that declares no datasource, or only names nothing else holds, installs as before; a reinstall of the same package is not a collision with itself.
+  - **Who sees it.** Only an install-local caller (`os package install`, an AI agent, a script) installing a package whose datasource name collides with one the environment already has.
+  
+  **The remedy.** Give the package's datasource a name the environment does not already hold, and install again.
+  
+  **What else changes.**
+  
+  A package installed through `POST /api/v1/marketplace/install-local` had its objects registered and nothing of its datasources: an object bound to the package's own datasource answered `404 OBJECT_NOT_FOUND` on every read and write, and the datasource was not served as code-defined. Now the install, and every restart's rehydrate of the ledger, take the path a boot of the package's artifact takes:
+  
+  - **One path.** `@objectstack/runtime` exports `connectPackageDatasources`, which `AppPlugin.start` now calls for the booted artifact and install-local calls for an installed package. Each declared datasource is registered in the metadata registry as `origin: 'code'`, stamped with the package (`_packageId`, `_packageVersion`), its name is recorded in the host's code-datasource set, and it is connected through the `datasource-connection` service's `connectDeclared` (the ADR-0062 D2 gate and the host's connect policy apply as on a boot). The boot's own behaviour is unchanged.
+  - **The install answer** carries `datasources`: each declared datasource's connect verdict (`connected`, or the connection service's own non-`ok` status). Omitted for a package that declares none.
+  - **A credential that cannot be resolved** is that datasource's named non-`ok` verdict, never a driver gap: the package is installed, Setup → Datasources reports the datasource as `error` with its reason, and a read of an object bound to it answers `503 ERR_DATASOURCE_UNAVAILABLE` naming it. Where a code datasource's credential comes from is not changed here.
+  - **Reinstall and uninstall.** A reinstall replaces the previous version's datasources; the uninstall closes their pools, removes their registrations and their names, reported as the `runtime.package-datasources` entry in `cleanups`.
+- df34d37: fix(cloud-connection): an install-local install judges who holds a datasource name with one judge that reads the engine too and fails closed, and a restart's rehydrate no longer takes over a name another holder owns
+  
+  Clause-②: yes (widening)
+  The widening: `@objectstack/runtime` now exports `datasourceNameHolder` and the type `DatasourceNameHolding`, and `POST /api/v1/marketplace/install-local` gains a `503 SERVICE_UNAVAILABLE` answer.
+  Metadata-protocol: none
+  
+  Three edges `POST /api/v1/marketplace/install-local`'s datasource-name check left open, each measured on `main`:
+  
+  - **A holder that cannot be read.** When the metadata registry's read of a declared datasource name threw, the check skipped it and the install went ahead (`200`). It now answers `503 SERVICE_UNAVAILABLE` with `details: { datasource, reading }` and writes nothing: a check that did not run is never taken for "no holder". Retry once that store answers.
+  - **A datasource registered on the data engine only** (the legacy `onEnable` bridge, which leaves no metadata item) was not seen: the install answered `200` and reported that pool as the package's `already-registered`. It now holds its name, `409 RESOURCE_CONFLICT` like every other holder.
+  - **A package installed before the check existed.** A restart's rehydrate replayed such a package's datasources over a datasource created in Setup under the same name: the Setup item was overwritten by the package's code registration, the name joined the code-defined set (the Setup row turned read-only), and the package's uninstall closed and evicted the Setup row's pool. The rehydrate now leaves a held name alone: it is not registered, recorded or connected for the package, one `error` line names it, its holder and the remedy, and the uninstall does not touch it. An uninstall also closes only the pools the package's own connect opened, never one it found already registered.
+  
+  `@objectstack/runtime` exports `datasourceNameHolder`, the one judge both the install door and the rehydrate use: the host's `default`, a metadata item not stamped with the package (a Setup row, another package's), a name in the code-datasource set the package did not record, then a driver on the data engine.
+  
+  **The remedy** for a package the rehydrate now reports: rename the package's datasource and install it again, or remove the datasource holding the name and restart.
+- bca27ad: fix(cloud-connection): a marketplace install-local uninstall the registry would refuse is refused 409 before the ledger write, naming the pair or the extender, with nothing removed (#28511)
+  
+  Clause-②: no (narrowing) — `DELETE /api/v1/marketplace/install-local/:manifestId` now refuses `409 RESOURCE_CONFLICT` the uninstall of a package whose paired customization package (`ID.custom`) is installed, or that owns an object another package extends (ADR-0029), an uninstall that answered 200 before; nothing is widened.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches uninstalling through the install-local door, so every taught use stays true.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: an uninstall the running registry already refuses is now refused at the install-local door before its ledger write, with the registry's existing RESOURCE_CONFLICT / 409 refusal, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the install-local uninstall door (`@objectstack/cloud-connection`, ADR-0146 D3).
+  
+  - **Before.** The door removed the ledger entry first and only then asked the registry to withdraw the package. A registry refusal (the base's `.custom` pair installed, or an extended object) was caught there and folded into a 200 with a failed `registry.uninstallPackage` entry in `cleanups`. The package stayed registered until the next restart, and the restart then dropped it from under its pair, stranding every customization the pair holds.
+  - **Now.** The door asks the registry the same question first, through `SchemaRegistry.assertPackageUninstallable` (the one predicate `uninstallPackage` asks, which mutates nothing). On a refusal it answers that refusal's own `409 RESOURCE_CONFLICT` and sentence, which names the pair and the extenders and opens with the way out. The ledger entry, the registration and the pair stay as they were, and no cleanup runs.
+  - **Unchanged.** An uninstall the registry would let go keeps the ledger-first order (the ledger entry is removed, then the package is withdrawn, then the cleanups run). An id this door never installed still answers 404. A host with no `objectql` registry, or a registry without the predicate, is not asked and behaves as before.
+  
+  **The remedy.** Delete the pair (export it first to keep its customizations: `GET /api/v1/packages/PAIR/export`) or uninstall the extending packages, then uninstall the base again.
+- 7449e47: fix(cloud-connection)!: install-local reads the manifest of a compiled artifact as `os package install <file>` sends it, so the protocol handshake and the dependency check run on it (#28535)
+  
+  Clause-②: no (narrowing) — `POST /api/v1/marketplace/install-local` refuses, with the 422 `OS_PROTOCOL_INCOMPATIBLE` (or `DEPENDENCY_MISSING`) the flat manifest already got, a compiled artifact sent with `id` and `version` lifted beside its nested `manifest`, whose `engines.protocol` excludes this runtime or whose `dependencies` this runtime does not satisfy. That body installed before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the install door's existing ADR-0087 handshake and ADR-0141 dependency check now read the keys of a compiled artifact the CLI sends, as they already read a flat manifest and a bare compiled artifact. The refusals are the existing shared answers, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at `POST /api/v1/marketplace/install-local` (`@objectstack/cloud-connection`), reached by `os package install ./dist/objectstack.json`.
+  
+  The door flattened a compiled artifact (`{ manifest: { … }, objects, … }`) only when the body had no top-level `id` or `name`. Every published CLI lifts `id` and `version` to the top beside the nested `manifest`, so that body was never flattened and the keys the install checks read at the manifest top level stayed one level down: an artifact built for another protocol installed with a "declares no engines.protocol range" warning, and an unmet dependency was never judged. The door now detects a compiled artifact by its nested `manifest` object alone, through the one flatten it already uses for the unmanaged import, so every sender's body is judged the same way. A compatible artifact installs as before, without the false warning.
+- a06feb7: fix(cloud-connection)!: install-local judges a ledger entry stored in the CLI's lifted shape through the install door's flatten, at the boot rehydrate and on the sample-data doors (#28604)
+  
+  Clause-②: no (narrowing) — at `kernel:ready` the install-local rehydrate no longer loads, and `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` and `/purge-sample-data` answer 422 `OS_PROTOCOL_INCOMPATIBLE` for, a ledger entry written by an install before #28535 in the body `os package install <file>` sends (`id` and `version` lifted beside a nested `manifest`) whose nested `engines.protocol` excludes this runtime. Such an entry loaded and those doors acted on it before. A flat entry with the same range was already refused the same way. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the rehydrate's existing ADR-0087 handshake, its ADR-0141 D5 dependency order and the sample-data doors' handshake now read a lifted ledger entry through the flatten the install door already uses, as they already read a flat entry. The refusals are the existing shared answers, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** boot-load and accept-set narrowing for already-ledgered install-local entries (`@objectstack/cloud-connection`): the `kernel:ready` rehydrate and the two sample-data doors, reached by a deployment where `os package install ./dist/objectstack.json` ran before #28535.
+  
+  An install before #28535 ledgered the CLI's body unflattened, so the entry's `engines` and `dependencies` sat one level down, and the rehydrate and the sample-data doors judged `engines.protocol` at the top: an entry built for another protocol was re-registered at every boot with no error. They now read the entry through the install door's one flatten (`flattenPackageBody`), and the rehydrate orders entries by the dependencies they nest too. Such an entry gets exactly what a flat entry with the same range gets: it is not loaded, one error line names the code, the package and the remedy, the listing marks it `notLoaded`, and DELETE or a compatible reinstall still act on it. A compatible lifted entry rehydrates exactly as before, registering the body as it was ledgered.
+- Updated dependencies [af1e1e0]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [1c63231]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [8c0306f]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [cee4b16]
+- Updated dependencies [4702c46]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [652da20]
+- Updated dependencies [1f1eda4]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [5782008]
+- Updated dependencies [4f93696]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [96e7a43]
+- Updated dependencies [31a6ca7]
+- Updated dependencies [1539aad]
+- Updated dependencies [57e00f5]
+- Updated dependencies [c90b5b1]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [e1ab32e]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [b2b3124]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [67cf0b1]
+- Updated dependencies [e46e25c]
+- Updated dependencies [81b4599]
+- Updated dependencies [6845035]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [0eb2d21]
+- Updated dependencies [49d652e]
+- Updated dependencies [045cfa4]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [693a729]
+- Updated dependencies [9fa70b4]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [ee9a8d6]
+- Updated dependencies [385aa12]
+- Updated dependencies [79d5dac]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [99aeee6]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [8d66cbe]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [a1d8bf6]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [308f826]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [33ab543]
+- Updated dependencies [e00374a]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [b8b3208]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [86f2afe]
+- Updated dependencies [e29a1b1]
+- Updated dependencies [72c0152]
+- Updated dependencies [e0aed00]
+- Updated dependencies [481ade6]
+- Updated dependencies [875d007]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [475d428]
+- Updated dependencies [4a5396b]
+- Updated dependencies [a3d24c9]
+- Updated dependencies [a7de844]
+- Updated dependencies [ecd944f]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [bc496bf]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [47c3e12]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [9ae6384]
+- Updated dependencies [07585bf]
+- Updated dependencies [6a648ac]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [e8cdf4e]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d8de26d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [642dd4f]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [7591c60]
+- Updated dependencies [6caca51]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [d5951c8]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [119931d]
+- Updated dependencies [95f545e]
+- Updated dependencies [3a054cb]
+- Updated dependencies [c4390f7]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [50015d8]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [5f31470]
+- Updated dependencies [d70e94a]
+- Updated dependencies [11a7f96]
+- Updated dependencies [ae64120]
+- Updated dependencies [139bc18]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [50646f0]
+- Updated dependencies [f9a1363]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [7abe151]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [2db3281]
+- Updated dependencies [3238750]
+- Updated dependencies [df34d37]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [35ffb77]
+- Updated dependencies [04c8930]
+- Updated dependencies [776c1d8]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [744ad0a]
+- Updated dependencies [5055b10]
+- Updated dependencies [488b3ed]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [1c61f48]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [125ad06]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [4a7b99f]
+- Updated dependencies [9eaa209]
+- Updated dependencies [cd065d3]
+- Updated dependencies [b9b22b9]
+- Updated dependencies [e2d0dab]
+- Updated dependencies [d3fdd46]
+- Updated dependencies [ba0084e]
+- Updated dependencies [a8d2fd7]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [1e346e9]
+- Updated dependencies [eeec88d]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [3ee6af4]
+- Updated dependencies [63acf35]
+- Updated dependencies [58cb05d]
+- Updated dependencies [16e7a80]
+- Updated dependencies [f5e6953]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [5e706e7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [d2c4874]
+- Updated dependencies [d94dd3a]
+- Updated dependencies [40e7bfc]
+- Updated dependencies [5114b0e]
+- Updated dependencies [6e11a92]
+- Updated dependencies [447a2a6]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [15e8311]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [28ef35e]
+- Updated dependencies [e170d42]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [0c6b7b8]
+- Updated dependencies [86fb645]
+- Updated dependencies [c16040d]
+- Updated dependencies [1617b7f]
+- Updated dependencies [0b63f5f]
+- Updated dependencies [7e6e8a4]
+- Updated dependencies [a9782b3]
+- Updated dependencies [a96bf3c]
+- Updated dependencies [899782b]
+- Updated dependencies [2587485]
+- Updated dependencies [60d8522]
+- Updated dependencies [fc28644]
+- Updated dependencies [8f294e0]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c363084]
+- Updated dependencies [50df124]
+- Updated dependencies [5bb7834]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70bf434]
+- Updated dependencies [2a4c003]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [1920e48]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [7b62f0a]
+- Updated dependencies [99a6a78]
+- Updated dependencies [54c2496]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [79bf748]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [68a2a21]
+- Updated dependencies [b48eeb1]
+  - @objectstack/objectql@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/runtime@18.3.0
+  - @objectstack/metadata-protocol@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/observability@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

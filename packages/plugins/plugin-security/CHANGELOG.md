@@ -1,5 +1,418 @@
 # @objectstack/plugin-security
 
+## 18.3.0
+
+### Minor Changes
+
+- a9f654e: feat!: ownership queues: records wait in a queue until a member claims them, and assignment rules route new records (ADR-0142)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered object-queue-field-reserved -->
+  
+  **BREAKING** for one shape only: an object whose records have a user owner (`ownership: 'user'`, the default) can no longer declare its own field named `queue`. The platform now injects a `queue` column on every such object, and `registerObject` refuses the declaration with `422 INVALID_METADATA` (`ObjectQueueColumnRefusedError`), naming the object. An `objectExtensions` entry that declares `queue` on such an object is not refused, because an extension is folded over its object at read time: its `queue` is ignored, the platform's column stands, and a warning names the extension. The remedy: rename the business field (for example `support_queue`) and copy its data across, or, when the object's records have no user owner, declare `ownership: 'business_unit'`, `'org'` or `'none'`. The upgrade guide entry is `object-queue-field-reserved`.
+  
+  Beside that, two enum additions: `ShareRecipientType` gains `queue` (a sharing rule can now name a queue as its recipient), and the `queue` approver type is authorable again (it leaves `NON_AUTHORABLE_APPROVER_TYPES`, so it is no longer marked deprecated). Two metadata types are new: `queue` and `assignment_rule`.
+  
+  - **`@objectstack/spec`**: new `queue` and `assignment_rule` metadata types (`QueueSchema`, `AssignmentRuleSchema`) and the stack keys `queues` and `assignmentRules`. A declared queue's members are positions. New `IOwnershipQueueService` contract, registered under `ownership-queue`. `queue` joins the injected system columns of `ownership: 'user'` objects and `PUBLIC_FORM_SERVER_MANAGED_FIELDS`. `APPROVER_VALUE_BINDINGS.queue` reads both a declared queue and an organization's `sys_queue` row, and `APPROVER_ORG_SCOPED.queue` is `true`. The explain rule kinds `queue_membership` and `queue_claim` are new. `QUEUE_NOT_FOUND` (422) is registered under plugin-security.
+  - **`@objectstack/objectql`**: objects with `ownership: 'user'` get a system-managed `queue` column beside `owner_id`. Declaring your own `queue` field on one is refused at registration (`INVALID_METADATA`), and an extension's own `queue` field on one is ignored with a warning. An update can carry a write precondition: when it no longer matches, the update answers `409 CONCURRENT_UPDATE`. Declared assignment rules run once for each inserted row that has no owner and no queue after the `beforeInsert` hooks. A rule can park the row in a queue, or pick a member by `round_robin` or `least_loaded`. Assignment never refuses an insert. `kernel:ready` refuses to boot a stack that declares queues or assignment rules when no `ownership-queue` service is registered.
+  - **`@objectstack/metadata-core`**: `queue` is classified as an injected system column.
+  - **`@objectstack/metadata`**: the artifact door registers a stack's `queues` and `assignmentRules`, so an artifact-only runtime serves them.
+  - **`@objectstack/plugin-sharing`**: three new objects, `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, and the `ownership-queue` service. The service resolves a queue name from the registry first, then from the organization's own rows, and has one member expander. A record with no owner that sits in a queue can be read and edited by the queue's members, never deleted. The `queue` sharing recipient grants matched records to the queue's members, and its grants are recomputed when membership changes or the queue is switched on or off.
+  - **`@objectstack/plugin-security`**: the owner gate handles `queue`. A **claim** sets `owner_id` from empty to yourself, by id. It is admitted when the sharing model allows you the record, and only one claimant wins: the loser gets `409`. A **release** gives your own record back to its home queue. A **move** to another queue needs the transfer grant, and a queue name that does not resolve is refused with `422 QUEUE_NOT_FOUND`. An insert that names a queue needs the transfer grant or membership of that queue. A guest can supply neither. Explain reports the queue reasons on the sharing layer.
+  - **`@objectstack/plugin-approvals`**: a `queue` approver resolves to the queue's members when the step opens. An empty queue adds nobody and logs a warning. The `queue:<name>` placeholder is never written again.
+  - **`@objectstack/lint`**: a queue-only approval node is reported `approval-approvers-may-resolve-empty`, and the org-axis red line admits the queue recipient. Two new advisory rules come with `os explain` entries: `assignment-rule-user-target` (warning) and `assignment-rule-queue-unstaffed` (info).
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, so `os migrate organization-ownership` plans them instead of refusing.
+  - **`@objectstack/runtime`**: `POST /security/_activation/:type/:name` also switches a declared `queue` or `assignment_rule` on and off.
+  - **`@objectstack/platform-objects`**: the two new metadata types' labels, and the queue recipient option, are translated in zh-CN, ja-JP and es-ES.
+  - **`@object-ui/app-shell`**: the flow designer no longer warns that a queue approver resolves to nobody.
+  - **`@objectstack/skills`**: the platform skill lists `queues` and `assignmentRules` among the stack's top-level keys.
+  
+  What to do: rename any `queue` field on a user-owned object, or in an extension of one, as above. Every other existing stack behaves as before. To use queues, declare `queues` and `assignmentRules` in your stack, and make sure plugin-sharing is installed: it registers the `ownership-queue` service.
+- f9f27a0: feat(plugin-security): `getRecordFieldAccess` — a record's field projection from the write gate's own verdict
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The `security` service answers `getRecordFieldAccess(object, recordId, context)`. It reads the row as the caller reads it (the reader the write gate's pre-image comes from) and asks the field-level write gate itself, `computeForbiddenFieldWrites`, for an update of that row naming every field, over the same permission sets, posture and delegator intersection the gate takes. A field permission whose `when` names only some rows therefore locks the field only on those rows, and the answer cannot disagree with a write of that row. A row that is absent or unreadable answers `null`. `getWritableFields` and every other row-less reader are unchanged and still apply each row-conditioned entry as its lock.
+- e3470ed: feat(security)!: `current_user.queues` is resolved by the platform from the ownership-queue service, and `queues` joins the reserved `current_user` keys (#27016)
+  
+  Clause-②: no (narrowing) — `queues` joins `RESERVED_RLS_MEMBERSHIP_KEYS`, so an object's `membershipKeys` may no longer declare a key named `queues`, and a registered membership resolver's `queues` answer is screened off. Nothing is widened past what the platform itself resolves: where no app supplied the key, a policy reading `current_user.queues` matched no rows before, and now it matches the caller's own queues.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key, export or type is removed or renamed: one name is added to the reserved list, which makes a membership key of that name refused at parse. The replacement name is the author's to choose, so there is no mechanical rewrite to prescribe and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing in `@objectstack/spec` (`MembershipKeyNameSchema`, read through `ObjectSchema.membershipKeys`) and at the membership resolver screen in `@objectstack/plugin-security`.
+  
+  - **Now.** A row-level security policy can read `current_user.queues`: the machine names of the ownership queues the caller belongs to in the active organization, directly or through a position, team or unit, as each queue's members define. The security plugin resolves it from the ownership-queue service's `queuesOf`, the same membership answer the claim gate's `isMember` reads, once per request and only when a policy about to compile reads the key. For example `owner_id == null && queue in current_user.queues` lets queue members read the unowned records sitting in their queues.
+  - **One source.** No other source can supply the key. A registered `rls-membership-resolver` that answers `queues` has that answer dropped with a WARN, a `rlsMembership` bag entry or a `queues` field on the execution context is never read, and a context copied for another user or organization does not carry the set. With no signed-in user, no ownership-queue service, or a membership read that fails, the key stays unresolved and every policy reading it matches no rows.
+  - **Who moves.** An object that declares `membershipKeys: { queues: … }`, or a membership resolver that lists `queues` among its keys. Census on this repository at 7eb613c3: none in `packages`, `examples`, `qa`, `skills` or `content`.
+  
+  **The remedy.** Rename the membership key. `queues` is resolved by the platform; choose a name that says what your set holds.
+- 8bb2c31: feat(plugin-security): `getRecordFieldAccess` answers `writable`, from the write gate run over an update of the row
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The record field-access answer gains `writable`. It is not composed from the gate's parts: the plugin keeps the authorization middleware it registers on the engine and runs that same function over a by-id update of the stored row with an empty payload, ending the chain before the engine's executor (hooks, validation, the driver write and audit). Every row-level gate the write meets is therefore the one the verdict meets: the object grant, the row-level security pre-image with the ownership floor, and the controlled-by-parent master. At the chain's end it asks plugin-sharing's by-id gate with the context as the middleware stamped it. Any refusal answers `false`, and so does a boot with no engine. The probe runs on a copy of the caller's context and advances no write epoch, so it leaves no shared state behind. `editable` is unchanged.
+
+### Patch Changes
+
+- fb91e97: fix(plugin-security): the seven built-in positions are served in Chinese, Japanese and Spanish
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setup → Positions lists the platform's built-in positions (Platform Admin, Organization Owner, Organization Admin, Organization Member, Organization External Member, Everyone, Guest) beside the app's own. Under zh-CN the app's positions read in Chinese while these seven stayed English, because this plugin's translation bundle carried no `positions` group. The bundle now carries `positions.<name>.label` and `.description` for each built-in position in zh-CN, ja-JP and es-ES, the locales its permission-set translations cover, so `GET /api/v1/meta/position` serves them in the requested locale. English is unchanged, and nothing else of a position changes.
+- 6328a07: fix(plugin-security): the security plugin's metadata-derived caches now invalidate on a runtime metadata publish
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The security plugin keeps the per-object inputs it derives from metadata for reuse across requests. Those caches are now dropped whenever metadata changes at runtime, so the next request is judged by the published declaration without a restart (#26596, #26698):
+  
+  - **The signal.** The plugin listens to the protocol's post-persistence `onMetadataMutation` notification, which every metadata authoring door emits (save, per-item and package publish, revert, rollback, delete) after the engine registry holds the new definition, and which a cluster peer replays after converging its own registry. Drafts are ignored. It also listens to the `metadata:reloaded` announcement that an artifact reload fires.
+  - **What it replaces.** The previous subscription probed an optional `watch` member on the metadata service, which `MetadataManager` does not implement, and the runtime authoring path does not announce to the metadata service's watchers in any case.
+  - **Composition note.** A protocol service that offers no `onMetadataMutation` is reported once at `warn` when the plugin starts.
+- 6279efe: fix(plugin-security)!: security explain refuses a `userId` that no `sys_user` record has with `404 RECORD_NOT_FOUND`, naming the id, instead of explaining the baseline principal the resolver builds for any id
+  
+  Clause-②: no (narrowing) — `POST` / `GET /security/explain` and the in-process `explain()` refuse a request naming another user whose id no `sys_user` record has, which they answered with a verdict before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the explain request's userId keeps its shape, and an id that names nobody is now refused instead of explained. A verdict about nobody had no meaning to keep, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the access-explanation door (`@objectstack/plugin-security`), served at `/security/explain` on both transports.
+  
+  - **Before.** An administrator explaining another user by an id that no `sys_user` record has (a typo, a deleted user, an id from another deployment) was answered `200` with a full verdict, usually `allowed: true`: the authorization resolver gives any id the baseline position and permission sets. `GET /data/sys_user/ID` answered 404 for the same id.
+  - **Now.** That request is refused `404 RECORD_NOT_FOUND`, and the message names the id. The id is read through the same `sys_user` existence read the on-behalf-of delegator path uses.
+  - **Unchanged.** The order of checks: an anonymous caller is refused 401, and a caller who may not explain others gets the same 403 `PERMISSION_DENIED` whether the id exists or not, before any existence read. Explaining yourself (no `userId`, or your own) and explaining a user who exists answer as before.
+  - **Who sees it.** A caller holding `manage_users` (or a system caller) who names an id that does not exist. An organization administrator or a delegated administrator naming such an id still gets the 403: no membership or scope covers a user who does not exist.
+  
+  **The remedy.** None needed: pick the user from the directory, or check the id.
+- 2a40f98: fix(plugin-security): the seed ownership hand-over no longer holds the event loop for seconds, so a sign-in during it is answered
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The seed ownership hand-over that runs when a seed settles (`app:seeded`, plugin-security's `claimSeedOwnership`) and its multi-organization twin (`claimOrgSeedOwnership` in `@objectstack/organizations`) no longer re-own a large seed in one unbroken run. On a synchronous driver (better-sqlite3, the wasm fallback) every step of a claim write resolves as a microtask, so one write over a 1,500-row seed ran its per-row hooks and audit rows for 2.6 s and a sign-in issued meanwhile waited for all of it. The claim now writes the seeded rows 50 at a time and yields the event loop after every write (the by-row path after every 50 rows); a sign-in during it answers in hundreds of milliseconds. The same rows go to the same owner with the same audit rows. If only some batches of a chunk are refused, the other batches stay claimed and one warning names the rows left unowned, which the next run claims; a chunk every batch of which is refused is reported and left unowned as before.
+- efdf11a: feat(security): a dismissed or revoked suggested audience binding can be re-opened, back to pending
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Once an admin dismissed a pending audience-binding suggestion, or revoked an accepted one, the row stayed `dismissed` and nothing in the product could take that "no" back: `confirm` accepts only pending rows, and the reconciliation never moves a dismissed row. A new door re-opens it:
+  
+  - **`POST /api/v1/security/suggested-bindings/:id/reopen`** moves a `dismissed` row back to `pending`, exactly as if it had never been answered (`deployment_decision` false, `resolved_by` / `resolved_at` cleared). It is served by both mounts of the family: the REST route and the dispatcher's `/security` domain.
+  - **Re-opening grants nothing.** A pending row is not an acceptance, so a revoked set stays out of the `everyone` anchor's definition until `POST …/:id/confirm` accepts it again, and that accept runs the ADR-0090 D7 high-risk gate like any other.
+  - **Refusals.** The same authority as the other doors (`manage_metadata`; under a walled posture, the platform operator; `403` otherwise), the same walled-host refusal naming `acceptedDefaultPermissionSets` (`409`), `404` for an unknown id, and `409 SUGGESTION_STATE` for a row that is not `dismissed` (the message names its status) or whose set its package no longer suggests. The last keeps the decision on record: a re-opened row with no declaration would be pruned by the next reconciliation.
+  - **Contract.** `ISecurityService` gains the OPTIONAL member `reopenAudienceBindingSuggestion(callerContext, id)`. A security service without it still satisfies the contract; both routes answer `501 NOT_IMPLEMENTED` naming the door, and every dismissal stands. plugin-security serves it and exports `reopenAudienceBindingSuggestion`.
+  - **SDK.** `client.security.suggestedBindings.reopen(id)`.
+- eac6d96: fix(rest)!: `security/explain` refuses an explicit empty `userId` with 400 instead of explaining the caller (#27442)
+  
+  Clause-②: no (narrowing) — `GET`/`POST /api/v1/security/explain` refuses a request whose `userId` is the empty string, which it answered before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the explain door refuses one request value, an empty userId, that it used to drop and answer as the caller. There is no authored or stored shape for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the access-explanation door (`@objectstack/rest`), held by the engine too (`@objectstack/plugin-security`).
+  
+  - **Before.** `POST /api/v1/security/explain` with `"userId": ""` (or `GET …?userId=`) dropped the empty id and answered `200` with an explanation of the CALLER. A client that lost the selected user (an empty picker) got a confident answer about a principal nobody asked about.
+  - **Now.** The door answers `400 VALIDATION_FAILED`, in the same envelope as its other request refusals, and no explanation is computed. On `GET`, `?userId=` names the key, so it counts as explicit and is refused the same way.
+  - **Unchanged.** An omitted `userId` still explains the caller; a `userId` naming another user is explained, refused `403`, or refused `404 RECORD_NOT_FOUND` exactly as before.
+  - **Engine.** `explainAccessForCaller` no longer reads an empty `userId` as "the caller": it goes through the other-user arm, so a direct caller gets the `403` (no right to explain others) or the `404 RECORD_NOT_FOUND` an unknown id gets.
+  
+  **The remedy.** Omit `userId` to explain your own access, or send the id of the user to explain.
+- 8e87403: feat(plugin-security): organization administrators hold `manage_connector_connections` by default, so an organization's owners and admins can connect its OAuth2 connectors without a hand-bound permission set (ADR-0143 D5, ruling B)
+  
+  Clause-②: yes (widening: the shipped `organization_admin` set, and `organization_admin_no_bypass` through its derivation, now admit their holders at the connector connection door; no other set changes)
+  Metadata-protocol: none
+  
+  The connector connection door (`GET` / `POST` / `DELETE /api/v1/automation/connectors/:name/connection` and the OAuth callback) asks the organization-scoped `manage_connector_connections` capability. Until now only platform administrators held it by default, so an organization owner or admin was refused until someone granted it to them through a permission set.
+  
+  - **Who gains it.** Every member whose organization role contains `owner` or `admin`, through the `organization_admin` set the platform already grants them per organization: `organization_admin` under a walled posture, `organization_admin_no_bypass` on a wall-less one. The no-bypass variant inherits the capability from `organization_admin`'s declaration; it is not a second list.
+  - **What it reaches.** Their own organization's connection only. The grant is scoped to the organization it was made in, and the door acts on the caller's active organization, so an organization admin who is a plain member elsewhere is still refused there. No token is ever shown to the holder.
+  - **Unchanged.** `member_default`, `viewer_readonly` and every other shipped set still hold the capability only by an explicit grant. No other capability of any set changes. An agent acting on behalf of an organization administrator resolves the administrator's system permissions as before, so it gains this one with them.
+- e2772b4: feat(plugin-security): Setup → People & Organization opens the Position Holders and Permission Set Assignment pages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Setup app's People & Organization group gains two entries, contributed by `@objectstack/plugin-security` beside its Positions / Capabilities / Permission Sets entries:
+  
+  - **Position Holders** (`nav_position_holders`) — `type: 'component'`, `componentRef: 'security:position-holders'`.
+  - **Permission Set Assignment** (`nav_permission_set_assignment`) — `type: 'component'`, `componentRef: 'security:permission-set-assignment'`.
+  
+  The console registers the two pages under those refs; until then an entry opens the console's not-found page. The entries carry no gate of their own, exactly like the catalog entries: the Setup app's `setup.access` and the ungated group anchor decide who sees them, and they disappear wherever the plugin is not installed.
+  
+  `@objectstack/platform-objects`' Setup bundles carry both labels in `en`, `zh-CN`, `ja-JP` and `es-ES`, with each translation's source digest recorded.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [a8ec04d]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [0bf7aaf]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [119931d]
+- Updated dependencies [f3d2845]
+- Updated dependencies [c946cb9]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [1e01924]
+- Updated dependencies [2c0a97b]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [9b4d193]
+- Updated dependencies [aa46d14]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [0c03ce2]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [0aaad18]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [86fb645]
+- Updated dependencies [c16040d]
+- Updated dependencies [1617b7f]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/formula@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

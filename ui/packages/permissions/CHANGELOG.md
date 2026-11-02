@@ -1,5 +1,279 @@
 # @object-ui/permissions
 
+## 18.3.0
+
+### Patch Changes
+
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 6866e2e: feat(permissions): `RecordFieldAccessScope` answers one record's field locks from the server's record-scoped projection
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Below `RecordFieldAccessScope`, `checkField(object, field, 'write')` for the scoped record answers from the server's projection of that record wherever `/auth/me/permissions` reports a field-level lock. That reader holds no row, so it reports a lock that applies only from a stage onward (a field permission `when`) on every row; the scope replaces that one input with the write gate's verdict for the stored row. The object-grant fallback, the owner-transfer rule, `read` and `create`, and every other object keep the enclosing provider's answer. Until the answer arrives, and when there is none, the row-blind lock stands. When its `revision` prop moves (the row was saved or re-read), it asks again and the lock stands until the new answer lands. The client never evaluates `when`. A nested scope for the same record asks once.
+- b5e4ce6: fix(plugin-form): the record edit dialog draws a record the caller may read but not write as read-only, says why, and offers no Save
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record shared to the caller for reading only (sharing, ownership or row-level security), or held by a pending approval that locks it, the console's edit dialog used to open with every field live; the user filled it in and the server refused the save as a whole. The dialog now asks the server about the row itself:
+  
+  - **The row's verdict.** `RecordFieldAccess` (`@object-ui/types`) carries the record projection's `writable`, which `DataSource.getRecordFieldAccess` already passes through. Below `RecordFieldAccessScope` (`@object-ui/permissions`), `writable: false` refuses `write` on every field of the record and `check(object, 'update')` with the reason `record-not-writable`; `read`, `create`, other objects and other records keep the enclosing answer, and an object grant the provider already refuses keeps its own reason. `writable: true` and an absent `writable` (an older server) change nothing.
+  - **The approval lock.** The projection leaves out the approvals record lock, which the server judges on the values a save sends. `RecordFieldAccessScope` takes `lockedBy: 'approval'` for a lock the host reads, answered the same way with the reason `record-locked-by-approval`, and `ModalForm` takes the same `lockedBy` prop. The console's edit dialog passes it from the approvals read and rule the record page uses.
+  - **What the form draws.** Every field gate (`gateFormFields`, the outbound write gate, the record page's inline edit) reads the scoped answer with no call-site change. `closedFormAffordance` reports `record` or `approval` for such a row, the form's notice says "You don't have permission to edit this record. The fields are read-only." (new key `form.noPermissionToEditRecord` in every pack) or the record page's approval-lock sentence, and `ModalForm` and `DrawerForm` offer no Save on it.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 4d278c9: feat(spec): a strict response contract for `GET /auth/me/permissions`, and `hasAnyQueue` on the ownership-queue contract
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `GET /auth/me/permissions` is the payload the console reads once per session for its whole permission layer. Until now nothing in `@objectstack/spec` declared its body. It is now declared, strictly:
+  
+  - **`MePermissionsResponseSchema`** (`@objectstack/spec/api`), discriminated by `authenticated`:
+    - `MePermissionsAnonymousResponseSchema`: `{ authenticated: false }` and nothing else.
+    - `MePermissionsAuthenticatedResponseSchema`: `userId`, `tenantId` (nullable), `positions`, `permissionSets`, `objects` (effective object permissions), `fields` (`{ readable, editable }` per `object.field`), `systemPermissions` and `tabPermissions` (optional: absent only on the body a server without SecurityPlugin answers, where absent means unknown), and `hasAnyQueue: boolean`.
+    - Both branches are strict: an undeclared key is refused, not dropped. A key the server starts sending is declared here first.
+    - Types `MePermissionsResponse`, `MePermissionsAnonymousResponse`, `MePermissionsAuthenticatedResponse`.
+  - **`IOwnershipQueueService.hasAnyQueue?(organizationId)`** (`@objectstack/spec/contracts`): does the organization have at least one ownership queue, `true` exactly when some name would resolve through `resolveQueue`. Optional, like `declaredQueueNamed?`, so an implementation written before it still satisfies the contract; the route answers `false` without it. `@objectstack/plugin-sharing`'s `OwnershipQueueService` implements it.
+  - **`@objectstack/plugin-hono-server`** types the route's body builder against `MePermissionsAuthenticatedResponse`, and reads `hasAnyQueue` through the contract. The wire is unchanged.
+  - **`@object-ui/permissions`**: `MePermissionsResponse` is now the spec's type, re-exported from `@objectstack/spec/api` (with `MePermissionsAuthenticatedResponse` beside it), in place of a hand-written interface that had drifted from the wire. The interface read a `roles` key the server never sends; the server's key is `positions`, so `usePermissions().roles` under `MePermissionsProvider` was always empty and now carries the caller's positions. A fixture typed as the response migrates `roles: [...]` → `positions: [...]` and adds `hasAnyQueue`; the anonymous body is `{ authenticated: false }` and nothing else.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [f486e9c]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [2e20454]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [82b29fe]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/spec@18.3.0
+  - @object-ui/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

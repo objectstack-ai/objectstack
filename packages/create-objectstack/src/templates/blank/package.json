@@ -16,17 +16,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@objectstack/spec": "18.2.0",
-    "@objectstack/runtime": "18.2.0",
-    "@objectstack/plugin-hono-server": "18.2.0",
-    "@objectstack/connector-rest": "18.2.0",
-    "@objectstack/connector-openapi": "18.2.0",
-    "@objectstack/connector-mcp": "18.2.0"
+    "@objectstack/spec": "18.3.0",
+    "@objectstack/runtime": "18.3.0",
+    "@objectstack/plugin-hono-server": "18.3.0",
+    "@objectstack/connector-rest": "18.3.0",
+    "@objectstack/connector-openapi": "18.3.0",
+    "@objectstack/connector-mcp": "18.3.0"
   },
   "devDependencies": {
-    "@objectstack/cli": "18.2.0",
-    "@objectstack/skills": "18.2.0",
-    "@objectstack/verify": "18.2.0",
+    "@objectstack/cli": "18.3.0",
+    "@objectstack/skills": "18.3.0",
+    "@objectstack/verify": "18.3.0",
     "typescript": "^5.3.0",
     "vitest": "~4.1.12"
   },

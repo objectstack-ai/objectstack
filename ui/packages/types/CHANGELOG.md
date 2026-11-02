@@ -1,5 +1,713 @@
 # @object-ui/types
 
+## 18.3.0
+
+### Minor Changes
+
+- c59b1bf: refactor(ui)!: retire `@object-ui/plugin-ai` and its three node types
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-ai#*) the retired operands are React components of a published ui package that nothing in the workspace loaded; no packages/spec schema, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite, and the three node literals are refused by name on the zod face -->
+  
+  **BREAKING.** `@object-ui/plugin-ai` is retired: `18.2.0` is its last published version, and it gets no further release. The console registered it neither eagerly nor lazily and no workspace package imported it, so the `ai-form-assist`, `ai-recommendations` and `nl-query` node types it registered rendered nowhere in the product.
+  
+  What leaves, and what to do:
+  
+  - FROM `@object-ui/plugin-ai` TO nothing: drop the `@object-ui/plugin-ai` import and dependency. A host that still wants the component keeps its own copy and registers it under its own type key.
+  - Page nodes of type `ai-form-assist`, `ai-recommendations` or `nl-query`: remove them from the page. `safeValidateSchema` and `objectui validate` now refuse each of the three literals by name at `type`, with that remedy; before, the page rendered the "Unknown component type" panel in their place whenever the package was not loaded.
+  - `@object-ui/types`: `AIFormAssistSchema`, `AIRecommendationsSchema`, `NLQuerySchema`, `AIConfig`, `AIFieldSuggestion`, `AIRecommendationItem`, `NLQueryResult`, `AIProvider` and `AIModelType` are `@deprecated` and now `never`, and `AnySchema` has no member for the three literals. The zod names (`AIFormAssistSchema` and the rest under `@object-ui/types/zod`, `AIComponentSchema` included) are `@deprecated` `z.never()` schemas that accept nothing. Remove every reference. The names stay importable until the tombstone sunset rule decides when they leave the published face.
+  - `@object-ui/i18n`: the `ai.*` message block (`ai.nlQuery.*`, `ai.formAssist.*`, `ai.recommendations.*`) is gone from all ten packs. A host that registered overrides for those keys can delete them.
+  - `@object-ui/cli`: `objectui check` no longer lists the three literals as known component types.
+- b53d9f3: refactor(types,plugin-calendar,plugin-gantt,plugin-list,plugin-view)!: the flat `object-calendar` and `object-gantt` field-mapping keys leave the published schemas; producers emit the `calendar` / `gantt` block (#25923)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No `@objectstack/spec` key, object definition, stored row or stored shape moves: the spec's `ComponentPropsMap['object-calendar']` and `['object-gantt']` rows already refuse every key this change takes off `@object-ui/types`, so no metadata that the spec accepts carries them, and `objectstack migrate meta` has nothing to rewrite. What narrows is the `@object-ui/types` mirror of those rows: its TypeScript interfaces, its tolerant zod mirrors and, for `object-calendar`, the strict authoring face derived from them, which now refuses the five flat keys by name as the spec does. The affected party is a TypeScript author or a hand-written node, reached by the compiler and by `objectui validate`, and the renderers still read the flat spelling a host hands them. One drawing outcome moves: `getGanttConfig` validates a `gantt` block and never validated the flat spelling, so a pre-door stored view whose `options.gantt` carries a value the spec refuses now shows the refusal screen instead of drawing; that row is outside what the spec accepts, and its conversion belongs to the stored-row census of #25923, not to tolerance in a consumer. The other categories are closed on facts: the five packages publish (not unpublished); no ADR-0087 id covers this change (not registered or already-registered); and the narrowed symbols are zod-backed metadata shapes (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  `@object-ui/types` published, on `ObjectCalendarSchema` and `ObjectGanttSchema`, a flat spelling of the field mapping that the spec refuses on the node. A declared flat key is one the strict authoring face derives from, so `objectui validate` accepted the `object-calendar` spelling the spec refuses. The keys only the host writes now live on each renderer package's own hand-off type (ui/AGENTS.md Commandment #0.1), and the producers write the block.
+  
+  - **`@object-ui/types`**: `ObjectCalendarSchema` (TypeScript and zod) no longer declares `startDateField`, `endDateField`, `titleField`, `colorField` or `allDayField` flat; they are written in its `calendar` block. The `dateField` / `endField` tombstones stay and now prescribe `calendar.startDateField` / `calendar.endDateField`. `ObjectGanttSchema` no longer declares the 29 `GanttConfig` keys flat (`startDateField`, `endDateField`, `titleField`, `progressField`, `dependenciesField`, `colorField`, `viewMode`, `summaryExtent`, `interactions` and the rest), nor the legacy `dependencyField` alias or the `search` / `searchableFields` pair; they are written in its `gantt` block (the pair is not authored at all). `staticData`, `filter`, `sort`, `gantt` and the other node keys stay. For `object-gantt` the strict authoring face already refused every flat key (its arm is the `properties` bag), so the narrowing there is the published TypeScript and zod export.
+  - **`@object-ui/plugin-calendar`**: `ObjectCalendarFlatFields` and `ObjectCalendarHandoff` type the flat read `getCalendarConfig` keeps for a host that mounts the renderer directly. The renderer is unchanged: the `calendar` block wins, and the flat spelling is read only without it.
+  - **`@object-ui/plugin-gantt`**: `ObjectGanttFlatFields` (derived from `GanttConfig`, plus the alias and the search pair) and `ObjectGanttHandoff` type the flat read the same way. The renderer is unchanged.
+  - **`@objectstack/spec`**: the `object-calendar` and `object-gantt` flat-key refusals no longer say `ObjectView` / `ListView` emit the flat spelling; they hand the binding off in the block, and the flat spelling is only a stored-document fallback the renderer still reads. The prescription itself is unchanged.
+  - **`@object-ui/plugin-list`** and **`@object-ui/plugin-view`**: `ListView` and `ObjectView`'s `generateViewSchema` emit `calendar: { … }` and `gantt: { … }` on the node they build instead of the flat keys. They emit the block only where the renderer's flat branch drew: a calendar once `startDateField` is declared, a gantt once both dates are, with `titleField` floored at `'name'` as that branch floored it. A gantt binding carrying a value the spec's `GanttConfigSchema` refuses (a pre-door stored `options.gantt`, say) goes out nested too, and now shows the renderer's refusal screen where the unvalidated flat branch drew it.
+  
+  **BREAKING** for TypeScript code or hand-written nodes that write the flat keys on these two node types.
+  
+  - **Before.** `const node: ObjectCalendarSchema = { type: 'object-calendar', objectName: 'event', startDateField: 'start' }` compiled, and the `object-calendar` strict face accepted it.
+  - **Now.** The flat key is a compile error, and `objectui validate` refuses it by name on `object-calendar` (it already did on `object-gantt`). A renderer handed a flat node by a host still draws it.
+  - **Fix.** Move the keys into the block: FROM `{ type: 'object-calendar', startDateField: 'start', titleField: 'name' }` TO `{ type: 'object-calendar', calendar: { startDateField: 'start', titleField: 'name' } }`, and FROM `{ type: 'object-gantt', startDateField: 's', endDateField: 'e', progressField: 'p' }` TO `{ type: 'object-gantt', gantt: { startDateField: 's', endDateField: 'e', titleField: 'name', progressField: 'p' } }` (the `gantt` block requires `titleField`). Code that hands a flat node straight to `<ObjectCalendar>` or `<ObjectGantt>` types it as `ObjectCalendarProps['schema']` or `ObjectGanttProps['schema']`, which carry the flat keys.
+- 8eeb3b3: feat(spec)!: retire the list view's `options` bag; stored bags fold onto the top-level blocks, and the renderers read the blocks alone (#25923)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered list-view-options-bag-folded, ui-list-view-options-bag-folded -->
+  
+  A flattened list view overlay carried every per-kind block twice: as the top-level `kanban`, `calendar`, `gallery`, `timeline`, `gantt`, `map`, `tree` and `chart`, and again under a legacy `options` bag the top-level block won over per key. Each renderer re-implemented that merge. The bag is retired, and each block has one spelling.
+  
+  - **`@objectstack/spec`**: the list overlay's `options` is a removed-key tombstone. The view write door refuses a body that carries it, by name, with the prescription to move each `options.KIND` block to `KIND`. The ADR-0087 D2 conversion `list-view-options-bag-folded` folds a stored bag onto the top-level blocks before a row is served (the top-level value wins per key; for `chart`, whose block replaced the bag whole, a bag beside a block is dropped), and `os migrate meta --from 17` lists the same edits for a source. A bag it cannot fold (an `options.grid`, a non-object block, a bag on a form view) is left in place with a TODO. The D3 entry `ui-list-view-options-bag-folded` names what the fold cannot decide: the bag was judged with every key optional, so a folded block can still miss a key its block requires. The page `list-view` component row shares the tombstone.
+  - **`@object-ui/types`**: `ListViewSchema.options` takes the spec's tombstone by reference, so every published door refuses a bag at `options` with the spec's text, and the TypeScript face has no bag. `NamedListView.options` is a `?: never` tombstone that names the top-level blocks. The dataset-chart filter refusal reads the `chart` block alone, and the page node's flat `options` is refused with the bag's own text rather than pointed at `properties.options`.
+  - **`@object-ui/plugin-list`**: `ListView` reads each kind from its top-level block alone: the render branches, the capability gate, the projection and expand collectors and the fetch effect's dependencies no longer read `options`. The `list-view` registration publishes no `options` input.
+  - **`@object-ui/app-shell`**: the object page relays each per-kind block at the top level of the list schema, held by value per block so an equal rebuild keeps its identity, and no longer forwards a stored bag. The interface page sends one `map` block (its derivation with the authored keys laid over) and no bag. The Studio view preview and the list-view inspector no longer fold a bag; the server does. `storedLegacyOptions` is removed.
+  - **`@object-ui/plugin-view`**: the host list schema carries the active view's blocks at the top level instead of under `options`.
+  - **`@object-ui/plugin-map`**: two development warnings name the view's `map` block instead of `options.map`.
+  - **`@object-ui/console`, `@objectstack/rest`, `@objectstack/metadata-protocol`, `@objectstack/lint`**: test pins only (the registry parity row, the write door's refusal and served fold, and the lint finding), no runtime change.
+  
+  **BREAKING** for a list view body, a page `list-view` node or a `ListView` host that writes `options`.
+  
+  - **Before.** `{ type: 'kanban', columns: ['name'], options: { kanban: { groupByField: 'stage' } } }` was accepted at the view write door and drew a board laned on `stage`, and `ListView` read the bag beside the top-level blocks.
+  - **Now.** The write door and every `@object-ui/types` door refuse `options` by name, and `ListView` reads no bag. A view already stored with one is served folded onto its top-level blocks and renders from them. On the object page those blocks now pass through the same relay defaults as a block written top-level (the kanban `titleField: 'name'` floor, for one), so a folded row can draw differently from its bag where the bag left such a key unset. No reachable source stores a bag (census: 0 rows), and `ObjectView.storedRowParity-10380` pins the folded rendering.
+  - **Fix.** Move each block to the top level: `{ type: 'kanban', columns: ['name'], kanban: { groupByField: 'stage', columns: ['name'] } }`, keeping the top-level value where both set a key, and add any key the block requires that the bag never had (a kanban's `columns`, a gantt's `titleField`, a chart's `dataset` and `values`). A grid's settings are top-level keys of the view. Run `os migrate meta --from 17` for a source, with `--write` to apply the edits it can prove.
+- 607d3bb: refactor(types)!: `object-form` and `object-calendar` declare the four spec keys their renderers read, and `@object-ui/types/zod` renames its legacy `ActionSchema` to `CRUDActionSchema` (#25923)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No `@objectstack/spec` key, object definition, stored row or stored shape moves. The four keys are members the spec's `ComponentPropsMap['object-form']` and `['object-calendar']` rows already declare, now declared by reference on the `@object-ui/types` mirror of those rows, so `objectui validate` refuses exactly the values the spec refuses and `objectstack migrate meta` has nothing to rewrite. The renamed zod const validates a legacy `type: 'action'` node that is not metadata and has no stored representation; the affected party is a JavaScript or TypeScript consumer importing it by name, reached by its own compiler or bundler. `runtime-export-retired` would be the natural category, but it reads only a package's main entry and refuses an operand declared in a `*.zod.ts`, and this export lives on the `./zod` subpath in `crud.zod.ts`. The package publishes (not unpublished); no ADR-0087 id covers this change (not registered or already-registered); and the symbols are zod-backed (not runtime-interface-only or type-surface-only). -->
+  
+  `@object-ui/types` mirrors `@objectstack/spec` schemas so that `objectui validate` and `os validate` give one verdict. Over every schema a mirror pairs with (same-name exports, and the `ComponentPropsMap` row of each node type), eleven spec keys were neither declared nor refused on objectui's side. Four of them are read by a renderer, and those are now declared:
+  
+  - **`ObjectFormSchema`** (TypeScript and zod) declares `contentLayout` and `confirmOnDiscard`, the `ComponentPropsMap['object-form']` members by reference. `ModalForm` reads `contentLayout`; `ModalForm` and `DrawerForm` read `confirmOnDiscard`.
+  - **`ObjectCalendarSchema`** (TypeScript and zod) declares `locale` and `loading`, the `ComponentPropsMap['object-calendar']` members by reference. `plugin-calendar` reads both off the node. They are node keys, not the calendar field-name keys that live in the `calendar` block.
+  
+  The other seven are the spec form-view entry's keys on `FormFieldSchema`, which is objectui's runtime form field, a different layer under the same name. `normalizeSectionField` in `@object-ui/plugin-form` translates between the two layers, and each key's handling is now recorded beside the mirrors.
+  
+  The legacy `type: 'action'` node's zod schema was exported as `ActionSchema`, the name of `@objectstack/spec/ui`'s action metadata schema, with which it shares no vocabulary. It is now `CRUDActionSchema`, beside `CRUDDialogSchema` and `CRUDComponentSchema`; what it accepts is unchanged. Its TypeScript twin keeps the deprecated `ActionSchema` name in `@object-ui/types`.
+  
+  **BREAKING** for code that imports the zod const by its old name, and for nodes that carry a value the spec refuses on the four keys.
+  
+  - **Before.** `import { ActionSchema } from '@object-ui/types/zod'` resolved to the legacy action node's schema. `ObjectFormSchema.safeParse({ type: 'object-form', objectName: 'account', mode: 'create', contentLayout: 'tabs' })` succeeded and kept the value, which stacked the sections.
+  - **Now.** The old import name is gone. The zod mirrors refuse `contentLayout: 'tabs'`, a non-boolean `confirmOnDiscard` or `loading`, and a non-string `locale`, at the key's own path, as the spec does.
+  - **Fix.** FROM `import { ActionSchema } from '@object-ui/types/zod'` TO `import { CRUDActionSchema } from '@object-ui/types/zod'`. Write `contentLayout` as `'simple'` or `'tabbed'`.
+- 17b5152: feat(spec,ui)!: a record opens one way per object — `navigation.mode` keeps `drawer` (now the default), `page`, `new_window` and `none`; `modal`, `split` and `popover` are retired, and a list page's `recordAction` drops `modal`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`navigation.mode` refuses `modal`, `split` and `popover`; `interfaceConfig.recordAction` refuses `modal`; an omitted `navigation.mode` defaults to `drawer` instead of `page`)
+  
+  <!-- adr-0087: registered navigation-mode-overlay-values-removed, ui-record-open-overlay-modes-retired -->
+  
+  **BREAKING** accept-set narrowing and default change on the record-open surface (`@objectstack/spec`), with the console following it in the same release.
+  
+  The model, ruled by the maintainer: an object has one default way to open a record — the drawer, which expands to the full page (the same record page at two widths) — and `page` only for an object that declares it. A centred dialog and a popover were extra surfaces for the same record, and the side-by-side pane is each reader's own choice, not something an author fixes for every reader.
+  
+  - **FROM → TO.** `navigation.mode: 'modal'`, `'split'` or `'popover'` (on a list view, an object's `listViews` entry, or a page list block: `list-view`, `object-grid`, `object-kanban`, `object-calendar`, `object-map`, `object-gantt`, `object-tree`, `object-timeline`) → delete the value; the block takes the `drawer` default. `interfaceConfig.recordAction: 'modal'` → delete the value; the default is `drawer`. Declare `page` only for an object whose record should open as a full page.
+  - **The one-line fix.** Delete the retired value. `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` row is converted when it is read (the `navigation-mode-overlay-values-removed` conversion), so a view saved from Studio with one of the three values keeps loading and opens the drawer.
+  - **What the parse says.** Each retired value is refused by name with its prescription, for example "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — …", at `defineStack` as `STACK_SCHEMA_INVALID` / 422. TypeScript rejects each at a `NavigationMode` position. A misspelt mode keeps zod's own message.
+  - **The default.** A navigation block written without `mode` parses to `drawer` (it parsed to `page`). The console never honoured that `page` for a list with no navigation block, because it guessed the surface from the object's field count; that guess is retired too. A list of an object with no authored navigation opens a clicked record in the drawer, whatever its field count, and a mobile viewport still pages. An artifact or stored row that a released toolchain parsed carries the old `page` written out and keeps opening as a full page; delete it to take the drawer.
+  - **The split pane.** It is now a reader's preference, read by the console's object page from the browser (`os:record-open-mode`, `drawer` or `split`, default `drawer`). It applies only to a record that opens in the drawer; an object or view that declares `page` keeps its declaration.
+  
+  The console (`@object-ui/*`): `useNavigationOverlay` defaults a block without `mode` to `drawer` and treats `drawer` as the one overlay mode. `NavigationOverlay` keeps the drawer face and the split face the console's object page draws from the preference; its `modal` and `popover` faces, the `popoverTrigger` / `popoverAnchorRef` props and the `useOverlayAnchor` export are removed, because no caller can reach them. The grid, kanban, calendar, gantt and tree renderers drop their `split` and `popover` plumbing. The registered `object-view` renderer opens records in the drawer (a page on a mobile viewport) instead of paging a field-heavy object. The Studio list-view inspector offers the four live modes, and the list page's `recordAction` the three live values.
+  
+  Migration for code that imported the removed component API: drop `popoverAnchorRef` / `popoverTrigger` from a `NavigationOverlay` call and any `useOverlayAnchor()` call; pass `mode="split"` with `mainContent` for a side-by-side pane.
+- fbe344b: feat(spec)!: the action blocks spell the destructive variant `danger`, the word `ActionSchema.variant` uses
+  
+  An action's variant was spelled in two dialects. `ActionSchema.variant`, the declaration the action runner dispatches, takes `primary | secondary | danger | ghost | link`. The four action blocks (`action:button`, `action:icon`, `action:group`, `action:menu`) and the group/menu members took the Button primitive's `default | destructive | outline | secondary | ghost | link` (plus `primary` on the button, the icon and the members) and refused `danger`. So one destructive action was `danger` as a declaration and `destructive` as a block, and each block renderer translated between the two.
+  
+  The block rows now take `danger` in place of `destructive`: `default | danger | outline | secondary | ghost | link`, plus `primary` where it was accepted before. `danger` draws the destructive button (a red item in a dropdown or `action:menu`) and asks a `confirmText` question through the destructive confirm button. `destructive` is refused at `variant` with the rename. Other components that draw the Button primitive directly (`element:button`, toasts, alerts, badges and the like) keep `destructive`, the primitive's own word, and are not touched.
+  
+  The four block renderers forward `danger` to the runner as it is and draw it as the primitive's `destructive`. They no longer read `destructive`: stored pages are rewritten by the conversion below, so no renderer keeps a bridge for the old word. `UIActionSchema.variant` (`@object-ui/types`) follows the rows by reference. The record detail views' Delete entry in the `⋯` menu is spelled `danger` too.
+  
+  This replaces the variant sentences of the #26665 entry in this release: the action blocks no longer translate `destructive` to `danger` at their forward to the runner, and `danger` is the spelling they accept (`UIActionSchema.variant` included). That entry's confirm-dialog behaviour is unchanged: a destructive block with a `confirmText` asks through the destructive confirm button, now when it is declared `variant: 'danger'`.
+  
+  Stored rows and older built artifacts: the ADR-0087 D2 conversion `page-action-block-variant-destructive-to-danger` rewrites `variant: 'destructive'` to `'danger'` on the four blocks' `properties.variant` and on each `action:group` / `action:menu` member's `variant`, at every position a page nests a component (regions, slots, nested containers). It renames an `action:bar`'s own `variant` and the `variant` of each `actions` / `systemActions` member as well. The bar has no props row, so nothing refuses `destructive` on it, but it draws each member through the block renderers, which no longer read that word. A stored `page` row is rewritten when it is rehydrated, so it keeps drawing the destructive button and confirming through the destructive confirm button. The conversion is retired from the load path, so a source that still writes `destructive` on a block is refused, not rewritten. The D3 entry `ui-page-action-block-variant-destructive-refused` carries the judgment for `os migrate meta`.
+  
+  Clause-②: no (narrowing) — the action block rows refuse `destructive`, a value they used to accept. `danger` takes its place on the same rows.
+  
+  Metadata-protocol: narrowed (`variant: 'destructive'` is refused on the action blocks and their members; write `danger`)
+  
+  <!-- adr-0087: registered page-action-block-variant-destructive-to-danger, ui-page-action-block-variant-destructive-refused -->
+  
+  **BREAKING** for an author who wrote `variant: 'destructive'` on an action block.
+  
+  **`destructive` → `danger`.**
+  
+  - **Before.** `{ type: 'action:button', properties: { label: 'Purge', actionType: 'script', variant: 'destructive' } }` parsed; `variant: 'danger'` was refused.
+  - **Now.** `destructive` is refused at `variant` (or at `actions.N.variant` on a group or menu member) with a message naming the rename.
+  - **Fix.** Write `variant: 'danger'` on the block or member. Nothing else changes: it draws the same destructive button. `os migrate meta --from 17 --write` applies the rename to your sources.
+- 6dbff8e: feat(spec,ui)!: the record page's `slots.tabs` is retired — a slotted page fills six slots, and a page that needs its own tab strip is `kind: 'full'`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`page.slots.tabs` is a tombstone that refuses every value; `slots.related` / `slots.relatedLists` are refused by name instead of being read as `tabs`)
+  
+  <!-- adr-0087: registered page-slots-tabs-removed, page-slots-tabs-retired -->
+  
+  **BREAKING** accept-set narrowing on the record page (`@objectstack/spec`), with the console following it in the same release.
+  
+  The record page composes its tabs and columns from the object's roles and relationship flags. An authored `tabs` slot replaced that whole strip, so a page that used it lost every synthesized related list and its wide-screen columns. The slot is gone; the six live slots (`header`, `actions`, `alerts`, `highlights`, `details`, `discussion`) are unchanged.
+  
+  - **FROM → TO.** `slots: { tabs: … }` on a `kind: 'slotted'` page → delete the key. To change which related lists appear or their order, set `relatedList` / `relatedList: 'primary'` on the child's reference field; to replace the Details body, author `slots.details`; a page that needs its own strip is `kind: 'full'` and authors its header, highlights, `page:tabs` strip and `record:discussion` in `regions`, drawn as authored.
+  - **The one-line fix.** `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` page is converted when it is read (the `page-slots-tabs-removed` conversion): the slot is dropped, and a page whose only slot it was becomes an empty slotted page, which renders the synthesized default. Whether such a page should become `kind: 'full'` is a judgement the conversion cannot make; the upgrade guide entry `page-slots-tabs-retired` lists it.
+  - **What the parse says.** `slots.tabs` is refused with its prescription ("`page.slots.tabs` was removed in @objectstack/spec 18.3.0 (ADR-0085) — …") at `defineStack` as `STACK_SCHEMA_INVALID` / 422, and at the metadata save door. `slots.related` and `slots.relatedLists` are refused by name with the same remedy. TypeScript rejects `tabs` in a `definePage` slot map.
+  - **The pair check.** `checkPageSlotPair` (the `details` + `tabs` refusal) is removed from `@objectstack/spec/ui` with the slot it paired; the `page-slots-details-beside-tabs-refused` upgrade entry is folded into `page-slots-tabs-retired`.
+  
+  The four in-repo pages that authored `slots.tabs` are rebuilt as `kind: 'full'` pages that render the same nodes in the same order: `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`), `sys_approval_request_detail` (`@objectstack/plugin-approvals`) and the showcase `showcase_project_detail`.
+  
+  The console (`@object-ui/*`): `buildDefaultPageSchema` composes from the six slots only, and `RecordDetailView` lays every slotted page out by width (three columns from 1280 px), since none can opt out with an authored strip any more. `@object-ui/types` drops the pair check from its page schemas and types `PageSlotMap.tabs` as `never`. The Studio slot canvas lists six slots.
+  
+  `@objectstack/skills`: the UI skill says a slotted page has no `tabs` slot and how to shape the strip instead.
+- 2655ebd: feat(spec)!: a form view's `buttons` block holds `submit` and `cancel` only; `buttons.reset` is retired, because no form ever drew a reset button
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`FormViewSchema.buttons.reset` is a tombstone)
+  
+  <!-- adr-0087: registered form-view-buttons-reset-removed, ui-form-view-buttons-reset-retired -->
+  
+  **BREAKING** accept-set narrowing on the form view surface (`@objectstack/spec`), ADR-0049 enforce-or-remove.
+  
+  The console draws a form's Submit and Cancel buttons on every entry point (the form page, the New and Edit dialogs, the record form page, master-detail forms). None of them drew a reset button, and `buttons.reset.label` was never read. The one renderer fold that read `buttons.reset.show` passed it to ObjectForm's clear-after-save flag, so `show: true` emptied the form after a successful save instead of adding a button.
+  
+  - **FROM → TO.** `buttons: { submit, cancel, reset }` → `buttons: { submit, cancel }`. No button replaces it: Cancel leaves the form without saving. `reset.show: true` used to clear the form after each save on ObjectView and the record form page; a converted form no longer clears after a save. A form that should clear after a save declares `submitBehavior: { kind: 'continue' }`, which ObjectForm and the console form page honour.
+  - **The one-line fix.** Delete `buttons.reset`. `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` row is converted when it is read (the `form-view-buttons-reset-removed` conversion), so a form view saved with the key keeps loading.
+  - **What the parse says.** "`view.form.buttons.reset` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form ever drew a reset button, and its label was never read. …", at every form view door (a view's `form` and `formViews.*`, a form view item record, a flattened form overlay) and at `defineStack` as `STACK_SCHEMA_INVALID` / 422. TypeScript rejects the key at the authoring site.
+  - **Unchanged.** `buttons.submit` and `buttons.cancel` parse and render as before.
+  
+  The renderer (`@object-ui/plugin-form`, `@object-ui/types`): `ObjectForm` no longer folds `buttons.reset.show` onto `showReset`, and the `ObjectFormSchema.buttons` mirror (type and zod) drops `reset`. The flat `showReset` prop itself is unchanged.
+- a33fce2: feat(spec,plugin-form)!: `ObjectForm` lays a form out and no longer picks its container; the `object-form` block drops `formType: 'split'` and `SplitForm` retires, while the block keeps opening `drawer` and `modal` forms itself
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (the `object-form` block's `formType` refuses `split`; its `splitDirection`, `splitSize`, `splitResizable` and `sections[].pane`, the `object-master-detail-form` block's `sections[].pane`, and `FormViewSchema.splitDirection`, are tombstones)
+  
+  <!-- adr-0087: not-required (already-registered form-view-presentation-types-removed, ui-form-view-type-layout-only) 18.3.0 is unreleased, so this change widens those two entries in place: the conversion now strips splitDirection and reaches object-form page blocks, four new RETIRED_KEYS_BY_MAJOR rows record the tombstoned keys, and the D3 entry names the block -->
+  
+  **BREAKING** accept-set narrowing on the `object-form` page block and the form view (`@objectstack/spec`), and a removed export (`@object-ui/plugin-form`). ADR-0050, the renderer half of #27155.
+  
+  The model: a form's `formType` says how it lays out its sections. Where it opens is the caller's. On the `object-form` block the caller is the block itself, so `drawer` and `modal` stay there as the two containers the block opens; `split` drew two panes and had no other reader, so it leaves with its renderer.
+  
+  - **FROM → TO (block).** `formType: 'split'` → `formType: 'tabbed'` (one tab per section) or delete the value for `simple`; delete each section's `pane` and the block's `splitDirection` / `splitSize` / `splitResizable`. To edit child records beside the parent, use an `object-master-detail-form` block. `formType: 'drawer'` and `formType: 'modal'` are unchanged. The `object-master-detail-form` block's parent `sections` share the shape, so delete each section's `pane` there too.
+  - **FROM → TO (form view).** `splitDirection` on a form view → delete it. It joins `splitSize` and `splitResizable`, which left in the same release.
+  - **The one-line fix.** Delete the retired value and keys. `os migrate meta --from 17` lists the edits for existing sources, and `--write` applies them. A stored page or view row is converted when it is read (the `form-view-presentation-types-removed` conversion now reaches `object-form` page blocks, the section `pane` of `object-master-detail-form` blocks, and `splitDirection` too), so a block saved with `split` keeps loading as a `simple` form.
+  - **What the parse says.** `formType: 'split'` is refused by name with its prescription ("'split' was removed from the `object-form` `formType` enum in @objectstack/spec 18.3.0 (ADR-0050) — …"); each tombstoned key is refused on every `formType`. TypeScript rejects each at the authoring site.
+  - **`@object-ui/plugin-form`.** `ObjectForm` renders the `simple`, `tabbed` and `wizard` layouts only; a `formType` of `drawer` or `modal` on a node handed straight to `<ObjectForm>` now renders the inline form, and the host opens its own drawer or dialog around it (the console's New and Edit dialogs already mount `ModalForm` themselves). The registered `object-form` block routes `drawer` and `modal` through the new internal `ObjectFormContainer`, which hands the node to `DrawerForm` or `ModalForm` as before. `SplitForm`, `SplitFormProps` and `SplitFormSchema` are no longer exported, and the block no longer publishes the `splitDirection`, `splitSize` and `splitResizable` inputs. FROM `import { SplitForm } from '@object-ui/plugin-form'` → TO a `TabbedForm`, or the `form` renderer's `fieldPanes` for a host that composes panes itself.
+  - **`@object-ui/types`.** `ObjectFormSchema.formType` is `'simple' | 'tabbed' | 'wizard' | 'drawer' | 'modal'`, and its `splitDirection` / `splitSize` / `splitResizable` are the spec's tombstones by reference; the section `pane` member is gone.
+  - **Console.** Studio's page-block inspector no longer offers `Split` for an `object-form` (its `engine.inspector.pageBlock.option.formType.split` string is removed from `@object-ui/i18n`), the record page passes no split keys, and a view whose `type` is not one of the three form layouts is no longer taken for a form (`@object-ui/console`).
+  - **Supersedes one line of the form view `type` entry (#27155).** That entry says `splitDirection` stays declared; in this release it leaves too.
+  - **Unchanged.** `drawerSide`, `drawerWidth`, `modalSize` and `modalCloseButton` keep their readers: the block's drawer and modal containers. The enforce-or-remove question for `drawerSide` / `drawerWidth` on form views stays on #27153.
+- 9ab75ee: feat(ui-types): the filter-builder number bucket follows the spec's numeric value family, so `progress`, `slider` and `summary` fields get the number operators
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `FILTER_NUMBER_LIKE_TYPES` is now taken from `NUMERIC_VALUE_TYPES` in `@objectstack/spec/data` instead of a hand-kept list of four. That set is the one the server's filter doors use to read a field as numeric, so a numeric field in the filter builder is offered the operators the server accepts for it. Before this change, a `progress` field fell through to the text operators (Contains, Starts with…), which the server refuses with a 400, and it was offered no Greater than or Less than.
+  
+  - **Accepted set widens by three members.** `FilterFieldSchema.type` (the `@object-ui/types/zod` entry), `FilterFieldType` and `FILTER_FIELD_TYPES` now also accept `progress`, `slider` and `summary`. Nothing that was accepted before is refused.
+  - **Renderer.** `filter-builder` in `@object-ui/components` reads the bucket from here, so these three types get the number operators and a number input with no change to the component.
+  - **Later spec additions follow.** A type the spec adds to `NUMERIC_VALUE_TYPES` joins the bucket and the validator on its own. The type face names the family as a literal union, and a mirror pin keeps that union equal to the spec set.
+- bf658d1: docs(types): `NavigationItem.reportName` says that an omitted name opens the app's report index
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The description of the mirror's optional `reportName` now states what its absence means on a `report` entry. No shape changes.
+- 0027c4a: feat(console): a record page opens from one request, and the record a drawer step shows next is asked ahead (#27627)
+  
+  Clause-②: yes (widening: optional `DataSource.getRecordPage` / `prefetchRecordPage`, new exports; no existing contract changes)
+  Metadata-protocol: added
+  
+  The record page (full page, split pane and drawer) asks `DataSource.getRecordPage` once when it opens, before any of its readers runs, and hands each part of the answer to the reader that used to ask for it:
+  
+  - the record, with the lookups the page resolves;
+  - each related list's total and first rows: the tab badges, collapsed and compact related cards and reference rail cards take them, so no `top=1` count probe and no separate first-rows read goes out;
+  - the header's `update` / `delete` verdicts and Claim's `transfer` decision, the in-place edit blocks' field projection, and the approval rows and lock.
+  
+  Readers still read for themselves after the open (a refresh, a write, a change on the data-invalidation bus), and a page on an adapter without `getRecordPage` reads as before. Lists the page cannot name in the request stay their own read: a list declared through a list view, a list whose filter carries a context token, and lists past the fiftieth. In the drawer, the record a ↑ / ↓ step shows next is asked ahead (`DataSource.prefetchRecordPage`), so stepping opens from an answer already on its way; on such an adapter that replaces the drawer's warm-up of the next record's related counts.
+  
+  - `@object-ui/types`: `DataSource.getRecordPage?` / `prefetchRecordPage?` and the `RecordPageRequest` / `RecordPagePayload` shapes.
+  - `@object-ui/data-objectstack`: both methods; concurrent identical reads share one request, a prefetched answer is taken once, and a write drops them all.
+  - `@object-ui/components`: `RelatedCountStore.seed` / `takeRows`.
+  - `@object-ui/plugin-detail`: `seedRecordVerdict`, `seedRecordFieldAccess`, `seedQueueClaimDecision`, `normalizeRelatedListSort`, `COMPACT_RELATED_ROWS`; a compact related card takes its first rows from the record page's answer. Its `sideEffects` array now names `queueClaim` and `recordFieldAccess` too: each drops a seeded answer on a data change through a bus subscription made at load.
+- 044d201: feat(console)!: an app opens on the first `landing` entry whose `visible` holds for the reader
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered app-landing-url-item-refused -->
+  
+  **BREAKING** accept-set narrowing in two places: `@objectstack/spec` refuses a `landing` entry that names a `url` navigation entry, and objectui's `app` node (`@object-ui/types` `AppComponentSchema`, and the published `objectui validate` door on it) runs the spec's landing check, so it refuses what the spec refuses.
+  
+  - **The console reads `landing`.** On the app root (`/apps/:app`), the console asks the app's `landing` entries in order and opens the navigation entry named by the first one whose `visible` holds for the signed-in member. Before, every reader opened on the app's first navigation item whatever the list said. No match, or no `landing` key, keeps that rule: the first navigation item by `order`.
+  - **The predicate's scope.** `visible` is asked with the evaluator the app's navigation `visible` uses, over the same roots: `current_user` (and its `user`, `ctx.user` and `os.user` aliases) and `features`. No `data` is bound. A predicate naming any other root (`record`, `app`) faults.
+  - **A fault passes the entry over.** A predicate the evaluator cannot answer is reported once in the browser console (the navigation gate's `withholding` line) and its entry is skipped; the next entry is asked. The landing only decides where a reader opens: every navigation entry keeps its own `visible`, `requiredPermissions` and `requiresObject` gates.
+  - **Only an entry the member is shown.** The `item` is looked up, at any depth, in the app's `navigation` and then each `areas[].navigation`, as the member is shown them. An entry the member's navigation gates hide is passed over. A `doc` entry lands: it opens the in-app docs portal, and which docs a reader may open stays the server's audience gate on the doc.
+  - **objectui refuses what the spec refuses.** `AppComponentSchema` now runs `checkAppLandingItems`: a `landing` entry whose `item` names no entry of the app's own navigation, or names a `group`, `separator`, `action` or `url` entry, is refused at `landing.N.item`, and a `visible` that reads `data` at `landing.N.visible`, with the spec's own message. To fix such a document, name an entry the app declares that opens a page, and gate on `current_user` or `features`.
+  - **Deriving from `AppComponentSchema`.** It now carries a refinement, and zod refuses `.extend()`, `.omit()` and `.pick()` on an object that carries one. Derive from it with `AppComponentSchema.shape` or `.safeExtend()`.
+  - **`@objectstack/spec` refuses a `url` landing.** A `url` navigation entry opens an external address, and the app-root landing is an in-app redirect, so a `url` landing would land nobody. `checkAppLandingItems` now refuses it at `landing.N.item` with the `group` / `separator` / `action` refusal, and the message no longer lists `url` among the entries that open something.
+  
+    FROM → TO: `landing: [{ item: 'nav_help_site', visible: … }]` naming a `url` entry → `landing: [{ item: 'nav_help', visible: … }]` naming an in-app entry the app declares (an `object`, `page`, `dashboard`, `report`, `component` or `doc` entry). `landing` arrived after `@objectstack/spec` 18.2.0, so only an app written against an unreleased build carries one; `os migrate meta` lists the change (`app-landing-url-item-refused`), with no conversion.
+  - **The liveness row flips.** `app.landing` (with `item` and `visible`) is `live` in `@objectstack/spec`'s liveness ledger, and its author warning is dropped.
+
+### Patch Changes
+
+- f486e9c: fix(types,components)!: a renderer's props index signature is `unknown`, not `any`, so a forwarded key must be narrowed before it is used
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (type-surface-only ui/packages/types/src/base.ts#ComponentRendererProps) A TypeScript annotation narrowing on a published renderer-props type: no metadata key, accepted value, export or error code is removed or renamed, nothing at runtime changes, and `objectstack migrate meta` has nothing to rewrite. The affected party is a TypeScript consumer, reached by its own compiler. -->
+  
+  **BREAKING** type-surface narrowing, compile-time only. Nothing a renderer receives or renders at runtime changes.
+  
+  - **`@object-ui/types`.** `ComponentRendererProps` keeps its index signature, so every key the host forwards is still admitted, but the signature now maps to `unknown` instead of `any`.
+  - **`@object-ui/components`.** The built-in renderers' own inline props annotations move the same way. The three host keys renderers read by name and pass to their root element (`data-obj-id`, `data-obj-type` and `style`, written or forwarded by `SchemaRenderer`) are declared once in a package-local type instead. The host-supplied callbacks and values a renderer reads by name (`onPageChange` on `pagination`, `onChange` / `value` on `input-otp`, `loading` on `button`, `className` on `text`, react-hook-form's `ref` on the form's built-in controls) are declared on that renderer's props.
+  
+  **Migration.** A renderer typed with `ComponentRendererProps` that reads a forwarded key:
+  
+  ```ts
+  // FROM — compiled, because the key was `any`
+  const Pager = ({ schema, ...props }: ComponentRendererProps<PagerSchema>) =>
+    <Nav onSelect={(n) => props.onPageChange(n)} />;
+  
+  // TO — declare the key you read on your own props, or narrow it before use
+  type PagerProps = ComponentRendererProps<PagerSchema> & { onPageChange?: (page: number) => void };
+  const Pager = ({ schema, onPageChange }: PagerProps) =>
+    <Nav onSelect={(n) => onPageChange?.(n)} />;
+  ```
+  
+  What to do: nothing if your renderers never read a forwarded key off `ComponentRendererProps` without declaring it. Otherwise declare the key on your renderer's props (as above) or narrow the `unknown` value (`typeof x === 'function'`, `typeof x === 'string'`) before using it.
+- 8a12a17: refactor(types)!: retire the zero-consumer `CommentSearchResult` interface
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#CommentSearchResult) the retired operand is a TypeScript interface for a cross-record comment search result; its only producer, the `useCommentSearch` hook of `@object-ui/collaboration`, already retired, and nothing in the workspace or in hotcrm reads the type; no packages/spec schema, registered node type, conversion surface or stored shape names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports the type `CommentSearchResult` from `@object-ui/types`. It described the hits of a comment search the packages no longer ship. `CommentEntry`, `MentionNotification` and `ActivityEntry` stay exported unchanged.
+  
+  - FROM `CommentSearchResult` TO a local interface in your own code: `{ comment: CommentEntry; objectName: string; recordId: string; highlight?: string }`.
+- d8a9cc5: refactor(plugin-calendar,plugin-gantt)!: the calendar and gantt renderers read their binding from the `calendar` / `gantt` block only; the flat fallback read is retired (#25923)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No `@objectstack/spec` key, accepted value, stored row or stored shape moves. The spec's `ComponentPropsMap['object-calendar']` and `['object-gantt']` rows already refuse every flat key this change stops reading, `@object-ui/types` stopped declaring them in the earlier slice of #25923, and both producers in the console (`ListView` and `ObjectView`) already write the block, so no metadata the spec accepts reaches the retired read. A stored-row census over every metadata source this repository reaches (examples, apps, the console's shipped metadata, seeds, fixtures, platform-objects) found no stored view or node that writes the binding flat, so `objectstack migrate meta` has nothing to rewrite. What narrows is the drawing outcome for a host that mounts `ObjectCalendar` or `ObjectGantt` directly with a flat node: it now reaches the refusal screen. The `@objectstack/spec` half is prose only: the two refusals no longer say the renderer still reads the flat spelling. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this change (not registered or already-registered); the narrowed type members are package-local hand-off types that neither package's entry exports (not type-surface-only or runtime-export-retired). -->
+  
+  `ObjectCalendar` and `ObjectGantt` kept a second, flat reading of their field binding for a host that mounts them directly with the keys written on the node. The spec refuses those keys on the node, `@object-ui/types` no longer declares them, and no producer writes them, so that read was a second dialect nothing should reach. It is retired.
+  
+  - **`@object-ui/plugin-calendar`**: `getCalendarConfig` reads the `calendar` block only. A node that writes `startDateField`, `endDateField`, `titleField`, `colorField` or `allDayField` flat, with no block, shows the "Calendar configuration required" screen, whose hint names the `calendar` block. The package-local `ObjectCalendarFlatFields` and `ObjectCalendarHandoff` types are gone, and `ObjectCalendarProps['schema']` is the published `ObjectCalendarSchema`.
+  - **`@object-ui/plugin-gantt`**: `getGanttConfig` reads the `gantt` block only. A node that writes its `GanttConfig` keys flat, with no block, shows the "Gantt configuration required" screen, which now names the `gantt` block, and in development a warning names every flat key the chart did not read, with or without a block beside it. The legacy singular `dependencyField` is read nowhere (the spec spells it `dependenciesField`, inside the block). The package-local `ObjectGanttFlatFields` type is gone; `ObjectGanttProps['schema']` keeps the two search keys `ListView` writes at runtime, now on `ObjectGanttSearchFields`.
+  - **`@objectstack/spec`**: the `object-calendar` and `object-gantt` flat-key refusals no longer say the renderer still reads the flat spelling. The prescription is unchanged: write the keys in the `calendar` / `gantt` block.
+  
+  **Supersedes, in the same release:** `25923-calendar-gantt-flat-keys-handoff.md` (the earlier slice of #25923) says the calendar and gantt renderers are unchanged and still read the flat spelling a host hands them, that `ObjectCalendarProps['schema']` and `ObjectGanttProps['schema']` carry the flat keys, and that the spec refusals call the flat spelling a fallback the renderer still reads. This change retires that read, so those sentences no longer hold: the renderers read the block only, the props types carry no flat binding key, and the refusals no longer say it.
+  
+  **BREAKING** for code that mounts `<ObjectCalendar>` or `<ObjectGantt>` with a flat node.
+  
+  - **Before.** `<ObjectGantt schema={{ type: 'object-gantt', objectName: 'task', startDateField: 's', endDateField: 'e' }} />` drew a chart, and the flat keys compiled against `ObjectGanttProps['schema']`.
+  - **Now.** The flat keys are a compile error on the props type, and the node shows the configuration-required screen.
+  - **Fix.** Write the binding in the block: `{ type: 'object-gantt', objectName: 'task', gantt: { startDateField: 's', endDateField: 'e', titleField: 'name' } }` (the `gantt` block requires `titleField`; the flat branch used to floor it at `'name'`), and `{ type: 'object-calendar', calendar: { startDateField: 'start' } }` for a calendar.
+- a260556: fix(types,core,components,plugin-form)!: `FormField` drops its open index signature, and a form-view field's `immutable` locks the control once the record exists
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/types/src/form.ts#FormField, ui/packages/core/src/validation/server-owned-value.ts#FieldWithDeclaredDefault) Two published TypeScript interfaces each lose their open index signature and nothing else: no member is removed or renamed, no metadata key, accepted value, export or error code moves, the zod mirror `FormFieldSchema` and the strict authoring face are unchanged, and `objectstack migrate meta` has nothing to rewrite. The affected party is a TypeScript consumer, reached by its own compiler (excess-property error naming the undeclared key). -->
+  
+  **BREAKING** type-surface narrowing, compile-time only.
+  
+  - **`@object-ui/types`.** `FormField` no longer ends in `[key: string]: any`. A key no member declares — a misspelling included — is now a compile error on a fresh `FormField` literal, as it already was on every node type since `BaseSchema` closed. The declared members are unchanged, and so are the zod mirror `FormFieldSchema` and the strict face `StrictAnyComponentSchema`, which already refused undeclared keys.
+  - **`@object-ui/core`.** `FieldWithDeclaredDefault`, the parameter type of `isServerOwnedValue`, drops its `[key: string]: unknown` signature, so a `FormField` value is assignable to it. It still reads only `field.defaultValue`.
+  - **`@object-ui/components`.** The form renderer types the field's raw metadata carrier as `Record<string, unknown> | FormField` (the stashed object field, else the field config itself), instead of reading the config through the signature.
+  - **`@object-ui/plugin-form`.** The host-written `group` key (copied from the object field for the field-group fallback) and the section-divider disclosure keys (`collapsible`, `collapsed`, `onToggle`) are typed on package-local hand-off types instead of riding the signature.
+  
+  **Fix (`@object-ui/plugin-form`).** A form-view field declaring `immutable: true` (spec `FormField.immutable`, "editable on create, locked once the record exists") is now drawn disabled when the form edits an existing record, and stays editable on a create form. It used to be copied onto the runtime field as `immutable`, which no renderer reads, so an edit form left the control editable.
+  
+  What to do: nothing if your `FormField` literals use only declared keys. Otherwise the compiler names each undeclared key on the literal that carries it (an excess-property error): correct a misspelling to the declared member, or, for a key only your host writes and reads, type it on a local intersection such as `FormField & { group?: string }` where its producer and reader live.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 6866e2e: feat(types): `DataSource.getRecordFieldAccess` asks the server for one record's field projection
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `DataSource` gains the optional `getRecordFieldAccess(resource, id)`, resolving to the new `RecordFieldAccess` type (`object`, `recordId`, `readable`, `editable`), or `null` when there is no answer. `editable` is the server's write gate judged on the stored row, so a field permission whose `when` names only some rows locks the field only on those rows. Adapters that do not speak to an ObjectStack server can leave it out.
+- eab4bba: feat(console): a greyed action says the reason its author declared
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An action greyed out by its `disabled` predicate now shows its declared `disabledReason` as the button's hover title and accessible description, and as a menu item's second line. The console used to show "Not available for this record" for every such action. That sentence stays the default when the action declares no reason, or a blank one.
+  
+  ```ts
+  defineAction({
+    name: 'submit_for_approval',
+    label: 'Submit for approval',
+    objectName: 'clm_contract',
+    disabled: "record.legal_review_status != 'approved'",
+    disabledReason: 'An approved legal review is required before the contract enters approval.',
+  });
+  ```
+  
+  - **Where it shows.** The record header (inline and in the ⋯ overflow), the record section bar, the declared actions bar, and the four `action:*` renderers (`action:button`, `action:icon`, `action:group`, `action:menu`). On every one, only the declared `disabled` predicate evaluated true earns a reason. A button greyed while its own action runs, or by the host, still gives none.
+  - **Translated like the other action copy.** `useActionTextLocalizer` (`@object-ui/react`) resolves the key when the action declares it, through the new `actionDisabledReason` resolver on `useObjectLabel` (`@object-ui/i18n`). The bundle's sentence at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an action with no `objectName`) comes first. After it comes the authored inline locale map, collapsed to the active language, then the authored string. A bundle entry never gives a reason to an action whose author wrote none. The four `action:*` renderers read the action as authored, so for them the inline locale map is the translation.
+  - **Typed.** `UIActionSchema` (`@object-ui/types`) declares `disabledReason`, derived from the spec's `ActionSchema`.
+  - **Liveness.** `disabledReason` is now `live` in `@objectstack/spec`'s ledger, with the console readers as evidence. The planned-property warning an author got for declaring it is gone. The key's description no longer says that nothing shows it.
+- a122269: fix(ui): a `destructive` action block confirms through the destructive button (#26665)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The four action blocks (`action:button`, `action:icon`, `action:group`, `action:menu`) now forward their `variant` to the action runner. `@objectstack/spec` spells the value in two dialects, each on its own surface: the blocks' rows take the Button primitive's vocabulary plus `primary`, and `ActionSchema`, which the runner dispatches, takes `primary | secondary | danger | ghost | link`. The forward translates: `destructive` becomes `danger`, `primary` / `secondary` / `ghost` / `link` pass through, and `default` / `outline` forward nothing. So a block declared `variant: 'destructive'` with a `confirmText` now asks its question through the destructive confirm button, where before it asked through a neutral one.
+  
+  `UIActionSchema.variant` (`@object-ui/types`) now takes the block rows' vocabulary by reference (`ActionButtonProps['variant']`), which adds `link`, a value those rows already accept. `danger` stays refused there, as the block rows refuse it.
+- b5e4ce6: fix(plugin-form): the record edit dialog draws a record the caller may read but not write as read-only, says why, and offers no Save
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record shared to the caller for reading only (sharing, ownership or row-level security), or held by a pending approval that locks it, the console's edit dialog used to open with every field live; the user filled it in and the server refused the save as a whole. The dialog now asks the server about the row itself:
+  
+  - **The row's verdict.** `RecordFieldAccess` (`@object-ui/types`) carries the record projection's `writable`, which `DataSource.getRecordFieldAccess` already passes through. Below `RecordFieldAccessScope` (`@object-ui/permissions`), `writable: false` refuses `write` on every field of the record and `check(object, 'update')` with the reason `record-not-writable`; `read`, `create`, other objects and other records keep the enclosing answer, and an object grant the provider already refuses keeps its own reason. `writable: true` and an absent `writable` (an older server) change nothing.
+  - **The approval lock.** The projection leaves out the approvals record lock, which the server judges on the values a save sends. `RecordFieldAccessScope` takes `lockedBy: 'approval'` for a lock the host reads, answered the same way with the reason `record-locked-by-approval`, and `ModalForm` takes the same `lockedBy` prop. The console's edit dialog passes it from the approvals read and rule the record page uses.
+  - **What the form draws.** Every field gate (`gateFormFields`, the outbound write gate, the record page's inline edit) reads the scoped answer with no call-site change. `closedFormAffordance` reports `record` or `approval` for such a row, the form's notice says "You don't have permission to edit this record. The fields are read-only." (new key `form.noPermissionToEditRecord` in every pack) or the record page's approval-lock sentence, and `ModalForm` and `DrawerForm` offer no Save on it.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 9c51314: fix(plugin-form): an ObjectForm block's `showReset` draws the Reset button it declares, instead of clearing the form after every save
+  
+  Clause-②: yes (widening)
+  
+  Metadata-protocol: none (the `object-form` block's `showReset` key and its spec text, "Show the reset button", are unchanged; the renderer now does what that text says. The two new keys are on `@object-ui/types`' `FormSchema`, the renderer-internal `form` node that `@objectstack/spec` does not declare)
+  
+  `showReset` on the `object-form` block is declared "Show the reset button", but the renderer passed it to the form's clear-after-save flag. So `showReset: true` drew no button and emptied the form after each successful save, and `showReset: false` did nothing.
+  
+  - **FROM → TO.** `showReset: true` now draws a Reset button beside Cancel and Save. Pressing it puts the form back to the values it opened with (the record being edited, or the create defaults) and saves nothing. A save no longer clears the form because of `showReset`. A form that should clear after a save declares `submitBehavior: { kind: 'continue' }`, or `resetOnSuccess: true` on a create form.
+  - **Where the button is drawn.** The simple form (flat or sectioned), the tabbed form, and the drawer and modal footers. The wizard and the master-detail form have their own action bars and draw no Reset button yet.
+  - **`@object-ui/types`.** `FormSchema` (the `form` node) gains two optional keys: `showReset`, which draws the button in the form's action bar, and `resetLabel`, its label (default: the session language's "Reset"). The `form` node also restores its opening values on a `reset` event, so a footer outside the form can reach it with a `type="reset"` button that names the form's `id`.
+- 10755db: fix(types): the plugin-ai refusal messages no longer carry a tracker number
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The refusal for an `ai-form-assist`, `ai-recommendations` or `nl-query` node, and the message of the `@deprecated` `z.never()` names (`AIFormAssistSchema` and the rest under `@object-ui/types/zod`), no longer quote an issue number. They still name `@object-ui/plugin-ai` and the remedy. What they accept and refuse is unchanged. Nothing to do.
+- ad2c286: fix(plugin-grid): inline edit opens no cell editor on a row the server's record-grained write verdict refuses
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An editable grid gated its cells on the object-level grant only, while the row kebab on the same rows also read the server's record-grained `update` verdict. A row that sharing, ownership or RLS refuses lost Edit from its kebab but still opened a cell editor, and the save was refused by the server. Now the cells read the same verdict as the kebab:
+  
+  - **A refused row reads as read-only.** No click, double-click or Enter opens an editor on it, and its cells show no edit cursor. A click on such a cell reaches the row as it does on a read-only grid. Selection, navigation and the row menu are unchanged.
+  - **One verdict, fail open.** The cells and the kebab read one batched explain probe for the rows on screen. A row with no answer yet, a failed or absent probe, or a row with no id keeps the object-level behaviour, as before. An editable grid with no kebab Edit now asks the same probe.
+  - **New runtime slot `DataTableSchema.isRowEditable`.** `(row) => boolean`, supplied by the host and read by `data-table` before it opens a cell editor. It only narrows `editable`: absent, every row follows `editable` and the column locks as before. It is a function, not metadata, so the zod mirror refuses an authored value by name.
+- 9462d8a: refactor(ui-types): one source for the filter-builder field-type list, read by the validator, the interface and the renderer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `filter-builder` field types used to be listed three times by hand: in `FilterFieldSchema.type`, in `FilterField['type']`, and in the renderer's behaviour buckets. Each copy could drift from the others, and past fixes repaired exactly that drift. There is now one declaration. The accepted set is unchanged: the same fourteen members, `type` still optional, and `text` still the default when it is absent.
+  
+  - **`@object-ui/types`** exports `FILTER_FIELD_TYPES` and the four behaviour buckets it is built from: `FILTER_NUMBER_LIKE_TYPES`, `FILTER_DATE_LIKE_TYPES`, `FILTER_SELECT_LIKE_TYPES` and `FILTER_LOOKUP_LIKE_TYPES`. It also exports the member type `FilterFieldType`. `FilterFieldSchema.type` builds its enum from the list, and `FilterField['type']` is `FilterFieldType`.
+  - **`@object-ui/components`**: `filter-builder` takes its number-, date-, select- and lookup-like buckets from `@object-ui/types` and no longer declares its own. What it draws for each type is unchanged.
+- 0ac6dab: feat(console): a bulk result names the records it wrote, and a required-field refusal says what to fill in
+  
+  Clause-②: yes (widening: `ActionResult` gains the optional `fieldErrors` member, `ActionFieldError` is a new export of `@object-ui/types`, and `ActionResponseOutcome` gains `fieldErrors`; no accept set moves)
+  Metadata-protocol: none
+  
+  - **Bulk action result.** After a bulk action such as Mark Done, the result read only "Succeeded 2 / 2". It now lists the records that succeeded, named the way the confirm step names them (the object's name field). The list appears when every failure is reported against a record of the run; when the server answered a bare count, the result keeps to the count rather than name a record that may have failed.
+  - **Required-field refusal from an action.** Running an action whose write the server refuses for a missing required field, such as Submit for Sign-off on a draft invoice with no Issued On, used to say only "Issued On is required". It now continues "Fill in Issued On, then run “Submit for Sign-off” again." Several fields are joined in the session's language. Any other refusal is shown as the server wrote it.
+  - For code that dispatches actions through `createServerActionHandler`: a failed `ActionResult` now carries the refusal's per-field entries as `fieldErrors` (field, code, message, label), read from the answer's `error.details.fields`. `error` is unchanged.
+- 72b08ee: docs(skills): hand-written inventory counts are deleted; the names and the source of truth stay
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-data` counted its field types ("49") in SKILL.md and in `rules/field-types.md`, and its lifecycle events ("8") in SKILL.md and `references/data-hooks.md`; `objectstack-automation` counted its built-in node types ("20"); `objectui/README.md` counted its plugins ("18"); `objectui/guides/schema-expressions.md` counted the formula registry ("30 functions"); `objectstack-query` counted the aggregate functions ("six"). No gate reads any of those numbers against the tree, so each one goes wrong the moment the inventory moves, and a wrong count misleads the reader more than no count.
+  - **Now.** The numbers are gone; every enumeration that taught something (the node-type tables, the plugin names, the function table, the aggregate names) stays, and each page still points at the file or schema that is the source of truth. Deletion only: every touched file shrinks under its unchanged token ceiling.
+  - The same deletion in shipped READMEs and one shipped source comment: `@objectstack/spec` (a `//` comment in `src/kernel/metadata-plugin.zod.ts`, which ships), `@objectstack/metadata` (README), and the `@object-ui/*` READMEs of i18n, plugin-grid, components, fields, types, plugin-form and console. No schema, key or behaviour changes.
+- 2e20454: fix(app-shell): a single-record action in a list's header is disabled, with the reason, unless exactly one row is selected, and is not drawn where the rows cannot be selected
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a list, a header action that runs on one record (for example Tasks → **Reassign…**, placed at `list_item` and `list_toolbar`) was drawn enabled with nothing selected, and said "select a row first" only after a click. Where the grid draws no row checkboxes, it could never work.
+  
+  - **0 rows or several rows:** the action is drawn disabled. Its tooltip and accessible description are the refusal a click already gave ("This action runs on a single record — select a row first." / "… select exactly one row."), in the session's language, from the existing `actions.selectRowFirst` / `actions.selectExactlyOneRow` keys.
+  - **Exactly one row:** the action is enabled and runs as before.
+  - **A list whose rows cannot be selected:** the action is not drawn.
+  - **Object-level actions** (declared at `list_toolbar` only) are unchanged with no rows selected. With several rows selected they are disabled with the "select exactly one row" reason, because a click is refused the same way.
+  - **The header has no rule of its own.** It asks the action runner for the early refusal a launch would get (the dispatch handler's `refuseBeforeInput`, the same check that refuses a click before any dialog opens). That check stays as the backstop, for example for a `?runAction=` deep link.
+  
+  New public members (additive):
+  
+  - `@object-ui/core`: `ActionRunner.launchRefusal(action)` returns the early refusal `execute` would give the action against the runner's current context, translated by its key, or `undefined` if there is none. It runs, sends and shows nothing. `ActionRunner.subscribeContext(listener)` calls `listener` after every `updateContext` and returns an unsubscribe function.
+  - `@object-ui/types`: `ActionContext.selectionAvailable?: boolean` tells whether the list publishing `selectedRecords` lets its rows be selected at all.
+  - `@object-ui/plugin-grid`: `ObjectGrid` publishes `selectionAvailable` beside `selectedRecords` in the action context, and clears it when it unmounts.
+- 71de060: fix(plugin-calendar): a calendar opens on the date its `calendar.initialDate` declares
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `calendar.initialDate` is now read where `ObjectCalendar` seeds the date it opens on. Before, every calendar opened on today whatever the key said, so a renewals calendar whose records fall months ahead opened on an empty month.
+  
+  - **Absent:** today, as before.
+  - **A wrapped date-macro token** (`{today}`, `{next_month_start}`, `{3_months_from_now}`, …): the date the token resolves to when the calendar opens, through the same `resolveDateMacros` resolver filter values use.
+  - **`first_record` / `next_record`:** one extra one-row read — the view's filter, plus a present start date (`first_record`) or a start date on or after the start of today (`next_record`), sorted by the start field ascending, one row — and the calendar opens on that record's start date. A `date` start field is bounded as a calendar day, any other as the instant of local midnight. No qualifying record, or a failed read, opens on today.
+  
+  The calendar shows the month, week or day of its active mode that holds the date. The seed happens once, on mount: after it, the user's navigation owns the date, and an anchor answer that arrives after the user has navigated is discarded.
+  
+  Both producers of the `object-calendar` node — a list view's calendar branch (`ListView`) and `ObjectView`'s generated calendar view — now forward `initialDate` inside the node's `calendar` block; before, they forwarded the block's five field bindings by name and dropped it. The `[PLANNED — not yet rendered]` marker is gone from `CalendarConfigSchema.initialDate`'s description, which now reads one sentence per form, and the `calendar` registry input descriptions of `object-calendar` and `list-view`, plus the designer's `calendar` options type, list the key.
+- bed8306: feat(console): an action's param dialog names its own submit verb — `submitText` is drawn on the submit button in place of "Confirm"
+  
+  Clause-②: yes (widening) — `@object-ui/types` `UIActionSchema` and `@object-ui/core` `ActionDef` gain the optional member `submitText`, typed by derivation from the spec's `ActionSchema`; `@object-ui/i18n` `useObjectLabel()` gains the resolver `actionSubmitText`. Nothing is narrowed.
+  Metadata-protocol: none
+  
+  - **The console.** The dialog an action opens to collect its `params` draws the action's `submitText` on its submit button ("Send", "Log Call"). Both param-collection handlers resolve it the way they resolve `description`: the translation bundle's `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action) first, then the authored inline locale map collapsed to the active language, then the authored string. An action that names no verb keeps "Confirm", and the button still says "Uploading…" while a file param uploads. `action:button`, `action:icon`, `action:group` and `action:menu` forward the key to the runner.
+  - **Studio.** The action form offers the key ("Submit button label"), translated in every shipped locale.
+  - **`os i18n extract`.** Scaffolds `objects.OBJECT._actions.ACTION.submitText` (or `globalActions.ACTION.submitText`) for an action with a non-empty `params` — the only action `translateAction` overlays it onto — and no slot for any other action.
+  - **Spec.** The liveness ledger row for `ActionSchema.submitText` is `live`, with its author warning dropped; the key's description no longer says no renderer shows it.
+- ea1751b: feat(fields): a lookup pick fills the fields its `lookupAutofill` declares, in the record form and in the line-item grid
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `FieldSchema.lookupAutofill` (`[{ target, source, overwrite? }]` on a single-value `lookup` / `master_detail`) now has its reader. Picking a record writes each declared `target` of the record being edited from the picked record's `source` — a quote line's `unit_price` from the picked product's `list_price` — before save, where a server hook used to be the only filler.
+  
+  - **The overwrite rule is the spec's.** Without `overwrite: true` a pick fills a target only while it is empty or still holds the value an earlier pick in the same form (or grid row) filled in; a value the user typed, or one the record already stored, stays. A pair declaring `overwrite: true` replaces the target on every pick. A `source` the picked record does not carry (a field the reader may not read is not served) writes nothing.
+  - **Record form.** `LookupField` applies the pairs on every single-value pick path: the dropdown, the keyboard, quick-create and the browse-all dialog. The form renderer hands it a new widget prop, `onAutofill(patch)`, which writes the targets as edits of the form (`setValue`, dirty), so the filled values are saved with the record.
+  - **Line-item grid.** `GridField` takes the child object's pairs through a new host prop, `lookupAutofill` (lookup field name → pairs, built with the new `lookupAutofillByField`), which `MasterDetailForm` and `LineItemsPanel` pass from the child schema they load. The column key `autofill` is unchanged and still governs only the same-named copy; a declared pair applies whatever it says and takes its target out of that copy, so one target has one writer per pick. A pick from the grid's browse-all dialog now reaches the grid once, with its record, so both copies run on that path too.
+  - **Types.** `LookupFieldMetadata.lookupAutofill` is declared by reference to the spec. New exports from `@object-ui/fields`: `declaredLookupAutofillPatch`, `lookupAutofillByField`, `LookupAutofillPair`, `LookupAutofillByField`; `lookupAutofillPatch` takes an optional fourth argument carrying the declared pairs.
+  - **Liveness.** The `lookupAutofill` row of `@objectstack/spec`'s field ledger moves from `planned` to `live`, citing these readers.
+  
+  A master-detail collection whose relationship and every column are authored loads no child schema, so its grid fills only the same-named copy.
+- bede9de: feat(plugin-grid): right-clicking a list row opens that row's actions at the pointer; a row inside a multi-row selection opens the selection's bulk actions
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A list row's actions were reachable only through the small ⋯ button at the far right of the row. A right-click on the row now opens them where the pointer already is. Nothing new is declared: the menu is a second way to reach what `list_item` actions, `userActions.edit` / `delete` and the view's bulk actions already declare.
+  
+  - **A row's menu is its ⋯ menu.** Open and Open in new tab (the record URL the row's link cell draws, when the host publishes one), then the row's actions from the same resolver the ⋯ cell reads: same capability gate, same per-record `visible` / `visibleWhen`, same order, same handlers and confirm dialogs. An action that is hidden for a row is absent from both. The inline primary buttons the cell shows beside the ⋯ are listed too, above the secondary actions, since a menu has no width budget.
+  - **A row inside a selection of two or more opens the selection's menu.** The bulk actions `BulkActionBar` offers, from the bar's own resolver, with the selection count and Clear. It never lists a single-record action. A row outside the selection, or a selection of one, opens the row's own menu.
+  - **The browser's menu stays where it is the useful one:** on a link in a cell, on an input or a cell in edit mode, when text is selected in the row (copying from a list keeps working), and on a touch long-press (touch keeps the ⋯ button). A grid that offers no row action at all, and whose rows cannot be selected, keeps it too; on a grid that does, a row whose own actions are all hidden by their predicates still opens Open and Open in new tab.
+  - **Keyboard:** the context-menu key and Shift+F10 on a focused cell open the same menu below it. Esc closes it and focus goes back to the cell.
+  - **Related-list tables** get the same menu from `data-table`'s own row menu: Open, then that row's ⋯ items. They have no record URL to open in a new tab, and no bulk actions, so a row inside a selection of two or more keeps the browser's menu there.
+  - **New runtime slot `DataTableSchema.renderRowContextMenu`.** `(row, { selected }) => ReactNode`, supplied by the host; `data-table` owns the menu around the items it returns, and `null` keeps the browser's menu. It is a function, not metadata, so the zod mirror refuses an authored value by name.
+- 82b29fe: feat(types): a related list's `filter` and its add-picker `filter` take a view filter's any-of group `{ or: [...] }`, as the spec carriers do
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `RecordRelatedListComponentProps.filter` and `.add.picker.filter` in `@object-ui/types` are now `ViewFilterElement[]` (a flat rule or an any-of group `{ or: [rule, ...] }`, from `@objectstack/spec/ui`), the element the protocol's `RecordRelatedListProps` already declares for both keys. The props the related-list renderer hands those values to move with them: `RelatedListProps.filter` and `RelatedListProps.add.picker.filter` in `@object-ui/plugin-detail`, and `ResolveRelatedRecordActionsInput.filter` in `@object-ui/react`. Every value these types accepted before is still accepted; a nested group or a group of tuples is still refused by `tsc`, as the protocol's parse refuses it.
+  
+  Types only: no runtime code changes. The related list and its picker lower the group through `@object-ui/core`'s `toFilterNode`, which the console reader change for the any-of group teaches to read it.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/spec@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

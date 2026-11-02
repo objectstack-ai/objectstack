@@ -1,5 +1,522 @@
 # @object-ui/plugin-dashboard
 
+## 18.3.0
+
+### Minor Changes
+
+- c26d643: Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A dataset-bound KPI tile and a cross-tab cell colour their period-over-period delta by the measure's declared `polarity` (`fields[].polarity` on the dataset answer, objectstack#26602). `'lower'` draws a rise red and a fall green, so a slower approval turnaround no longer reads as good news. `'neutral'` draws the delta in the muted text colour, with no green and no red. `'higher'`, and an undeclared polarity, keep the colours every delta had before: a rise green, a fall red. The arrow still shows which way the number moved under every polarity.
+- dbf576b: feat(spec): an inline `object-metric` tile declares `polarity`, so a lower-is-better KPI draws a rise red
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added (object-metric polarity)
+  
+  A dataset measure has declared `polarity` since the dataset-bound KPI tile learned to colour its delta by it, but a page-level `object-metric` tile aggregates a field, not a dataset measure, so it had nothing to attach to and coloured its trend badge by direction alone: an average turnaround that rose 23% was drawn green.
+  
+  - **Spec.** `ObjectMetricPropsSchema` (`ComponentPropsMap['object-metric']`) declares an optional top-level `polarity`, the dataset measure's own `DatasetMeasurePolarity` by reference: `higher`, `lower` or `neutral`. Any other value is refused at the key. `betterWhen`, `goodDirection` and `trendDirection` are pointed at `polarity`; a top-level `direction` is answered with both keys it could mean (`trend.direction` for the static badge's arrow, `polarity` for good news); `higherIsBetter` / `lowerIsBetter` get the three values.
+  - **Renderer.** `ObjectMetricWidget` forwards `polarity` to `MetricWidget`, which colours the badge it draws, the `compareTo`-derived one or the static `trend`, by the same rule the dataset-bound tile uses (`deltaToneClass`, now one shared helper): `lower` draws a rise red and a fall green, `neutral` draws it muted. The arrow always shows which way the number moved. The `object-metric` registration publishes the input.
+  - **Undeclared keeps today's colours exactly**: a rise green, a fall red. Nothing infers a polarity from the aggregated field's name.
+  - **Skills.** `objectstack-ui` `rules/dashboards.md` says an inline `object-metric` declares its own `polarity`.
+  
+  Nothing to do for existing tiles. To use it, add `polarity: 'lower'` to an `object-metric` node whose number is better when it falls.
+
+### Patch Changes
+
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 4aeb054: fix(plugin-dashboard): a dashboard tile whose data the viewer may not read is left out, not drawn as a permission error
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A viewer who may not read the data behind one dataset tile used to see that tile draw "You don't have permission to view the data behind this widget" among tiles that answered. Outside design mode, `DashboardRenderer` now leaves such a tile out of the layout, frame and title included, once the server refuses its query as a read refusal (403 / `PERMISSION_DENIED`), and the remaining tiles reflow. The server's refusal stays the only verdict: every tile is still queried, and nothing is hidden on a guess.
+  
+  - In design mode the tile stays and draws the no-access state, so an author can still see and select it.
+  - A failure that is not a read refusal keeps the tile and its error, as before.
+  - The editable grid layout (`DashboardGridLayout`) keeps the tile and its no-access state, unchanged.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 1ed3360: feat(ui): a `record`-mode currency amount shows each record's own currency; the code field is an ISO 4217 select pre-filled with the organization currency; Studio edits the mode and the pointer (ADR-0144 D2, D6, D8 rule 4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` now renders in the currency its record's `currency_code` holds, on every face that holds the record:
+  
+  - **Cells and widgets.** `resolveFieldCurrency(field, tenantDefault, record)` takes the record in scope as an optional third argument. Under `record` mode it reads only that record's code field; no record, or a blank code, resolves to no currency, so the amount shows as a plain number and never in the tenant default. `dynamic` and `fixed` fields resolve exactly as before. The list cell, the form and inline amount box (symbol, decimals and spinner step follow the selected code), formula cells returning `currency`, the record page's summary chips, the dashboard table and record drawer, and Gantt tooltips all pass the record. `recordCurrencyField(field)` names the pointer.
+  - **The code field.** A `text` field declaring `valueDomain: 'iso_4217_currency'` renders a searchable select instead of a free-text box, grouped "Available" (the organization currency, then rated currencies, then the codes the object's records already hold) and "All currencies (ISO 4217)". It offers only codes the value domain accepts. The form reads the used codes once per object, with one grouped query, and hands them to the field on its own metadata (`usedCurrencyCodes`); a data source without grouped queries offers home + the record's own code. The rated group is empty until the exchange-rate table ships. The picker itself is `CurrencyCodePicker` in `@object-ui/components`.
+  - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
+  - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
+  - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+  - **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget, the report table (and its export) and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
+  - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
+- 1c87beb: fix(plugin-dashboard): a dataset-bound `metric` tile captions its value with the widget's `description`, falling back to the measure label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `metric` dashboard tile drew the measure's label (for example "Total Amount") under its value, and the widget's `description`, which says what the number counts, only in the title's tooltip. When a widget declares a `description`, the tile now draws it as the caption under the value, in the measure label's place. A widget with no description (or an empty one) keeps the measure label as its caption. The measure label still rides in the title's tooltip, under the description, so it stays reachable at every tile width.
+  
+  Both dashboard surfaces (`DashboardRenderer` and `DashboardGridLayout`) show the same caption. The tile keeps its two lines of text, and no new metadata key is read: `description` is the existing widget-level key of `DashboardWidgetSchema`.
+- 9e73c08: fix(plugin-charts): a sankey with two dimensions draws every flow from the first dimension to the second, instead of only the first second-dimension group's
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard widget (or a dataset-bound chart) of type `sankey` with `dimensions: ['status', 'category']` and one measure used to draw a single root node, the first `category` value, with only that value's flows; every other `category` value was dropped and nothing on the chart said so. The second dimension reaches the renderer pivoted into one series per value, and the sankey read the first series only.
+  
+  - **Every cell is a flow.** Two or more series on a sankey are now drawn as two columns of nodes: each first-dimension value flows into each second-dimension value it has records for, and the flow's width is the measure. A combination the dataset did not answer is no flow and is not reported as missing.
+  - **A partial flow says so.** A cell that is not above zero cannot be drawn as a flow; the chart prints the existing omitted-rows note once per second-dimension value that lost a cell, and a chart with no cell above zero shows the existing "no flow to draw" refusal, naming every column it tested.
+  - **Clicking a flow drills to its cell**, the one dataset row for that pair. A node spans several cells, so a node click does not drill.
+  - **Unchanged:** a sankey with one series draws the same one-level flow from the measure to each category. A comparison overlay (`compareTo`) is never drawn as a flow. A stored sankey widget that declares several measures (refused at publish by the spec) is handed only its first measure, as before, so its other measures are not drawn as groups.
+- e7dda2c: fix(plugin-dashboard): a viewer whose every dashboard tile is refused sees one no-access panel, not an empty canvas
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A tile whose data the viewer may not read is left out of the dashboard outside design mode. When every tile was left out, the viewer saw the dashboard's header over an empty canvas, with no message. `DashboardRenderer` now draws one no-access panel in the canvas in that case (lock icon, "You don’t have access", "You don’t have permission to view the data behind this dashboard."), the same face the console shows for a dashboard the viewer may not open. The header, its description and the refresh control stay as they are.
+  
+  - A partial refusal is unchanged: the refused tiles leave, the rest reflow, no message.
+  - In design mode every tile stays and draws its own no-access state; no panel.
+  - A failure that is not a read refusal keeps every tile and its error; no panel.
+  - A dashboard with no widgets draws no panel.
+  - `@object-ui/i18n` adds `dashboard.allWidgetsForbiddenMessage` in all ten locales.
+- 9e4f1cf: Clause-②: yes (widening: @object-ui/core gains the public export formatMonthBucketLabel; no accept set moves)
+  Metadata-protocol: none
+  
+  Dashboard numbers and chart labels stay readable on a phone:
+  
+  - **KPI value.** A dataset-bound KPI tile's value now shrinks to fit its tile, the way the plain metric tiles already did, instead of being cut with an ellipsis (`$1,090,00...` on a phone). Past the smallest size it keeps the ellipsis and shows the full figure as a tooltip. A short value looks as before.
+  - **Month axis.** A chart over a month-bucketed date dimension labels its axis `Oct 2025` in the reader's locale, not the raw bucket key `2025-10`. The chart tooltip's header reads the same label. The key itself is unchanged in the data, so drill-through and ordering are unaffected. `@object-ui/core` adds `formatMonthBucketLabel(value, locale)`, which answers that label for a `YYYY-MM` key and `undefined` for anything else.
+  - **Legend swatches.** A bar or area chart's legend draws a colour swatch for every series; it drew none, because those marks fill from a gradient. A comparison (`compareTo`) series' swatch is drawn hollow, so it reads apart from the solid swatch of the series it overlays in the same colour.
+  - **Horizontal bar labels.** A horizontal bar chart's category labels are drawn in full on a phone, wrapped to at most two lines inside the axis, instead of cut to eight characters (`In Progr…`). A label still too long ends in an ellipsis and shows the full text as a tooltip.
+- d7625ea: fix(plugin-charts): a pie, donut, funnel or treemap with two dimensions draws every second-dimension group or refuses on the tile, instead of silently drawing the first group only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard widget (or a dataset-bound chart) of type `pie`, `donut`, `funnel` or `treemap` with `dimensions: ['stage', 'owner']` and one measure used to draw only the first `owner` value's amounts; every other owner was dropped and nothing on the chart said so. The second dimension reaches the renderer pivoted into one series per value, and these arms read the first series only.
+  
+  - **Treemap draws every cell.** Two or more series on a treemap are now drawn as two levels: each first-dimension value is a parent, and each second-dimension value it has records for is a leaf inside it, sized by the measure and named `stage / owner`. A cell that is not above zero is left out, and the chart prints the existing "not drawn to scale" note once per second-dimension value that lost a cell; a chart with no cell above zero shows the existing "nothing to size" refusal, naming every value it tested. Clicking a leaf drills to its cell.
+  - **Pie, donut and funnel refuse on the tile.** A pie slice is one share of one whole and a funnel stage one total, so neither has a place for a second series. Handed two or more, they now draw nothing and show a refusal (`data-chart-error="one-series-family"`) that names every group, instead of the first group's chart.
+  - **Several measures outside a dashboard.** The renderer cannot tell a second-dimension group from a second measure, so a pie, donut or funnel chart block that authors a `yAxis` list, or a page chart with one dimension and two measures, now shows the same refusal naming every measure instead of drawing the first one alone, and such a treemap nests the measures under each category.
+  - **Unchanged:** a chart with one dimension and one measure draws exactly as before on all four types, a comparison overlay (`compareTo`) is never read as a group, and a chart with no rows is the empty chart it was. A stored dashboard widget of these types that declares several measures (refused at publish by the spec) is handed only its first measure, as before, so its other measures are not read as groups.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [2302b92]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [47b6392]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [fc92c62]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [81b4599]
+- Updated dependencies [d7df639]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [ee29ac3]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [48bffe3]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [b223072]
+- Updated dependencies [e199adf]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [ddbd08e]
+- Updated dependencies [7614f8f]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [efa2915]
+- Updated dependencies [aa874c8]
+- Updated dependencies [d220b9b]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [50d05cb]
+- Updated dependencies [af6ca00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [5da3a8c]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [bf74607]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [55a1feb]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [3702be4]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [8a1f467]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [2f2c6b9]
+- Updated dependencies [5c083e8]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [a5d7098]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [946395d]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [b339465]
+- Updated dependencies [e15a87c]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [f91ab5a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [3ba5206]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [86dc686]
+- Updated dependencies [f23e051]
+- Updated dependencies [aaa5c1d]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [91e4652]
+- Updated dependencies [001c04b]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [9da2f4b]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [768ec4b]
+- Updated dependencies [4bc963c]
+- Updated dependencies [ba0084e]
+- Updated dependencies [a8d2fd7]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [82b29fe]
+- Updated dependencies [8c3f9d9]
+- Updated dependencies [4d278c9]
+- Updated dependencies [d5da45b]
+- Updated dependencies [5114b0e]
+- Updated dependencies [3694d3b]
+- Updated dependencies [d62d973]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [5e879ea]
+- Updated dependencies [1404938]
+- Updated dependencies [9182ff6]
+- Updated dependencies [272fec0]
+- Updated dependencies [693e100]
+- Updated dependencies [7253344]
+- Updated dependencies [da6f0ce]
+- Updated dependencies [0c1829a]
+- Updated dependencies [0aaad18]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [3e05ed1]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [839aae5]
+- Updated dependencies [99a6a78]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [847e424]
+- Updated dependencies [64bc7fa]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @objectstack/spec@18.3.0
+  - @object-ui/fields@18.3.0
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+  - @object-ui/permissions@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

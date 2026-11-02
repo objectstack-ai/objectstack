@@ -1,5 +1,528 @@
 # Changelog — @objectstack/service-analytics
 
+## 18.3.0
+
+### Minor Changes
+
+- c26d643: feat(spec): a dataset measure declares its `polarity`, so a lower-is-better KPI draws a rising delta as bad news
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `DatasetMeasureSchema` declares one optional key, `polarity`, with three values (`DatasetMeasurePolarity`): `'higher'` (a rise is good), `'lower'` (a fall is good: turnaround days, overdue counts, cost) and `'neutral'` (neither direction is good or bad). It is declared on the measure, the semantic layer, so every widget over the measure agrees, and not on a widget's `compareTo`, which is the executor's closed comparison directive. An undeclared polarity keeps today's colours: a rise green, a fall red. Nothing infers a polarity from the measure's name. The near-miss keys `betterWhen`, `direction`, `goodDirection` and `trendDirection` are pointed at `polarity`, and the boolean spellings `higherIsBetter` / `lowerIsBetter` are answered with the three values.
+  
+  The dataset answer's column descriptor declares the same vocabulary as `fields[].polarity` (`AnalyticsResult` and `AnalyticsResultResponseSchema`), and the analytics service relays the measure's declared value onto it, on the live query and the draft-data preview alike, the measure's `__compare` column included. An undeclared measure and every dimension column carry no `polarity` key, so an answer over a dataset that declares none is unchanged.
+  
+  The dataset form's measures repeater offers `polarity`, labelled in every shipped locale (`@objectstack/platform-objects` metadata-form catalogs).
+- 3604371: feat(spec,service-analytics): analytics over a record-currency amount — grouped answers name a per-row currency, an ungrouped amount aggregate is refused, and two compile-time guards on record-mode measures (ADR-0144 D2, D6)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A measure column over a `currencyMode: 'record'` amount now carries `fields[].currencyField` on a `queryDataset` answer: the name of the dimension column that groups by the amount's code field. Each row's currency is that row's value of it, and the column carries no `currency`. Before, a breakdown by currency labelled every group with one code.
+  
+  - `AnalyticsResult.fields[].currencyField` (`@objectstack/spec/contracts`) and the same key on `AnalyticsResultResponseSchema` (`@objectstack/spec/api`).
+  - The cube door refuses a `sum`, `avg`, `min` or `max` over a record-mode amount whose query does not group by the code field, with `INVALID_FIELD` / 400 naming the measure, the field and its object. It judges every path: a dataset or registered cube, an ad-hoc `query` over the object (`amount_sum`), and a draft preview. A `totals` grouping that drops the code, the grand total included, is refused the same way. `count` reads no amount and is served, and its column carries neither currency key.
+  
+  Two compile-time refusals, `DATASET_INVALID` / 400, on the record mode alone, so nothing that compiled before is refused:
+  
+  - a measure `currency` over a record-mode amount, whose currency is per row, including on a derived measure that resolves to one;
+  - a derived measure that combines a record-mode amount with an operand in another currency (another code field, a `fixed` code, an explicit code or the tenant's), for every op. A count operand is not compared, so an amount-per-invoice ratio still compiles.
+  
+  The same two shapes over `fixed` fields only are not judged here; ADR-0144 open item 12 refuses them on a card of its own after this release.
+  
+  ⛔ Not released alone: this ships in the same release as the record currency mode, its write refusals and the per-row display.
+- e0aed00: fix(spec)!: `POST /analytics/query` and `POST /analytics/sql` refuse an empty cube name with 400 VALIDATION_FAILED, not 500, and the engine's in-process guard throws the same typed refusal (#27505)
+  
+  Clause-②: no (narrowing) — `AnalyticsQueryRequestSchema.cube`, the body of the two analytics query doors, refuses the empty string, which it admitted before as "a string". Nothing is widened and no key is added, removed or renamed.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` names a cube only by a real name (`skills/objectstack-ui/SKILL.md`, `rules/dashboards.md` and the `analytics-inline-vs-dataset` eval); no file teaches an empty `cube`, and every taught use stays true.
+  
+  <!-- adr-0087: registered analytics-query-empty-cube-name-refused -->
+  
+  **BREAKING** accept-set narrowing at the analytics query doors (`@objectstack/spec`), and the error shape of the engine's own guard (`@objectstack/service-analytics`).
+  
+  - **Before (`@objectstack/spec@18.2.0`, the last release).** `cube` was `z.string()`, so `{ "cube": "", "measures": ["x.count"] }` passed the body schema at `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql`, reached the engine, and the engine's guard threw a plain `Error` (`Cube name is required …`), which the door mapped to **500 `INTERNAL_ERROR`** — a client input mistake read as a server fault, paged operators and got retried. The same body with `cube` left out answered 400.
+  - **Now.** `cube` is `z.string({ error: … }).min(1, …)` (JSON Schema `minLength: 1`; the one sentence is the type-level `error` and the `.min(1)` message alike). An empty cube name is refused at the door, `400 VALIDATION_FAILED` with one `fields[]` entry `{ field: 'cube', code: 'min_length' }` reading the schema's prescription (`Name the cube to query: …`, exported as `ANALYTICS_CUBE_NAME_REQUIRED`), and the engine is never called. A missing `cube` keeps the 400 it already had, and now reads the same sentence (the member carries a type-level `error` beside its `.min(1)`) where it read Zod's `expected string, received undefined`; a present `cube` that is not a string reads the same sentence with code `invalid_type`. The field code is what tells the cases apart (`required` / `invalid_type` / `min_length`).
+  - **`@objectstack/runtime`.** The two doors now hand the body to the field mapper (`fieldsFromZodIssues(issues, body)`, as the `/data` doors do), so an ABSENT required key of the analytics body is reported with the ADR-0114 code `required` where it used to read Zod's `invalid_type` for the same body: `cube` left out, `measures` left out, and a request with no body at all (`field: '(body)'`). A present key of the wrong type still reads `invalid_type`. Status and `error.code` (`400 VALIDATION_FAILED`) are unchanged; only the per-field `fields[].code` moves.
+  - **`@objectstack/service-analytics`.** `AnalyticsService.query` and `generateSql` refuse an absent or empty `cube` with the same typed refusal — `code: 'VALIDATION_FAILED'`, `status: 400`, `name: 'ValidationError'`, the schema's own sentence as the message, and a `fields[]` entry at `cube` produced by running the value through the schema's `cube` member and the one D3 mapper, so its code is the door's for the same value (`required` absent, `min_length` empty, `invalid_type` for a `null`) — in place of the two plain `Error` throws, so a plugin, flow or test that holds the service reads the answer the door gives, and a boundary that serves the throw (`resolveThrownHttpError`, the dispatcher's error exits) answers 400 rather than 500.
+  - **Not covered.** `MemoryAnalyticsService` (`@objectstack/driver-memory`), the other `IAnalyticsService` implementation, keeps its plain `Error('Cube name is required')` for the same input in this release; this change does not touch it. At the HTTP doors the schema now refuses an empty cube before either implementation runs, so the difference reaches in-process callers only.
+  - **Unchanged.** A non-empty cube name parses and runs as before. A whitespace-only name is a name no cube carries and keeps its `404 CUBE_NOT_FOUND` from the engine; this change adds no trimming rule. Nothing is stored: a cube name travels in a request, never in stack metadata, so there is no row to rewrite.
+  - **Who sees it.** A dashboard, client or script that sends `cube: ""` — an unset selection or a blank form field — read a 500 before and reads a 400 with the field named now. A test that pinned the old plain-Error text (`Cube name is required`) pins the envelope instead.
+  
+  **The remedy.** Name the cube to query: a cube `GET /analytics/meta` lists, or a registered object name. There is no mechanical rewrite: an empty string names no cube, so the choice is the caller's.
+- 6dc06b2: fix(service-analytics): a dataset refuses a measure `currency` that contradicts its field's `fixed` code, and a derived measure across two different `fixed` codes (ADR-0144 open item 12)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  **BREAKING** (`@objectstack/service-analytics`): two compile-time refusals, `DATASET_INVALID` / 400, for dataset metadata that compiled before and printed a wrong label or a wrong number. Both reach boot registration, `queryDataset` and the Studio draft preview, which compile through the one `compileDataset` call.
+  
+  - A measure `currency` whose code differs from the aggregated field's `fixed` code. The column printed the field's amounts under the measure's code, such as euros labelled `USD`. The message names the fix: delete the measure's `currency`, and the column takes the field's code. A measure `currency` that restates the `fixed` code is still accepted.
+  - A derived measure, for every op, whose monetary operands resolve to two different `fixed` codes, directly or through a derived `sum` / `difference` built on them. The value combined bare numbers in two currencies and carried no currency at all. The message names the fix: derive it from measures in one currency, or drop the operand in the other. A `count` operand is not compared, so an amount per invoice still compiles.
+  
+  Not judged, unchanged: a `fixed` code against the tenant currency, which is not known at compile; a measure `currency` over a `dynamic` field. The record-mode arms of both guards are unchanged.
+  
+  No in-tree dataset declares either shape. A deployed tenant's stored datasets cannot be surveyed from the repository: a stored dataset with either shape now refuses at registration and at query, and its message names the edit.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the two refusals reject a contradiction in a dataset's own measures at compile and name the fix in their message; there is no stored shape to convert and no key is removed -->
+- ba4ecf1: fix(service-analytics): a dataset refuses a derived measure `currency` that contradicts the one `fixed` code its operands resolve to
+  
+  Clause-②: no (narrowing) — not a widening; a dataset that compiled before is refused now
+  Metadata-protocol: narrowed
+  
+  **BREAKING** (`@objectstack/service-analytics`): one more compile-time refusal, `DATASET_INVALID` / 400, for dataset metadata that compiled before and printed a wrong label. It reaches boot registration, `queryDataset` and the Studio draft preview, which compile through the one `compileDataset` call.
+  
+  - A derived `sum` / `difference` whose monetary operands all resolve to one `fixed` code, directly or through a derived measure built on them, and which declares its own `currency` with another code. The column printed the operands' amounts under the declared code, such as `{ derived: { op: 'sum', of: ['eur_a', 'eur_b'] }, currency: 'USD' }` over two EUR-fixed measures printing euros labelled `USD`. The message names the dataset, the measure, its operands and their code, and the fix: delete the measure's `currency` (the column takes the operands' code), or restate that code.
+  - A derived measure `currency` that restates the operands' `fixed` code is still accepted.
+  
+  Not judged, unchanged: a derived measure whose operands resolve to no one `fixed` code (a `fixed` amount with a tenant-currency one, a `ratio` or `product`), and the record-mode and mixed-code refusals of both guards.
+  
+  No in-tree dataset declares this shape. A deployed tenant's stored dataset with it now refuses at registration and at query, and its message names the edit.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the refusal rejects a contradiction in a dataset's own measures at compile and names the fix in its message; there is no stored shape to convert and no key is removed -->
+
+### Patch Changes
+
+- 14ab711: fix(service-analytics): a date-dimension series answers every bucket of its window, the empty ones included (#26893)
+  
+  Clause-②: no — no input is refused or newly accepted and no export or type changes; a dataset answer gains the rows for the time buckets no record fell in, which it used to leave out
+  Metadata-protocol: none
+  
+  A grouped query answers one row per bucket that holds records, so a month with no closed-won deal was not a zero in a 12-month revenue trend: it was missing, and a chart's category axis drew the months on either side of it as neighbours. `queryDataset` (and `POST /api/v1/analytics/dataset/query`, which the dashboard's dataset widget calls) now adds those buckets in the dataset executor:
+  
+  - **Which buckets.** When the grid's time dimension carries a `timeDimensions[].dateRange` (a preset or an explicit pair), every bucket of that window, in order. With no `dateRange`, only the gaps between the first and last bucket that came back are filled: a window stated only in `runtimeFilter`, or a one-bound filter such as `{ close_date: { $gte: '{12_months_ago}' } }`, does not bound the edges. No window and no rows still answer no rows.
+  - **Their values.** The same values an empty group already reads: `0` for `count` and `sum`; `avg`, `min` and `max` stay unset (the column is absent from the row, which a chart reads as no value), never `0`. A derived measure is computed over them as over any row.
+  - **Other dimensions.** With a second grid dimension (month × owner), each combination that already holds a row gets every bucket; a combination no row holds is not added.
+  - **Keys.** The added keys are spelled by the same bucket labeller the grouping uses, in the selection's timezone, so they sort and merge with the real ones (`2026-05`, `2026-W01`, `2026-10-04`).
+  - **Not filled.** A selection with a `limit` or `offset`, an `order` on a measure, or a `compareTo`, and a grid with two bucketed time dimensions, answer exactly as before. A fill that would leave more than 2,000 rows in the grid (a `day` series over ten years) does not run at all, so the answer is never filled part-way.
+- 12b5aec: fix(service-analytics): a windowed dataset answer reports its window in `drillRanges`, so a drill list stays inside the picked period
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A dataset query whose selection carries `timeDimensions[].dateRange` (a report's picked period) counts only that period's records, but its answer's `drillRanges` covered only the date dimensions it groups by. So a report run on "this quarter" and grouped by stage drilled to a list of every period's deals, and a month bucket cut by `last_30_days` drilled the whole month.
+  
+  - **The window rides `drillRanges`.** A windowed dimension that is not grouped gets an entry on every row: the `[gte, lt)` the query filtered by. A windowed field that a bucket already bounds narrows that bucket's entry to the part inside the window, and adds no entry of its own, so an edge bucket drills only its in-window records. Drill hosts already filter by every `drillRanges` entry, by its `field`, so they need no change.
+  - **One window, not a second resolver.** The bounds come from the query's own steps: the preset resolved in the reference time zone, an explicit `[a, b]` as written, the shared whole-day lowering (a bare-day end runs to the start of the next day), and the engine's temporal storage form: ISO instants for a `datetime` field, `YYYY-MM-DD` days for a `date` field.
+  - **No entry when there is no exact spelling.** An explicit window whose end is an instant (compared with `<=`), or whose end is the last supported day (no upper bound), gets no entry, and the drill stays as wide as before. So does a field whose type is unknown under a non-UTC time zone, as for buckets.
+  - **Spec.** The `drillRanges` docblock on `AnalyticsResult` and its `.describe` text on the dataset answer schema say what the key now carries. No key is added.
+- 835b2d1: fix(service-analytics): a `compareTo` dataset answer also returns the time buckets that are empty in both windows (#27111)
+  
+  Clause-②: no — no input is refused or newly accepted and no export or type changes; a `compareTo` dataset answer gains the rows for the time buckets no record fell in, in either window, which it used to leave out
+  Metadata-protocol: none
+  
+  The empty time-bucket fill for a date-dimension series did not run when the selection carried a `compareTo`, so a period-over-period trend still dropped a month that held no record in either window, and a chart drew the months on either side of it as neighbours. `queryDataset` (and `POST /api/v1/analytics/dataset/query`) now fills a `compareTo` answer by the same rule as a plain series:
+  
+  - **Which buckets.** The primary window decides: every bucket of the time axis's own `dateRange`, never the shifted one. A bucket that holds records in either window already comes back, with the same values as before; only a bucket empty in both windows is added. An axis with no `dateRange` of its own (the comparison anchored on another, window-only date) gets only the gaps between its first and last bucket filled.
+  - **Their values.** The same values an empty group reads, for the measure and for its `<measure>__compare` column alike: `0` for `count` and `sum`; `avg`, `min` and `max` stay unset (the column is absent from the row). A derived measure is computed over them as over any row.
+  - **Not filled.** As for a plain series: a selection with a `limit` or `offset`, an `order` on a measure or on a `__compare` column, a grid with two bucketed time dimensions, and a fill that would leave more than 2,000 rows answer exactly as before.
+  
+  This supersedes the "or a `compareTo`" in the **Not filled** line of the #26893 note in the same release: a `compareTo` answer is filled too, as above.
+- 5b5cff1: fix(service-analytics): a preset `dateRange` on a `date` field counts the reference time zone's calendar days, east of UTC too
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset or analytics query with a preset `dateRange` (`this_quarter`, `last_30_days`, …) on a dimension whose field is `type: 'date'` counted the wrong calendar days under a reference time zone east of UTC. The preset resolves to the zone's midnight instants, and a `date` column read each instant by its leading UTC day, so the window slid one day early: in `Asia/Shanghai`, `this_quarter` (Q3 2026) counted 2026-06-30 and dropped 2026-09-30. West of UTC the days were already right.
+  
+  Now a `date` field compares the calendar days the period covers in the reference zone (Q3 is 2026-07-01 through 2026-09-30 in any zone), and a `datetime` field keeps comparing instants. The fix applies on both query strategies, in the drill ranges a windowed answer reports (so a drill still lists exactly what the row counted), and in the draft preview. An explicit `[a, b]` window is unchanged, and so is a field whose type the host cannot name.
+- bc4c963: fix(driver-memory): a preset `dateRange` on a `date` field counts the reference time zone's calendar days on the in-memory analytics face
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An analytics query on the in-memory driver with a preset `dateRange` (`this_quarter`, `this_month`, …) on a dimension whose field is declared `type: 'date'` counted the wrong calendar days from UTC westward. The face compared the preset's resolved instants (the zone's midnight, `2026-07-01T07:00:00.000Z` in `America/Los_Angeles`) against the stored bare day as text, so `this_quarter` (Q3 2026) dropped 2026-07-01 and counted 2026-10-01, in `America/Los_Angeles` and in `UTC` alike.
+  
+  Now a `date` field compares the calendar days the period covers in the reference zone (Q3 is 2026-07-01 through 2026-09-30 in any zone), and a `datetime` field keeps comparing instants: the same rule service-analytics' faces apply. An explicit `[a, b]` window is unchanged, and so is a field whose type the driver was never told through `syncSchema`.
+  
+  The rule now has one home, `@objectstack/core`: `dateRangeWindowBounds` and `inclusiveCalendarDayWindow` are exported from it, and `@objectstack/service-analytics` calls them instead of its own copy (no behaviour change there). `InMemoryDriver` gains `isDeclaredDateField(object, field)`, which answers from the declared schema.
+- 96367f1: fix(service-analytics): a derived `sum` / `difference` over one `fixed` currency code carries that code on its result column
+  
+  Clause-②: no (the response comes to say what `content/docs/data-modeling/currency.mdx` already declares: "A derived `sum` or `difference` over one `fixed` code carries that code")
+  Metadata-protocol: none
+  
+  A dataset derived measure that adds or subtracts measures whose amounts are all fixed to one currency code, such as `{ derived: { op: 'sum', of: ['eur_a', 'eur_b'] } }` over two EUR-fixed amounts, reached `POST /analytics/dataset/query` as a bare number with no `currency`, so a renderer printed euros unlabelled. Its column now carries that code (`EUR`), on the live query and the Studio draft preview alike. The code is the one the dataset compiler's currency guard already resolves for the measure, read from that same resolution, so the column says what compile judged.
+  
+  Unchanged: a derived measure whose operands resolve to no one `fixed` code (a `fixed` amount with a tenant-currency one, two tenant-currency amounts, explicit codes over `dynamic` fields, record-mode amounts) and every `ratio` or `product` carry no currency unless they declare their own. The refusal of a derived measure `currency` that contradicts its operands' `fixed` code now names the fix as "delete the measure's `currency` (the column takes the operands' code), or restate that code".
+- 8882857: fix(service-analytics): a live dataset query serves a derived measure built on another derived measure, and refuses a derived cycle with its path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `DatasetSchema` accepts a derived measure whose `of` names another derived measure, and the currency page (`content/docs/data-modeling/currency.mdx`) describes one: "a measure built on it is judged the same way". `queryDataset` did not answer it:
+  
+  - **Live query, native and ObjectQL strategies.** The derived operand was handed to the cube as a base measure and refused `INVALID_FIELD` / 400 ("Measure 'total_twice' on cube … aggregates field 'total_twice', which object … does not have"). It is now served: the executor follows `of` until it reaches aggregated measures and computes the derived measures dependencies first, at any depth, in `totals` too.
+  - **Draft preview.** It runs the same executor over seed rows and answered the derived operand as a row count, so a `ratio` over a derived `sum` read `1` where the answer was `150`. It now answers the same value as the live query.
+  - **A cycle.** A derived measure that reaches itself through `of` (`loop_a` → `loop_b` → `loop_a`; the schema refuses only the one-step self-reference) has no value at any depth. Selecting it, or a measure built on it, is refused `DATASET_INVALID` / 400 before anything is read, and the message names the cycle. Before, the live strategies refused it `INVALID_FIELD` as an unknown field and the draft preview served a number.
+  
+  A derived measure whose operands are all aggregated measures is unchanged: same value, same columns.
+- 8a33dff: fix(service-analytics)!: the dataset draft preview mints and judges a measure the dataset does not declare as the live strategies do, so a misspelled measure is refused `INVALID_FIELD` instead of answered as a row count
+  
+  Clause-②: no (narrowing) — a draft-preview dataset query (`queryDataset` with `previewDrafts: true` over a pending seed draft) now refuses a selected measure that the native and ObjectQL strategies refuse, which it served before. Nothing is widened: no export, answer member, error code or status is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the draft preview now answers an undeclared measure the way the published dataset already answers it. The refusals are the live faces' existing ones, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on the draft preview of `queryDataset` (`@objectstack/service-analytics`).
+  
+  - **Before.** The preview read every measure the dataset does not declare as `count(*)`. A misspelled `nope` or `ghost_avg` answered a row count per group under the typo, where both live strategies refuse it `INVALID_FIELD` / 400 ("Measure 'nope' on cube … aggregates field 'nope', which object … does not have. Valid measures: …"). A working spelling read the wrong number too: `amount_sum`, or a bare `amount`, answered the row count where the live strategies answer `SUM(amount)`.
+  - **Now.** The preview mints an undeclared measure with the live strategies' own mint (the `<cube>.` qualifier rule, then the `_sum` / `_avg` / `_min` / `_max` / `_count_distinct` suffix convention, a bare field name meaning its sum) and asks the same gates before it reads a seed row: a field the object does not have is refused `INVALID_FIELD` / 400 with the same message; an aggregate the field-type table refuses (`region_sum` over a text field) is refused `INVALID_FIELD` / 400; a spelling that is not a column reference (`amount + 1`) is refused `PERMISSION_DENIED` / 403; and the field-level read gate judges a minted measure by the field it aggregates.
+  - **Answers that change value.** On the preview, the answer for an inferred measure over a real field (`amount_sum`, `amount`, `amount_avg`, …) changes from a row count to the live value, the number the published dataset serves.
+  - **Unchanged.** A declared measure, a duration measure, a derived measure and the undeclared `count` serve what they served. The live strategies are unchanged.
+  - **Who sees it.** A Studio author whose draft widget names a measure the dataset does not declare: a typo now shows the refusal it meets once published, instead of a plausible count.
+  
+  **The remedy.** Name a measure the dataset declares, or spell an inferred one over a field the object has (`<field>_sum`, `<field>_avg`, …).
+- d35db2c: fix(service-analytics): a dataset `count` that names an amount field is no amount: the cross-currency guard no longer compares it, and its result column carries no currency
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A `count` counts rows, not money, also when it names a field (`{ aggregate: 'count', field: 'amount' }` counts the records with an amount). Two readers still treated such a count as an amount in the field's currency:
+  
+  - **The compile-time currency guard.** A derived measure over an amount and such a count was refused `DATASET_INVALID` / 400 as "amounts in different currencies": for example `ratio(usd_total, priced_invoices)`, an average amount per priced invoice, when the counted field is a record-currency amount or fixed to another code. It now compiles. Only an amount aggregate (`sum`, `avg`, `min`, `max`) resolves a currency for the guard, so a `count` is never compared, whatever field it names or `currency` it declares. Unchanged: a derived measure over two amounts in different `fixed` codes, or a record-currency amount and another currency, is still refused, and a measure `currency` that contradicts its field's `fixed` code is still refused on a `count` too.
+  - **The result column.** A `count` over a `fixed`-currency or tenant-currency amount carried that currency on its column (`fields[].currency`), so a dashboard tile counting priced invoices printed `€3` instead of `3`. The column now carries no currency; a `sum` / `avg` / `min` / `max` over the same field keeps it, and a measure that declares its own `currency` keeps it as before.
+- 4159c70: fix(service-analytics)!: the dataset draft preview refuses a dimension whose field the object does not have, as the live strategies do, instead of grouping every row under one null key
+  
+  Clause-②: no (narrowing) — a draft-preview dataset query (`queryDataset` with `previewDrafts: true` over a pending seed draft) now refuses a selected dimension that the native and ObjectQL strategies refuse, which it served as one `null` group before. Nothing is widened: no export, answer member, error code or status is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the draft preview now answers an undeclared dimension the way the published dataset already answers it. The refusal is the live faces' existing one, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on the draft preview of `queryDataset` (`@objectstack/service-analytics`).
+  
+  - **Before.** The preview grouped by a dimension the dataset does not declare without asking whether the object has its field. A misspelled `bogus` answered one group, `{ bogus: null }`, carrying the whole total, where both live strategies refuse it `INVALID_FIELD` / 400 ("Dimension 'bogus' on cube … groups by field 'bogus', which object … does not have. Valid dimensions: …").
+  - **Now.** The preview asks the live strategies' dimension gate before it reads a seed row, so `bogus` is refused `INVALID_FIELD` / 400 with the same message, alone or beside a declared dimension.
+  - **Gate order.** The preview now asks its gates in the live order: the measure-field gate, the dimension-field gate, the aggregate × field-type door and the record-currency door (`ensureCube`'s order), then the caller-measure column-reference gate, the stored-body, internal-field and field-level read gates (`query()`'s order). So a query with two mistakes is answered about the same one first on every face. Before, the preview asked the column-reference gate (403) ahead of the field-type (400) and currency doors, so `['amount + 1', 'region_sum']` answered 403 on the preview and 400 live.
+  - **Unchanged.** A declared dimension, and an undeclared one naming a field the object has (`amount`), group as before on every face. The live strategies are unchanged.
+  - **Who sees it.** A Studio author whose draft widget groups by a dimension name the object has no field for: the typo now shows the refusal it meets once published, instead of a single blank group with the grand total.
+  
+  **The remedy.** Group by a dimension the dataset declares, or by one of the object's own field names.
+- f64724a: fix(service-analytics)!: the dataset draft preview refuses a runtimeFilter on a field the object does not have, and a dimension over a JSON column, as the live strategies do, instead of serving an empty or object-keyed answer
+  
+  Clause-②: no (narrowing) — a draft-preview dataset query (`queryDataset` with `previewDrafts: true` over a pending seed draft) now refuses a `runtimeFilter` member whose field the object does not have, and a grouped dimension over a `json` column, both of which the native and ObjectQL strategies refuse and the preview served before. Nothing is widened: no export, answer member, error code or status is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the draft preview now answers an unknown filter field and a JSON dimension the way the published dataset already answers them. Both refusals are the live faces' existing ones, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on the draft preview of `queryDataset` (`@objectstack/service-analytics`).
+  
+  - **Before.** The preview evaluated a `runtimeFilter` over the seed rows without asking whether the object has each filtered field. A misspelled `{ bogus: 'x' }` matched no row and served `[]`; under an `$or`, `{ $or: [{ bogus: 1 }, { region: 'amer' }] }` served the other arm's rows. Both live strategies refuse it `INVALID_FIELD` / 400 with `param: 'where'` ("Filter member 'bogus' in 'where' on cube … constrains field 'bogus', which object … does not have …"). The preview also grouped by a dimension over a `json` column, one group per object value, where live refuses it `INVALID_FIELD` / 400 with `param: 'dimensions'` (#20807).
+  - **Now.** The preview asks both live gates before it reads a seed row, so each mistake is refused with the same envelope and message on all three faces: the filter in every spelling (object, `$or` arm, array triple), the JSON dimension whether the dataset declares it or not.
+  - **Gate order.** Both gates sit where `ensureCube` asks them: the structured-JSON door after the dimension-field gate and before the aggregate × field-type door, the `where` gate last among `ensureCube`'s gates (after the record-currency door) and before `query()`'s caller-measure column-reference gate. So a query with two mistakes is answered about the same one first on every face: a JSON dimension beside an unknown filter field answers the dimension; `amount + 1` beside an unknown filter field answers the filter (400), where the preview answered the column-reference gate (403).
+  - **Unchanged.** A filter on a declared dimension, on an undeclared field the object has (`amount: { $gt: 40 }`) and an `$in` filter serve the same rows as before on every face. The live strategies are unchanged.
+  - **Who sees it.** A Studio author whose draft widget filters on a field name the object does not have, or groups by a JSON field: the mistake now shows the refusal it meets once published, instead of an empty chart or one bar per object value.
+  
+  **The remedy.** Filter on one of the object's own fields, spelled as the object declares it; group by a scalar field, not a `json` one.
+- a2e7556: fix(service-analytics)!: a dataset dimension spelled through a relationship path the dataset does not declare is refused INVALID_FIELD on the native, ObjectQL and draft-preview faces
+  
+  Clause-②: no (narrowing) — a dimension named through a relationship path the dataset's `include` does not declare is now refused `INVALID_FIELD` / 400: in a `queryDataset` selection on all three faces, and in an `/analytics/query` or `/analytics/sql` request over a registered dataset cube, where the ObjectQL strategy also served it before (the gate sits in the call context those doors share). The draft preview served it as one `null` group and the ObjectQL strategy served a real lookup by joining it anyway; both now refuse. The native strategy refused it `DATASET_INVALID` / 400 and now answers `INVALID_FIELD` / 400 for this case only. Nothing is widened: no export, answer member, error code or status is added; both codes were already on the wire.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: a selection that names an undeclared relationship path is refused on the faces that served it, and the native face's refusal takes the member-level code the other dimension gates answer. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on `queryDataset` (`@objectstack/service-analytics`), and a code change on one native refusal.
+  
+  - **Before.** A selected dimension spelled through a relationship the dataset does not include (`OBJECT.bogus`, or a real lookup such as `account.name` with no `include: ['account']`) got three answers: the native strategy refused `DATASET_INVALID` / 400 ("join … is not backed by a declared relationship"), the ObjectQL strategy refused `OBJECT.bogus` `INVALID_FIELD` from the driver and served `account.name` grouped by the related record, and the draft preview (`previewDrafts: true`) served one `null` group with the whole total.
+  - **Now.** The service asks one gate on every strategy and on the preview, after the object, body, internal-field and field-level verdicts: the member is refused `INVALID_FIELD` / 400 with one message naming it, the first undeclared path hop by hop (`account.owner` when only `account` is included), the declared paths and the valid dimensions. The error carries `member`, `param: 'dimensions'` and `cube`.
+  - **Unchanged.** A dimension through a declared path, and a dotted spelling that resolves to a declared dimension (`CUBE.region`, `OBJECT.region`), serve as before. An undeclared plain dimension keeps its own refusal. A path through an object the caller may not read keeps its 403. A `runtimeFilter` member through an undeclared path, and a hand-authored cube's configured allowlist, still reach the native strategy's `DATASET_INVALID`.
+  - **Who sees it.** A widget or caller grouping by a related field the dataset forgot to include, through `queryDataset` or through `/analytics/query` and `/analytics/sql` naming a registered dataset cube: every face now gives the refusal, instead of a blank group in the draft, a served chart or statement on an ObjectQL driver, and `DATASET_INVALID` on a SQL driver.
+  
+  **The remedy.** Add the relationship to the dataset's `include`, or group by a dimension the dataset declares.
+- c01690e: fix(service-analytics)!: members read through a relationship path answer one refusal on the native, ObjectQL and draft-preview faces
+  
+  Clause-②: no (narrowing) — the draft preview (`queryDataset` with `previewDrafts: true`) now refuses `INVALID_FIELD` / 400 any member it would read through a relationship path (a dimension, time dimension, measure or filter member), which it served as one `null` group, `[]` or a total of `0`, because it joins nothing; a `timeDimensions` entry and a `runtimeFilter` member spelled through a relationship path the dataset's `include` does not declare are refused `INVALID_FIELD` / 400 on every face, where the native strategy answered `DATASET_INVALID` / 400 and the preview served; and a declared path to a column the related object lacks is refused `INVALID_FIELD` / 400 before SQL, where the native strategy answered `DATABASE_ERROR` / 500. Nothing is widened: no export, answer member, error code or status is added; every code was already on the wire.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: a selection that reads through a relationship path is refused by the preview that cannot join it, a selection naming an undeclared path or a missing related column is refused on the faces that served it or failed on it, and the native face's refusal takes the member-level code the other member gates answer. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on the `queryDataset` draft preview (`@objectstack/service-analytics`), and a code change on two native refusals.
+  
+  - **Before.** Measured on real SQLite over a dataset `include: ['account']`: the preview answered a backed `account.name` (or a declared dimension over it, or a declared measure over a related field) with one `null` group holding the whole total, a backed `runtimeFilter` member with `[]`, and a windowed backed time dimension with a total of `0`, while the live strategies served the real answer. `OBJECT.region` and `CUBE.region`, which both live strategies resolve to the declared `region`, also came back as one `null` group. A time dimension through an undeclared path was dropped by the preview and refused `DATASET_INVALID` by the native strategy when only windowed; a `runtimeFilter` member through an undeclared path got `DATASET_INVALID` (native), the cross-object filter refusal (ObjectQL) and `[]` or, under an `$or`, the other arm's rows (preview). `account.bogus` reached SQL on the native strategy as a 500.
+  - **Now.** The service's join gate (the one `dimensions` already asked since the previous fix) also judges `timeDimensions` entries and `where` leaves, so an undeclared path is refused on every face with one message naming the member and the path. A second gate refuses a declared path to a column the related object does not have, naming the member, the column (`field`) and the object (`object`), on every face with one message. The preview then refuses any remaining relationship-path member with a message saying it joins no related object, and answers `OBJECT.region` / `CUBE.region` with the declared dimension's groups.
+  - **Unchanged.** The live strategies serve a backed path as before (the ObjectQL strategy keeps its own cross-object refusals for a filter, a bucketed time dimension or a measure it cannot join). A path through an object the caller may not read keeps its 403. A hand-authored cube's configured allowlist still answers `DATASET_INVALID`, and so does every other reason that code is raised.
+  - **Who sees it.** An author previewing a draft dataset that groups, filters or measures through a related object: the preview now says it cannot join instead of showing a number that changes after publish. A caller naming a related field the dataset does not include, or a related column that does not exist: one `INVALID_FIELD` / 400 on every face.
+  
+  **The remedy.** Publish the draft to query a related field through the live strategies, or preview without it; add the relationship to the dataset's `include`; check the related column's spelling.
+- 92a1638: fix(service-analytics): the draft preview groups a bucketed time dimension and reads a qualified filter member as the live faces do, and the ObjectQL strategy serves a backed `RELATION.id` dimension
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Three answers `queryDataset` gave differently depending on the face, measured on real SQLite:
+  
+  - **A bucketed time dimension in the draft preview.** A `timeDimensions` entry with a `granularity` is now grouped by its bucket whether or not the member is also in `dimensions`, and the bucket is a column of the answer and of `fields` (type `time` for a `date` dimension). This is the set both live strategies project. Before, the preview grouped by `dimensions` alone: one total where the live faces answered one row per month, regions without months, and a windowed `year` bucket with no key.
+  - **A filter member spelled other than its column, in the draft preview.** A `runtimeFilter` (or dataset filter) member such as `OBJECT.region`, `CUBE.region` or a dataset dimension `zone` declared over `region` is now read from the column it names, with that column's declared type, through the member resolution the live strategies use. Before, the preview matched no drafted row: `[]`, or under an `$or` only the other arm's rows, where both live faces served the rows.
+  - **A backed `RELATION.id` dimension on the ObjectQL strategy.** `account.id` (with `include: ['account']`), and two dimensions through one relationship (`account.id` beside `account.name`, or the FK column `account` beside `account.name`), are now served with the native strategy's groups. Before, the strategy handed the engine a `groupBy` naming one column twice and answered `INVALID_QUERY` / 400. The engine's duplicate-column refusal is unchanged; the strategy now names each column once.
+  
+  Nothing is refused that was served, and no export, key, error code or status is added. The draft preview still refuses a relationship-path member (#28555).
+- 52de5a5: fix(service-analytics): the ObjectQL strategy serves two dataset dimensions over one column
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A dataset that exposes one column under two dimension names (`region`, and `zone` declared over `region`) and is queried with both is now served by the ObjectQL strategy with one group per value, keyed by both names, as the native strategy and the draft preview answer it. This holds on the strategy's direct path, beside a bucketed time dimension, and beside a cross-object dimension such as `account.name`. Before, the strategy handed the engine a `groupBy` naming the column twice and answered `INVALID_QUERY` / 400, measured on real SQLite.
+  
+  The strategy now names each group key once: the same column, or the same column bucketed at the same granularity. The engine's duplicate-column refusal is unchanged, and it still answers a selection that asks for two values under one name, such as a column raw beside its own month bucket. Nothing is refused that was served, and no export, key, error code or status is added.
+- c5ac1b6: fix(service-analytics)!: the draft preview refuses one column asked raw beside its own time bucket, as the live faces do
+  
+  Clause-②: no (narrowing) — the draft preview (`queryDataset` with `previewDrafts: true`) now refuses `INVALID_QUERY` / 400 a selection that asks one column for two values under one name (a dimension `X` beside a `timeDimensions` entry `OBJECT.X` with a granularity, or two buckets of one column), with the message, `path`, `param`, `object` and `fields` the native and ObjectQL strategies already answer; it served both columns. Nothing is widened: no export, answer member, error code or status is added, and the code was already on the wire.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package root changes: a selection both live faces already refuse is now refused by the draft preview too, with their refusal. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on the `queryDataset` draft preview (`@objectstack/service-analytics`).
+  
+  - **Before.** Measured on real SQLite: `dimensions: ['closed_at']` with `timeDimensions: [{ dimension: 'OBJECT.closed_at', granularity: 'month' }]` was refused by both live strategies with the engine's duplicate-column refusal (`groupBy.1.field names the column 'closed_at', which groupBy.0 already names`), while the draft preview answered one row per raw timestamp carrying both columns. The same held for a month and a year bucket of one column.
+  - **Now.** The preview judges the keys the ObjectQL strategy would hand the engine for the selection, at the same positions, and refuses with the engine's refusal for them, so all three faces answer one `INVALID_QUERY` / 400 with one message.
+  - **Unchanged.** A raw dimension beside a bucket of a different column, a dimension that is also its own time dimension (one bucket), and two dimensions over one column with no bucket (#28744) are still served on every face. The live refusal does not move.
+  - **Who sees it.** An author previewing a draft dataset with such a selection: the preview now says what publish would say, instead of a table publish refuses.
+  
+  **The remedy.** Ask for the column once: as the bucketed time dimension, or as the raw dimension.
+- fa59f78: fix(service-analytics)!: two granularities of one time dimension are refused on every face, not collapsed to the last one
+  
+  Clause-②: no (narrowing) — `timeDimensions` naming one dimension, spelled the same way, at two granularities (`[{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'year' }]`) is now refused `INVALID_QUERY` / 400 on the native strategy, the ObjectQL strategy and the draft preview, with the refusal each already gives one column asked twice under one name (#28765); every face served it as the last granularity's buckets and dropped the other entry. Nothing is widened: no export, public member, answer member, error code or status is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package root changes: a selection that was half served is refused with a refusal already on the wire. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on `queryDataset` (`@objectstack/service-analytics`), on every face.
+  
+  - **Before.** Measured on real SQLite: the pair above answered one `2026` row holding the whole total on all three faces (the `month` entry dropped silently); `year` then `month` answered the months (the `year` entry dropped). Beside the raw dimension `closed_at`, both live faces answered one `1970-01` bucket holding the whole total.
+  - **Now.** The ObjectQL strategy's group-key builders keep every granularity a dimension is asked at, so the engine sees both buckets of the one column and answers its duplicate-column refusal, which the native strategy relays for a bucketed selection; the draft preview judges the same keys and gives the same refusal, field for field. This holds beside other dimensions and beside a cross-object dimension.
+  - **Unchanged.** One dimension asked twice at the same granularity is one bucket and is served. One bucket per column, and buckets of different columns, are served. No new refusal is added; the existing one now sees the pair.
+  - **Who sees it.** A caller sending two granularities for one time dimension: a refusal saying the column is asked twice, instead of a chart missing one of them.
+  
+  **The remedy.** Ask each time dimension at one granularity.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [1617b7f]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

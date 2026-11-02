@@ -1,5 +1,1042 @@
 # @object-ui/plugin-detail
 
+## 18.3.0
+
+### Minor Changes
+
+- 17b5152: feat(spec,ui)!: a record opens one way per object — `navigation.mode` keeps `drawer` (now the default), `page`, `new_window` and `none`; `modal`, `split` and `popover` are retired, and a list page's `recordAction` drops `modal`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`navigation.mode` refuses `modal`, `split` and `popover`; `interfaceConfig.recordAction` refuses `modal`; an omitted `navigation.mode` defaults to `drawer` instead of `page`)
+  
+  <!-- adr-0087: registered navigation-mode-overlay-values-removed, ui-record-open-overlay-modes-retired -->
+  
+  **BREAKING** accept-set narrowing and default change on the record-open surface (`@objectstack/spec`), with the console following it in the same release.
+  
+  The model, ruled by the maintainer: an object has one default way to open a record — the drawer, which expands to the full page (the same record page at two widths) — and `page` only for an object that declares it. A centred dialog and a popover were extra surfaces for the same record, and the side-by-side pane is each reader's own choice, not something an author fixes for every reader.
+  
+  - **FROM → TO.** `navigation.mode: 'modal'`, `'split'` or `'popover'` (on a list view, an object's `listViews` entry, or a page list block: `list-view`, `object-grid`, `object-kanban`, `object-calendar`, `object-map`, `object-gantt`, `object-tree`, `object-timeline`) → delete the value; the block takes the `drawer` default. `interfaceConfig.recordAction: 'modal'` → delete the value; the default is `drawer`. Declare `page` only for an object whose record should open as a full page.
+  - **The one-line fix.** Delete the retired value. `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` row is converted when it is read (the `navigation-mode-overlay-values-removed` conversion), so a view saved from Studio with one of the three values keeps loading and opens the drawer.
+  - **What the parse says.** Each retired value is refused by name with its prescription, for example "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — …", at `defineStack` as `STACK_SCHEMA_INVALID` / 422. TypeScript rejects each at a `NavigationMode` position. A misspelt mode keeps zod's own message.
+  - **The default.** A navigation block written without `mode` parses to `drawer` (it parsed to `page`). The console never honoured that `page` for a list with no navigation block, because it guessed the surface from the object's field count; that guess is retired too. A list of an object with no authored navigation opens a clicked record in the drawer, whatever its field count, and a mobile viewport still pages. An artifact or stored row that a released toolchain parsed carries the old `page` written out and keeps opening as a full page; delete it to take the drawer.
+  - **The split pane.** It is now a reader's preference, read by the console's object page from the browser (`os:record-open-mode`, `drawer` or `split`, default `drawer`). It applies only to a record that opens in the drawer; an object or view that declares `page` keeps its declaration.
+  
+  The console (`@object-ui/*`): `useNavigationOverlay` defaults a block without `mode` to `drawer` and treats `drawer` as the one overlay mode. `NavigationOverlay` keeps the drawer face and the split face the console's object page draws from the preference; its `modal` and `popover` faces, the `popoverTrigger` / `popoverAnchorRef` props and the `useOverlayAnchor` export are removed, because no caller can reach them. The grid, kanban, calendar, gantt and tree renderers drop their `split` and `popover` plumbing. The registered `object-view` renderer opens records in the drawer (a page on a mobile viewport) instead of paging a field-heavy object. The Studio list-view inspector offers the four live modes, and the list page's `recordAction` the three live values.
+  
+  Migration for code that imported the removed component API: drop `popoverAnchorRef` / `popoverTrigger` from a `NavigationOverlay` call and any `useOverlayAnchor()` call; pass `mode="split"` with `mainContent` for a side-by-side pane.
+- fbe344b: feat(spec)!: the action blocks spell the destructive variant `danger`, the word `ActionSchema.variant` uses
+  
+  An action's variant was spelled in two dialects. `ActionSchema.variant`, the declaration the action runner dispatches, takes `primary | secondary | danger | ghost | link`. The four action blocks (`action:button`, `action:icon`, `action:group`, `action:menu`) and the group/menu members took the Button primitive's `default | destructive | outline | secondary | ghost | link` (plus `primary` on the button, the icon and the members) and refused `danger`. So one destructive action was `danger` as a declaration and `destructive` as a block, and each block renderer translated between the two.
+  
+  The block rows now take `danger` in place of `destructive`: `default | danger | outline | secondary | ghost | link`, plus `primary` where it was accepted before. `danger` draws the destructive button (a red item in a dropdown or `action:menu`) and asks a `confirmText` question through the destructive confirm button. `destructive` is refused at `variant` with the rename. Other components that draw the Button primitive directly (`element:button`, toasts, alerts, badges and the like) keep `destructive`, the primitive's own word, and are not touched.
+  
+  The four block renderers forward `danger` to the runner as it is and draw it as the primitive's `destructive`. They no longer read `destructive`: stored pages are rewritten by the conversion below, so no renderer keeps a bridge for the old word. `UIActionSchema.variant` (`@object-ui/types`) follows the rows by reference. The record detail views' Delete entry in the `⋯` menu is spelled `danger` too.
+  
+  This replaces the variant sentences of the #26665 entry in this release: the action blocks no longer translate `destructive` to `danger` at their forward to the runner, and `danger` is the spelling they accept (`UIActionSchema.variant` included). That entry's confirm-dialog behaviour is unchanged: a destructive block with a `confirmText` asks through the destructive confirm button, now when it is declared `variant: 'danger'`.
+  
+  Stored rows and older built artifacts: the ADR-0087 D2 conversion `page-action-block-variant-destructive-to-danger` rewrites `variant: 'destructive'` to `'danger'` on the four blocks' `properties.variant` and on each `action:group` / `action:menu` member's `variant`, at every position a page nests a component (regions, slots, nested containers). It renames an `action:bar`'s own `variant` and the `variant` of each `actions` / `systemActions` member as well. The bar has no props row, so nothing refuses `destructive` on it, but it draws each member through the block renderers, which no longer read that word. A stored `page` row is rewritten when it is rehydrated, so it keeps drawing the destructive button and confirming through the destructive confirm button. The conversion is retired from the load path, so a source that still writes `destructive` on a block is refused, not rewritten. The D3 entry `ui-page-action-block-variant-destructive-refused` carries the judgment for `os migrate meta`.
+  
+  Clause-②: no (narrowing) — the action block rows refuse `destructive`, a value they used to accept. `danger` takes its place on the same rows.
+  
+  Metadata-protocol: narrowed (`variant: 'destructive'` is refused on the action blocks and their members; write `danger`)
+  
+  <!-- adr-0087: registered page-action-block-variant-destructive-to-danger, ui-page-action-block-variant-destructive-refused -->
+  
+  **BREAKING** for an author who wrote `variant: 'destructive'` on an action block.
+  
+  **`destructive` → `danger`.**
+  
+  - **Before.** `{ type: 'action:button', properties: { label: 'Purge', actionType: 'script', variant: 'destructive' } }` parsed; `variant: 'danger'` was refused.
+  - **Now.** `destructive` is refused at `variant` (or at `actions.N.variant` on a group or menu member) with a message naming the rename.
+  - **Fix.** Write `variant: 'danger'` on the block or member. Nothing else changes: it draws the same destructive button. `os migrate meta --from 17 --write` applies the rename to your sources.
+- 6dbff8e: feat(spec,ui)!: the record page's `slots.tabs` is retired — a slotted page fills six slots, and a page that needs its own tab strip is `kind: 'full'`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`page.slots.tabs` is a tombstone that refuses every value; `slots.related` / `slots.relatedLists` are refused by name instead of being read as `tabs`)
+  
+  <!-- adr-0087: registered page-slots-tabs-removed, page-slots-tabs-retired -->
+  
+  **BREAKING** accept-set narrowing on the record page (`@objectstack/spec`), with the console following it in the same release.
+  
+  The record page composes its tabs and columns from the object's roles and relationship flags. An authored `tabs` slot replaced that whole strip, so a page that used it lost every synthesized related list and its wide-screen columns. The slot is gone; the six live slots (`header`, `actions`, `alerts`, `highlights`, `details`, `discussion`) are unchanged.
+  
+  - **FROM → TO.** `slots: { tabs: … }` on a `kind: 'slotted'` page → delete the key. To change which related lists appear or their order, set `relatedList` / `relatedList: 'primary'` on the child's reference field; to replace the Details body, author `slots.details`; a page that needs its own strip is `kind: 'full'` and authors its header, highlights, `page:tabs` strip and `record:discussion` in `regions`, drawn as authored.
+  - **The one-line fix.** `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` page is converted when it is read (the `page-slots-tabs-removed` conversion): the slot is dropped, and a page whose only slot it was becomes an empty slotted page, which renders the synthesized default. Whether such a page should become `kind: 'full'` is a judgement the conversion cannot make; the upgrade guide entry `page-slots-tabs-retired` lists it.
+  - **What the parse says.** `slots.tabs` is refused with its prescription ("`page.slots.tabs` was removed in @objectstack/spec 18.3.0 (ADR-0085) — …") at `defineStack` as `STACK_SCHEMA_INVALID` / 422, and at the metadata save door. `slots.related` and `slots.relatedLists` are refused by name with the same remedy. TypeScript rejects `tabs` in a `definePage` slot map.
+  - **The pair check.** `checkPageSlotPair` (the `details` + `tabs` refusal) is removed from `@objectstack/spec/ui` with the slot it paired; the `page-slots-details-beside-tabs-refused` upgrade entry is folded into `page-slots-tabs-retired`.
+  
+  The four in-repo pages that authored `slots.tabs` are rebuilt as `kind: 'full'` pages that render the same nodes in the same order: `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`), `sys_approval_request_detail` (`@objectstack/plugin-approvals`) and the showcase `showcase_project_detail`.
+  
+  The console (`@object-ui/*`): `buildDefaultPageSchema` composes from the six slots only, and `RecordDetailView` lays every slotted page out by width (three columns from 1280 px), since none can opt out with an authored strip any more. `@object-ui/types` drops the pair check from its page schemas and types `PageSlotMap.tabs` as `never`. The Studio slot canvas lists six slots.
+  
+  `@objectstack/skills`: the UI skill says a slotted page has no `tabs` slot and how to shape the strip instead.
+- aad9ad5: feat(spec,lint,app-shell)!: a field group's `relatedList` names body tables only — a group naming a side card or a hidden list is refused, and Studio offers body tables only
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered field-group-related-list-side-card-refused -->
+  
+  **BREAKING** for one shape: an object's `fieldGroups[i].relatedList` that names an inbound relationship which is not a body table of the record page. Ruling B on #27478: whether a related list is a body table is decided once, by the relationship's own keys on the child's FK (ruling B on #27055), and a field group only positions one.
+  
+  - **Before.** A group's `relatedList` naming any inbound relationship parsed, passed `defineStack` and published, but the record page draws only body tables at a group: a group naming a side card (`task` through a plain lookup, say) drew nothing at the group and the card stayed in the related column, silently. Studio's group inspector offered every inbound relationship.
+  - **Now.** One predicate, `isBodyTableRelationship` (exported from `@objectstack/spec/data`), answers "is this inbound relationship a body table": its FK declares `relatedList: 'primary'`, or it is a `master_detail` FK that sets `inlineEdit` and declares no `relatedList`. A group whose `relatedList` names a relationship it does not count is refused where the child's fields are known: `defineStack` (`os validate`, `os build`) with a `STACK_CROSS_REFERENCE_INVALID` issue, and the object publish door (`PUT /api/v1/meta/object`, Studio, MCP) with `422 INVALID_METADATA`, rule `related-list-group-not-body` (`@objectstack/lint`, with an `os explain` entry). The sentence, written by `fieldGroupBodyTableRefusal` on both surfaces, names each FK that is not a body table (a side card, or hidden by `relatedList: false`) and the remedy. A bare child name names every FK of that child, so it is refused when any of them is not a body table, and the remedy points at `object.field` for the one that is. Children the name check leaves unjudged (another package's object) are left unjudged here too. `relatedLists` entries are not judged this way: they order body tables and side cards alike.
+  - **The remedy.** Mark the relationship `relatedList: 'primary'` on the child's FK (or, on an inline-edited `master_detail`, remove an explicit `relatedList: true`), name only the body table as `object.field`, or remove the group's `relatedList`. There is no automatic conversion: which edit the author meant is not recorded. The upgrade guide entry is `field-group-related-list-side-card-refused`.
+  - **One record page cell moves.** A `master_detail` FK that sets `inlineEdit` and declares `relatedList: true` is a side card, as `relatedList`'s description says ("write true to keep it a side card") and as Studio's relationship inspector writes it. The record page (`@object-ui/app-shell` `RecordDetailView`) used to draw it as a body table, because it kept its own copy of the rule that ignored `relatedList`. It now reads the spec predicate through `deriveRelatedLists`' `isPrimary`, so that list moves to the related column. `isMainContentList` (an internal helper of `@object-ui/app-shell`) is gone; its callers read `isBodyTableRelationship`.
+  - **Studio.** The field-group inspector's related-table picker (`@object-ui/app-shell`) offers body tables only, refuses to write any other pick, and shows a stored value that is not a body table with a line saying why the page draws nothing for it (`@object-ui/i18n`, en and zh).
+  - **Stored rows and built artifacts.** The object parse does not judge this, so a stored `sys_metadata` object row carrying such a group is not rewritten and still loads and registers unchanged; its record page draws what it drew before, except the one cell above. The next save of that object through the metadata write door is refused (`422`, at `fieldGroups[i].relatedList`) until it is fixed, and so is a write of the child that turns a body table a stored group places into a side card. A built artifact is judged when it is built. Census at the change: no example, platform object, dogfood fixture or HotCRM object (hotcrm `47a0666`) declares a field group `relatedList` at all; deployed metadata was not measured.
+  - **`@object-ui/plugin-detail`.** Documentation only: `bodyTablePlacement` and the `isBody` option name the spec predicate.
+- 0027c4a: feat(console): a record page opens from one request, and the record a drawer step shows next is asked ahead (#27627)
+  
+  Clause-②: yes (widening: optional `DataSource.getRecordPage` / `prefetchRecordPage`, new exports; no existing contract changes)
+  Metadata-protocol: added
+  
+  The record page (full page, split pane and drawer) asks `DataSource.getRecordPage` once when it opens, before any of its readers runs, and hands each part of the answer to the reader that used to ask for it:
+  
+  - the record, with the lookups the page resolves;
+  - each related list's total and first rows: the tab badges, collapsed and compact related cards and reference rail cards take them, so no `top=1` count probe and no separate first-rows read goes out;
+  - the header's `update` / `delete` verdicts and Claim's `transfer` decision, the in-place edit blocks' field projection, and the approval rows and lock.
+  
+  Readers still read for themselves after the open (a refresh, a write, a change on the data-invalidation bus), and a page on an adapter without `getRecordPage` reads as before. Lists the page cannot name in the request stay their own read: a list declared through a list view, a list whose filter carries a context token, and lists past the fiftieth. In the drawer, the record a ↑ / ↓ step shows next is asked ahead (`DataSource.prefetchRecordPage`), so stepping opens from an answer already on its way; on such an adapter that replaces the drawer's warm-up of the next record's related counts.
+  
+  - `@object-ui/types`: `DataSource.getRecordPage?` / `prefetchRecordPage?` and the `RecordPageRequest` / `RecordPagePayload` shapes.
+  - `@object-ui/data-objectstack`: both methods; concurrent identical reads share one request, a prefetched answer is taken once, and a write drops them all.
+  - `@object-ui/components`: `RelatedCountStore.seed` / `takeRows`.
+  - `@object-ui/plugin-detail`: `seedRecordVerdict`, `seedRecordFieldAccess`, `seedQueueClaimDecision`, `normalizeRelatedListSort`, `COMPACT_RELATED_ROWS`; a compact related card takes its first rows from the record page's answer. Its `sideEffects` array now names `queueClaim` and `recordFieldAccess` too: each drops a seeded answer on a data change through a bus subscription made at load.
+
+### Patch Changes
+
+- 2302b92: feat(console): ownership queues in the Console — a queue picker reading both sources, a Claim button the server decides, and an "In a queue" list filter
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The server half of ownership queues shipped without a Console face. Now:
+  
+  - **Queue pickers list both sources.** The flow designer's approver Value for a `queue` approver, and a sharing rule's `queue` recipient, list the queues an installed app declares (`GET /api/v1/meta/queue`) together with the organization's own `sys_queue` records, one list by machine name, and store the name. The approver picker follows the binding the server publishes (`registry-and-data`); with no data adapter, or a server that publishes another binding, it keeps the text box.
+  - **Claim.** A record sitting in a queue (no owner, a `queue` named) shows **Claim** in its header only when the explain engine's answer for a transfer of that record carries an admitting `queue_claim` rule; no answer means no button. Claim sends `{ owner_id: <self> }` through the normal update, and a lost race (`409 CONCURRENT_UPDATE`) is reported as "Someone else claimed this record first."
+  - **In a queue.** A list of an object served with the injected `queue` column gains an **In a queue** toggle that narrows the fetch (and an export) to `owner_id` empty and `queue` set. Which of those rows come back is still the server's read filter.
+  - **Docs.** A new authoring guide, *Queues and assignment rules*, covers declaring a queue and an assignment rule, the `load` requirement, what a parked record is and who sees it, how a claim is spelled, and that a queue is not a messaging audience; the approvals, sharing-rule and RLS pages link to it.
+- 7990fb0: fix(plugin-detail): the record page remembers "Show empty fields" per user and object
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record page, each section's "Show N empty fields" row used to open that one section only, and the choice was gone after a reload or on the next record. A reader who wanted the whole record clicked once per section, every time.
+  
+  What changes:
+  
+  - In the Console, the choice is now the signed-in user's, per object. One click shows the empty fields in every section of that object's record page. The choice holds on the next record of the same object, after a reload and on another device. Other objects keep their own choice.
+  - It is stored in a `sys_user_preference` row per object, key `ui.record.<object>`, with the value `{ "showEmptyFields": true }` or `false`. The row sits beside the list page's `ui.list.<object>` rows and loads in the same single preference read.
+  - `@object-ui/react` adds `RecordPagePreferencesProvider`, `useRecordPagePreferences` and the `RecordPagePreference` and `RecordPagePreferencesStore` types. A host uses them to hand its store to the record page's sections.
+  - With no store (no signed-in user, or a host that provides none), each section keeps the toggle in its own state, as before.
+  
+  What to do: nothing. Nothing a view or object declares changes.
+- 8a12a17: refactor(plugin-detail)!: take the test-only `resetUnknownActivityTypeWarnings` off the package entry
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-detail#resetUnknownActivityTypeWarnings) the retired operand is a test seam that clears the warn-once bucket of the unmapped activity-type diagnostic; no shipped code in the workspace or in hotcrm called it, and no packages/spec schema, registered node type, conversion surface or stored shape names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports `resetUnknownActivityTypeWarnings` from `@object-ui/plugin-detail`. It existed for tests; the one workspace test outside the package now imports it from the module that declares it. `ACTIVITY_TYPE_TO_FEED_TYPE`, `UNMAPPED_ACTIVITY_FEED_TYPE`, `activityRowToFeedItem` and `isRefusedFeedRead` stay exported unchanged, and the diagnostic still warns once per unmapped type.
+  
+  - FROM `resetUnknownActivityTypeWarnings()` in a test TO a fresh module instance per test (`vi.resetModules()` before importing `@object-ui/plugin-detail`), or an activity type unique to that test.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- b53322d: **Shipped in 18.2.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(plugin-detail): reveal the read-only field's copy button on keyboard focus
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record page in desktop read mode, the copy-to-clipboard button beside a read-only, copyable field was shown on hover only. It is a real button, so a keyboard user's Tab stop landed on a control they could not see. It is now also shown while it has keyboard focus, or while anything else in its field has focus (for example the field's own click-to-copy row), in the same way as the inline-edit pencil beside it. Hover, click-to-copy and the button's accessible name are unchanged.
+  
+  What to do: nothing.
+- 28804e8: fix(plugin-detail): a related list's `date` column reads in one absolute face when its field declares no `format`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record page's related list drew its `date` column in mixed faces, for example "Yesterday · 3 days ago · Sep 20, 2025", the way list grids did before their own fix. The related list builds its own table cells and did not tell the date cell that it sits in a column.
+  
+  - **Default change for an undeclared `format` (visible from metadata).** In a related list's table, a `date` field that declares no `format` now renders the locale's short absolute date (`Oct 25`, with the year when the date is not in the current year), one face for every row, as a list grid already does.
+  - **The relative phrase moves to the tooltip.** It is shown on hover ("Yesterday", "In 2 days", or "Overdue 3d" on a declared `dueLike` field). A past declared deadline is still red.
+  - **A declared `format` still wins.** A field that declares `format: 'relative'` keeps the relative face.
+  - **Other surfaces are unchanged.** The phone-width gallery of a related list, the record detail body and the header highlights strip render `date` values as before. `datetime` cells are not affected.
+  
+  What to do: nothing. To keep the relative wording in a related list's column, declare `format: 'relative'` on the field.
+- 9f181af: fix(plugin-detail): a related list whose read fails says so instead of showing "No related records found"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a record page's related list could not read its rows (a refused read, a server error, a network failure), it drew its ordinary empty state, "No related records found", and only logged the failure. A reader was told a record had no related rows when the console simply could not read them, and on a Related tab the list was also folded into the stack's line of empty lists.
+  
+  - **A failed read draws one load-failed line on the list's card**, with a Retry button. It reads "Couldn't load records" with the server's own sentence when the server answered with one, or the generic "Something went wrong while loading this data" when it did not.
+  - **A refused read uses the console's shared no-access wording**, the same as a list view: "You don't have access. You don't have permission to view these records." The server's text is not shown for a refused read. A signed-out session and an object whose API is disabled get the list view's sentences for those cases too; the API-disabled case offers no Retry, because retrying cannot change it.
+  - **Both fetch paths.** The adapter path and the legacy raw-URL path both draw the line. On the raw-URL path a non-2xx answer is now a failed read; it used to be parsed as a result with no rows.
+  - **The stack fold leaves a failed list in its own row.** A failed list never reports itself as empty, so it is not folded into the empty-lists line, and its header shows no record count.
+  - **Retry clears the failure and reads the list again.**
+  
+  What to do: nothing.
+- 2dd332d: fix(plugin-detail): a record highlight chip with no translation is captioned by the field's declared label instead of nothing
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The highlight strip under a record's title drew an empty caption over every chip whose field had no entry in an i18n bundle and no label on the strip entry. That is every chip on a synthesized record page of an object without a bundle, which includes every AI-built app: the strip showed two bare values side by side with nothing saying which field each one was.
+  
+  The chip caption now climbs the same ladder the record's details body uses: the bundle's translation, then the strip entry's own label, then the label the object declares for the field (an inline locale map is read in the session language), then the field name. A translated label and an authored strip label still win as before. The caption also updates when the object definition arrives after the record.
+  
+  What to do: nothing.
+- d31329f: fix(plugin-detail): `record:path` leaves out a stage the record's status option rules out, instead of ticking it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Ruling-ref: #26581 ruling `6442747364` letter A, with its guardrail
+  
+  A path ticked every stage before the current one by position, so a stage the record could never have stood on read as passed: an order contract that skips legal review by type showed 「审查中 ✓」 after approval. The status field's option already says which records it applies to. Its `visibleWhen` means "offered only when TRUE (else omitted)", and the server refuses a write of a value whose predicate is false. So `record:path` now omits, on both the desktop and the mobile row, any stage whose matching option declares a `visibleWhen` that is FALSE for the record.
+  
+  - Stages match options by value, so authored `stages[]` are filtered the same way as stages derived from the picklist.
+  - A predicate that reads the acting user (`current_user`, `user`, `ctx` or `os`) hides nothing. It says who may pick the value, not which route the record takes.
+  - A predicate that cannot be evaluated keeps its stage, as an option list keeps an option (render side fail-open, ADR-0137 D3).
+  - The stage the record stands on is always drawn.
+  
+  No new key and no new read: the predicate is evaluated against the record and object definition the record page already holds.
+- 94bab5a: fix(ui): the stage path and the kanban lay a select's options out by their declared lifecycle `kind` (#26612)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A select option may declare `kind: 'open' | 'won' | 'lost'` (`SelectOption.kind` in `@objectstack/spec`). Two readers now follow it instead of the option order or the value's spelling.
+  
+  - **`record:path`.** Once the status field declares a kind on any option, an option without one reads as `open`, the spec's rule for an absent kind, and is never classified from a `closed_won` / `closed_lost` spelling. The stages are laid out by kind: the open options as the steps in their authored order, then every won option as the forward terminus, then the lost options apart from the rail. A lost option authored mid-list no longer pulls the options after it into the lost group. A field that declares no kind keeps the spelling fallback and its positional layout as before, and a dev build now warns once, naming the object, the field and the stages it guessed.
+  - **Kanban.** Lanes the board derives from the lane field's options run open → won → lost when the field declares a kind, each class in its authored order, and every lost lane starts collapsed: a spine with its card count that the viewer can open. Authored `columns` and fields that declare no kind keep their order; the board guesses nothing from spelling.
+- eab4bba: feat(console): a greyed action says the reason its author declared
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An action greyed out by its `disabled` predicate now shows its declared `disabledReason` as the button's hover title and accessible description, and as a menu item's second line. The console used to show "Not available for this record" for every such action. That sentence stays the default when the action declares no reason, or a blank one.
+  
+  ```ts
+  defineAction({
+    name: 'submit_for_approval',
+    label: 'Submit for approval',
+    objectName: 'clm_contract',
+    disabled: "record.legal_review_status != 'approved'",
+    disabledReason: 'An approved legal review is required before the contract enters approval.',
+  });
+  ```
+  
+  - **Where it shows.** The record header (inline and in the ⋯ overflow), the record section bar, the declared actions bar, and the four `action:*` renderers (`action:button`, `action:icon`, `action:group`, `action:menu`). On every one, only the declared `disabled` predicate evaluated true earns a reason. A button greyed while its own action runs, or by the host, still gives none.
+  - **Translated like the other action copy.** `useActionTextLocalizer` (`@object-ui/react`) resolves the key when the action declares it, through the new `actionDisabledReason` resolver on `useObjectLabel` (`@object-ui/i18n`). The bundle's sentence at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an action with no `objectName`) comes first. After it comes the authored inline locale map, collapsed to the active language, then the authored string. A bundle entry never gives a reason to an action whose author wrote none. The four `action:*` renderers read the action as authored, so for them the inline locale map is the translation.
+  - **Typed.** `UIActionSchema` (`@object-ui/types`) declares `disabledReason`, derived from the spec's `ActionSchema`.
+  - **Liveness.** `disabledReason` is now `live` in `@objectstack/spec`'s ledger, with the console readers as evidence. The planned-property warning an author got for declaring it is gone. The key's description no longer says that nothing shows it.
+- 0d07de2: feat(plugin-detail,app-shell): the default record page is one page at two widths — resident columns on a wide page, the tabs in a drawer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The synthesized default record page (no authored page, or a slotted page that keeps the default tab strip) used to be tabbed at every width: on a wide screen the details took the whole width while the timeline, the related lists and the comments each sat behind a tab click. It is now laid out by the width of the view it occupies — never the viewport, so the same page in a drawer stays narrow:
+  
+  - **1280 px and up:** three resident columns — details · timeline (the discussion composer on top, then Activity and History) · related (each related list as a card naming its first rows, then the opt-in reference rail and `rightRail` slot, Approvals, Attachments and the created / updated line). No tab strip.
+  - **1024 – 1279 px:** details · timeline; the related column folds into a rail opened from a **Related (N)** toggle above the columns. Closed, its lists read nothing.
+  - **Below 1024 px, and whenever the view is embedded (drawer / split pane):** the tab strip, exactly as before.
+  
+  One header (title, actions, highlights, stage path) serves every tier. No metadata key, page template or node type is added: the page description stays the tabbed one Studio seeds, and the columns are read off it by each tab's stable `value`. `?tab=` keeps selecting a tab in the tabbed tier and is ignored by the columns. An authored record page (`kind: 'full'`) and an authored `slots.tabs` strip are drawn as authored at every width. In a column tier History is resident, so its audit read goes out when the page opens instead of when its tab is clicked.
+  
+  New `@object-ui/plugin-detail` exports for a host wiring the same layout: `useRecordPageTier(element, { embedded, enabled })`, `recordPageTierFor(width)`, `buildDefaultPageColumns(page)`, `recordPageColumnOfTab(value)`, `RecordPageColumns`, the `RECORD_PAGE_THREE_COLUMN_MIN_WIDTH` / `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` floors and their types. Additive: nothing existing changes shape.
+- 34c2407: feat(app-shell,components): the record drawer opens a related row or a lookup in place, one level at a time, and its bar names no object
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's record drawer is one drawer (objectstack#26679):
+  
+  - **The bar.** Its left side is empty at the root: no object name and no "n / N" position. Its right side holds `↑` `↓` (previous / next through the level's sibling set, disabled at the ends; `↑` / `↓` and `k` / `j` while no text field, menu or grid has the keyboard), `⤢` (icon only) and `✕`. `NavigationOverlay` gains three optional props for it — `onBack`, `trail` and `stepper` — and keeps its title as the accessible name only, on every host.
+  - **The root steps through the list.** `ListView` reports the rows it shows, in their order, through a new `onRowsChange` host prop (beside `onTotalChange`, answered by a paged grid; a board or a grouped grid reports no rows). The object page hands them to its drawer, so `↑` `↓` at the root move to the previous / next row, disabled at the first and the last.
+  - **In place.** A related row, a lookup value or any record link inside the drawer opens that record in the same drawer and keeps the previous one on a stack. The bar shows `←` and the path (each ancestor returns to its level); `←` or `Esc` goes back one level, `Esc` at the root closes, `✕` closes the whole stack. `↑` `↓` one level down step through the rows the parent's related list showed, never across levels. Each level keeps its own `?tab=`. An object that declares `navigation.mode: 'page'` still opens its page.
+  - **⤢ at any level** opens that record's page with the levels below it as its `?from=` trail, so its back link reads the record it was opened from; the page offers "Collapse to drawer", which returns to the drawer with the stack restored.
+  - **On the record page**, a related row or a lookup opens its record in a drawer over the page, under the same rules.
+  - **`data-table` inside a dialog.** A table drawn inside a dialog now opens its rows: the row click ignored every click with a dialog ancestor, so a related list inside a record drawer drew pointer rows that opened nothing. Only a dialog portalled out of the row (one that does not contain it) still stops the click.
+  - **What a reload keeps.** The root stays `?recordId=` on an object list; the levels above it live in memory, so a reload shows the root record.
+  
+  Published-type additions, all optional: `RelatedRecordHandlers.onView` receives the ids of the rows on show as a third argument, and `RelatedList`'s `onRowClick` receives those rows as its third argument. The i18n packs gain `detail.collapseToDrawer` in all ten languages. In zh, the `⤢` label (`detail.openAsFullPage` and `console.objectView.expandToPage`, kept byte-identical) reads 整页打开.
+- 9dacccf: feat(app-shell,plugin-detail,components,i18n): the record page's timeline and related columns are each reader's switches, per object, toggled from the crumb row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Whether the record page shows its timeline column and its related column is now the reader's own choice, per object, kept in the browser. It is not metadata: no key, no spec change.
+  
+  - **Defaults derived from the object.** A reader who never chose gets the timeline on for a "worked" object and off otherwise, and the related column on. An object is worked when `stageField` names a field, when a field's options declare a lifecycle `kind` (unless `stageField: false`), or when it sets `enable.files: true` — only what the object declares of itself. Being another object's `master_detail` parent does not count: a container that owns child rows (a price book, a campaign) is not a worked record. `recordTimelineDefaultReason` and `recordPageColumnDefaults` in `@object-ui/plugin-detail` say which.
+  - **A switched-off column frees its room.** With the timeline off, a wide page draws details | related, and the timeline's blocks (the composer and History) become an Activity card at the foot of the related column. With the related column off, it stays behind the rail toggle. `recordPageArrangementFor` is the rule, and `RecordPageColumns` takes the reader's `switches`. Below the column widths the page is tabbed as before, the switches are kept for when it widens, and `?tab=` is unchanged.
+  - **Panel toggles.** `PanelToggles` in `@object-ui/components` is a group of icon toggles with `aria-pressed`, a tinted pressed state, and a tooltip naming the shortcut. The record page draws it on its crumb row, right side, only in a column tier. It is not drawn in the drawer or split pane.
+  - **Shortcuts.** `⌘⇧.` / `Ctrl+Shift+.` toggles the timeline and `⌘⇧,` / `Ctrl+Shift+,` the related column, matched by the physical key. Not `⌘⇧T` / `⌘⇧R`: the browser keeps those (reopen closed tab, hard reload) and the page never receives them. They do nothing while a text field has focus, and the keyboard-shortcuts dialog lists them while the record page is open.
+  - **One preference store.** `app-shell`'s `workspacePreference` module keeps every reader preference by preference and scope (`user`, or `object:OBJECT_NAME`). Each value is a small record with a version `v`. It reads live through `useSyncExternalStore`, follows other tabs, and falls back to the default with no storage. The record-open preference (`os:record-open-mode`) is now a thin alias over it and keeps its stored spelling, so a reader's earlier choice reads back unchanged.
+- eef8373: feat(plugin-detail,app-shell,components): the record page v3 — frameless details, one timeline, compact related cards the reader arranges, body tables, enlarge in place
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The synthesized default record page (an object with no assigned page) takes the v3 layout. Nothing an author writes changes: the page is still drawn from the object's semantic roles (ADR-0085), and every change below is the renderer's.
+  
+  What changes for a reader:
+  
+  - **Header.** One filled primary action, two outline actions, the rest in the `⋯` menu. The header's Refresh moved into that menu as its first item. Up to six highlights, drawn as an equal-width grid on the default page.
+  - **Details.** Sections are frameless: a title over a hairline, then the fields in one to three columns by how many fields the section shows. Every titled section collapses from its title. Sections with no value at all fold into one line at the foot, such as 「Address · Conversion · Extra · 3 empty sections · Expand」. The created / updated line closes the details column and also names the owner and the record id.
+  - **Timeline.** One stream: comments, `sys_activity` rows and field changes (`trackHistory`), newest first, with the composer on top and the chips All / Activity / Discussion / Changes. Field changes and system events are one muted line each. 「View all N →」 shows the rest. The separate History tab, the Activity tab and the discussion footer are gone. With `enable.feeds: false` the stream keeps activity and changes and offers no composer.
+  - **Related cards.** In the related column each related list is a compact card: title, count and ＋ in one row, no table header, up to three rows of the record's name and one status or date chip. The column is 320 px, beside details and the timeline at 1.25fr : 1fr. 「查看全部」 is gone from the card.
+  - **The reader arranges the cards.** On desktop the title row drags a card, with a drop line. The card's `⋯` menu has Move up, Move down, Collapse and Hide. A collapsed card shows its title and count and reads no rows. The order, collapsed and hidden state are kept per user and object in the console's workspace preferences, the same store as the column switches, and apply in the tabbed tier's Related tab too. A reader who never dragged sees the default order. A later change to the default does not reorder a dragged column; the column then says 「Default order updated · Restore default」. A relationship added since the reader's last drag lands after its nearest default neighbour and carries a 「New」 badge for 48 hours. Hidden cards are listed at the column's foot (「N hidden · Show」).
+  - **Enlarge in place.** A card's ⤢ or its count opens the list as a full-width table over the page body, with every column, paging, sort and inline edit. The address is `?related=object.field`; Esc or ‹ returns to the columns.
+  - **Body tables.** A related list that is the record's own body is drawn as a table inside the details column, right after the first field section, instead of a side card. A body list is a `master_detail` FK declaring `inlineEdit`, or a list marked `relatedList: 'primary'`. A body table opens on ten rows and has a totals line for its numeric columns over the rows on the page.
+  - **Tabs.** The drawer and narrow widths show Details / Timeline / Related / (Approvals). The Timeline is second for a worked object and last otherwise. Attachments close the Related tab.
+  
+  **BREAKING** (`@object-ui/plugin-detail`, TypeScript only): `BuildPageOptions` no longer accepts `hideHighlights`, `hidePath`, `showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`, `relatedLayout`, `recordChrome`, `showActivity`, `history`, or the `slots.rightRail` slot. No console caller passed any of them. A caller still passing one gets a compile error naming the key, and the page it draws is the same with the key or without it. The `record:reference_rail` renderer stays for authored pages. `buildDefaultHeader` takes `{ actions }` only, and `buildDefaultHighlights` drops its two hide flags.
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#BuildPageOptions) a renderer's options interface: no Zod schema, no spec declaration and no stored representation reads it, so the compiler is the channel that reaches every caller -->
+- 8243694: perf(plugin-detail,app-shell): the record page's related column loads counts first, then rows only for the cards in view, and never blocks the details
+  
+  Clause-②: yes (widening: three new exports on the published `@object-ui/plugin-detail` main entry, a public-surface addition; no accept set moves)
+  Metadata-protocol: none
+  
+  Opening a record with many related lists used to read every list's rows as the page opened. The related column now loads in three steps, and the details column never waits for it:
+  
+  - **Counts first.** When the page opens, every card in the related column is counted in one request set, sent beside the record read. Each count reads the total and one row's id, nothing more. Until the whole set has answered, each card shows a placeholder. Then each card's header draws from its count. A card counted at 0 is its title row alone and reads no rows. The counts share the store the tab strip's badges read, so a write to a child counts it again.
+  - **Rows on demand.** A card reads at most three rows, in its inherited sort, and asks only for the fields it draws: the record's name field and one status or date field. That field comes from the relationship's `relatedListColumns` when declared, else the object's status field, else its first date field. A card reads its rows only once it comes into view (`IntersectionObserver`; cards just below the fold count as in view). The folded 「动态」 card (the timeline switched off) is closed until the reader opens it, and its feed reads nothing until then.
+  - **Details first.** The details column draws from the record read alone. The related column's placeholders hold their place until the counts land, and the cards then draw in a transition, so a record read landing at the same moment draws the details first.
+  - **Drawer prefetch.** In the record drawer, the record that `↑` / `↓` would show next has its related counts read once the current record has loaded, so the next record's badges draw from the store.
+  
+  Additive API (`@object-ui/plugin-detail`): `prefetchRelatedCounts`, `relatedCountTargetsIn` and `relatedCountTargetOf` are exported with their types `RelatedCountTarget` and `RelatedCountsSource`, for the app-shell record drawer's prefetch. `RecordPageColumns` takes an optional `relatedFieldsOf`, the child objects' field definitions the host already holds, so the counts read no child schema first.
+- 2140821: fix(ui): a calendar event and a gantt bar open the same record page a grid row opens in the console
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the console a calendar event or a gantt bar opened a second, smaller rendering of the record (the quick-look `RecordDetailPanel`), while a grid row or a kanban card of the same object opened the record page in the drawer, with the drawer stack and ⤢ to the full page. Now every view opens the record page:
+  
+  - **Calendar and gantt.** A host's `onRowClick` takes the click, as it already did on the kanban, the grid, the gallery, the map, the timeline and the tree. Before, both views let their own drawer outrank the host's handler, and the gantt's registration never forwarded one. The console's handler opens the record in the drawer, or on its page where the view or the object declares `page`. Before, a calendar view that declared `page` opened the quick-look drawer instead.
+  - **The renderers' own drawer is the fallback.** A calendar or gantt that nobody hands a click (a standalone block, a list with no host handler, a host outside the console) still opens its own drawer, as before. `ListView` passes the two views its click router only when its own host routes record clicks, so a hostless list keeps that drawer instead of a click that opens nothing.
+  - **Gantt registration.** `ObjectGanttRenderer` forwards a function-typed `onRowClick` and nothing else. An authored non-function value is dropped, and host `data` stays dropped.
+  - **`RecordDetailPanel`** is unchanged apart from its docblock, which names it as the fallback and its later removal.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 2594f5b: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(plugin-detail): the record page's in-place edit reads the stored row's field locks. `record:details` and `record:highlights` now ask the server's record-scoped field projection (`DataSource.getRecordFieldAccess`, `GET /data/{object}/{id}/field-access`) when the page's inline-edit session may edit, so a field permission whose `when` locks a field only from some state onward disables it only on the rows it names, as the record form's edit dialog already does. The answer is asked again after a write to the record. A data source without the method keeps the row-blind `/auth/me/permissions` answer, and a list view's column-wide inline edit keeps it too.
+- 1e8e529: fix(ui): the page designer canvas draws an authored `record:details` body's `select` and `location` values the way the record page does (#27177)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the page designer's Design canvas, a `full` record page whose `record:details` block names its fields drew a `select` value as its stored code (`amer` instead of `Americas`) and a `location` value as the literal `[Object]`. The record page itself was right.
+  
+  `DetailView` learned field types only from its dataSource (`getObjectSchema`). The canvas mounts the record page's own `record:details` renderer under a record context that holds the bound object's schema but no dataSource, so a field named by bare name had no type and drew raw. Now, when the host supplies the record (`recordFromHost`, which `record:details` sets), `DetailView` takes field types from the record context's object schema until a dataSource answers. A dataSource answer still wins, nothing new is fetched, and a `DetailView` with no record context, or one that reads its own record, draws exactly as before.
+- 1ed3360: feat(ui): a `record`-mode currency amount shows each record's own currency; the code field is an ISO 4217 select pre-filled with the organization currency; Studio edits the mode and the pointer (ADR-0144 D2, D6, D8 rule 4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` now renders in the currency its record's `currency_code` holds, on every face that holds the record:
+  
+  - **Cells and widgets.** `resolveFieldCurrency(field, tenantDefault, record)` takes the record in scope as an optional third argument. Under `record` mode it reads only that record's code field; no record, or a blank code, resolves to no currency, so the amount shows as a plain number and never in the tenant default. `dynamic` and `fixed` fields resolve exactly as before. The list cell, the form and inline amount box (symbol, decimals and spinner step follow the selected code), formula cells returning `currency`, the record page's summary chips, the dashboard table and record drawer, and Gantt tooltips all pass the record. `recordCurrencyField(field)` names the pointer.
+  - **The code field.** A `text` field declaring `valueDomain: 'iso_4217_currency'` renders a searchable select instead of a free-text box, grouped "Available" (the organization currency, then rated currencies, then the codes the object's records already hold) and "All currencies (ISO 4217)". It offers only codes the value domain accepts. The form reads the used codes once per object, with one grouped query, and hands them to the field on its own metadata (`usedCurrencyCodes`); a data source without grouped queries offers home + the record's own code. The rated group is empty until the exchange-rate table ships. The picker itself is `CurrencyCodePicker` in `@object-ui/components`.
+  - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
+  - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
+  - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+  - **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget, the report table (and its export) and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
+  - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
+- 273137d: fix(plugin-detail,app-shell,components): the record page's related switch decides whether the column exists, its panel switches are one segmented control in the header's action row, a 1440 px window with the sidebar is three columns, and the related order and body-table placement read the object's `relatedLists` and field groups
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The synthesized default record page (an object with no assigned page). Nothing an author writes changes meaning: the two read points below are keys the spec already declares.
+  
+  - **The related switch.** With the related column switched off there is no related column and no 「Related」 rail toggle, in every column tier. With it on and no room for it (the two-column tier), the rail toggle opens and closes it. Before, the switch did nothing in the two-column tier and the rail still opened the column.
+  - **One segmented control in the header row.** The two panel switches are now one control with an icon and a label per segment (Timeline, Related column). It is drawn at the right end of the record header's action row, after `⋯`, behind a vertical hairline, in both column tiers. A segment that is on is filled with the accent tint; one that is off is muted text, so the state reads in the dark theme too. The crumb row keeps only the ways back and is not drawn when there is none. The shortcuts are unchanged (`⌘⇧.` / `⌘⇧,`); they now also match a key event that carries the typed character (`.` / `>`, `,` / `<`) but no physical key code.
+  - **Thresholds.** Three columns from a 1120 px container, two from 760 px, the tabs below (were 1280 / 1024). Measured on the console: the expanded sidebar is 256 px, so a 1440 px window is 1184 px of record page (three columns), and a 1024 px window is 768 px (two columns). `RECORD_PAGE_THREE_COLUMN_MIN_WIDTH` and `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` carry the new values and their derivation.
+  - **Related order.** The default order of the related cards, the Related tab and the body tables is the object's `relatedLists` first, then the derived order. That order already reached the page through `deriveRelatedLists`; the stale comment that said it did not is gone, and a mounted pin now holds it.
+  - **Body-table placement.** A field group whose `relatedList` names a body table's relationship (a child object name, or `object.field`) places that table at the group's position among the field groups. Other body tables stay after the first field section.
+  - **Restore default order.** Once a reader has moved or hidden a related card, the foot of the related column (and of the Related tab) offers 「Restore default order」 on the same line as 「N hidden · Show」. It lays the default order back, shows every card, and records the current default as the one the arrangement is based on. The reader's stored arrangement keeps its shape. The hint shown when the author's default changed stays as it was.
+  - **`@object-ui/components`.** `PanelToggles` is the segmented control. `PageHeaderTrailingContext` (new export) is the host slot at the end of `page:header`'s action row, and `PageHeaderActions` takes a `trailing` node for it. No metadata key reaches it.
+  - **`@object-ui/plugin-detail`.** `relatedListEntryNames` (new export) is the one reading of a related-list entry; app-shell's related-list order and the Studio editors import it from here.
+  - **`@object-ui/i18n`.** New `detail.relatedRestoreDefaultOrder` in the ten packs.
+  
+  What to do: nothing.
+- ad3a640: docs(spec): the related-list descriptions say which unknown names are refused, and `relatedList: 'primary'` and `enable.trackHistory` describe the current record page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Description text only: no key, type, default, accepted value or export moves, and every stack that parsed, validated or published before still does.
+  
+  - **`ObjectSchema.relatedLists` and `fieldGroups[i].relatedList`.** The descriptions promised that a name matching no inbound `lookup` / `master_detail` relationship is refused. They now say exactly where. A name whose child is in the stack but has no such relationship to this object is refused everywhere. A name whose child exists nowhere is refused by `os validate` / `os build` (which leave a `sys_` / `cloud_` / `ai_` name to the runtime) and by a metadata write that names no package. A write into a package stores it, because a child outside that package may be a downstream package's object that points in; the record page places nothing for it.
+  - **`relatedList: 'primary'`.** A primary list is a full-width table in the record's details column, after the first field section, and inside the Details tab when the page is tabbed. It no longer gets a tab of its own; a supporting list is a card in the related column (the shared Related tab when tabbed).
+  - **`enable.trackHistory`.** The record's field changes join its one timeline stream, under the Changes filter, instead of a History tab. On a page an author assigns, a `record:history` or `record:activity` block shows the record's field changes from its own activity, and neither reads this flag.
+  - **`@object-ui/plugin-detail` README.** The wide-layout table's timeline column is the one stream (composer, discussion, activity and, with `enable.trackHistory`, field changes) rather than "Activity and History".
+  
+  What to do: nothing.
+- f0857d2: fix(ui): four KPI tiles sit two across on a phone, a calendar's footer says its count is the loaded dates', and the record not-found page says the record may also be one you cannot read
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three console rows from a full HotCRM browser pass:
+  
+  - **A layout `grid` with a bare `columns` of 4 or more draws two tiles across on a phone** (below `sm`), then the authored count from `md`. A home page's KPI strip (`columns: 4` over `object-metric` tiles) took a row per tile and filled the first screen; it now reads as the dashboard's own phone layout for metric tiles. A bare 2 or 3 still stacks on a phone and pairs from `sm`, and an authored breakpoint object (`columns: { xs: 1, md: 4 }`) is drawn as written.
+  - **A calendar view's footer says `N records loaded for these dates`.** The calendar fetches the window of dates it draws, so the footer's count is that window's records, not the view's total; it read "N records", the words a grid uses for the whole view. A grid, a board and a calendar over rows handed in whole keep "N records". New count family `list.calendarRecordCount` in all ten packs.
+  - **The record not-found page says the record "does not exist, may have been deleted, or you may not have access to it".** The server answers a record the reader may not see the same as a missing one (`404 RECORD_NOT_FOUND`, so existence is never revealed), so the page cannot tell the two apart and now names both. `empty.recordNotFoundDescription` and `detail.recordNotFoundDescription` change in all ten packs.
+- 359e935: fix(plugin-detail): a formula declaring `returnType: 'currency'` reads as money in related lists and the quick-look panel
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `Field.formula` with `returnType: 'currency'` and its own `currencyConfig` read as a bare grouped number (`90,000.00`) in a related list and in the quick-look panel, beside the currency fields it was computed from (`$150,000.00`). The related list's cell builder and `buildRecordDetailFields` rebuilt the field from a picked key list that left `returnType` out, so the formula cell never saw it. Both now hand `returnType` through beside `currencyConfig`, the way the list grid and the record page already do, and the formula reads `$90,000.00`. A formula declaring `number`, or nothing, keeps the bare number.
+- 5b17215: fix(plugin-detail): the record highlights strip draws a boolean as one neutral chip, as the details body does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `record:highlights` strip drew `true` as a green "✓ Yes" chip and `false` as a warning-toned "× No" chip, whatever the field meant, so a case's "SLA Violated: No" read as a warning. The metadata does not say which value is the good one, and the details body draws the same field as a plain word, so both values now share one neutral chip: the locale's Yes / No word, with no state colour and no glyph.
+- 69991ff: fix(plugin-grid, plugin-detail): a formula declaring `returnType: 'currency'` reads as money in list cells and on the record page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `Field.formula` with `returnType: 'currency'` and its own `currencyConfig` read as a bare grouped number (`90,000.00`) beside the currency fields it was computed from (`$150,000.00`). The formula cell already draws a declared currency through the currency cell, but the grid's configured columns and the record page's field enrichment rebuilt the field from a picked key list that left `returnType` out, so the cell never saw it. Both now hand `returnType` through beside `currencyConfig`, and the formula reads `$90,000.00`. A formula declaring `number`, or nothing, keeps the bare number.
+- 9324232: fix(console): a packaged action switched off for this deployment is no longer offered as a live button
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An administrator can switch a packaged action off in Setup › Packaged automation. The action door then refuses it, but the console kept offering the button on the record header, in action bars and in list rows, so a click could only fail. The object reads now serve the names of the switched-off actions beside the object (#27842), and the console stops offering those actions everywhere it already hides an action whose capability the user lacks: the record header, action bars, record quick actions, list and related-list toolbars, row and bulk actions. Turning the action back on in Setup brings the button back.
+  
+  `@object-ui/core` adds four exports for this: `isActionSwitchedOff(action)`, `markSwitchedOffActions(schema, served)`, `markSwitchedOffActionsByObject(objects, served)` and `ACTION_SWITCHED_OFF_KEY`. The data layer stamps a switched-off action entry under that symbol key, which survives a spread and never reaches JSON, so an action handed back to a metadata write never carries it.
+  
+  What to do: nothing. A backend that does not serve the names hides nothing, as before.
+- ea74ebf: fix(record-page): one date format per record page, appended cards line up with the page's own, and comment text reads in the foreground colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three record-page readability fixes from the 18.3.0 RC walkthrough:
+  
+  - **One date format.** A `record:details` section row now writes the year on a current-year date, as the highlights strip above it already does. A project page read "End Date Dec 31, 2026" in the strip and "Start Date Oct 2" in a section; both now read with the year. Grid cells keep the face that drops the current year.
+  - **Aligned cards.** The panels the record page appends after an authored page (the Attachments and Approvals fallbacks, and the "Created … Updated …" footer) take the same horizontal inset as the page body, so they no longer draw wider than the page's own cards.
+  - **Comment contrast.** A feed entry's body text uses the foreground colour, as a reply's body already did. The actor, the timestamp and the other meta text stay muted.
+- ad030d8: feat(plugin-detail)!: the record page's related panels lose collapse — the header opens the whole list, ⠿ ＋ ⋯ on hover, ⋯ holds Hide alone, empty panels fold into one line, and the stored arrangement drops `collapsed`
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/plugin-detail/src/synth/relatedArrangement.ts#RelatedArrangement, ui/packages/plugin-detail/src/synth/relatedArrangement.ts#ResolvedRelatedArrangement, ui/packages/plugin-detail/src/synth/relatedArrangement.ts#RelatedArrangementEdit, ui/packages/i18n/src/locales/en.ts#TranslationKeys) a reader's per-browser layout preference and its edit vocabulary, and the key type of the console's own translation catalogue: no Zod schema, no spec declaration and no stored metadata reads them, so the compiler is the channel that reaches every caller; the stored preference moves to version 2 and a version-1 record reads as no choice -->
+  
+  The record page's related column is a stack of same-shaped panels (record page v4).
+  
+  - **The panel header** is the title, then the count chip. The header row (or the chip) opens the panel's whole list; on hover the title's end shows › and its tooltip reads "View all N". On hover or focus the right end shows ⠿ (drag to reorder; focused, ⌥↑ / ⌥↓ move the panel), ＋ and ⋯, which now holds Hide and nothing else. There is no collapse and no ⤢, and nothing is reserved on the left.
+  - **Empty panels** (0 rows) fold into one line after the others: "N more empty lists · name · … · Expand". Expand draws them again in their places. The Related tab of an authored page keeps its own line.
+  - **The compact row's first column** skips the foreign key that points back at the record on the page: a product's line items, whose name field is the product, are named by their next column.
+  - **The stored arrangement** (`record.related.arrangement`, per reader × object) is `{ v, order, hidden, basedOn, seen }`. `collapsed` is removed with no compatibility read: a reader's earlier record reads as no choice, and the panels show in the default order.
+  
+  **BREAKING** (`@object-ui/plugin-detail` and `@object-ui/i18n`, TypeScript only): `@object-ui/i18n`'s exported `TranslationKeys` loses the four `detail.relatedCard*` keys named below (a `t()` call with one of them still compiles, its key being a `string`, and reads the key back); and `RelatedArrangement` and `ResolvedRelatedArrangement` no longer carry `collapsed`, `RelatedArrangementEdit` no longer has the `collapse` kind, and `resolveRelatedArrangement` / `editRelatedArrangement` no longer take a last `defaultCollapsed` argument. The only caller is the console's own arranged column. A caller still passing one gets a compile error naming it; the fix is to drop it, since a panel has no collapsed state to set. `RELATED_ARRANGEMENT_RECORD_VERSION` (2) is new.
+  
+  - The i18n keys `detail.relatedCardMoveUp`, `detail.relatedCardMoveDown`, `detail.relatedCardCollapse` and `detail.relatedCardCount` leave every pack; `detail.relatedPanelViewAll`, `detail.relatedPanelReorder`, `detail.relatedPanelReorderHint` and `detail.relatedEmptyFold` arrive in all ten.
+- bf74607: feat(plugin-detail)!: a tab row closes the record header — 概览, 动态, then each related panel with its count, as many as the row's width fits; an open panel face is the active tab
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-detail#ArrangedRelatedTab) the retired operand is a component in a published ui package's entry that only the console's own record view imported, for the tabbed tier the record page no longer has; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  The synthesized record page (record page v4) gets a persistent tab row at the bottom edge of its record header, on every face: the full page, the split pane, the overlay drawer, the maximized pane and a phone.
+  
+  - **The tabs.** 「概览」 (Overview) first, then 「动态」 (Activity), then one tab per related panel in the reader's arrangement (`record.related.arrangement`), each with its count. 「动态」 shows the stream's size and a related tab its list's count. The counts come from the same request set the right column's panels read, so no relationship is counted twice.
+  - **Width.** The row shows as many tabs as fit its own width, measured on every resize (the window, the sidebar collapsing, a pane dragged wider). The rest fold into 「+N ▾」, which lists them with their counts, and the hidden panels' tabs come at its end. 「概览」 and at least one more tab are always on the row. So is the active tab: when it would fold, it takes the row's last slot instead.
+  - **The open face is the active tab.** Choosing a tab, a panel's header or 「查看全部 N 条」 draws that panel's whole face below the tab row, at the page's full width: the related list with every column, paging, sort and inline edit, or the 动态 stream with its chips. The top of the page and the record header stay as they are. The URL keeps `?related=<object>.<field>` and `?related=timeline`. 「概览」 or Esc returns. The face no longer draws a ‹ back line or a title of its own, because the tab names it. Moving from one tab to another replaces the history entry, so one Back, Esc or 「概览」 always returns to the page. Inside the pane the face fills the pane body, and maximizing widens it in place.
+  - A body table that is open in place (its ⤢ in the details) takes a tab of its own while it is open.
+  - **Reads.** The page now counts every related panel, including the hidden ones and those behind a closed ⊟, because their tabs show the counts.
+  - A synthesized page whose tab strip cannot be laid out is drawn as written. Its 关联 tab no longer reorders its lists to the reader's arrangement, which the right column and the tab row now carry.
+  
+  **BREAKING** (`@object-ui/plugin-detail`, TypeScript only). The only importer was the console's own record view. `ArrangedRelatedTab` leaves the package entry. It laid the reader's arrangement over the 关联 tab of the tabbed tier, which the record page no longer has. FROM `ArrangedRelatedTab` TO no wrapper: draw the page with `RecordPageColumns`, whose right column and tab row read the arrangement, or draw an unlaid page as written. A caller still naming it gets a compile error that names it.
+- 3d2da4f: feat(plugin-detail)!: one record page laid out by its own width — details beside a right column from 760 px, one column below; 动态 is the right column's first panel; ⊟ shows or hides the right column
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-detail#RECORD_PAGE_THREE_COLUMN_MIN_WIDTH, @object-ui/plugin-detail#recordPageArrangementFor, @object-ui/plugin-detail#recordPageColumnDefaults, @object-ui/plugin-detail#recordTimelineDefaultReason, @object-ui/plugin-detail#RecordPageColumnSwitches, @object-ui/plugin-detail#RecordPageArrangement, @object-ui/plugin-detail#RecordPageObjectLike, @object-ui/plugin-detail#RecordTimelineDefaultReason, @object-ui/plugin-detail#DefaultPageColumns.relatedCount, @object-ui/plugin-detail#UseRecordPageTierOptions.embedded, @object-ui/plugin-detail#RecordPageColumnsProps.switches) the retired operands are the synthesized record page's layout helpers, their option and prop members, and the types they took, in a published ui package's entry that only the console's own record view imported; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  The synthesized record page (record page v4) is laid out by one rule, the width of the container it occupies. The page, the split pane, the overlay drawer and the maximized pane all follow it.
+  
+  - **At 760 px and wider**, the details sit beside a right column 320 px wide. **At 1120 px and wider** the right column is 380 px, a details section takes up to three field columns (two otherwise), and the 动态 panel shows five entries (three otherwise).
+  - **Below 760 px** (the split pane at 720 px, a phone) the page is ONE column: the details, then the right column's panels in their order.
+  - The three-column tier, the tabbed tier and the 「相关 N」 rail are gone, and so are the resident timeline column, its ⊞ switch and the per-object default that decided it.
+  - **动态** (formerly the timeline) is the first panel of the right column. It has the same header as a related panel: 「动态」 and the stream's count, and the header row opens the 动态 tab. Its body is a one-line composer (pressed, it opens the full composer, focused), the newest entries one line each, and 「查看全部 N 条」 when the stream holds more. The 动态 tab (`?related=timeline`) is the full stream: the 全部 · 活动 · 讨论 · 变更 chips, threaded replies, and "Load more" for the next page.
+  - **⊟** (「右栏」, `⌘⇧,`) is one icon at the end of the record header's action row, drawn only where the tier has a right column. Off, the details take the row. It keeps the reader's earlier related-column choice: the stored preference `record.columns.related` is unchanged. The record header's `PanelToggles` (`@object-ui/components`) now draws icon-only toggles named by their label.
+  - The 动态 panel is on screen at open in every tier, so a synthesized page reads its feed and its audit history at open. An authored page with tabs still waits for the tab that holds them.
+  - **Tab labels** (`page:tabs`, `@object-ui/components`). A synthesized page that keeps its tab strip (one the layout cannot partition) labels its stream tab `Activity stream`, which the strip reads as 「动态」. An authored `Timeline` tab, such as the served approval page's history, is no longer read as the record stream: it keeps the pack's own word for a timeline (「时间线」, タイムライン, and so on).
+  
+  **BREAKING** (`@object-ui/plugin-detail`, TypeScript only). The only importer is the console's own record view. `RecordPageTier` is now `'stack' | 'two-column' | 'wide'`: there is no tabbed tier, and the widest tier is called `wide`. `recordPageTierFor(width)` takes no second argument. `useRecordPageTier` answers `null` only while the page is not laid out (disabled, or not yet measured). `RecordPageColumnsProps.tier` takes every `RecordPageTier`. A caller still naming a retired symbol gets a compile error that names it.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `RECORD_PAGE_THREE_COLUMN_MIN_WIDTH` TO `RECORD_PAGE_WIDE_MIN_WIDTH`, the same 1120 px floor under its new name.
+  - FROM `recordPageArrangementFor` TO `recordPageTierHasRightColumn(tier)` and the reader's ⊟: every laid-out page is the details and, where the tier has room, the right column.
+  - FROM `recordPageColumnDefaults` TO no call: every object's page opens with its right column, and ⊟ defaults to on.
+  - FROM `recordTimelineDefaultReason` TO no call, for the same reason: no object decides a timeline column any more.
+  - FROM `RecordPageColumnSwitches` TO a `boolean`, the right column's switch.
+  - FROM `RecordPageArrangement` TO the `RecordPageTier` itself, read through `recordPageTierHasRightColumn`.
+  - FROM `RecordPageObjectLike` TO no type: no helper takes an object definition any more.
+  - FROM `RecordTimelineDefaultReason` TO no type, with `recordTimelineDefaultReason`.
+  - FROM `DefaultPageColumns.relatedCount` TO the length of `columns.related`; the rail it labelled is gone.
+  - FROM `UseRecordPageTierOptions.embedded` TO no option: an embedded page follows the same width rule.
+  - FROM `RecordPageColumnsProps.switches` TO `RecordPageColumnsProps.rightColumn`, one `boolean`.
+  
+  `RECORD_PAGE_WIDE_MIN_WIDTH`, `recordPageTierHasRightColumn` and `RECORD_PAGE_TIMELINE_PANEL` (the 动态 tab's `?related=` id) are new.
+- 55a1feb: feat(app-shell): one top bar above the record header on every face — the breadcrumb on the left; the counter with ↓ ↑, ⊟, ⤢ / ⤡ and ✕ on the right, each only where it applies
+  
+  Clause-②: yes (widening: `@object-ui/components` gains `RecordTopBar`, `RecordTopBarButton`, `useRecordStepKeys` and the types `RecordTopBarProps` and `RecordTopBarStepper`, `NavigationOverlay` gains an optional `toggles` prop and its `stepper` an optional `position` and `scope`; `@object-ui/i18n` gains `detail.recordOfScope`, `detail.relatedFilter`, `detail.relatedChips`, `detail.relatedChipAll`, `detail.relatedChipMine`, `detail.relatedChipOverdue`, `detail.relatedExport` and `detail.relatedRows` in all ten locales; no export retires and no accept set moves)
+  Metadata-protocol: none
+  
+  The record page v4 draws one 40 px top bar above the record header, on every face: the full page, the split pane, the overlay drawer, the maximized pane and a phone. The bar holds the frame controls. The record header's action row keeps the business actions only.
+  
+  - **Left: the breadcrumb.** At the root it reads 「对象 › 记录名」 (for example 「Leads › Mira Costa」). The object returns to the list: in a pane it closes the pane, and on a page it goes to the list the page was opened from, or to the object's list. One level down in a pane, the bar keeps 「← 路径」 as before. A page opened under a `?from=` trail shows ← and the same path, and each ancestor links to its page.
+  - **Right, in a fixed order.** First the counter 「3 / 21」 and ↓ ↑. Its tooltip names the list's view. Then ⊟, then ⤢ / ⤡, then ✕. Each control is drawn only where it applies:
+    - In a pane, the counter and ↓ ↑ show whenever the pane has a list context. ✕ shows on the pane faces only, and it closes the whole path.
+    - On a page, the counter and ↓ ↑ show only for a page a list opened: the row's ↗, or a row click or record link on a list whose rows open as pages. ↓ ↑ and `j` / `k` step through that list's rows: a step replaces the page with the sibling's page. The arrow keys still scroll the page.
+    - ⤡ 「收为抽屉」 (Collapse to drawer) shows only for a page the row's ↗ opened. It returns to the list with the record you stepped to open in the pane.
+    - A page opened directly shows only ⊟.
+    - While a pane is open over a page, the pane owns `j` / `k`.
+  - **⊟ moves into the bar.** The right-column switch (「右栏」, ⌘⇧,) leaves the record header's action row. It is drawn in the top bar only where the face's tier has a right column. In a pane, the record puts it into the pane's own bar. A host's plain overlay without the console's pane keeps it at the end of the header's action row.
+  - **The crumb row goes.** The row above the record header that held 「‹ origin」 and 「Collapse to drawer」 is removed. Both now live in the top bar.
+  - **The enlarged related list draws a toolbar.** When a related list is the active tab, it draws a toolbar over the table instead of the related list's card header and foot. The toolbar holds a filter input, the chips 全部 N / 我的 / 逾期, the child object's toolbar actions, 新建 and 导出, and a 「N 条 · 第 x / y 页」 line sits above the table. 我的 is drawn where the child object has an `owner_id` column. 逾期 is drawn where the child object declares a deadline (`dueLike: true` on a `date` or `datetime` field) with no `settledWhen`, because no query can ask which deadlines are settled. 导出 downloads a CSV through the server with the same parent, filter, chip, filter text and order the table shows.
+  - **动态 count on a deep link.** A link that opens the record on another tab, or a page with the right column switched off, still shows the 动态 tab's count. The count comes from the feed the page already holds; it starts no read of its own.
+- 2f2c6b9: feat(fields): every record reference shows a hover card with the target's declared highlights, without navigating
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Hovering a record reference for 400 ms, or pressing Space on it, shows a floating card: the target object's icon and label, the record's name as a link that opens it the way a click on the reference does, and the object's declared `highlightFields` minus the name field, at most six, drawn by the same cell renderers a list uses (option labels, currency, dates, lookups). Esc, moving the pointer away or blurring the reference hides it, and one card is open at a time. Focus alone does not show it.
+  
+  - **Where.** Every lookup and master-detail value that links to its record (`LookupCellRenderer`): a relation column in a list, in a related list's table and in its enlarged view, and a lookup in the record's details. On the record page's related column, the name in a compact related row shows the card too, and its title opens the row as the name does.
+  - **What it reads.** Nothing until a card is shown; then one `findOne` for the record, with `$expand` naming only the reference fields the card draws. The answer is kept per record and read again after the data bus says the record changed, so a list of 200 rows reads nothing on render.
+  - **Metadata only.** Only the object's declared `highlightFields` are drawn: a name the object does not define, the name field and a field the viewer may not read are left out. An object that declares none shows the record's name and the object label. A record the viewer cannot read shows the reference's name and the object label.
+  - **Layout.** The card is portalled to the document body, so the row, cell or chip under it keeps its layout.
+  
+  `@object-ui/fields` exports `RecordHoverCard` (with `RecordHoverCardProps` and `RecordHoverCardObjectDef`) for a host that draws a reference of its own: wrap the element that names the record and pass the target's `objectName`, `recordId` and the object definition the host already holds.
+- c4cb5ec: fix(plugin-detail): the discussion header shows no count when a feed read was refused
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A member who may not read a record's comments saw `Discussion (0)` directly above "You don't have permission to view comments on this record." The timeline's heading counted the rows it holds, and a refused read holds none, so the header claimed the record had no comments when the server only withheld them. When the host reports a refused comment or activity read, the timeline heading now shows its title with no count, and the collapsed discussion toggle reads "Open discussion panel" instead of `Show Discussion (0)`. A readable feed keeps its count, `(0)` included.
+- c0f9fdb: fix(console): a record delete says it cannot be undone, and the success toast names the record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A record delete is permanent (there is no recycle bin), yet the one-record confirm only asked "Are you sure you want to delete this record?" and the success toast said "Record deleted" (record page) or "Task deleted successfully" (list) without saying which record went.
+  
+  - **The question.** `objectActions.deleteConfirm` (the list row, the record page and the object-view grid Delete) and plugin-detail's `detail.deleteConfirmation` now end with the pack's own "This cannot be undone." sentence, the one the batch question already carried, in all ten locale packs.
+  - **The toast.** `recordDelete.successText` (`@object-ui/core`) names the deleted record by the same display-name resolver the confirm title reads: `Task "Website Relaunch" deleted`. A record with nothing nameable keeps `{{label}} deleted successfully`. The record page, the console list and the object-view grid all use it; `recordDelete.run` takes an optional `objectDef` so the name follows the object's declared `nameField`. A batch delete keeps its count.
+  - `@object-ui/i18n` gains `objectActions.deletedNamed` in all ten packs. There is no Undo: there is nothing to restore from.
+- e15a87c: fix(fields): a user's Permission Sets and Positions tabs show each set's and position's label, not its api name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A text field declaring `widget: 'permission-ref'` or `widget: 'position-ref'` (`sys_user_permission_set.permission_set`, `sys_user_position.position`) now has a read face of its own in list and detail cells: it draws the registry label of the stored name (`Organization Admin` for `organization_admin_no_bypass`), with the name on the cell's `title`. The labels come from the catalog the edit picker already lists (`DataSource.listMetadataItems`, `GET /api/v1/meta/:type`), read once per data source and registry type for every cell. A name the catalog does not hold, or holds without a label, still draws as the name, as does every cell while the catalog loads, when it fails, or when no data source can list a registry. A record page's related list now hands a column's declared `widget` to the cell resolution, as the grid already did, so these columns reach the face there.
+- be25e2d: feat(plugin-detail): `record:path` with `allowStageChange: true` lets the reader press a stage to move the record there
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `RecordPathProps.allowStageChange` was declared in `@objectstack/spec` but read by nothing: the path stayed a read-only progress rail. The renderer now honours it, and the block's registry `inputs` publish it, so it appears in `sdui.manifest.json` and the component reference.
+  
+  - **Who can press.** With `allowStageChange: true`, each stage other than the current one is a button, for a reader who may edit `statusField` on this record: the record page's edit session allows editing the record, the field is not read-only or computed, and the caller's field edit grant holds, asked of the stored row. Everyone else, and every path without the key or with `false`, keeps the readout exactly as before. While the record's inline edit holds unsaved changes the path is a readout too.
+  - **The write.** A press asks for confirmation, then saves `{ statusField: value }` through the same record update the inline-edit save bar uses, with the record's `updated_at` as the `ifMatch` concurrency token, and re-reads the record.
+  - **Refusals.** The server decides which moves are legal: the object's `state_machine` rule (ADR-0020), required fields and edit rights. A refused move is shown under the path: the server's own sentence for each refused field (a field other than the status field is named by its label), a fixed line for a permission refusal, and on a stale concurrency token a line saying the record changed, after the record is re-read.
+  - **Copy.** Seven `detail.pathStageChange*` keys, in all ten language packs.
+- be646ed: feat(console): a comment author is told, in one sentence, which mentioned users will not be notified
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When a record comment @mentions someone the server's mention gate refuses, the server saves the comment with every mention, withholds that person's notification, and answers their ids to the author's own write as `withheldMentions`. The Console said nothing, so the author believed the colleague had been told. Now:
+  
+  - **One sentence, no reason.** Posting a comment, posting a reply, or saving an edit that adds a mention raises one warning naming the users who will not be notified, by the names the mention picker offered ("Grace Hopper, Linus will not be notified of this comment."). It gives no reason. A write that withheld nobody says nothing. The copy is `detail.mentionsWithheld` in all ten packs.
+  - **The answer reaches the caller.** `ObjectStackAdapter.create` and `.update` take an optional per-call `onMentionsWithheld(ids)` listener (on `update`, beside `ifMatch`). It is called once, after the write succeeded, only when the answer names at least one id; a throwing listener does not fail the write. Both methods still resolve the record, so no other caller sees a change.
+  - **Mention chips.** The comment composer draws the users the text mentions as a row of chips under the editor (labelled `detail.mentionedPeople`), resolved the way the write resolves them, and the preview draws each picked `@name` as one chip, multi-word names whole.
+- 700ec85: feat(console): a percent field with `percentDisplay: 'plain'` shows the percentage with no progress bar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `FieldSchema.percentDisplay` (`bar` or `plain`) was declared ahead of its renderer, so every percent field still drew a progress bar, including rates and probabilities such as an opportunity's win probability. The Console now reads it:
+  
+  - **The percent cell.** `PercentCellRenderer` in `@object-ui/fields` prints the formatted percentage alone when the field says `percentDisplay: 'plain'`. An absent key or `bar` keeps the bar beside the number, as before. The number itself is unchanged: same storage reading (`max`), same decimal places (`scale`), same locale.
+  - **Every read-only host.** The list grid, the record page's fields and header chips, the quick-look panel, related lists and gallery cards all draw that one cell. Each builds the cell's field metadata key by key, so each now copies `percentDisplay` beside `useGrouping`: the grid's three configured-column paths, the detail enrichment key list (record page fields and header chips), the quick-look panel, the related list and the gallery card.
+  - **The field form.** The field designer offers a `percentDisplay` select (Bar / Plain) on `percent` fields. Left untouched it writes nothing, and the field keeps the bar.
+  - **The contract.** `percentDisplay`'s describe no longer says the Studio UI does not read it, and its liveness row is `live`, naming those relay sites.
+  
+  Nothing to migrate: a field that already says `plain` now shows it.
+- 82b29fe: feat(types): a related list's `filter` and its add-picker `filter` take a view filter's any-of group `{ or: [...] }`, as the spec carriers do
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `RecordRelatedListComponentProps.filter` and `.add.picker.filter` in `@object-ui/types` are now `ViewFilterElement[]` (a flat rule or an any-of group `{ or: [rule, ...] }`, from `@objectstack/spec/ui`), the element the protocol's `RecordRelatedListProps` already declares for both keys. The props the related-list renderer hands those values to move with them: `RelatedListProps.filter` and `RelatedListProps.add.picker.filter` in `@object-ui/plugin-detail`, and `ResolveRelatedRecordActionsInput.filter` in `@object-ui/react`. Every value these types accepted before is still accepted; a nested group or a group of tuples is still refused by `tsc`, as the protocol's parse refuses it.
+  
+  Types only: no runtime code changes. The related list and its picker lower the group through `@object-ui/core`'s `toFilterNode`, which the console reader change for the any-of group teaches to read it.
+- 310cb96: feat(plugin-detail): the record page's tab row puts the related lists with records first, and the empty ones wait in the 「+N ▾」 dropdown
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The tab row under the record header used to place one tab per related list in the reader's arrangement, whatever its count, so on a record with many inbound lists two empty lists could take visible slots while lists with records sat in the dropdown. The right column already folds its empty panels into one line; the tab row now follows the same rule:
+  
+  - **Lists with records first.** After Overview and Activity, the related lists whose count is not `0` keep the reader's arrangement among themselves, then the empty ones follow in the same order. A count that is not known yet (still loading, or a refused read) counts as non-empty, so that tab stays where the arrangement puts it.
+  - **Empty lists never take a slot.** Their tabs always sit in the dropdown, even on a row with room for them: after the tabs that did not fit, behind a separator, with their `0` in a muted face, and before the hidden lists' tabs.
+  - **The active tab stays on the row.** A link that opens an empty list (`?related=`) still shows its tab, in the row's last slot.
+  - **No tab moves once drawn.** While the lists' counts are still loading (the right column shows its count placeholders meanwhile), their tabs wait off the row, and they appear once the counts land, already in order; the tab that is open is always drawn. A list whose count cannot be read keeps its place in the reader's arrangement.
+  - **Nothing stored changes.** The order is computed when the row is drawn; the stored arrangement (`record.related.arrangement`) and its shape are untouched.
+  
+  What to do: nothing. No metadata key and no setting.
+- 69dfac0: Clause-②: no
+  Metadata-protocol: none
+  
+  A phone's list card row now reads like the board's list row: the declared name field as the title, one subtitle line joining the first two shown columns' display values with " · " (a masked or empty value is skipped), and one status chip at the right (the object's status field as `detectStatusField` names it, drawn through its own cell), with no per-column label lines. Every value is drawn through the same cell the desktop row uses, so the amount, date and percent faces the card used to draw on its own are gone. The enlarged related tab on a phone draws these same card rows at the body's full width instead of the inset gallery cards; 768 px and wider are unchanged.
+- 64bc7fa: Clause-②: no
+  Metadata-protocol: none
+  
+  On a phone, the record header title and the record path's stage labels no longer run off the right edge. Below the `sm` breakpoint, `page:header`'s record title column now takes the header's width, so a long title ellipsises as it does on desktop instead of being cut mid-word. The `record:path` phone row now gives every stage an equal share of the row (with a 2.5rem floor, past which it still scrolls): an ordinary stage label ellipsises and keeps its full text in `title`, and a terminal stage label wraps, as on the desktop rail.
+- 64e5efd: fix(ui): a refused list or related-list read says "no access" and offers no Retry
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **List view.** A permission refusal (403) on a list read draws the no-access panel without the Retry button, the same way an object whose API is switched off already did: a retry re-reaches the same refusal. A network failure or a 5xx keeps Retry.
+  - **Related list.** A related list the reader may not read draws a quiet, neutral line (`role="status"`, no destructive styling) with the list's no-access sentence, and no Retry. It no longer shows the generic action refusal ("You do not have permission to perform this action.") in red to someone who only opened the record. Other read failures are drawn as before.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [2302b92]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [47b6392]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [fc92c62]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [81b4599]
+- Updated dependencies [d7df639]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [ee29ac3]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [48bffe3]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [b223072]
+- Updated dependencies [e199adf]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [ddbd08e]
+- Updated dependencies [7614f8f]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [efa2915]
+- Updated dependencies [aa874c8]
+- Updated dependencies [d220b9b]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [50d05cb]
+- Updated dependencies [af6ca00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [5da3a8c]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [bf74607]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [55a1feb]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [3702be4]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [8a1f467]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [2f2c6b9]
+- Updated dependencies [5c083e8]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [a5d7098]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [946395d]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [b339465]
+- Updated dependencies [e15a87c]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [f91ab5a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [3ba5206]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [86dc686]
+- Updated dependencies [f23e051]
+- Updated dependencies [aaa5c1d]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [91e4652]
+- Updated dependencies [001c04b]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [9da2f4b]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [768ec4b]
+- Updated dependencies [4bc963c]
+- Updated dependencies [ba0084e]
+- Updated dependencies [a8d2fd7]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [82b29fe]
+- Updated dependencies [8c3f9d9]
+- Updated dependencies [4d278c9]
+- Updated dependencies [d5da45b]
+- Updated dependencies [5114b0e]
+- Updated dependencies [3694d3b]
+- Updated dependencies [d62d973]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [5e879ea]
+- Updated dependencies [1404938]
+- Updated dependencies [9182ff6]
+- Updated dependencies [272fec0]
+- Updated dependencies [693e100]
+- Updated dependencies [7253344]
+- Updated dependencies [da6f0ce]
+- Updated dependencies [0c1829a]
+- Updated dependencies [0aaad18]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [3e05ed1]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [839aae5]
+- Updated dependencies [99a6a78]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [847e424]
+- Updated dependencies [64bc7fa]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @objectstack/spec@18.3.0
+  - @object-ui/fields@18.3.0
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+  - @object-ui/permissions@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

@@ -1,5 +1,28 @@
 # @object-ui/create-plugin
 
+## 18.3.0
+
+### Patch Changes
+
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 19a2b61: chore(scaffold): generated apps and plugins declare the dev ranges this repository now builds with
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The workspace moved `react-router-dom` to `^7.18.4` and `vite-plugin-dts` to `^5.1.2`. A routed app scaffolded by `@object-ui/cli` now declares `react-router-dom` `^7.18.4`, and a plugin scaffolded by `@object-ui/create-plugin` now declares `vite-plugin-dts` `^5.1.2`, so a new project starts on the same versions the in-repo packages are tested on.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+
 ## 18.2.0
 
 ### Minor Changes

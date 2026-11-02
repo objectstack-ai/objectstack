@@ -1,5 +1,275 @@
 # @object-ui/plugin-charts
 
+## 18.3.0
+
+### Patch Changes
+
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 45c9be5: fix(plugin-charts): a chart's data labels print in their value axis's units, and the tallest mark keeps its label on the chart surface
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Units.** With `showDataLabels` on, each value label now prints with the tick formatter of the value axis its series is drawn against. An axis with no authored `format` labels its marks in the same compact units as its ticks (`174K` beside a `400K` tick, where the label used to print `174000`); an authored `yAxis[].format` still wins, per axis on a dual-axis or combo chart. Dashboard charts, whose `chartConfig` carries no axis format, are the common case.
+  - **Headroom.** A vertical bar, line, area or combo chart with data labels on takes a top margin that fits one label above the plot, so a mark on the top edge of the domain (the tallest bar under a nice top tick) no longer draws its label outside the chart. Charts without data labels, and horizontal bars, keep recharts' default margin.
+- 9e73c08: fix(plugin-charts): a sankey with two dimensions draws every flow from the first dimension to the second, instead of only the first second-dimension group's
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard widget (or a dataset-bound chart) of type `sankey` with `dimensions: ['status', 'category']` and one measure used to draw a single root node, the first `category` value, with only that value's flows; every other `category` value was dropped and nothing on the chart said so. The second dimension reaches the renderer pivoted into one series per value, and the sankey read the first series only.
+  
+  - **Every cell is a flow.** Two or more series on a sankey are now drawn as two columns of nodes: each first-dimension value flows into each second-dimension value it has records for, and the flow's width is the measure. A combination the dataset did not answer is no flow and is not reported as missing.
+  - **A partial flow says so.** A cell that is not above zero cannot be drawn as a flow; the chart prints the existing omitted-rows note once per second-dimension value that lost a cell, and a chart with no cell above zero shows the existing "no flow to draw" refusal, naming every column it tested.
+  - **Clicking a flow drills to its cell**, the one dataset row for that pair. A node spans several cells, so a node click does not drill.
+  - **Unchanged:** a sankey with one series draws the same one-level flow from the measure to each category. A comparison overlay (`compareTo`) is never drawn as a flow. A stored sankey widget that declares several measures (refused at publish by the spec) is handed only its first measure, as before, so its other measures are not drawn as groups.
+- 9e4f1cf: Clause-②: yes (widening: @object-ui/core gains the public export formatMonthBucketLabel; no accept set moves)
+  Metadata-protocol: none
+  
+  Dashboard numbers and chart labels stay readable on a phone:
+  
+  - **KPI value.** A dataset-bound KPI tile's value now shrinks to fit its tile, the way the plain metric tiles already did, instead of being cut with an ellipsis (`$1,090,00...` on a phone). Past the smallest size it keeps the ellipsis and shows the full figure as a tooltip. A short value looks as before.
+  - **Month axis.** A chart over a month-bucketed date dimension labels its axis `Oct 2025` in the reader's locale, not the raw bucket key `2025-10`. The chart tooltip's header reads the same label. The key itself is unchanged in the data, so drill-through and ordering are unaffected. `@object-ui/core` adds `formatMonthBucketLabel(value, locale)`, which answers that label for a `YYYY-MM` key and `undefined` for anything else.
+  - **Legend swatches.** A bar or area chart's legend draws a colour swatch for every series; it drew none, because those marks fill from a gradient. A comparison (`compareTo`) series' swatch is drawn hollow, so it reads apart from the solid swatch of the series it overlays in the same colour.
+  - **Horizontal bar labels.** A horizontal bar chart's category labels are drawn in full on a phone, wrapped to at most two lines inside the axis, instead of cut to eight characters (`In Progr…`). A label still too long ends in an ellipsis and shows the full text as a tooltip.
+- d7625ea: fix(plugin-charts): a pie, donut, funnel or treemap with two dimensions draws every second-dimension group or refuses on the tile, instead of silently drawing the first group only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard widget (or a dataset-bound chart) of type `pie`, `donut`, `funnel` or `treemap` with `dimensions: ['stage', 'owner']` and one measure used to draw only the first `owner` value's amounts; every other owner was dropped and nothing on the chart said so. The second dimension reaches the renderer pivoted into one series per value, and these arms read the first series only.
+  
+  - **Treemap draws every cell.** Two or more series on a treemap are now drawn as two levels: each first-dimension value is a parent, and each second-dimension value it has records for is a leaf inside it, sized by the measure and named `stage / owner`. A cell that is not above zero is left out, and the chart prints the existing "not drawn to scale" note once per second-dimension value that lost a cell; a chart with no cell above zero shows the existing "nothing to size" refusal, naming every value it tested. Clicking a leaf drills to its cell.
+  - **Pie, donut and funnel refuse on the tile.** A pie slice is one share of one whole and a funnel stage one total, so neither has a place for a second series. Handed two or more, they now draw nothing and show a refusal (`data-chart-error="one-series-family"`) that names every group, instead of the first group's chart.
+  - **Several measures outside a dashboard.** The renderer cannot tell a second-dimension group from a second measure, so a pie, donut or funnel chart block that authors a `yAxis` list, or a page chart with one dimension and two measures, now shows the same refusal naming every measure instead of drawing the first one alone, and such a treemap nests the measures under each category.
+  - **Unchanged:** a chart with one dimension and one measure draws exactly as before on all four types, a comparison overlay (`compareTo`) is never read as a group, and a chart with no rows is the empty chart it was. A stored dashboard widget of these types that declares several measures (refused at publish by the spec) is handed only its first measure, as before, so its other measures are not read as groups.
+- Updated dependencies [2302b92]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [b3f7344]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [47b6392]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [a122269]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [da46b2a]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [fc92c62]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [d7df639]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [ee29ac3]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [2655ebd]
+- Updated dependencies [48bffe3]
+- Updated dependencies [a33fce2]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [4145210]
+- Updated dependencies [1ed3360]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [b223072]
+- Updated dependencies [7614f8f]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [efa2915]
+- Updated dependencies [aa874c8]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [af6ca00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [5da3a8c]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [bf74607]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [55a1feb]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [8a1f467]
+- Updated dependencies [5c083e8]
+- Updated dependencies [a5d7098]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [946395d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [b339465]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [f91ab5a]
+- Updated dependencies [3ba5206]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [86dc686]
+- Updated dependencies [aaa5c1d]
+- Updated dependencies [bed8306]
+- Updated dependencies [91e4652]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [ea1751b]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [9da2f4b]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [768ec4b]
+- Updated dependencies [4bc963c]
+- Updated dependencies [a8d2fd7]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [82b29fe]
+- Updated dependencies [8c3f9d9]
+- Updated dependencies [d5da45b]
+- Updated dependencies [3694d3b]
+- Updated dependencies [d62d973]
+- Updated dependencies [5e879ea]
+- Updated dependencies [1404938]
+- Updated dependencies [9182ff6]
+- Updated dependencies [272fec0]
+- Updated dependencies [693e100]
+- Updated dependencies [7253344]
+- Updated dependencies [da6f0ce]
+- Updated dependencies [0aaad18]
+- Updated dependencies [839aae5]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [847e424]
+- Updated dependencies [64bc7fa]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes
