@@ -309,10 +309,11 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
 // drops focus to the body (measured in Chromium 153, and not handed back when
 // it is enabled again). happy-dom keeps focus on it, so the test runs the
 // fixup on the switch the way the browser does, else the focus pins could not
-// fail.
+// fail. (happy-dom's `blur()` does nothing on a disabled control, so focus is
+// moved to the body itself.)
 function runFocusFixup(el: HTMLElement): () => void {
   const observer = new MutationObserver(() => {
-    if (el.hasAttribute('disabled') && document.activeElement === el) el.blur();
+    if (el.hasAttribute('disabled') && document.activeElement === el) document.body.focus();
   });
   observer.observe(el, { attributes: true, attributeFilter: ['disabled'] });
   return () => observer.disconnect();
