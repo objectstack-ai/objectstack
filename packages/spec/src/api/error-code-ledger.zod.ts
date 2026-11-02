@@ -1208,6 +1208,13 @@ export const ERROR_CODE_LEDGER = {
     // operation, try when it settles"; that one says "never, fix the
     // configuration instead".
     'DELIVERY_NOT_ELIGIBLE',
+    // [#29068] `unregisterDevice`'s refusal for a device id the caller does
+    // not hold, unknown or another user's alike (`deviceNotFoundError` in
+    // `device-registry.ts`), so the answer never says the id exists for
+    // somebody else. Wire path: `DELETE /api/v1/notifications/devices/:deviceId`
+    // throws it out of the `/notifications` domain and the dispatcher answers
+    // `404 NOT_FOUND` through `resolveThrownHttpError`.
+    'NOT_FOUND',
   ],
   '@objectstack/trigger-api': [
     'ENQUEUE_FAILED',                // queue accepted the call but publish threw

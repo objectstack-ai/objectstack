@@ -133,5 +133,13 @@ describe('/notifications/devices — the device registry faces', () => {
         }
         expect(service.registerDevice).not.toHaveBeenCalled();
         expect(service.unregisterDevice).not.toHaveBeenCalled();
+
+        // Unserved with or without an inbox (the route ledger's refusal rows):
+        // only a missing notification service answers 501.
+        const { listInbox: _dropped, ...registryOnly } = deviceService();
+        const noInbox = await makeDispatcher(registryOnly).handleNotification('/devices', 'GET', undefined, {}, SIGNED_IN());
+        expect(noInbox.handled).toBe(false);
+        const noService = await makeDispatcher(null).handleNotification('/devices', 'GET', undefined, {}, SIGNED_IN());
+        expect(noService.response?.status).toBe(501);
     });
 });
