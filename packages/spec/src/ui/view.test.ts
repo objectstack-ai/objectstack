@@ -3435,7 +3435,7 @@ describe('UserActionsConfigSchema', () => {
     expect(config.group).toBe(true);
     expect(config.addRecordForm).toBe(false);
     expect(config.editInline).toBe(true);
-    expect(config.hideFields).toBe(false);
+    expect(config.hideFields).toBe(true);
     expect(config.rowColor).toBe(false);
     expect(config.buttons).toBeUndefined();
   });
@@ -3495,16 +3495,51 @@ describe('UserActionsConfigSchema', () => {
     });
   });
 
-  // The split is copied from the renderer's reads, not chosen by the spec
-  // (ruled A on objectui#5435): ListView.tsx computes `showGroup` as
-  // `ua?.group !== false` (absent ⇒ shown) but `showHideFields` / `showColor`
-  // as `ua?.hideFields === true` / `ua?.rowColor === true` (absent ⇒ hidden).
-  // Normalising the three to one default would silently flip a toolbar
-  // affordance on every view that never wrote the key.
-  it('pins the group-ON / hideFields-OFF / rowColor-OFF defaults asymmetry, copied from what the renderer reads', () => {
+  // Maintainer ruling on #28912: 「Fable 评估（核对后） 同意立卡」, confirmed on
+  // the card 「#28911 和 #28912 都保留，按卡上写的做。」 A reader can hide and
+  // show the view's columns by default; `hideFields: false` is the opt-out.
+  // The old OFF default was copied from the renderer's legacy `=== true` read;
+  // the renderer now reads `ua?.hideFields !== false`, so the two agree again.
+  describe('hideFields defaults ON (maintainer ruling)', () => {
+    it('an absent key parses to true', () => {
+      expect(UserActionsConfigSchema.parse({}).hideFields).toBe(true);
+      const view = ListViewSchema.parse({
+        name: 'accounts',
+        label: 'Accounts',
+        columns: [{ field: 'name' }],
+        userActions: {},
+      });
+      expect(view.userActions?.hideFields).toBe(true);
+    });
+
+    it('an explicit false stays false — the opt-out', () => {
+      expect(UserActionsConfigSchema.parse({ hideFields: false }).hideFields).toBe(false);
+      const view = ListViewSchema.parse({
+        name: 'accounts',
+        label: 'Accounts',
+        columns: [{ field: 'name' }],
+        userActions: { hideFields: false },
+      });
+      expect(view.userActions?.hideFields).toBe(false);
+    });
+
+    it('a view with no `userActions` block still materialises none', () => {
+      const view = ListViewSchema.parse({
+        name: 'accounts',
+        label: 'Accounts',
+        columns: [{ field: 'name' }],
+      });
+      expect(view.userActions).toBeUndefined();
+    });
+  });
+
+  // `group` is ON unless turned off (`ua?.group !== false`), `rowColor` is OFF
+  // unless turned on (`ua?.rowColor === true`) — the renderer's reads, ruled A
+  // on objectui#5435. `hideFields` left this pair by the ruling above.
+  it('pins the group-ON / hideFields-ON / rowColor-OFF defaults, matching what the renderer reads', () => {
     const config = UserActionsConfigSchema.parse({});
     expect(config.group).toBe(true);
-    expect(config.hideFields).toBe(false);
+    expect(config.hideFields).toBe(true);
     expect(config.rowColor).toBe(false);
   });
 
