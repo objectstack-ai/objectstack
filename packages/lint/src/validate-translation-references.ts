@@ -2660,6 +2660,7 @@ interface ActionEntryContext {
  *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
  *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
  *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
+ *   | `cancelText`                        | `confirmText` or a non-empty `params` (either dialog) | `translateAction` |
  *
  * A dialog leaf under a DECLARED dialog is read whether or not the dialog
  * authors that leaf itself — the resolver overlays a translated `title` onto a
@@ -2667,7 +2668,10 @@ interface ActionEntryContext {
  *
  * `submitText` is the param dialog's button, the one leaf with a host of its
  * own: the dialog opens only for a non-empty `params`, and `translateAction`
- * overlays the key only then (#27944). The leaf keys beside them (`label`,
+ * overlays the key only then (#27944). `cancelText` is the dismiss button both
+ * pre-run dialogs carry, so its host is either one: a declared `confirmText`
+ * (the confirm dialog) or a non-empty `params` (the param dialog) (#28519).
+ * The leaf keys beside them (`label`,
  * `description`, `confirmText`, `successMessage`, `disabledReason`) are prose
  * on a node that resolved, read whenever the action is, as on the object
  * branch.
@@ -2684,6 +2688,7 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
   checkActionSubmitText(findings, ctx);
+  checkActionCancelText(findings, ctx);
 }
 
 /**
@@ -2708,6 +2713,32 @@ function checkActionSubmitText(findings: TranslationRefFinding[], ctx: ActionEnt
     hint:
       `Move the \`submitText\` translation under the action that collects the params, declare ` +
       `\`params\` on this action first if it should open a dialog, or drop it.`,
+  });
+}
+
+/**
+ * [#28519] `cancelText` — the label of the dismiss button on the dialog an
+ * action opens before it runs. Two dialogs carry that button: the confirm
+ * dialog of a declared `confirmText` and the param dialog of a non-empty
+ * `params`; `translateAction` overlays the key only for an action that opens
+ * one of them, so under any other action the translation is read by nothing —
+ * {@link checkActionSubmitText}'s rule, with either declaration as the host.
+ */
+function checkActionCancelText(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  if (!isRec(ctx.rawAction) || ctx.rawAction.cancelText === undefined) return;
+  if (ctx.action.confirmText != null) return;
+  if (Array.isArray(ctx.action.params) && ctx.action.params.length > 0) return;
+  findings.push({
+    severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+    rule: TRANSLATION_TARGET_UNKNOWN,
+    where: `${ctx.where} · dismiss button`,
+    path: `${ctx.path}.cancelText`,
+    message:
+      `Translations carry a dialog \`cancelText\`, but ${ctx.subject} declares neither ` +
+      `\`confirmText\` nor \`params\`, so it opens no confirm or param dialog and nothing reads this label.`,
+    hint:
+      `Move the \`cancelText\` translation under the action whose dialog it dismisses, declare the ` +
+      `\`confirmText\` or \`params\` that opens the dialog on this action first, or drop it.`,
   });
 }
 

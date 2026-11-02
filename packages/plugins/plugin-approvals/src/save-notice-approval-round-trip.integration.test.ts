@@ -20,7 +20,20 @@
  * `subflow` that asks the approval: the parse cannot see that a subflow
  * pauses (it does only when its child does), so that is where the run-time
  * refusal is still the guard. The parse refusal itself is pinned at
- * `registerFlow` in the second case.
+ * `registerFlow` in the last case.
+ *
+ * [#28840] That subflow shape is now declined by the arming gate: a
+ * `save_notice` after a `subflow` whose child can suspend registers but is
+ * NOT armed, so the create no longer starts it. The first case pins that
+ * decline through the real record-change trigger: the flow registers, the
+ * create fires nothing, and `/_status` names the `subflow` node and the
+ * child's `approval` node. The resumed leg stays reachable through a run
+ * started directly (`automation.execute`) with the context the record-change
+ * trigger hands a run, the write's notice channel included, so the second
+ * case still pins that the stored run drops the channel and its resumed
+ * `save_notice` refuses by name. What the direct start skips is the trigger's
+ * hand-off of the channel, which the record-change trigger's own suite pins
+ * (#28251).
  *
  * The executor's own suite pins the run-time refusal with a hand-built
  * context. This suite pins it through the real round trip, so a store that
@@ -43,7 +56,8 @@
  *
  * Ablated: with the executor's no-channel refusal replaced by a success, the
  * resumed-leg assertions go red (`save-notice-node.ts`), and are green again
- * once it is restored.
+ * once it is restored. With the arming gate's save-notice half removed, the
+ * first case goes red (the flow is armed and the create starts it).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -89,6 +103,9 @@ const deal = {
  * the graph is accepted, the parent suspends with its child, persists, and
  * resumes from storage when the decision completes the child. The resumed
  * parent leg is where the second `save_notice` meets the run-time refusal.
+ *
+ * [#28840] The arming gate declines this graph, so the create never starts
+ * it; the run-time case starts it directly.
  */
 const CHILD = 'deal_manager_review';
 const child = {
@@ -205,15 +222,42 @@ describe('[#28786] a save_notice before an approval answers the write, and one o
     try { await kernel?.shutdown(); } catch { /* noop */ }
   });
 
-  it('the create hears the sentence, the run is persisted without the channel, and the resumed save_notice refuses', async () => {
-    // ── The write: the save_notice ahead of the approval answers it.
+  it('[#28840] the flow registers but is not armed: the create starts nothing, and /_status names the subflow node and the child\'s approval', async () => {
+    const automation = kernel.getService<AutomationEngine>('automation');
+    expect(automation.getFlow(FLOW), 'the flow is registered').toBeDefined();
+    const row = automation.getFlowRuntimeStates().find((s) => s.name === FLOW);
+    expect(row).toMatchObject({ enabled: true, bound: false, unboundCause: 'notice_after_suspending_subflow' });
+    expect(row?.reason).toContain("`save_notice` node 'tell_after' is reached after `subflow` node 'review'");
+    expect(row?.reason).toContain(`child flow '${CHILD}' can suspend the run at \`approval\` node 'ask'`);
+
     const heard: unknown[] = [];
-    const created: any = await ql.insert(
+    await ql.insert(
       deal.name,
-      { name: 'Acme' },
+      { name: 'Globex' },
       { context: { userId: SUBMITTER }, onNotice: (message: unknown) => { heard.push(message); } } as any,
     );
-    expect(heard, "the create's own answer carried the notice").toEqual(['Sent Acme to your manager for approval']);
+    expect(heard, 'no run answered the create').toEqual([]);
+    expect(await runRows(), 'the create started no run').toEqual([]);
+  });
+
+  it('a run started with the write\'s channel is persisted without it, and its resumed save_notice refuses by name', async () => {
+    const automation = kernel.getService<AutomationEngine>('automation');
+    const created: any = await ql.insert(deal.name, { name: 'Acme' }, { context: SYSTEM });
+
+    // ── The run, started as the record-change trigger starts one: the record,
+    // the writer, and the write's notice channel, whose `set` answers the write.
+    const heard: unknown[] = [];
+    const started: any = await automation.execute(FLOW, {
+      record: { ...created },
+      previous: undefined,
+      object: deal.name,
+      event: 'insert',
+      userId: SUBMITTER,
+      params: { ...created },
+      saveNotice: { set: (message: string) => { heard.push(message); } },
+    } as any);
+    expect(started.success, 'the run suspended at its subflow, it did not fail').toBe(true);
+    expect(heard, 'the save_notice ahead of the subflow set the sentence').toEqual(['Sent Acme to your manager for approval']);
 
     // ── Suspended and persisted: one live row, its context stored as JSON.
     const [pause] = await runRows();

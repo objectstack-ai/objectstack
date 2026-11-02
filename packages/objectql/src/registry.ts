@@ -513,6 +513,9 @@ type ObjectFieldPatches = NonNullable<ObjectExtensionParsed['fieldPatches']>;
 /** An `extend` contributor's body: a partial object that may carry {@link ObjectFieldPatches}. */
 type ObjectExtensionBody = Partial<ServiceObject> & { fieldPatches?: ObjectFieldPatches };
 
+/** [#28835] One extension's `fields` as the fold merged them, with the package that declared them. */
+type FoldedExtensionFields = { packageId: string | undefined; fields: unknown };
+
 const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -4285,6 +4288,12 @@ export class SchemaRegistry {
     if (ownership === 'extend') {
       const extendRefusal = extendContributionRefusal(schema, packageId);
       if (extendRefusal) throw extendRefusal;
+      // [#28858] …filed under the key the object it extends is registered
+      // under — see {@link extensionTargetKey}. Every entry that registers an
+      // extension reaches this line: the manifest `objectExtensions` loop and
+      // a stored `object_extension` row ({@link registerObjectExtension}).
+      const target = this.extensionTargetKey(String(schema.name ?? ''), packageId);
+      if (target !== schema.name) schema = { ...schema, name: target };
     }
     // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
     // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
@@ -4627,6 +4636,8 @@ export class SchemaRegistry {
     let merged = tenantRules
       ? this.withPackagedOwnerRules(contributors, baseDefinition, tenantRules)
       : { ...baseDefinition };
+    // [#28835] Each extension's `fields` as the merge took them, in fold order.
+    const folded: FoldedExtensionFields[] = [];
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
         let extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
@@ -4664,8 +4675,10 @@ export class SchemaRegistry {
           )
           : [];
         this.reportFieldPatchMisses([...misses, ...residual], contrib.packageId);
+        folded.push({ packageId: contrib.packageId, fields: extension.fields });
       }
     }
+    this.reportRedeclaredFields(String(merged.name ?? baseDefinition.name ?? ''), contributors, ownFields, folded);
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
@@ -4679,6 +4692,75 @@ export class SchemaRegistry {
    * {@link shadowedExtensionQueueWarned} gives.
    */
   private fieldPatchMissesWarned = new Set<string>();
+
+  /**
+   * [#28835] Field names already named as declared by more than one
+   * contributor, keyed `object|field|packages` (the packages in fold order).
+   * Per registry, for the reason {@link shadowedExtensionQueueWarned} gives.
+   */
+  private redeclaredFieldsWarned = new Set<string>();
+
+  /**
+   * [#28835] Name, once, each field name of the object that more than one
+   * contributor declares in `fields`: two extensions both adding it, or an
+   * extension redeclaring a field the owner declares (one of `ownFields`). The
+   * merge spreads `fields`, so the definition served is the last one the fold
+   * applied: contributions fold in ascending `priority`, and at equal priority
+   * in the order they registered, so the one registered last. The line names
+   * the object, the field, every declaring package in that order, and the one
+   * whose definition is served.
+   *
+   * Judged from the contributors' own declarations (`folded`, as the merge
+   * took them), never from the running body, so a base that already carries
+   * the extensions' fields (a folded body handed to
+   * {@link foldObjectExtendersOnto}, a stored overlay row) is not read as a
+   * redeclaration. `fieldPatches` is not a declaration and is not counted
+   * ({@link reportFieldPatchMisses} names a patch that misses). A `.custom`
+   * pair's `__c` field and a dependent's plain one never share a name.
+   *
+   * ⛔ Never a refusal, and the served definition is unchanged: the same
+   * reasons as {@link reportFieldPatchMisses} (the fold runs on every read
+   * while a boot is still registering packages). At `warn`: one package's
+   * definition of the field is not served.
+   */
+  private reportRedeclaredFields(
+    object: string,
+    contributors: readonly ObjectContributor[],
+    ownFields: ReadonlySet<string> | undefined,
+    folded: readonly FoldedExtensionFields[],
+  ): void {
+    if (folded.length === 0) return;
+    const owner = contributors.find((c) => c.ownership === 'own');
+    const declarers = new Map<string, Array<{ packageId: string | undefined; owner: boolean }>>();
+    for (const { packageId, fields } of folded) {
+      if (!isPlainRecord(fields)) continue;
+      for (const name of Object.keys(fields)) {
+        let list = declarers.get(name);
+        if (!list) {
+          list = owner && ownFields?.has(name) ? [{ packageId: owner.packageId, owner: true }] : [];
+          declarers.set(name, list);
+        }
+        list.push({ packageId, owner: false });
+      }
+    }
+    const named = (packageId: string | undefined) => (packageId ? `"${packageId}"` : '(no package)');
+    for (const [field, list] of declarers) {
+      if (list.length < 2) continue;
+      const key = `${object}|${field}|${list.map((d) => d.packageId ?? '').join(',')}`;
+      if (this.redeclaredFieldsWarned.has(key)) continue;
+      this.redeclaredFieldsWarned.add(key);
+      const extenders = list.filter((d) => !d.owner).map((d) => named(d.packageId));
+      const declaredBy = list[0]!.owner
+        ? `the owner ${named(list[0]!.packageId)} and by extensions from ${extenders.join(', ')}`
+        : `extensions from ${extenders.join(', ')}`;
+      console.warn(
+        `[Registry] Field "${field}" of object "${object}" is declared in \`fields\` by ${declaredBy}; ` +
+          `the definition served is the one from ${named(list[list.length - 1]!.packageId)}, the last the fold applies ` +
+          '(ascending `priority`; at equal priority, the one registered last). Rename the field in one extension, ' +
+          'or patch an owner field\'s display properties instead of redeclaring it.',
+      );
+    }
+  }
 
   /**
    * [ADR-0146 D10, second rule] Name, once, each patch the fold did not apply
@@ -6181,6 +6263,46 @@ export class SchemaRegistry {
       'extend',
       typeof priority === 'number' ? priority : DEFAULT_EXTENDER_PRIORITY,
     );
+  }
+
+  /**
+   * [#28858] Spellings of an `extend` already named, keyed
+   * `spelled|resolved|package`. Per registry, for the reason
+   * {@link shadowedExtensionQueueWarned} gives.
+   */
+  private extensionSpellingWarned = new Set<string>();
+
+  /**
+   * [#28858, ADR-0146 D10] The key an extension of `name` is filed under: the
+   * key {@link getObject} reads `name` as. That is `name` itself whenever an
+   * entry is registered under it, or nothing is registered that `name` folds
+   * to. It differs only for a short name `getObject` folds to a legacy
+   * `<ns>__<name>` key ({@link resolveObjectKey}); filing such an extension
+   * under the short name would open a second, owner-less entry beside the
+   * object it meant, which nothing serves and nothing checks.
+   *
+   * The folded spelling is named once at `warn`, with the key to write. ⛔
+   * Never a refusal: the manifest loop and the boot hydration run while
+   * packages are still registering (AGENTS.md *Startup registry reads*). The
+   * `object_extension` item door refuses the same spelling at save (#28834),
+   * where the author is present to fix it. A legacy owner that registers
+   * AFTER the extension is not yet there to fold to, so that extension is
+   * filed under its own spelling, as before.
+   */
+  private extensionTargetKey(name: string, packageId: string | undefined): string {
+    if (name === '' || this.objectContributors.has(name)) return name;
+    const resolved = this.resolveObjectKey(name);
+    if (resolved === undefined || resolved === name) return name;
+    const key = `${name}|${resolved}|${packageId ?? ''}`;
+    if (!this.extensionSpellingWarned.has(key)) {
+      this.extensionSpellingWarned.add(key);
+      console.warn(
+        `[Registry] An extension${packageId ? ` from package "${packageId}"` : ''} names its object '${name}', ` +
+          `which is registered as '${resolved}': the extension is filed under '${resolved}', the object it ` +
+          `reads as. Write \`extend: '${resolved}'\` to name the object by the key it is registered under.`,
+      );
+    }
+    return resolved;
   }
 
   /**

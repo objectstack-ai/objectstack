@@ -44,6 +44,8 @@ interface AppShellProps {
   branding?: AppShellBranding;   // App branding — four theme fields, see Branding
   rightRail?: React.ReactNode;   // Optional right rail beside the content, not
                                  // over it (ADR-0057 P3a)
+  showHeader?: boolean;          // Draw the top bar (default: true); false draws
+                                 // no header and does not mount navbar
 }
 ```
 
@@ -69,6 +71,12 @@ of its own to it, in particular **no sidebar toggle**. If you want one, render i
 - Fixed height: `h-12` (3rem / 48px) at every breakpoint — there is no responsive height variant
 - Border bottom separator
 - Background matching app theme
+
+Pass `showHeader={false}` to draw no header at all, for a page that draws its own top bar:
+the shell then renders no `<header>` element and does not mount `navbar`. It defaults to
+`true`, and leaving `navbar` out alone still draws the (empty) bar. The Console uses it on
+a phone (below 768 px): a record page's own top bar, with its back link to the object's
+list, is the page's only bar there, and every other route keeps the app bar.
 
 ### Content Area
 

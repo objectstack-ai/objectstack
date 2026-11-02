@@ -41,7 +41,8 @@ const OBJECT_ENVELOPE = { type: 'object', name: 'showcase_project', item: OBJECT
 
 let capturedFacetProps: Record<string, any> | null = null;
 
-vi.mock('./PermissionAdvancedFacets', () => ({
+vi.mock('./PermissionAdvancedFacets', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./PermissionAdvancedFacets')>()),
   PermissionAdvancedFacets: (props: Record<string, any>) => {
     capturedFacetProps = props;
     return null;

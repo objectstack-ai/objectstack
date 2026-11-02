@@ -2159,11 +2159,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       : userFilterConditions;
 
   // The "In a queue" toggle (objectstack ADR-0142 D3). Offered only on an
-  // object the server serves with its injected `queue` column; withheld with
-  // the user filters on a dataset-bound chart. Ephemeral like the toolbar's
-  // other unpersisted toggles: it narrows what is on screen, nothing else.
+  // object the server serves with its injected `queue` column, AND only when
+  // the session says the organization has at least one queue (`hasAnyQueue`
+  // on `/auth/me/permissions`, objectstack#28428): with no queue the toggle
+  // could only ever return an empty list. The flag rides the permissions
+  // answer the console already holds, so a list mount reads no queue list.
+  // An unknown answer (no provider, the role-based one, anonymous) hides it.
+  // Withheld with the user filters on a dataset-bound chart. Ephemeral like
+  // the toolbar's other unpersisted toggles: it narrows what is on screen.
   const [sittingInQueueOnly, setSittingInQueueOnly] = React.useState(false);
-  const queueFilterOffered = objectHasOwnershipQueue(objectDef);
+  const { hasAnyQueue } = usePermissions();
+  const queueFilterOffered = hasAnyQueue === true && objectHasOwnershipQueue(objectDef);
   const appliedQueueSittingConditions =
     queueFilterOffered && sittingInQueueOnly && !datasetChartOnScreen
       ? QUEUE_SITTING_CONDITIONS

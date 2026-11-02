@@ -342,7 +342,8 @@
         "$TURBO_ROOT$/packages/rest/src/analytics-nested-relation-filter.test.ts",
         "$TURBO_ROOT$/packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts",
         "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts",
-        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts"
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts",
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts"
       ]
     },
     "@objectstack/lint#test": {
@@ -596,6 +597,7 @@
         "!**/node_modules/**",
         "$TURBO_ROOT$/packages/client/src/**",
         "$TURBO_ROOT$/packages/mcp/src/**",
+        "$TURBO_ROOT$/packages/plugins/plugin-audit/src/objects/sys-activity.object.ts",
         "$TURBO_ROOT$/packages/plugins/plugin-hono-server/src/**",
         "$TURBO_ROOT$/packages/rest/src/**",
         "$TURBO_ROOT$/packages/runtime/src/**",

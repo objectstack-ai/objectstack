@@ -49,9 +49,16 @@ import {
   isOverridableMetadataType,
   type OverrideDeclarationParsed,
 } from '@objectstack/spec/kernel';
+import {
+  BASE_FIELD_DISPLAY_WHITELIST,
+  EXTENSION_FIELD_SUFFIX,
+  isExtensionFieldName,
+  isPlainRecord,
+} from '@objectstack/spec/data';
 import { Layers, Pencil, RotateCcw } from 'lucide-react';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
+import { readFields, writeFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
 
 /**
  * The types Studio's Customize door covers: the Interfaces pillar's view,
@@ -363,4 +370,230 @@ export function StudioRestoreOriginalDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
+}
+
+/* ───────────── Object extensions (objectstack#28575, ADR-0146 D10) ───────────── */
+
+/**
+ * The selected field is a read-only base package's own field, edited through
+ * the base's pair: the field inspector, which the registry mounts with the
+ * shared inspector props, keeps only the inputs of the spec's display-property
+ * whitelist editable. The Data pillar provides it around the inspector.
+ */
+export const BaseFieldDisplayPatchContext = React.createContext(false);
+
+/**
+ * The metadata type a base object's extension is written as: one row per
+ * package per target object, filed under the target's name, its body
+ * `ObjectExtensionSchema` (`extend`, `fields`, `fieldPatches`, …).
+ */
+export const OBJECT_EXTENSION_TYPE = 'object_extension';
+
+/** The pair's extension of one base object: `extend` names the object. */
+export type ObjectExtensionBody = Record<string, unknown> & { extend: string };
+
+/**
+ * `name` spelled as a customer extension field: the spec's suffix appended
+ * once (`region` → `region__c`, `region__c` unchanged). Empty stays empty.
+ */
+export function extensionFieldName(name: string): string {
+  if (!name) return name;
+  return isExtensionFieldName(name) ? name : `${name}${EXTENSION_FIELD_SUFFIX}`;
+}
+
+/**
+ * The extension body a read served for `objectName`: the document without
+ * its `_` keys (the envelope a read stamps, which the strict schema refuses),
+ * `extend` set to the object. `null` when the read served no document.
+ */
+export function objectExtensionBodyOf(doc: unknown, objectName: string): ObjectExtensionBody | null {
+  if (!isPlainRecord(doc)) return null;
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(doc)) {
+    if (!key.startsWith('_')) body[key] = value;
+  }
+  return { ...body, extend: objectName };
+}
+
+/** The names `ext.fields` declares. */
+export function extensionFieldNames(ext: Record<string, unknown> | null | undefined): string[] {
+  return ext && isPlainRecord(ext.fields) ? Object.keys(ext.fields) : [];
+}
+
+/** `def` with one field patch applied: the whitelisted keys, and option labels by stored value. */
+function applyFieldPatch(def: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...def };
+  for (const key of BASE_FIELD_DISPLAY_WHITELIST.field) {
+    if (patch[key] !== undefined) out[key] = patch[key];
+  }
+  const optionPatches = patch.options;
+  if (isPlainRecord(optionPatches) && Array.isArray(def.options)) {
+    out.options = def.options.map((option) => {
+      if (!isPlainRecord(option) || typeof option.value !== 'string') return option;
+      const optionPatch = optionPatches[option.value];
+      if (!isPlainRecord(optionPatch)) return option;
+      const next: Record<string, unknown> = { ...option };
+      for (const key of BASE_FIELD_DISPLAY_WHITELIST.option) {
+        if (optionPatch[key] !== undefined) next[key] = optionPatch[key];
+      }
+      return next;
+    });
+  }
+  return out;
+}
+
+/**
+ * The object the Data pillar shows for a base object with the pair's
+ * extension of it: the object as served (which already holds the pair's
+ * PUBLISHED extension, merged by the registry), with the extension's
+ * `fieldPatches` applied to the fields they name and its `fields` laid over
+ * by name, the extension winning, so a published field the extension still
+ * declares shows once. A field the published extension declared and the
+ * extension no longer does (`published`) is left out: the extension
+ * removed it.
+ */
+export function foldObjectExtension(
+  object: Record<string, unknown>,
+  ext: Record<string, unknown> | null,
+  published: ReadonlySet<string> = new Set(),
+): Record<string, unknown> {
+  if (!ext) return object;
+  const view = readFields(object.fields);
+  const own = isPlainRecord(ext.fields) ? ext.fields : {};
+  const patches = isPlainRecord(ext.fieldPatches) ? ext.fieldPatches : {};
+  const entries: FieldEntry[] = [];
+  for (const entry of view.entries) {
+    if (published.has(entry.name) && !Object.prototype.hasOwnProperty.call(own, entry.name)) continue;
+    const patch = patches[entry.name];
+    entries.push(isPlainRecord(patch) ? { name: entry.name, def: applyFieldPatch(entry.def, patch) } : entry);
+  }
+  for (const [name, def] of Object.entries(own)) {
+    if (!isPlainRecord(def)) continue;
+    const at = entries.findIndex((e) => e.name === name);
+    if (at >= 0) entries[at] = { name, def };
+    else entries.push({ name, def });
+  }
+  return { ...object, fields: writeFields({ shape: view.shape, entries }) };
+}
+
+/**
+ * The base object's own fields: the names the served object holds that are
+ * neither the extension's nor the published extension's.
+ */
+export function baseOwnedFieldNames(
+  object: Record<string, unknown>,
+  ext: Record<string, unknown> | null,
+  published: ReadonlySet<string> = new Set(),
+): Set<string> {
+  const ours = new Set([...extensionFieldNames(ext), ...published]);
+  return new Set(readFields(object.fields).entries.map((e) => e.name).filter((n) => !ours.has(n)));
+}
+
+const optionLabels = (options: unknown): Map<string, unknown> => {
+  const out = new Map<string, unknown>();
+  if (!Array.isArray(options)) return out;
+  for (const option of options) {
+    if (isPlainRecord(option) && typeof option.value === 'string') out.set(option.value, option.label);
+  }
+  return out;
+};
+
+/**
+ * The extension after an edit of the folded object's fields (`before` →
+ * `after`, both as the folded object holds them): every field that is not
+ * the base's is the extension's, declared whole in `fields`, in the edited
+ * order; on a base field, only a change to a whitelisted property
+ * ({@link BASE_FIELD_DISPLAY_WHITELIST}, option labels by stored value) is
+ * written, into its `fieldPatches` entry; a property cleared is held as ''
+ * until {@link extensionBodyForSave} drops it on save, so the base's own text
+ * comes back. Any other change to a base
+ * field is not the extension's to make, and is not written.
+ */
+export function routeFoldedFieldsEdit(input: {
+  before: unknown;
+  after: unknown;
+  baseOwned: ReadonlySet<string>;
+  ext: ObjectExtensionBody;
+}): ObjectExtensionBody {
+  const { before, after, baseOwned, ext } = input;
+  const was = new Map(readFields(before).entries.map((e) => [e.name, e.def]));
+  const fields: Record<string, unknown> = {};
+  const patches: Record<string, Record<string, unknown>> = {};
+  if (isPlainRecord(ext.fieldPatches)) {
+    for (const [name, patch] of Object.entries(ext.fieldPatches)) {
+      if (isPlainRecord(patch)) patches[name] = { ...patch };
+    }
+  }
+  for (const entry of readFields(after).entries) {
+    if (!baseOwned.has(entry.name)) {
+      Object.defineProperty(fields, entry.name, { value: entry.def, enumerable: true, writable: true, configurable: true });
+      continue;
+    }
+    const prev = was.get(entry.name);
+    if (!prev) continue;
+    const patch: Record<string, unknown> = { ...(patches[entry.name] ?? {}) };
+    for (const key of BASE_FIELD_DISPLAY_WHITELIST.field) {
+      const next = entry.def[key];
+      if (next === prev[key]) continue;
+      // A cleared value stays in the edit buffer as '' (so the input can be
+      // emptied and retyped); `extensionBodyForSave` drops it on the wire,
+      // which restores the package's text.
+      if (next === undefined) delete patch[key];
+      else patch[key] = next;
+    }
+    const prevLabels = optionLabels(prev.options);
+    const nextLabels = optionLabels(entry.def.options);
+    const optionPatch: Record<string, unknown> = isPlainRecord(patch.options) ? { ...patch.options } : {};
+    for (const [value, label] of nextLabels) {
+      if (!prevLabels.has(value) || prevLabels.get(value) === label) continue;
+      const entryPatch: Record<string, unknown> = isPlainRecord(optionPatch[value]) ? { ...optionPatch[value] } : {};
+      if (typeof label === 'string') entryPatch.label = label;
+      else delete entryPatch.label;
+      if (Object.keys(entryPatch).length > 0) optionPatch[value] = entryPatch;
+      else delete optionPatch[value];
+    }
+    if (Object.keys(optionPatch).length > 0) patch.options = optionPatch;
+    else delete patch.options;
+    if (Object.keys(patch).length > 0) patches[entry.name] = patch;
+    else delete patches[entry.name];
+  }
+  const out: ObjectExtensionBody = { ...ext };
+  delete out.fields;
+  delete out.fieldPatches;
+  if (Object.keys(fields).length > 0) out.fields = fields;
+  if (Object.keys(patches).length > 0) out.fieldPatches = patches;
+  return out;
+}
+
+/**
+ * The extension body as sent: every cleared ('') patch value dropped, and a
+ * field or option patch left empty by that dropped too, so clearing a base
+ * field's label (say) restores the package's own text rather than writing an
+ * empty one.
+ */
+export function extensionBodyForSave(body: ObjectExtensionBody): ObjectExtensionBody {
+  if (!isPlainRecord(body.fieldPatches)) return body;
+  const patches: Record<string, unknown> = {};
+  for (const [name, raw] of Object.entries(body.fieldPatches)) {
+    if (!isPlainRecord(raw)) continue;
+    const patch: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (key === 'options' || value === '' || value === undefined) continue;
+      patch[key] = value;
+    }
+    if (isPlainRecord(raw.options)) {
+      const options: Record<string, unknown> = {};
+      for (const [value, optionRaw] of Object.entries(raw.options)) {
+        if (!isPlainRecord(optionRaw)) continue;
+        const kept = Object.fromEntries(Object.entries(optionRaw).filter(([, v]) => v !== '' && v !== undefined));
+        if (Object.keys(kept).length > 0) options[value] = kept;
+      }
+      if (Object.keys(options).length > 0) patch.options = options;
+    }
+    if (Object.keys(patch).length > 0) patches[name] = patch;
+  }
+  const out: ObjectExtensionBody = { ...body };
+  delete out.fieldPatches;
+  if (Object.keys(patches).length > 0) out.fieldPatches = patches;
+  return out;
 }
