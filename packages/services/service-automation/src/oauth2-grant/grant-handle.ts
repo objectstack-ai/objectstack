@@ -87,11 +87,12 @@ export interface OAuth2GrantHandleDeps {
     /** The cluster lock, when the deployment has a cluster service. Read at refresh time. */
     readonly lock?: () => ILock | undefined;
     /**
-     * Told when the authorization server refused an organization's grant and
-     * the connection was marked `reconnect_required`, so the plugin re-judges
+     * Told when a refresh marked an organization's connection
+     * `reconnect_required`, with the `reason` it stored (whose cause is the
+     * one that happened on that path), so the plugin logs it and re-judges
      * the instance. A throw here is the listener's own.
      */
-    readonly onGrantRefused?: (organizationId: string) => void;
+    readonly onGrantRefused?: (organizationId: string, reason: string) => void;
     readonly timeoutMs?: number;
     readonly fetch?: typeof fetch;
     readonly now?: () => number;
@@ -162,6 +163,15 @@ export function reconnectRequiredReason(
     return `connector instance '${connector}' needs to be reconnected for organization '${organizationId}': `
         + `${RECONNECT_REQUIRED_CAUSES[cause]}. Reconnect required: an administrator connects it again, and the next dispatch `
         + 'uses the new connection (ADR-0143 D4)';
+}
+
+/**
+ * The dispatch refusal of a connection already marked `reconnect_required`:
+ * the reason the row stores, whose cause is the one that marked it, and the
+ * authorization server's refusal only for a row that stores none.
+ */
+function markedReason(connector: string, record: ConnectorConnectionRecord): string {
+    return record.statusReason ?? reconnectRequiredReason(connector, record.organizationId);
 }
 
 /** Create the handle of one `oauth2` instance. */
@@ -244,7 +254,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
             throw unavailable(`the connection of connector instance '${connector}' could not be read now; the next dispatch retries`);
         }
         if (!record) throw unavailable(notConnectedReason(connector, organizationId));
-        if (record.status === 'reconnect_required') throw unavailable(reconnectRequiredReason(connector, record.organizationId));
+        if (record.status === 'reconnect_required') throw unavailable(markedReason(connector, record));
         return record;
     };
 
@@ -257,7 +267,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
             /* the refusal stands either way; the row is re-judged on the next dispatch */
         }
         try {
-            deps.onGrantRefused?.(record.organizationId);
+            deps.onGrantRefused?.(record.organizationId, reason);
         } catch {
             /* the listener's throw is its own */
         }
@@ -301,7 +311,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
     const refreshOnce = async (organizationId: string): Promise<CachedToken> => {
         const current = await deps.connections.read(organizationId, connector);
         if (!current) throw unavailable(notConnectedReason(connector, organizationId));
-        if (current.status === 'reconnect_required') throw unavailable(reconnectRequiredReason(connector, organizationId));
+        if (current.status === 'reconnect_required') throw unavailable(markedReason(connector, current));
         let refreshToken: string | undefined;
         try {
             refreshToken = await deps.connections.resolveRefreshToken(current);

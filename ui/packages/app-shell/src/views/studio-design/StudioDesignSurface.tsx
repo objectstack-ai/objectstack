@@ -10721,6 +10721,7 @@ export function AutomationsPillar({
           // the Data pillar threads it (objectui#2259). objectstack#28570 —
           // a customized flow's editors are open.
           readOnly: editLocked,
+          readOnlyReason: editLocked ? t('engine.studio.pkg.readonlyHint', locale) : undefined,
           locale,
         })}
       </div>
