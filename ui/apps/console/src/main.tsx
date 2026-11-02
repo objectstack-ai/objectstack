@@ -9,7 +9,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import { App } from './App';
 import { I18nProvider, preloadBootstrapLocale } from '@object-ui/i18n';
-import { MobileProvider, generatePWAManifest } from '@object-ui/mobile';
+import { MobileProvider, generatePWAManifest, getNativeHost } from '@object-ui/mobile';
 import { registerPlaceholders } from '@object-ui/components';
 import { initSentry, initRuntimeConfig, getProductName, getProductShortName, getFaviconUrl, getPwaDescription, getPwaThemeColor } from '@object-ui/app-shell';
 import { loadLanguage } from './loadLanguage';
@@ -133,27 +133,34 @@ Promise.all([
   // Generate a dynamic PWA manifest from runtime branding and inject it.
   // Blob URL replaces the static /manifest.json so PWA install prompts use
   // the branded name, short name, description, theme color, and favicon.
-  const manifestJson = generatePWAManifest({
-    enabled: true,
-    name: getProductName(),
-    shortName: getProductShortName(),
-    description: getPwaDescription(),
-    themeColor: getPwaThemeColor(),
-    backgroundColor: '#ffffff',
-    display: 'standalone',
-    startUrl: './',
-    scope: './',
-    orientation: 'any',
-    icons: [{ src: faviconUrl || './favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
-  });
-  const blob = new Blob([JSON.stringify(manifestJson)], { type: 'application/json' });
-  const manifestUrl = URL.createObjectURL(blob);
+  // Inside the ObjectStack mobile shell (`window.ObjectStackNative`) the static
+  // manifest is removed and none is injected: the app is installed natively
+  // there, so an install manifest offers nothing. Read here, after the boot
+  // round-trips, not at module load; a bridge that lands even later only
+  // leaves the manifest in place, which a WebView never acts on.
   const existingManifest = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
   if (existingManifest) existingManifest.remove();
-  const manifestLink = document.createElement('link');
-  manifestLink.rel = 'manifest';
-  manifestLink.href = manifestUrl;
-  document.head.appendChild(manifestLink);
+  if (!getNativeHost()) {
+    const manifestJson = generatePWAManifest({
+      enabled: true,
+      name: getProductName(),
+      shortName: getProductShortName(),
+      description: getPwaDescription(),
+      themeColor: getPwaThemeColor(),
+      backgroundColor: '#ffffff',
+      display: 'standalone',
+      startUrl: './',
+      scope: './',
+      orientation: 'any',
+      icons: [{ src: faviconUrl || './favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+    });
+    const blob = new Blob([JSON.stringify(manifestJson)], { type: 'application/json' });
+    const manifestUrl = URL.createObjectURL(blob);
+    const manifestLink = document.createElement('link');
+    manifestLink.rel = 'manifest';
+    manifestLink.href = manifestUrl;
+    document.head.appendChild(manifestLink);
+  }
 
   // The two loaders wait for this page load's session answer. Signed in, they
   // read `/i18n` with the session's credentials; signed out, they request

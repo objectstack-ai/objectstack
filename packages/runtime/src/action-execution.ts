@@ -1659,14 +1659,19 @@ export function apiForwardCredentialKind(requestContext: HttpProtocolContext | u
  * A forward refusal: the status and standard code, and the sentence that says
  * why. `401` when the target's door cannot read the caller's credential (the
  * status the target would have answered); `403` when the scope-family rule
- * refuses an agent the consent did not grant the forward's family.
+ * refuses an agent the consent did not grant the forward's family, or when the
+ * target's door accepts the credential and its per-object gate refuses the
+ * request for it ({@link apiForwardDataDoorGuardRefusal}, that gate's own code
+ * and sentence).
  */
 export type ApiForwardCredentialRefusal = { status: 401 | 403; code: string; message: string };
 
 /**
  * The refusal for running `action` by forward with this caller's credential —
- * `null` when the target's door accepts it ({@link API_FORWARD_DOOR_ACCEPTS}),
- * or when the action is not a same-origin `type: 'api'` action at all.
+ * `null` when the target's door accepts it ({@link API_FORWARD_DOOR_ACCEPTS})
+ * and the target's per-object gate would not refuse the request for it
+ * ({@link apiForwardDataDoorGuardRefusal}), or when the action is not a
+ * same-origin `type: 'api'` action at all.
  *
  * `target` is the forward's path, which decides the door; the listing passes
  * the declared `target`, whose door prefix is the same before its tokens are
@@ -1686,7 +1691,7 @@ export function apiForwardCredentialRefusal(
     const kind = apiForwardCredentialKind(requestContext);
     if (!kind) return null;
     const door = apiForwardTargetDoor(target);
-    if (API_FORWARD_DOOR_ACCEPTS[door].has(kind)) return null;
+    if (API_FORWARD_DOOR_ACCEPTS[door].has(kind)) return apiForwardDataDoorGuardRefusal(kind, action, target);
     const path = (typeof action?.target === 'string' ? action.target : target).split('?')[0]!;
     // [ADR-0090 D10 rule 5] The two flipped cells: an agent principal is carried
     // by a forward credential, bounded by the scope-family rule.
@@ -1698,6 +1703,62 @@ export function apiForwardCredentialRefusal(
         ? apiActionIdentityRouteKeyRefusal(action, path)
         : apiActionOAuthForwardRefusal(action, path, door);
     return { status: 401, code: standardErrorCodeForHttpStatus(401), message };
+}
+
+/**
+ * [#28943] The data-door operation a forward to `/api/v1/data/<object>[/…]`
+ * asks, by the door's own operation names — `undefined` for a path the data
+ * door does not serve. A safe method (`GET`, `HEAD`) and the door's two reads
+ * by `POST` (`/:object/query`, `/:object/:id/page`) are reads; `PATCH` and
+ * `PUT` are `update`, `DELETE` is `delete`, `POST` to the collection is
+ * `create`, and every other `POST` (`batch`, `createMany`, `import`, `clone`,
+ * …) is a write the door names on its own route. Only the read-or-write
+ * reading is load-bearing: the per-object rule this feeds refuses every
+ * operation it does not list as a read.
+ */
+function apiForwardDataDoorOperation(method: string, path: string): { object: string; operation: string } | undefined {
+    const m = /^\/api\/v1(?:\/environments\/[^/]+)?\/data\/([^/?#]+)(?:\/([^?#]*))?/.exec(path);
+    if (!m) return undefined;
+    const object = m[1]!;
+    const rest = (m[2] ?? '').replace(/\/+$/, '').split('/').filter(Boolean);
+    const verb = method.toUpperCase();
+    if (verb === 'GET' || verb === 'HEAD') return { object, operation: rest.length ? 'get' : 'list' };
+    if (verb === 'PATCH' || verb === 'PUT') return { object, operation: 'update' };
+    if (verb === 'DELETE') return { object, operation: 'delete' };
+    if (rest.length === 0) return { object, operation: 'create' };
+    if (rest.length === 1 && rest[0] === 'query') return { object, operation: 'list' };
+    if (rest.length === 2 && rest[1] === 'page') return { object, operation: 'get' };
+    return { object, operation: rest[rest.length - 1]! };
+}
+
+/**
+ * [#28943] A forward the target's door ACCEPTS the caller's credential for,
+ * which the target's per-object gate then refuses for that credential: today
+ * one rule, a write to `sys_api_key` from a principal an API key admitted
+ * (`@objectstack/core` `apiKeyManagementCredentialRefusal`, the predicate
+ * every data door's gate asks, read here and never restated). The refusal is
+ * the rule's own: its `403`, its `PERMISSION_DENIED`, its sentence. So
+ * `list_actions` marks `revoke_api_key` unavailable to an `osk_` caller with
+ * the answer the target gives, and the run doors answer that same refusal
+ * before forwarding instead of after. A session caller, and a caller whose
+ * door recorded no credential, are never refused here (the rule is positive
+ * on `api_key`).
+ *
+ * `method` is the forward's (`action.method`, default `POST`, as
+ * {@link buildApiActionRequest} reads it), so the listing (the declared
+ * `target`, tokens unfilled) and the run door (the filled path) judge the same
+ * request: the object segment is never a token.
+ */
+function apiForwardDataDoorGuardRefusal(
+    kind: ApiForwardCredentialKind,
+    action: any,
+    target: string,
+): ApiForwardCredentialRefusal | null {
+    if (kind !== 'api_key') return null;
+    const request = apiForwardDataDoorOperation(String(action?.method || 'POST'), target);
+    if (!request) return null;
+    const refusal = apiKeyManagementCredentialRefusal({ ...request, credential: kind });
+    return refusal ? { status: refusal.status, code: refusal.code, message: refusal.message } : null;
 }
 
 /**
