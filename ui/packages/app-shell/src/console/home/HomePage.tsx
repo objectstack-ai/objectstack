@@ -20,7 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { useRecentItems, type RecentItem } from '../../hooks/useRecentItems.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
-import { useNavTargetLabel } from '../../hooks/useNavTargetLabel.js';
+import { useNavTargetLabel, type NavTargetLabelOptions } from '../../hooks/useNavTargetLabel.js';
 import { readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { useFavorites } from '../../hooks/useFavorites.js';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -344,6 +344,9 @@ function usePendingDraftsRow(t: (key: string, opts?: any) => string, language: s
   );
 }
 
+/** Home's labels read each object they name by name (objectstack#29121). */
+const BY_NAME: NavTargetLabelOptions = { byName: true };
+
 export function HomePage() {
   const navigate = useNavigate();
   const { t, language } = useObjectTranslation();
@@ -353,25 +356,13 @@ export function HomePage() {
   // A recent entry stores identity; the rail labels it with this, on the
   // render, in the current language (objectui#11678).
   const recentLabel = useRecentItemLabel();
-  // objectstack#29121 — the objects the recent record rows name, read by name
-  // (`readObjectsByName`): their icons and labels are all Home needs of the
-  // object registry, so it never loads the whole list for them.
-  const recentObjectNames = useMemo(
-    () => [
-      ...new Set(
-        recentItems
-          .filter((item) => item.type === 'record')
-          .map((item) => recentItemObject(item))
-          .filter((name): name is string => typeof name === 'string' && name !== ''),
-      ),
-    ],
-    [recentItems],
-  );
-  const recentObjects = readObjectsByName(metadata, recentObjectNames);
   // A record row's trail names its object as the sidebar names an unlabelled
   // navigation entry for it, and the app as its launcher tile does
   // (objectui#12604).
-  const targetLabel = useNavTargetLabel({ objects: recentObjects });
+  //
+  // objectstack#29121 — by name: the object a row names is read alone (as its
+  // icon below is), so Home never loads the whole registry for its rows.
+  const targetLabel = useNavTargetLabel(BY_NAME);
   const { appLabel } = useObjectLabel();
   const { favorites } = useFavorites();
   const { user } = useAuth();
@@ -508,7 +499,9 @@ export function HomePage() {
     const app = segment ? matchAppBySegment(activeApps, segment) : undefined;
     const objectIcon =
       item.type === 'record' && objectName
-        ? (recentObjects as Array<{ name?: unknown; icon?: unknown } | null | undefined>).find((o) => o?.name === objectName)?.icon
+        ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown } | null | undefined>).find(
+            (o) => o?.name === objectName,
+          )?.icon
         : undefined;
     return {
       context:

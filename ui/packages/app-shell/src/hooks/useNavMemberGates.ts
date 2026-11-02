@@ -372,7 +372,10 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
   // gates every app's navigation) the gate reads the same names-only scope over
   // the app list's `requiresObject` union, with `views: false`: it reads which
   // objects there are, never their views. It read the whole registry there,
-  // which the home page then loaded on every visit for these few names.
+  // which the home page then loaded on every visit for these few names. The
+  // package leg asks without views too: inside an app the bundle answers them
+  // anyway, and on Home (the palette's gates for its host app) nothing does,
+  // so composing them read the whole `/meta/view` list.
   const metadata = useMetadata();
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
   const inApp = typeof app?.name === 'string' && app.name !== '';
@@ -381,7 +384,7 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
   const scope: { objects: readonly unknown[]; missing: readonly string[] } | null = !readObjectScope
     ? null
     : packageId
-      ? readObjectScope({ packageId })
+      ? (readObjectScope as ReadNamesWithoutViews)({ packageId, views: false })
       : unionNames.length === 0
         ? NO_REQUIRED_OBJECTS
         : inApp

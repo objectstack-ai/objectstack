@@ -75,17 +75,24 @@ const NO_OBJECTS: readonly unknown[] = Object.freeze([]);
  * its way, it is that list, and nothing more is asked. A provider without
  * scope reads (a hand-rolled context) answers with its `objects`, as before.
  *
+ * The definitions come without views, unless `views: true`: a reader of a
+ * list view's label needs the object's `listViews`, so its object is composed
+ * with its views (outside an app that reads the `/meta/view` list, never the
+ * object registry).
+ *
  * Asking for no name asks for nothing: a names-only scope with no names would
  * be the whole registry.
  */
 export function readObjectsByName(
   metadata: Pick<MetadataContextValue, 'objects' | 'readObjectScope' | 'getTypeStatus'>,
   names: readonly string[],
+  options: { views?: boolean } = {},
 ): readonly unknown[] {
   const { readObjectScope, getTypeStatus } = metadata;
   if (readObjectScope && getTypeStatus?.('object') === 'idle') {
     const asked = names.filter((name) => typeof name === 'string' && name !== '');
     if (asked.length === 0) return NO_OBJECTS;
+    if (options.views) return readObjectScope({ names: asked }).objects;
     return (readObjectScope as ReadNamesWithoutViews)({ names: asked, views: false }).objects;
   }
   return metadata.objects ?? NO_OBJECTS;
