@@ -153,9 +153,17 @@ implementation detail:
 <Callout type="warn">
 **FLS posture (ADR-0066 ⑧):** runtime field security is block-list-shaped —
 an **undeclared** field is visible by default, and field grants union (one
-set's `readable: true` out-votes another's `false`). Until the muting layer
-lands, protect sensitive fields by granting them only in the sets that need
-them, and treat "sensitive field on a public object" as a review smell.
+set's `readable: true` out-votes another's `false`). A set that holds View All
+(`viewAllRecords`) on an object also votes `readable: true` on every field of
+that object, and a set that holds Modify All (`modifyAllRecords`) votes
+`readable: true` and `editable: true`; View All never grants an edit. So no
+set's `readable: false` hides a field from a caller who holds a View All or
+Modify All set on its object; a field's `requiredPermissions` capability gate
+still applies to every caller. Otherwise union without deny is unchanged.
+Until the muting layer lands, protect sensitive fields by granting them only
+in the sets that need them, grant the object without those two bits to a set
+that must withhold a field from its own holders, and treat "sensitive field on
+a public object" as a review smell.
 </Callout>
 
 ## Package provenance & composition (ADR-0086)
