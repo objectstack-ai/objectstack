@@ -29,13 +29,24 @@
  * `current_user.positions` answers here as it does in the sidebar. `features`
  * is not bound: Home reads no deployment config, as the scope it replaces did.
  *
+ * The palette is mounted from the first time it opens, never while Home is
+ * merely shown (objectstack#29121). Mounted closed, it read the whole object
+ * registry (`useMetadata().objects`, the largest metadata payload of the page)
+ * and its host app's package scope for its gates, on every visit, for a dialog
+ * nobody had opened. Opened, it is handed the host app's object scope over the
+ * objects its navigation lists, read without views: those are the objects its
+ * record search reads (`useRecordSearch` searches the navigation's objects and
+ * names their groups from these definitions), which is what the palette is
+ * handed inside an app as well. Once mounted it stays, so it closes as it
+ * always has.
+ *
  * @module
  */
 
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useNavigationContext } from '../../context/NavigationContext.js';
-import { CommandPaletteProvider } from '../../context/CommandPaletteProvider.js';
+import { CommandPaletteProvider, useCommandPalette } from '../../context/CommandPaletteProvider.js';
 import { CommandPalette } from '../../chrome/CommandPalette.js';
 import { AppHeader } from '../../layout/AppHeader.js';
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
@@ -44,6 +55,8 @@ import { useAdapter } from '../../providers/AdapterProvider.js';
 import { filterActiveApps, matchAppBySegment, resolveHostAppSegment } from '../../utils/index.js';
 import { useAiSurfaceEnabled } from '../../hooks/useAiSurface.js';
 import { ExpressionProvider } from '../../providers/ExpressionProvider.js';
+import { navigationNames } from '../appObjectScope.js';
+import type { ReadNamesWithoutViews } from '../../hooks/useObjectPresence.js';
 import { buildExpressionUser } from '../../providers/expressionUser.js';
 import { useAuth } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -59,6 +72,58 @@ import { rememberDockReturnLocation } from '../../layout/chatDockState.js';
  */
 const NO_SCOPE_INPUT: Record<string, never> = {};
 
+const NO_OBJECTS: any[] = [];
+
+/**
+ * The objects the palette searches, while it is open: the host app's object
+ * scope over the objects its navigation lists, without views
+ * (objectstack#29121) — its package's list plus, by name, a listed object the
+ * package does not hold; by name alone for an app bound to no package. Once
+ * the whole registry is loaded, or on its way, it is that list, and nothing
+ * more is asked. A provider without scope reads answers its `objects`.
+ */
+function useHostAppPaletteObjects(hostApp: Record<string, any>): any[] {
+  const metadata = useMetadata();
+  const names = navigationNames(hostApp.navigation, (item) => (item.type === 'object' ? item.objectName : undefined));
+  const packageId = typeof hostApp._packageId === 'string' && hostApp._packageId ? hostApp._packageId : undefined;
+  const { readObjectScope, getTypeStatus } = metadata;
+  if (readObjectScope && getTypeStatus?.('object') === 'idle') {
+    const read = readObjectScope as ReadNamesWithoutViews;
+    if (packageId) return read({ packageId, names, views: false }).objects;
+    return names.length > 0 ? read({ names, views: false }).objects : NO_OBJECTS;
+  }
+  return metadata.objects ?? NO_OBJECTS;
+}
+
+interface HomeCommandPaletteProps {
+  apps: any[];
+  hostApp: Record<string, any>;
+  onAppChange: (segment: string) => void;
+  dataSource?: any;
+}
+
+/** The palette once opened, with the objects it searches. */
+function OpenedHomeCommandPalette({ apps, hostApp, onAppChange, dataSource }: HomeCommandPaletteProps) {
+  const objects = useHostAppPaletteObjects(hostApp);
+  return (
+    <CommandPalette
+      apps={apps}
+      activeApp={hostApp}
+      objects={objects}
+      onAppChange={onAppChange}
+      dataSource={dataSource}
+    />
+  );
+}
+
+/** Home's palette: mounted from its first open (see the module doc). */
+function HomeCommandPalette(props: HomeCommandPaletteProps) {
+  const { open } = useCommandPalette();
+  const [opened, setOpened] = useState(open);
+  if (open && !opened) setOpened(true);
+  return opened || open ? <OpenedHomeCommandPalette {...props} /> : null;
+}
+
 interface HomeLayoutProps {
   children: React.ReactNode;
   /**
@@ -73,7 +138,7 @@ export function HomeLayout({ children }: HomeLayoutProps) {
   const { user } = useAuth();
   // The shared `current_user` normaliser, keyed on the session user (objectui#6515).
   const expressionUser = useMemo(() => buildExpressionUser(user), [user]);
-  const { apps, objects } = useMetadata();
+  const { apps } = useMetadata();
   const dataSource = useAdapter();
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
@@ -116,10 +181,9 @@ export function HomeLayout({ children }: HomeLayoutProps) {
       {hostApp ? (
         <CommandPaletteProvider>
           {header}
-          <CommandPalette
+          <HomeCommandPalette
             apps={apps ?? []}
-            activeApp={hostApp}
-            objects={objects ?? []}
+            hostApp={hostApp}
             onAppChange={(segment) => navigate(`/apps/${segment}`)}
             dataSource={dataSource}
           />

@@ -1859,7 +1859,9 @@ const es = {
       title: "Configuración",
       subtitle: "Configure su sistema, las integraciones y los indicadores de funciones.",
       loadError: "No se pudo cargar la configuración",
-      empty: "No hay configuraciones registradas. Los plugins pueden registrar manifiestos de configuración mediante el SettingsService.",
+      empty: "Todavía no hay páginas de configuración disponibles. Aparecen aquí cuando una aplicación instalada las proporciona.",
+      adminManaged: "La configuración la gestiona su administrador",
+      adminManagedDescription: "Su cuenta no puede ver ni cambiar esta configuración. Pida a un administrador cualquier cambio que necesite.",
       settingsCount: "{{n}} configuraciones",
       beta: "Beta",
       categories: {
@@ -2744,6 +2746,7 @@ const es = {
       orText: "o continúe con correo electrónico",
       ssoButton: "Iniciar sesión con SSO",
       ssoOnlyDescription: "Accede con el inicio de sesión único de tu organización",
+      noSignInMethodText: "No hay ningún método de inicio de sesión disponible. Ponte en contacto con tu administrador.",
       usePasswordText: "Usar una contraseña en su lugar",
       backToSsoText: "Volver al inicio de sesión único",
       twoFactorTitle: "Autenticación en dos pasos",

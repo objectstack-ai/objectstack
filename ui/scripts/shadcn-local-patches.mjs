@@ -528,6 +528,44 @@ const sheetHideOverlayPatches = [
 ];
 
 /**
+ * The sheet close-button touch-target patch (objectstack#29078).
+ *
+ * The Console runs inside the mobile app's WebView, and its phone-width audit
+ * (objectstack#29040) holds every control to a 44 px touch target. Upstream's
+ * Sheet close button is its 16 px glyph and nothing more, so every drawer in
+ * the Console closed from a 16 px box at 375 and 390 px. Below `sm` the button
+ * becomes a 44 px box, its glyph centred where it was; from `sm` up the class
+ * list is upstream's, unchanged.
+ *
+ * The payload is the class list itself, so it is inline, for the reason the
+ * sidebar offcanvas family gives. One anchor, the button's own line, written
+ * from `scripts/__tests__/fixtures/shadcn-registry/sheet.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const SHEET_CLOSE_UPSTREAM_CLASSES =
+  'absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 ' +
+  'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none ' +
+  'data-[state=open]:bg-secondary';
+const SHEET_CLOSE_PHONE_CLASSES =
+  'max-sm:right-1 max-sm:top-1 max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center';
+const sheetCloseTouchTargetPatches = [
+  {
+    id: 'sheet-close-phone-touch-target',
+    issue: 'objectstack#29078',
+    reason:
+      'Makes the Sheet close button a 44 px touch target below `sm` (the ' +
+      'phone-width floor of objectstack#29040). Upstream draws only the 16 px ' +
+      'glyph; a sync that dropped this would shrink every drawer close back ' +
+      'to 16 px at phone width, silently and compilably.',
+    find: `      <SheetPrimitive.Close className="${SHEET_CLOSE_UPSTREAM_CLASSES}">`,
+    replace: `      <SheetPrimitive.Close className="${SHEET_CLOSE_UPSTREAM_CLASSES} ${SHEET_CLOSE_PHONE_CLASSES}">`,
+    marker: SHEET_CLOSE_PHONE_CLASSES,
+    occurrences: 1,
+  },
+];
+
+/**
  * The calendar display-locale patch (objectui#10722).
  *
  * `Calendar` mounts react-day-picker's `DayPicker`, which spells its month
@@ -610,14 +648,64 @@ const calendarDisplayLocalePatches = [
   },
 ];
 
+/** The phone-only classes the close-touch-target family adds (objectstack#29107). */
+const PHONE_CLOSE_TOUCH_TARGET =
+  'max-sm:right-1 max-sm:top-1 max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center';
+
+/**
+ * The phone-width close-button touch-target patch (objectstack#29107).
+ *
+ * `DialogContent` auto-renders its close button as the bare 16 px lucide glyph
+ * inside `absolute right-4 top-4`, with no padding and no minimum size, so on a
+ * phone the whole tap target is 16 x 16 px — under the 44 px floor the
+ * Console's phone-width audit holds every control to. Every modal a phone user
+ * opens draws this one button (the declared-action param dialog, the command
+ * palette), so the floor belongs in the primitive, not at each call site.
+ *
+ * The payload is phone-only (`max-sm:`), so from `sm` up the button keeps
+ * upstream's classes and the desktop header does not grow. Below `sm` the
+ * button becomes a 44 px flex box anchored 4 px from the corner, the glyph
+ * centred in it at its own 16 px size. The Sheet close takes the same class
+ * set through its own family, `sheetCloseTouchTargetPatches`.
+ *
+ * Inline, like the `hideOverlay` family: the payload is utility classes on the
+ * primitive's own element, so there is no implementation to host in `src/lib/`.
+ * One anchor, written from the vendored registry bytes
+ * (`scripts/__tests__/fixtures/shadcn-registry/dialog.registry.txt`): the
+ * opening of the Close element's class list, which names the element and its
+ * desktop placement and nothing incidental. The phone classes sit right after
+ * the placement they override.
+ *
+ * @param {string} primitive Radix namespace prefix, e.g. `Dialog`.
+ * @returns {LocalPatch[]}
+ */
+function phoneCloseTouchTargetPatches(primitive) {
+  const anchor = `<${primitive}Primitive.Close className="absolute right-4 top-4 `;
+  return [
+    {
+      id: `${primitive.toLowerCase()}-phone-close-touch-target`,
+      issue: 'objectstack#29107',
+      reason:
+        `${primitive}Content's close button is a 16 x 16 px tap target upstream ` +
+        '(the bare glyph, no padding or minimum size). Below `sm` this makes it a ' +
+        '44 px box with the glyph centred; from `sm` up upstream classes apply ' +
+        'unchanged, so the desktop header does not grow.',
+      find: anchor,
+      replace: `${anchor}${PHONE_CLOSE_TOUCH_TARGET} `,
+      marker: `${anchor}${PHONE_CLOSE_TOUCH_TARGET} `,
+      occurrences: 1,
+    },
+  ];
+}
+
 /**
  * Component name (as tracked in `shadcn-components.json`) → patches it needs.
  *
  * @type {Record<string, LocalPatch[]>}
  */
 export const LOCAL_PATCHES = {
-  sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches],
-  dialog: i18nCloseLabelPatches('Dialog'),
+  sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches, ...sheetCloseTouchTargetPatches],
+  dialog: [...i18nCloseLabelPatches('Dialog'), ...phoneCloseTouchTargetPatches('Dialog')],
   sidebar: [
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,

@@ -2227,7 +2227,9 @@ const en = {
       title: 'Settings',
       subtitle: 'Configure your system, integrations, and feature flags.',
       loadError: 'Failed to load settings',
-      empty: 'No settings registered. Plugins can register settings manifests via the SettingsService.',
+      empty: 'No settings pages are available yet. They appear here when an installed app provides them.',
+      adminManaged: 'Settings are managed by your administrator',
+      adminManagedDescription: 'Your account cannot view or change these settings. Ask an administrator if something needs to change.',
       settingsCount: '{{n}} settings',
       beta: 'Beta',
       // Section headers, keyed by the manifest `category` value. Unknown
@@ -3193,6 +3195,7 @@ const en = {
       // the same with or without the pack.
       ssoButton: 'Sign in with SSO',
       ssoOnlyDescription: "Sign in with your organization's single sign-on",
+      noSignInMethodText: 'No sign-in method is available. Contact your administrator.',
       usePasswordText: 'Use a password instead',
       backToSsoText: 'Back to single sign-on',
       // objectstack#29105 — the second step of a password sign-in for an account

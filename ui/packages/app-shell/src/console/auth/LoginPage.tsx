@@ -203,6 +203,7 @@ export function LoginPage() {
           ssoOnlyDescription: t('auth.login.ssoOnlyDescription'),
           usePasswordText: t('auth.login.usePasswordText'),
           backToSsoText: t('auth.login.backToSsoText'),
+          noSignInMethodText: t('auth.login.noSignInMethodText'),
           // The two-factor step a password sign-in leads to when the account
           // has two-factor sign-in on (objectstack#29105).
           twoFactorTitle: t('auth.login.twoFactorTitle'),

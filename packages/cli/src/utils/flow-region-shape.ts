@@ -19,8 +19,15 @@
  *
  * Walked the way `findExtensionFieldSuffixRefusals` (`./extension-field-suffix.ts`)
  * walks: each `packages[]` entry's flows, or the stack's own flows when it
- * declares no packages. A flow the schema refuses is left to the schema step,
- * which has already reported it.
+ * declares no packages.
+ *
+ * A flow `FlowSchema` refuses HERE is a row, never a skip (#29059). The stack
+ * schema has already parsed every flow this walk reads, and `FlowSchema` is
+ * idempotent on its own output today, so the branch cannot be reached by an
+ * author. If that ever stops being true the region verdict was never computed,
+ * and a silent `return` would pass the flow: the false-clean direction this
+ * gate exists to close. The row says the flow could not be judged, with the
+ * schema's issues, and the door refuses on it like any other row.
  *
  * Not judged here: a cycle in the flow's TOP-LEVEL graph. The engine refuses it
  * with `detectCycles`, which lives in `@objectstack/service-automation` and is
@@ -37,9 +44,12 @@ export interface FlowRegionRefusalRow {
   path: string;
   /** The code the CLI's other author-time refusals carry. */
   code: 'VALIDATION_ERROR';
-  /** The flow's name. */
+  /** The flow's name; its `path` when the body carries no string name. */
   flow: string;
-  /** `Flow '<name>' …: ` followed by the engine's refusal, verbatim. */
+  /**
+   * `Flow '<name>' …: ` followed by the engine's refusal, verbatim — or, when
+   * `FlowSchema` refuses the parsed body, the schema's issues (#29059).
+   */
   message: string;
 }
 
@@ -54,7 +64,20 @@ export function findFlowRegionRefusals(parsed: Record<string, unknown>): FlowReg
     if (!Array.isArray(flows)) continue;
     flows.forEach((raw, i) => {
       const result = FlowSchema.safeParse(raw);
-      if (!result.success) return;
+      if (!result.success) {
+        const declared = (raw as { name?: unknown } | null)?.name;
+        const name = typeof declared === 'string' && declared !== '' ? declared : `${at}flows[${i}]`;
+        const issues = result.error.issues
+          .map((issue) => `${issue.path.length > 0 ? issue.path.join('.') : '(root)'}: ${issue.message}`)
+          .join('; ');
+        rows.push({
+          path: `${at}flows[${i}]`,
+          code: 'VALIDATION_ERROR',
+          flow: name,
+          message: `Flow '${name}' could not be judged for its region shape: the flow schema refused the parsed body (${issues})`,
+        });
+        return;
+      }
       try {
         validateControlFlow(result.data);
       } catch (err) {

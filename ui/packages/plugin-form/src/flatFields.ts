@@ -59,8 +59,8 @@ export interface FlatFieldsContext extends SectionFieldsContext {
  * fields flat (no sections).
  *
  * Fields the object schema does not declare are SKIPPED — the flat containers
- * have always dropped them rather than rendering `fromObjectSchema`'s bare
- * `input` stub, and a whitelist naming a field the object does not have is an
+ * have always dropped them (`fromObjectSchema` builds nothing for them, and
+ * the sectioned arms drop them too), and a whitelist naming a field the object does not have is an
  * authoring error the form should not paper over with an untyped control. A
  * `customFields` member naming such a field is drawn in its place: the member
  * is a whole definition, not an untyped stub.
@@ -81,11 +81,14 @@ export function buildFlatFields(ctx: FlatFieldsContext): FormField[] {
   }
 
   return mergeCustomFields(names, ctx.customFields, (name) => {
-    const field = ctx.objectSchema?.fields?.[name];
-    if (!field) return undefined;
+    // `fromObjectSchema` answers `undefined` for a name the object does not
+    // declare, so the skip below is its own answer, not a second check.
+    const built = fromObjectSchema(name, ctx);
+    if (!built) return undefined;
+    const field = ctx.objectSchema.fields[name];
 
     return {
-      ...fromObjectSchema(name, ctx),
+      ...built,
       // Field-group membership (Field.group → object.fieldGroups[].key), read
       // by `deriveFieldGroupSections` for the fieldGroups fallback. Carried
       // HERE and not in `fromObjectSchema` because that fallback only ever runs

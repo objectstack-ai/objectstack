@@ -1803,7 +1803,9 @@ const de = {
       title: "Einstellungen",
       subtitle: "Konfigurieren Sie Ihr System, Integrationen und Feature-Flags.",
       loadError: "Einstellungen konnten nicht geladen werden",
-      empty: "Keine Einstellungen registriert. Plugins können Einstellungsmanifeste über den SettingsService registrieren.",
+      empty: "Noch keine Einstellungsseiten verfügbar. Sie erscheinen hier, sobald eine installierte App sie bereitstellt.",
+      adminManaged: "Einstellungen werden von Ihrem Administrator verwaltet",
+      adminManagedDescription: "Ihr Konto kann diese Einstellungen weder anzeigen noch ändern. Wenden Sie sich an einen Administrator, wenn etwas geändert werden muss.",
       settingsCount: "{{n}} Einstellungen",
       beta: "Beta",
       categories: {
@@ -2681,6 +2683,7 @@ const de = {
       orText: "oder mit E-Mail fortfahren",
       ssoButton: "Mit SSO anmelden",
       ssoOnlyDescription: "Melden Sie sich über das Single Sign-on Ihrer Organisation an",
+      noSignInMethodText: "Es ist keine Anmeldemethode verfügbar. Wenden Sie sich an Ihren Administrator.",
       usePasswordText: "Stattdessen ein Passwort verwenden",
       backToSsoText: "Zurück zum Single Sign-on",
       twoFactorTitle: "Zwei-Faktor-Authentifizierung",

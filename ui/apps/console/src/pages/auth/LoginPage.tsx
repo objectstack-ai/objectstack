@@ -597,6 +597,10 @@ function LoginFormCard({
         }),
         usePasswordText: t('auth.login.usePasswordText', { defaultValue: 'Use a password instead' }),
         backToSsoText: t('auth.login.backToSsoText', { defaultValue: 'Back to single sign-on' }),
+        // Drawn in place of the form when the server offers no sign-in method.
+        noSignInMethodText: t('auth.login.noSignInMethodText', {
+          defaultValue: 'No sign-in method is available. Contact your administrator.',
+        }),
         // The two-factor step a password sign-in leads to when the account
         // has two-factor sign-in on (objectstack#29105).
         twoFactorTitle: t('auth.login.twoFactorTitle', { defaultValue: 'Two-factor authentication' }),

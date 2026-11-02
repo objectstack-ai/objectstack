@@ -68,7 +68,10 @@ function makeFakeEngine() {
   // the resume the same way a downstream node's throw does — `RESUME_FAILED`
   // with `repairable: true`, the suspension already consumed.
   let failNextInsertOn: string | undefined;
-  const matches = (row: any, where: any) => Object.entries(where ?? {}).every(([k, v]) => {
+  const matches = (row: any, where: any): boolean => Object.entries(where ?? {}).every(([k, v]) => {
+    // The participant probe behind the read door asks "acted on it" as one
+    // `$or` (the person, or a slot they act under) — the real engine composes it.
+    if (k === '$or') return (v as any[]).some((sub) => matches(row, sub));
     if (k.startsWith('$')) throw new Error(`fake engine: unsupported filter operator ${k}`);
     if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
     if (v && typeof v === 'object' && '$ne' in (v as any)) return row[k] !== (v as any).$ne;
@@ -252,9 +255,18 @@ describe('#17601 — a second `resubmit` on a stranded-resubmit strand', () => {
     // ── ⛔ FIRING CONTROLS. Each guard the card reads as "passes" is shown able
     // to REFUSE on this very row, in this very state — otherwise "it passed" is
     // indistinguishable from "it was never consulted".
+    // A caller with no part in the request does not read it, and is answered
+    // as for a missing id before the door's own guards are asked…
     const foreign = await s.tryResubmit(req.id, 'u1');
-    expect(foreign.ok, 'CONTROL: the submitter-only guard still fires').toBe(false);
-    expect(foreign.ok === false && foreign.message).toMatch(/^FORBIDDEN: only the submitter may resubmit/);
+    expect(foreign.ok, 'CONTROL: the read rule fires for a non-participant').toBe(false);
+    expect(foreign.ok === false && foreign.message).toBe(`REQUEST_NOT_FOUND: ${req.id}`);
+    // …so the submitter-only guard is fired by a caller the read rule never
+    // hides a request from: the override actor, who is not the submitter.
+    const admin = { isSystem: false, userId: 'root', positions: [], permissions: ['admin_full_access'] } as any;
+    const byAdmin = await s.service.resubmit(req.id, { actorId: 'root' } as any, admin)
+      .then(() => ({ ok: true as const }), (e: Error) => ({ ok: false as const, message: e.message }));
+    expect(byAdmin.ok, 'CONTROL: the submitter-only guard still fires').toBe(false);
+    expect(byAdmin.ok === false && byAdmin.message).toMatch(/^FORBIDDEN: only the submitter may resubmit/);
 
     const requests = s.data.tables.get('sys_approval_request')!;
     const before = requests.length;
