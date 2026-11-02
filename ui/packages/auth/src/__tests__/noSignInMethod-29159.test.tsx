@@ -111,7 +111,7 @@ describe('LoginForm — doors the server does advertise stay usable', () => {
     await configResolved();
 
     expect(screen.getByText(SSO_ONLY_COPY)).toBeTruthy();
-    expect(screen.getByRole('button', PROVIDER_BUTTON)).toBeTruthy();
+    expect(await screen.findByRole('button', PROVIDER_BUTTON)).toBeTruthy();
     expect(screen.getByRole('button', BREAK_GLASS)).toBeTruthy();
     expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
     expect(screen.queryByLabelText('Password')).toBeNull();
@@ -126,7 +126,7 @@ describe('LoginForm — doors the server does advertise stay usable', () => {
     await configResolved();
 
     expect(screen.getByText(SSO_ONLY_COPY)).toBeTruthy();
-    expect(screen.getByRole('button', PROVIDER_BUTTON)).toBeTruthy();
+    expect(await screen.findByRole('button', PROVIDER_BUTTON)).toBeTruthy();
     expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
     expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
   });
@@ -139,7 +139,7 @@ describe('LoginForm — doors the server does advertise stay usable', () => {
     });
     await configResolved();
 
-    expect(screen.getByRole('button', PROVIDER_BUTTON)).toBeTruthy();
+    expect(await screen.findByRole('button', PROVIDER_BUTTON)).toBeTruthy();
     expect(screen.queryByText(SSO_ONLY_COPY)).toBeNull();
     expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
     expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
