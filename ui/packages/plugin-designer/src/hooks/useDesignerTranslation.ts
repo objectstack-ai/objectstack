@@ -218,7 +218,6 @@ export const DESIGNER_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'designer.undo': 'Undo',
   'designer.redo': 'Redo',
   'designer.canvasMinimap': 'Canvas minimap',
-  'designer.versionHistory': 'Version history',
   'detail.goBack': 'Go back',
 };
 

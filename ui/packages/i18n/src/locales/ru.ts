@@ -1197,7 +1197,6 @@ const ru = {
     undo: "Отменить",
     redo: "Повторить",
     canvasMinimap: "Миникарта холста",
-    versionHistory: "История версий",
   },
   detail: {
     editInlineHint: "Дважды щёлкните для редактирования",

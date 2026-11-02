@@ -384,6 +384,62 @@ describe('team membership writes re-evaluate team-recipient rules, and the trans
   });
 });
 
+/**
+ * [#29503] The holder check the per-user pass asks reads the membership table
+ * again, and a failed read used to answer "not a holder": the pass then revoked
+ * the user's grants on an outage. It now refuses, the pass's catch logs, and
+ * the grants stay until the read succeeds. Only the holder check's reads fail
+ * here (a read filtered on the recipient column), so the write itself and its
+ * pre-image read go through as they would in an outage of that index.
+ */
+describe('[#29503] a failed holder read keeps the user\'s grants instead of revoking them', () => {
+  const failHolderReads = (t: Awaited<ReturnType<typeof boot>>, table: string, column: string) => {
+    const real = t.driver.find.bind(t.driver);
+    return vi.spyOn(t.driver, 'find').mockImplementation(((obj: string, query: unknown, ...rest: unknown[]) =>
+      obj === table && JSON.stringify(query ?? {}).includes(`"${column}"`)
+        ? Promise.reject(Object.assign(new Error('SQLITE_IOERR: disk I/O error'), { code: 'SQLITE_IOERR' }))
+        : real(obj as never, query as never, ...(rest as []))) as never);
+  };
+
+  it('⛔ team: a member still on the team through a second row keeps the grants when the holder read fails', async () => {
+    const t = await boot();
+    await t.ql.insert('sys_team_member', { id: 'tm_1', organization_id: ORG_A, team_id: 'team_eu', user_id: 'u_team' }, { context: SYSTEM } as never);
+    await t.ql.insert('sys_team_member', { id: 'tm_2', organization_id: ORG_A, team_id: 'team_eu', user_id: 'u_team' }, { context: SYSTEM } as never);
+    expect(await t.grantsOf('u_team', 'srule_team')).toEqual(['acct_eu_1:read', 'acct_eu_2:read']);
+
+    failHolderReads(t, 'sys_team_member', 'team_id');
+    await t.ql.delete('sys_team_member', { where: { id: 'tm_2' }, context: SYSTEM } as never);
+    vi.restoreAllMocks();
+
+    expect(await t.grantsOf('u_team', 'srule_team')).toEqual(['acct_eu_1:read', 'acct_eu_2:read']);
+    expect(t.warn.mock.calls.some(([line]) => /recipient membership re-evaluation failed/.test(String(line)))).toBe(true);
+  });
+
+  it('⛔ position: a holder still assigned through a second row keeps the grants when the assignment read fails', async () => {
+    const t = await boot();
+    await t.assign('up_1', 'u_pos', 'eu_sales');
+    await t.assign('up_2', 'u_pos', 'eu_sales');
+    expect(await t.grantsOf('u_pos')).toEqual(EU_GRANTS);
+
+    failHolderReads(t, 'sys_user_position', 'position');
+    await t.ql.delete('sys_user_position', { where: { id: 'up_2' }, context: SYSTEM } as never);
+    vi.restoreAllMocks();
+
+    expect(await t.grantsOf('u_pos')).toEqual(EU_GRANTS);
+    expect(t.warn.mock.calls.some(([line]) => /recipient membership re-evaluation failed/.test(String(line)))).toBe(true);
+  });
+
+  it('control — the same delete with the reads healthy keeps the grants too (the user still holds the recipient)', async () => {
+    const t = await boot();
+    await t.ql.insert('sys_team_member', { id: 'tm_1', organization_id: ORG_A, team_id: 'team_eu', user_id: 'u_team' }, { context: SYSTEM } as never);
+    await t.ql.insert('sys_team_member', { id: 'tm_2', organization_id: ORG_A, team_id: 'team_eu', user_id: 'u_team' }, { context: SYSTEM } as never);
+
+    await t.ql.delete('sys_team_member', { where: { id: 'tm_2' }, context: SYSTEM } as never);
+
+    expect(await t.grantsOf('u_team', 'srule_team')).toEqual(['acct_eu_1:read', 'acct_eu_2:read']);
+  });
+});
+
 describe('binding and write classification', () => {
   const fakeEngine = () => {
     const hooks: Array<{ event: string; options: Record<string, any> }> = [];
