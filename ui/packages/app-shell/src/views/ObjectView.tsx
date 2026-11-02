@@ -72,7 +72,7 @@ import { useObjectViewTitleSwitcher } from './objectViewTitleSwitcher.js';
 import { useObjectViewPluginSchema } from './objectViewPluginSchema.js';
 import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import { ObjectViewPageHeader } from './objectViewPageHeader.js';
-import { ObjectViewRecordOverlay, RecordPaneListCount } from './objectViewRecordOverlay.js';
+import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { useObjectViewViewCrud } from './objectViewViewCrud.js';
 
@@ -741,12 +741,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
     // URL, row click, open as page, record links) moved to `./objectViewRecordNavigation.ts`.
-    // objectstack#26677 — the side-by-side pane is a READER's preference, not a
-    // `navigation.mode` (`split` left the spec). Live state: the Display menu's
-    // Open records section writes it (objectstack#26681) and the next row click
-    // opens the new way. It applies only to a record that opens in the drawer:
-    // an object that declares `page` (or `new_window` / `none`) keeps its
-    // declaration. objectstack#27545 — the pane beside the list is the default.
+    // objectstack#26677 — how a drawer-mode record opens is a READER's
+    // preference, not a `navigation.mode`: the drawer (the default) or the
+    // full page. Live state: the Display menu's Open records section writes it
+    // (objectstack#26681) and the next row click opens the new way. It applies
+    // only to a record that opens in the drawer: an object that declares
+    // `page` (or `new_window` / `none`) keeps its declaration. objectstack#28915
+    // — the pane beside the list retired, so the drawer is the default and the
+    // list under it keeps its full width.
     const [recordOpenPreference, setRecordOpenPreference] = useRecordOpenPreference();
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
@@ -772,28 +774,21 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         recordOpenPreference,
         phone,
     });
-    // A record that opens in the pane draws beside the list (`split`) unless
-    // the reader prefers the drawer over it: same URL state (`?recordId=`),
-    // same close, a different shell. A reader who prefers the page still gets
-    // the pane for a `?recordId=` link. Any other mode is the object's own.
-    const recordPaneMode = navOverlay.mode === 'drawer'
-        ? (recordOpenPreference === 'drawer' ? 'drawer' : 'split')
-        : navOverlay.mode;
     // objectstack#26681 — the Display menu's Open records section: the mode this
-    // object and view resolved to, and the reader's preference with its setter.
-    // The console offers the full page as the third choice (objectstack#27545).
-    // Not on a phone, where every record is a page (objectstack#27058).
+    // object and view resolved to, and the reader's preference with its setter:
+    // the drawer or the full page (objectstack#27545, objectstack#28915). A
+    // reader who prefers the page still gets the drawer for a `?recordId=`
+    // link. Not on a phone, where every record is a page (objectstack#27058).
     const recordOpen = useMemo<ListViewProps['recordOpen']>(
         () => (phone ? undefined : {
             resolvedMode: navOverlay.mode,
             preference: recordOpenPreference,
             setPreference: setRecordOpenPreference,
-            selectPage: () => setRecordOpenPreference('page'),
         }),
         [phone, navOverlay.mode, recordOpenPreference, setRecordOpenPreference],
     );
     // objectstack#26681 — the name cell's ↗, "open as full page", for a row that
-    // opens the drawer (or the pane beside the list). A `page` object's row
+    // opens the drawer. A `page` object's row
     // already opens the page; a `new_window` / `none` one keeps its declaration.
     const openAsPageLabel = t('console.objectView.openAsPage', { defaultValue: 'Open as full page' });
     const openAsPage = useMemo(
@@ -958,8 +953,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         [refusedViewFace, viewAccess.checking, objectViewSchema, dataSource, mergedViews, activeViewId, onListViewChange, onListEdit, handleRowClick, renderListView, onListCreateView, onListViewAction],
     );
 
-    // The page column — header, list, panels — that the record pane draws
-    // beside, at its full height, or over (objectstack#27545).
+    // The page column — header, list, panels — that the record drawer draws
+    // over (objectstack#27545); it keeps its full width (objectstack#28915).
     const pageColumn = (
         <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden">
              {/* 1. Header with breadcrumb + description.
@@ -1130,7 +1125,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                             {listView}
                         </div>
                     </div>
-                    <RecordPaneListCount count={recordCount} t={t} />
                 </div>
                 {/* Metadata panel only shows for admin users */}
                 <MetadataPanel
@@ -1182,7 +1176,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         {phone ? pageColumn : (
         <ObjectViewRecordOverlay
             navOverlay={navOverlay}
-            mode={recordPaneMode}
+            mode={navOverlay.mode}
             list={pageColumn}
             handleDrawerClose={handleDrawerClose}
             objectDef={objectDef}

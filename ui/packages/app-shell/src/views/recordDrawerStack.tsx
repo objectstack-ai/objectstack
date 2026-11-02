@@ -376,8 +376,8 @@ export function useRecordDrawerStack({
 export type RecordDrawerStack = ReturnType<typeof useRecordDrawerStack>;
 
 /**
- * The pane itself: the shared `NavigationOverlay` — the drawer, or the pane
- * beside `mainContent` (the list) on the split face — with the record's top
+ * The pane itself: the shared `NavigationOverlay` — the drawer over
+ * `mainContent` (the list) — with the record's top
  * bar (objectstack#27524, Target 7): at the root the breadcrumb 「对象 › 记录名」
  * (the object returns to the list: it closes the pane), one level down `←`
  * and the path (objectstack#26679); on the right the counter and ↓ ↑, the

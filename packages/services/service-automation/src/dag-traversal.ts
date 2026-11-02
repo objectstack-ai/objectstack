@@ -34,6 +34,7 @@ import {
     FlowSuspendSignal,
     isRefusalSignal,
     isSuspendSignal,
+    nestedChildRunId,
     type ExecutionLogEntry,
     type NodeExecutionResult,
     type StepLogEntry,
@@ -141,6 +142,8 @@ export interface DagTraversalHost {
     readonly persistSuspendedRun: AutomationEngine['persistSuspendedRun'];
     readonly flowChecksumOf: AutomationEngine['flowChecksumOf'];
     readonly renderFlowTerminalMessage: AutomationEngine['renderFlowTerminalMessage'];
+    readonly resolveSuspensionChain: AutomationEngine['resolveSuspensionChain'];
+    readonly cancelRun: AutomationEngine['cancelRun'];
 }
 
 /** The body of {@link AutomationEngine.executeNode}, moved unedited; that method's docblock is its contract. */
@@ -746,9 +749,9 @@ export async function traverseNext(
     }
 }
 
-/** The body of {@link AutomationEngine.runRegion}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.runRegion}; that method's docblock is its contract. */
 export async function runRegion(
-    this: Pick<DagTraversalHost, 'executeNode'>,
+    this: Pick<DagTraversalHost, 'executeNode' | 'resolveSuspensionChain' | 'cancelRun' | 'logger'>,
     region: FlowRegionParsed,
     variables: Map<string, unknown>,
     context: AutomationContext,
@@ -835,12 +838,42 @@ export async function runRegion(
         if (isSuspendSignal(err)) {
             const suspended = region.nodes.find(n => n.id === err.nodeId);
             const flowName = (suspended?.config as { flowName?: unknown } | undefined)?.flowName;
-            throw refuseRegionSuspension({
+            const refusal = refuseRegionSuspension({
                 regionNodeId: grouping?.parentNodeId ?? entryId,
                 regionKind: grouping?.regionKind ?? 'region',
                 suspendedNodeId: err.nodeId,
                 ...(typeof flowName === 'string' && flowName ? { subFlowName: flowName } : {}),
             });
+            // [#28897] A `subflow` / `map` node suspends by parking the CHILD
+            // run it started and linking it through its correlation
+            // (`subflow:<childRunId>` / `map:<childRunId>`). This run fails
+            // here, so nothing will ever resume through that link: measured,
+            // the child stayed parked in the durable store, and a later
+            // resume ran the rest of the child for a caller that had already
+            // failed, then failed to resume that caller. So the child run is
+            // cancelled, with every run it is itself parked on, deepest
+            // first, through the engine's own `cancelRun`. ⛔ The refusal is
+            // thrown exactly as before: a failed cancellation is logged, never
+            // put in its place.
+            const childRunId = nestedChildRunId(err.correlation);
+            if (childRunId !== undefined) {
+                try {
+                    const chain = await this.resolveSuspensionChain(childRunId);
+                    const reason = `the run that started it failed at a region boundary: ${refusal.message}`;
+                    for (const run of [...chain].reverse()) await this.cancelRun(run.runId, reason);
+                } catch (cancelErr) {
+                    // #4632 verdict: DURABILITY, `error`, as `cancelRun`'s own
+                    // store failure: the child may still be parked.
+                    this.logger.error(
+                        `[automation] node '${err.nodeId}' suspended inside region '${refusal.regionNodeId}', and ` +
+                            `cancelling the child run '${childRunId}' it parked failed, so that run may still be ` +
+                            `parked. Cancel it with cancelRun('${childRunId}'). The failure is in this record's meta.`,
+                        undefined,
+                        describeThrownForLog(cancelErr),
+                    );
+                }
+            }
+            throw refusal;
         }
         // [#15788] The refusing `end` node's signal, converted at exactly
         // the same boundary and for the same reason: a control signal must

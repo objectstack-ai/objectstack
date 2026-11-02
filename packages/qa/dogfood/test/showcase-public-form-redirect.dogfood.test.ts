@@ -30,6 +30,10 @@
 // plugin needs to mount. The plugin is imported as SOURCE by relative path,
 // like the other package-internal reads in this suite, so the verdict is about
 // this checkout and not about the last build of `@objectstack/cli`.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the editor's save goes into the showcase's `.custom` pair, declaring the form
+// it overrides; the anonymous doors serve the pair's override.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -37,6 +41,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { createConsoleStaticPlugin } from '../../../cli/src/utils/console.js';
 
@@ -44,6 +49,7 @@ const SLUG = 'contact-us';
 const AUTHORED = `/forms/${SLUG}`;
 const PAGE = `/_console/f/${SLUG}`;
 const VIEW = '/meta/view/showcase_inquiry.contact';
+const BASE = 'com.example.showcase';
 const SYS = { isSystem: true } as const;
 const BUNDLE_MARKER = 'console-bundle-22079';
 
@@ -92,13 +98,14 @@ describe('showcase: the authored public form path redirects to the console form 
   const saveSharing = async (patch: Record<string, unknown>) => {
     const body = structuredClone(published);
     Object.assign(body.config.sharing, patch);
-    const res = await stack.apiAs(admin, 'PUT', VIEW, body);
+    const res = await stack.apiAs(admin, 'PUT', inPair(VIEW, BASE), declaredOverride(body, BASE, '0.1.0'));
     expect(res.status, await res.clone().text()).toBe(200);
   };
 
   beforeAll(async () => {
     stack = await boot();
     admin = await stack.signIn();
+    await ensurePair(stack, admin, BASE);
     ql = await stack.kernel.getServiceAsync('objectql');
     const res = await stack.apiAs(admin, 'GET', VIEW);
     expect(res.status).toBe(200);

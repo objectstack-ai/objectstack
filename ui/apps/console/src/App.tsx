@@ -12,8 +12,9 @@
  * with extra `<Route>` children.
  */
 
-import { lazy, Suspense, useMemo } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useNativeHostRouting } from '@object-ui/mobile';
 import { AuthProvider, useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { UploadProvider, createObjectStackUploadAdapter } from '@object-ui/providers';
 import { DevMasterDetail } from './dev/DevMasterDetail';
@@ -135,6 +136,35 @@ function resolveBasename(): string {
 
 const BASENAME = resolveBasename();
 
+/**
+ * Native shell mode: wires the router to the ObjectStack mobile shell when it
+ * hosts this Console (`window.ObjectStackNative`, see `@object-ui/mobile`).
+ *
+ * Rendered beside `<Routes>`, inside `ConsoleShell`'s Suspense boundary, so
+ * its first effect runs once the first route has committed, which is when
+ * `ready()` is posted. Every navigation posts `routeChanged` with the router's
+ * path, query and hash (the basename is already stripped), and the shell's
+ * `objectstack-native:navigate` event moves this router instead of reloading
+ * the page. `data-os-native-shell` on the root element names the platform, so
+ * a stylesheet can tell shell mode apart. Without the bridge this renders
+ * nothing and installs nothing.
+ */
+function NativeShellRouting() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const host = useNativeHostRouting({
+    route: `${location.pathname}${location.search}${location.hash}`,
+    navigate,
+  });
+  const platform = host?.platform;
+  useEffect(() => {
+    if (!platform) return undefined;
+    document.documentElement.setAttribute('data-os-native-shell', platform);
+    return () => document.documentElement.removeAttribute('data-os-native-shell');
+  }, [platform]);
+  return null;
+}
+
 /** Wraps `DefaultHomeLayout` so the FAB gets the signed-in user id. */
 function HomeRoute() {
   const { user } = useAuth();
@@ -211,6 +241,7 @@ export function App() {
         <FaviconSync />
         <UploadProvider adapter={uploadAdapter}>
         <ConsoleShell>
+          <NativeShellRouting />
           <Routes>
             {/*
               * Public auth surfaces — render OUTSIDE ProtectedRoute so
