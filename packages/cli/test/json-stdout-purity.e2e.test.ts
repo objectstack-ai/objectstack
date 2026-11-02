@@ -100,6 +100,8 @@ const FAMILY: Record<string, string[]> = {
   // `sys_activity` and writes nothing. Its backfill logs through a sink of its
   // own, which `--json` points at stderr, as `audit-metadata-bodies` does.
   'migrate activity-changed-fields': [],
+  // Its dry run takes the `summary-nulls` shape: a read-only boot, no row written.
+  'migrate blank-single-values': [],
   // [ADR-0139 E7] The same shape: a dry run by default, reading `sys_comment`
   // and writing nothing, its backfill logging through a sink `--json` points at
   // stderr.
