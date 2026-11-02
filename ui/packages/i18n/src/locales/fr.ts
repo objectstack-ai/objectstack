@@ -7,6 +7,7 @@ const fr = {
     banner: {
       message: 'Vous incarnez {{user}} — chaque action est enregistrée en son nom.',
       startedBy: 'Démarré par l’administrateur {{admin}}.',
+      startedByUnnamed: 'Démarré par un administrateur.',
       stop: 'Arrêter l’usurpation',
       stopping: 'Arrêt en cours…',
       stopFailed: 'Impossible d’arrêter l’usurpation : {{reason}}',

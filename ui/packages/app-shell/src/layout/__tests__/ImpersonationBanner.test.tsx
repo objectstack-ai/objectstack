@@ -79,9 +79,24 @@ function tokenBoundClient(): AuthClient {
   } as unknown as AuthClient;
 }
 
-/** Stub `fetch` for the stop-impersonating call. */
+/** The administrator's `sys_user` row, read by the banner to name them. */
+const ADMIN_READ_PATH = '/api/v1/data/sys_user/usr_admin';
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+/** The data route's answer for the administrator's row, in its envelope. */
+function adminRow(fields: Record<string, unknown>): Response {
+  return jsonResponse({
+    success: true,
+    data: { object: 'sys_user', id: 'usr_admin', record: { id: 'usr_admin', ...fields } },
+  });
+}
+
+/** Stub `fetch` for the stop-impersonating call and the administrator read. */
 function stubStopEndpoint(
-  respond: (url: string) => Response,
+  respond: (url: string) => Response | Promise<Response>,
 ): { urls: string[]; bearers: (string | null)[] } {
   const urls: string[] = [];
   const bearers: (string | null)[] = [];
@@ -138,15 +153,66 @@ describe('ImpersonationBanner (#4467)', () => {
 
   it('names BOTH parties while the session is impersonated', async () => {
     TokenStorage.set(IMPERSONATED_TOKEN);
+    const seen = stubStopEndpoint((url) =>
+      url.endsWith(ADMIN_READ_PATH) ? adminRow({ name: 'Dev Admin', email: 'admin@objectos.ai' }) : new Response('{}'),
+    );
     renderBanner();
 
     const banner = await screen.findByTestId('impersonation-banner');
     // The impersonated user — whose name every write is recorded under.
     expect(banner.textContent).toMatch(/RT8 Dave/);
-    // The administrator who started it, as the session reports them.
-    expect(banner.textContent).toMatch(/usr_admin/);
+    // The administrator who started it, by name: the session carries only the id.
+    const startedBy = await screen.findByTestId('impersonation-started-by');
+    expect(startedBy.textContent).toBe('Started by administrator Dev Admin.');
+    expect(banner.textContent).not.toMatch(/usr_admin/);
+    // The read went out as the session the console holds: the impersonated user's.
+    const read = seen.urls.findIndex((u) => u.endsWith(ADMIN_READ_PATH));
+    expect(read).toBeGreaterThanOrEqual(0);
+    expect(seen.bearers[read]).toBe(`Bearer ${IMPERSONATED_TOKEN}`);
     // And an exit.
     expect(screen.getByTestId('impersonation-stop')).toBeTruthy();
+  });
+
+  it('names the administrator by email when their row carries no name', async () => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    stubStopEndpoint((url) =>
+      url.endsWith(ADMIN_READ_PATH) ? adminRow({ name: '', email: 'admin@objectos.ai' }) : new Response('{}'),
+    );
+    renderBanner();
+
+    const startedBy = await screen.findByTestId('impersonation-started-by');
+    expect(startedBy.textContent).toBe('Started by administrator admin@objectos.ai.');
+  });
+
+  it.each([
+    ['refused (the impersonated user cannot read the row)', () => jsonResponse({ success: false, error: { code: 'PERMISSION_DENIED' } }, 403)],
+    ['missing', () => jsonResponse({ success: false, error: { code: 'NOT_FOUND' } }, 404)],
+    ['answered without a name or email', () => adminRow({})],
+    ['a network failure', () => {
+      throw new TypeError('Failed to fetch');
+    }],
+  ])('says "an administrator", never the id, when the read is %s', async (_case, answer) => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    stubStopEndpoint((url) => (url.endsWith(ADMIN_READ_PATH) ? answer() : new Response('{}')));
+    renderBanner();
+
+    const startedBy = await screen.findByTestId('impersonation-started-by');
+    expect(startedBy.textContent).toBe('Started by an administrator.');
+    expect(screen.getByTestId('impersonation-banner').textContent).not.toMatch(/usr_admin/);
+  });
+
+  it('shows no administrator at all while the read is still out', async () => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    stubStopEndpoint((url) => {
+      if (url.endsWith(ADMIN_READ_PATH)) return new Promise<Response>(() => {});
+      return new Response('{}');
+    });
+    renderBanner();
+
+    const banner = await screen.findByTestId('impersonation-banner');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('impersonation-started-by')).toBeNull();
+    expect(banner.textContent).not.toMatch(/usr_admin/);
   });
 
   it('stop: calls the endpoint, adopts the restored token, refreshes identity, banner goes', async () => {
