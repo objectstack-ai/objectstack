@@ -3233,9 +3233,6 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11808 — the routes a read-only package does have (ADR-0070 D2,
   // ADR-0005): an environment overlay, and the marketplace where the runtime has one.
   'engine.studio.landing.readonlyHint': 'Code and installed packages are read-only, so they are not edited or duplicated here. Customize one with an environment overlay, for the metadata types that accept one.',
-  // objectui#12513 — the link leaves Studio for Setup, and says so.
-  'engine.studio.landing.overlay': 'Open in Setup',
-  'engine.studio.landing.overlayTitle': 'Open this package’s metadata: each type shows whether it accepts an environment overlay',
   'engine.studio.landing.marketplace': 'Or install a template app from the marketplace',
   // ADR-0146 D3 — a read-only base's card says what this deployment changed on
   // it, from the server's per-package customization read.

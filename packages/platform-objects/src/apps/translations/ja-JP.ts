@@ -62,11 +62,7 @@ export const jaJP: TranslationData = {
         nav_position_holders: { label: 'ポジション保持者' },
         nav_permission_set_assignment: { label: '権限セットの割り当て' },
 
-        nav_positions: { label: 'ポジション' },
-        nav_capabilities: { label: 'ケイパビリティ' },
-        nav_permission_sets: { label: '権限セット' },
         nav_sharing_rules: { label: '共有ルール' },
-        nav_declared_sharing_rules: { label: '宣言済みの共有ルール' },
         nav_record_shares: { label: 'レコード共有' },
         nav_queues: { label: 'キュー' },
         nav_queue_members: { label: 'キューメンバー' },

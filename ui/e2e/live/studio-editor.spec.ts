@@ -3,7 +3,9 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
 /**
  * Live e2e for the Studio metadata page editor — guards the "Add block works
  * and blocks are configurable" contract the SDUI runtime depends on. Drives the
- * real editor at /apps/:app/metadata/page/:name against the running stack.
+ * real editor at /studio/~all/metadata/page/:name (Studio's "All metadata"
+ * area; Setup carries no metadata editor, objectstack ADR-0146 D1) against the
+ * running stack.
  *
  * The page under edit is one the test authors in the environment: a copy of the
  * showcase's `showcase_project_workspace` (its regions and blocks) under a fresh
@@ -53,7 +55,7 @@ async function removePage(request: APIRequestContext, name: string) {
 test('the page editor loads with its config sections', async ({ page, request }) => {
   const { name, regions } = await authorEditablePage(request);
   try {
-    await page.goto(`/apps/showcase_app/metadata/page/${name}`);
+    await page.goto(`/studio/~all/metadata/page/${name}`);
     await expect(page.getByTestId('metadata-edit-page')).toBeVisible();
     // The environment's own page: no lock stands between the test and the editor.
     await expect(page.getByText(/is locked and cannot be edited/i)).toHaveCount(0);
@@ -72,7 +74,7 @@ test('the page editor loads with its config sections', async ({ page, request })
 test('Add block opens a block-type picker with configurable block kinds, and the added block is stored', async ({ page, request }) => {
   const { name, firstRegionBlocks } = await authorEditablePage(request);
   try {
-    await page.goto(`/apps/showcase_app/metadata/page/${name}`);
+    await page.goto(`/studio/~all/metadata/page/${name}`);
     await expect(page.getByTestId('metadata-edit-page')).toBeVisible();
 
     await page.getByRole('button', { name: /Add block/i }).first().click();

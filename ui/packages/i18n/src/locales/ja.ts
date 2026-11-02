@@ -1785,7 +1785,7 @@ const ja = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。管理者が「設定 → 権限セット」で権限セットを使って付与できます。",
+      accessRequired: "Studio を開くには Studio へのアクセス権限が必要です。管理者が「設定 → 権限セットの割り当て」で権限セットを使って付与できます。",
     },
     saveAdvisoryTitle: "保存しました — 編集チェックで {{count}} 件の推奨事項が見つかりました",
     saveAdvisoryTitle_one: "保存しました — 編集チェックで {{count}} 件の推奨事項が見つかりました",

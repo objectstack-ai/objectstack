@@ -49,13 +49,14 @@ const readTables: (root: string) => Map<string, Map<string, string>> = readDesig
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
 /**
- * The keys that name the overlay axis: the three `BuilderLanding` renders, and
- * the hint `PermissionMatrixEditor` shows on a set a code package ships.
+ * The keys that name the overlay axis: the two `BuilderLanding` renders, and
+ * the hint `PermissionMatrixEditor` shows on a set a code package ships. The
+ * third landing string, the overlay link's tooltip, retired with the link: the
+ * landing no longer links into Setup (objectstack ADR-0146 D1, N-28).
  */
 const KEYS = [
   'engine.studio.landing.description',
   'engine.studio.landing.readonlyHint',
-  'engine.studio.landing.overlayTitle',
   'perm.readOnly.artifact.hint',
 ] as const;
 

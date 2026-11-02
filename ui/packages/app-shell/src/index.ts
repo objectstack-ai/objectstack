@@ -527,6 +527,10 @@ export {
   studioMetadataAreaPath,
 } from './views/studio-design/metadataArea.js';
 export { StudioMetadataArea } from './views/studio-design/StudioMetadataArea.js';
+// objectstack ADR-0146 D1 (N-28) — where a Setup metadata URL lands in that
+// area (the datasource's stays in Setup). A host whose legacy aliases forward
+// onto Setup's metadata routes lands them in one hop through this.
+export { setupMetadataStudioPath } from './views/studio-design/setupMetadataRedirect.js';
 
 // Setup › Packaged actions (ADR-0126 §7.4) — on/off for the actions installed
 // packages ship. Reached through the `automation:packaged-actions` component
