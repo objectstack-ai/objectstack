@@ -29,6 +29,7 @@ import {
   MULTI_CAPABLE_TYPES,
   expandEmptyOperator,
 } from '@objectstack/spec/data';
+import { blankAsNullColumns } from '@objectstack/core';
 import { normalizeBlankTypedValues } from './record-validator.js';
 
 /** Every declarable type the `$empty` table puts on `null_only` that the typed arm does not own. */
@@ -92,11 +93,11 @@ describe('normalizeBlankTypedValues: optional single-value option / reference co
     }
   });
 
-  it('a multiple: true column is the multi_value row, not this arm: "" passes through', () => {
+  it('a multiple: true column is the multi_value row, not this arm: #29343\'s list arm owns it', () => {
     const schema = schemaOf(multiCapable, { multiple: true });
     for (const t of multiCapable) expect(expandEmptyOperator(schema.fields[`f_${t}`]).arm, t).toBe('multi_value');
-    const row = rowOf(multiCapable, '');
-    expect(normalizeBlankTypedValues(schema, row)).toBe(row);
+    const reach = blankAsNullColumns(schema);
+    for (const t of multiCapable) expect(reach.get(`f_${t}`), t).toBe('emptyList');
   });
 
   it('a lifecycle column the engine owns is never rewritten', () => {
