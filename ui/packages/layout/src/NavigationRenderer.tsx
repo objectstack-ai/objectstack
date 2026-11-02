@@ -72,6 +72,7 @@ import {
   Separator,
   cn,
   useIsMobile,
+  useOptionalSidebar,
 } from '@object-ui/components';
 import type { NavigationItem, KeyedI18nLabel } from '@object-ui/types';
 import { isElementApiDataSourceShape } from '@object-ui/react';
@@ -1244,6 +1245,42 @@ export function resolveActiveNavItem(
  */
 const ActiveNavIdContext = React.createContext<string | null>(null);
 
+/**
+ * Whether the rows draw at phone size (44 px rows, larger text and icons),
+ * provided once at the tree root by {@link NavMobileSource} (objectstack#29141).
+ */
+const NavIsMobileContext = React.createContext<boolean>(false);
+
+/**
+ * The phone-size answer the rows read, decided once for the whole tree.
+ *
+ * Inside a sidebar provider it is the provider's own `isMobile`, which settled
+ * when the shell mounted. Each row used to ask `useIsMobile()` itself, and that
+ * hook answers `false` on its first render and corrects itself in an effect:
+ * every time the phone drawer opened, its whole tree mounted at desktop size,
+ * then each row's effect read the viewport and set state, and the tree rendered
+ * and restyled a second time. On the showcase (54 rows) that second pass was
+ * about a third of the open at 4x CPU.
+ *
+ * With no sidebar provider the tree keeps the viewport answer it had, asked
+ * once here for every row. The provider's value does not change when the
+ * sidebar opens or closes, so the rows below do not re-render on a toggle:
+ * `children` is the element the root rendered, and the provided value is the
+ * same boolean.
+ */
+function NavMobileSource({ children }: { children: React.ReactNode }) {
+  const sidebar = useOptionalSidebar();
+  if (sidebar) {
+    return <NavIsMobileContext.Provider value={sidebar.isMobile}>{children}</NavIsMobileContext.Provider>;
+  }
+  return <ViewportMobileSource>{children}</ViewportMobileSource>;
+}
+
+function ViewportMobileSource({ children }: { children: React.ReactNode }) {
+  const isMobile = useIsMobile();
+  return <NavIsMobileContext.Provider value={isMobile}>{children}</NavIsMobileContext.Provider>;
+}
+
 // ---------------------------------------------------------------------------
 // Search filter helper
 // ---------------------------------------------------------------------------
@@ -1541,7 +1578,8 @@ function NavigationItemRenderer({
 }) {
   // iOS-native mobile drawer polish: >=44px tap targets, larger text and
   // icons, rounder rows. Desktop (>=768px) keeps the compact rail untouched.
-  const isMobile = useIsMobile();
+  // Decided once for the tree (`NavMobileSource`), not by a hook per row.
+  const isMobile = React.useContext(NavIsMobileContext);
   const mobileBtnClass = isMobile ? 'min-h-[44px] text-[15px] gap-3 rounded-xl' : undefined;
   const navIconClass = cn('shrink-0', isMobile ? 'h-5 w-5' : 'h-4 w-4');
   // Resolve the initial open state (objectui#13336):
@@ -1971,22 +2009,24 @@ export function NavigationRenderer({
   // --- No explicit groups → wrap in a single SidebarGroup ---
   if (!hasGroups) {
     return (
-      <ActiveNavIdContext.Provider value={activeNavId}>
-        {favoritesSection}
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {sorted.map((item) => (
-                <NavigationItemRenderer
-                  key={item.id}
-                  item={item}
-                  {...itemProps}
-                />
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </ActiveNavIdContext.Provider>
+      <NavMobileSource>
+        <ActiveNavIdContext.Provider value={activeNavId}>
+          {favoritesSection}
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {sorted.map((item) => (
+                  <NavigationItemRenderer
+                    key={item.id}
+                    item={item}
+                    {...itemProps}
+                  />
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </ActiveNavIdContext.Provider>
+      </NavMobileSource>
     );
   }
 
@@ -2034,10 +2074,12 @@ export function NavigationRenderer({
   flushLeaves('leaf-end');
 
   return (
-    <ActiveNavIdContext.Provider value={activeNavId}>
-      {favoritesSection}
-      {fragments}
-    </ActiveNavIdContext.Provider>
+    <NavMobileSource>
+      <ActiveNavIdContext.Provider value={activeNavId}>
+        {favoritesSection}
+        {fragments}
+      </ActiveNavIdContext.Provider>
+    </NavMobileSource>
   );
 }
 
