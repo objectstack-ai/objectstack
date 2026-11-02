@@ -22,7 +22,7 @@ import {
   PHONE_TOUCH_TARGET,
   useBelowSm,
 } from './components/ViewSettingsPopover';
-import { UserFilters } from './UserFilters';
+import { UserFilters, type UserFiltersHandle } from './UserFilters';
 import {
   calendarWindowCovers,
   calendarWindowFilter,
@@ -1842,12 +1842,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // `show*` flags are folded into it by `normalizeListViewSchema` above, so
     // there is no dual-read here — one vocabulary, one place.
     //
-    // The DEFAULTS are per-toggle and deliberately asymmetric, matching what
-    // these flags have always done: the four view-shaping affordances plus
-    // grouping are on unless turned off; column visibility and row coloring are
-    // off unless turned on. (`hideFields`/`rowColor` default OFF is objectui's
-    // historical behavior, kept deliberately — flipping it would grow two
-    // buttons on every existing view.)
+    // The DEFAULTS are per-toggle and read the spec's own defaults
+    // (`UserActionsConfigSchema`): the four view-shaping affordances, grouping
+    // and column visibility are on unless turned off; row coloring is off
+    // unless turned on. `hideFields` defaults ON by maintainer ruling on #28912
+    // — a reader hides and shows columns for themselves, and an app withholds
+    // the control with `hideFields: false`. Where the choice is stored (the
+    // reader's own list state, or session-only on a system view with no
+    // `columns`) is the host's call, not this read's.
     //
     // This is the VIEW half of a NAME COLLISION, and the right half here:
     // `userActions` on a VIEW is toolbar policy (`UserActionsConfigSchema`),
@@ -1873,7 +1875,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       showRefresh: ua?.refresh !== false,
       showDensity: ua?.rowHeight !== false,
       showGroup: ua?.group !== false,
-      showHideFields: ua?.hideFields === true,
+      showHideFields: ua?.hideFields !== false,
       showColor: ua?.rowColor === true,
       // The bundled "Display" form is the default (objectui#12423): the bar
       // keeps Filter, Sort, Display and Search. `compactToolbar: false` is the
@@ -2178,6 +2180,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
   // User Filters State (Airtable Interfaces-style)
   const [userFilterConditions, setUserFilterConditions] = React.useState<any[]>([]);
+  // The mounted chip bar's handle: the empty state's "Clear filters" clears
+  // the chips through it (objectstack#29052). The selection stays the bar's.
+  const userFiltersRef = React.useRef<UserFiltersHandle>(null);
 
   // The user filter this component APPLIES — its fetch, the export, the node of
   // a view that queries for itself, the empty-state copy. Empty while a
@@ -3934,16 +3939,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   }, [onSearchChange]);
 
   // objectstack#28908 — the empty state's "Clear filters": removes the
-  // reader's whole query (the panel's conditions, the "In a queue" toggle and
-  // the search) and leaves the view's declared filter alone, which is not the
-  // reader's. The panel's group goes through the same emit as a panel edit, so
-  // the toolbar badge clears and the host stores the empty group. User-filter
-  // chips are not reset here: `UserFilters` holds its own selection and each
-  // chip clears in place.
+  // reader's whole query (the panel's conditions, the user-filter chips, the
+  // "In a queue" toggle and the search) and leaves the view's declared filter
+  // alone, which is not the reader's. The panel's group goes through the same
+  // emit as a panel edit, so the toolbar badge clears and the host stores the
+  // empty group. The chips clear through the bar's own handle, which reports
+  // the cleared selection to the host as a chip's × does (objectstack#29052).
   const handleClearReaderQuery = React.useCallback(() => {
     const cleared: FilterBuilderRowGroup = { ...currentFilters, conditions: [] };
     setCurrentFilters(cleared);
     onFilterChange?.(cleared);
+    userFiltersRef.current?.clear();
     setSittingInQueueOnly(false);
     if (searchInput) handleSearchChange('');
   }, [currentFilters, onFilterChange, searchInput, handleSearchChange]);
@@ -5683,6 +5689,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const cappedPosture = cappedWindow && surfaceDrawsFetchedRows;
   // Either short posture draws none of the object list's chrome.
   const listChromeShown = !compactPosture && !cappedPosture;
+  // The user-filter bar is on screen (the toolbar draws it below). Its chips
+  // are the reader's filter, so the empty state's "Clear filters" counts them;
+  // preset tabs are the view's presets and are not cleared.
+  const userFilterBarShown = listChromeShown && !!filterElements && toolbarFlags.showUserFilters;
+  const userFilterChipsClearable =
+    userFilterBarShown && filterElements?.element !== 'tabs' && appliedUserFilterConditions.length > 0;
   // The records the query matched, once a load settles: the server's total, or
   // the rows in hand when the whole result is in memory. The capped list's
   // 「View all N」 and the tab badge (`onTotalChange`) both say this number.
@@ -5908,9 +5920,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               them visible (single line, scrollable) to match the Airtable
               Interface pattern. Withheld on a dataset-bound chart, which they
               cannot reach (`datasetChartOnScreen`, objectui#10327). */}
-          {filterElements && toolbarFlags.showUserFilters && (
+          {filterElements && userFilterBarShown && (
               <div className="shrink-0 min-w-0 overflow-x-auto" data-testid="user-filters">
                 <UserFilters
+                  ref={userFiltersRef}
                   config={filterElements}
                   objectDef={objectDef}
                   objectDefPending={!objectDefLoaded}
@@ -6780,12 +6793,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               />
             ))}
           </div>
-        ) : !loading && data.length === 0 && (currentView === 'grid' || currentView === 'gallery') ? (
+        ) : !loading && data.length === 0 && (currentView === 'grid' || currentView === 'gallery' || currentView === 'tree') ? (
           // objectui#12217 — the gallery draws the grid's empty state, through
           // the one shared component: the authored `emptyState`, resolved
           // against the display locale, otherwise the localized `list.*` copy.
           // It used to hand the empty list to `ObjectGallery`, which drew a
           // hard-coded English line and never read the view's `emptyState`.
+          // The tree takes the same branch: `ObjectTree` reads no `emptyState`
+          // and drew the generic `common.noData`. This component's fetch runs
+          // with the very filter the tree's own query is handed
+          // (`selfQueryFilter`) and no search term (`searchlessViewOnScreen`),
+          // so an empty `data` is the tree's empty answer too.
           <ListEmptyState
             title={schema.emptyState?.title}
             message={schema.emptyState?.message}
@@ -6832,9 +6850,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // emptied: the empty state offers the way out.
             onClearSearch={searchTerm && searchTerm.trim() ? () => handleSearchChange('') : undefined}
             // objectstack#28908 — a filter the reader applied (the panel's
-            // finished conditions, the queue toggle) is part of the empty
-            // query: the one clear action removes it, the search with it.
+            // finished conditions, the user-filter chips, the queue toggle) is
+            // part of the empty query: the one clear action removes it, the
+            // search with it.
             onClearFilters={
+              userFilterChipsClearable ||
               appliedQueueSittingConditions.length > 0 ||
               (Array.isArray(appliedFilters?.conditions) && appliedFilterGroup(appliedFilters).conditions.length > 0)
                 ? handleClearReaderQuery

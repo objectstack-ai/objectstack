@@ -1504,7 +1504,11 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
         data-testid="dataset-export"
         title={tt('dashboard.exportCsv', 'Export CSV')}
         aria-label={tt('dashboard.exportCsv', 'Export CSV')}
-        className="absolute right-1 top-1 z-10 rounded p-1 text-muted-foreground opacity-70 hover:bg-accent/50 hover:text-foreground hover:opacity-100"
+        // objectstack#29078 — below `sm` the button is a 44 px touch target.
+        // At that size, pinned over the table's top-right corner, it would
+        // cover the last column's sort button, so on a phone it leaves the
+        // corner and takes its own right-aligned row above the table.
+        className="absolute right-1 top-1 z-10 rounded p-1 text-muted-foreground opacity-70 hover:bg-accent/50 hover:text-foreground hover:opacity-100 max-sm:static max-sm:ml-auto max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center"
       >
         <Download className="h-3.5 w-3.5" />
       </button>
@@ -1648,7 +1652,8 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                     return (
                       <td
                         key={`${cc.col.id}-${cc.measure}`}
-                        className={cn('px-2 py-1 text-right tabular-nums whitespace-nowrap', clickable && 'cursor-pointer hover:bg-accent/40')}
+                        // A drillable cell is a 44 px touch target below `sm` (#29078).
+                        className={cn('px-2 py-1 text-right tabular-nums whitespace-nowrap', clickable && 'cursor-pointer hover:bg-accent/40 max-sm:h-11 max-sm:min-w-11')}
                         data-testid={clickable ? 'dataset-drill-cell' : undefined}
                         onClick={clickable ? () => openDrill(index as number, title) : undefined}
                       >
@@ -1867,8 +1872,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                       type="button"
                       onClick={() => cycleSort(c)}
                       data-testid="dataset-table-sort"
+                      // 44 px tall below `sm` (#29078), so a phone can tap the sort.
                       className={cn(
-                        'inline-flex w-full select-none items-center font-medium transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                        'inline-flex w-full min-h-11 sm:min-h-0 select-none items-center font-medium transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                         numeric ? 'justify-end' : 'justify-between',
                       )}
                     >
@@ -1898,7 +1904,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
                   // A comparison column formats as the measure it compares.
                   const measure = compareOf(c) ?? (values.includes(c) ? c : undefined);
                   return (
-                    <td key={c} className={cn('px-2 py-1 whitespace-nowrap tabular-nums', numericColumns.has(c) && 'text-right')}>
+                    // A drillable row is a 44 px touch target below `sm` (#29078);
+                    // a `td`'s height is its floor, so the row grows to it.
+                    <td key={c} className={cn('px-2 py-1 whitespace-nowrap tabular-nums', numericColumns.has(c) && 'text-right', canDrill && 'max-sm:h-11')}>
                       {measure
                         ? formatMeasure(row[c], measureField(measure)?.format, measureCellCurrency(measureField(measure), state.rows[index]), measureField(measure)?.percentScale, displayLocale)
                         : formatDimensionValue(row[c], displayLocale)}
