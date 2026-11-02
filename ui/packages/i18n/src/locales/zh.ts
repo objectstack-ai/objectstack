@@ -3212,7 +3212,6 @@ const zh = {
     browseMarketplace: '浏览应用市场',
     quickActions: {
       title: '快捷操作',
-      manageObjects: '管理对象',
       systemSettings: '系统设置',
       systemSettingsDesc: '配置您的系统',
     },
@@ -3255,7 +3254,6 @@ const zh = {
       systemSettings: '系统设置',
       applications: '应用',
       appMarketplace: '应用市场',
-      objectManager: '对象管理器',
       users: '用户',
       organizations: '组织',
       roles: '角色',
@@ -4790,24 +4788,19 @@ const zh = {
       bulkOperationFailed: '批量操作失败：{{reason}}',
     },
   },
-  // objectui#6301 — 设置 › 打包自动化(ADR-0126 §7.4)。术语沿用本包既有译法:
-  // `common.package` = 软件包,`flowRunner.completed` = 流程,`common.duplicate`
-  // 一族的“复制”在这里写作“克隆”,因为服务端的 clone 是另起机器名的同级流程,
-  // 不是一次副本粘贴。⛔ 本组不含任何血缘/漂移措辞(§9)。
+  // objectui#6301 — 设置 › 打包动作(ADR-0126 §7.4)。术语沿用本包既有译法:
+  // `common.package` = 软件包。页面的流程一半(列表与克隆对话框)已移入 Studio
+  // 的自动化区(ADR-0146 D11),其键随之离开各语言包。⛔ 本组不含任何血缘/漂移
+  // 措辞(§9)。
   packagedAutomation: {
     refresh: '刷新',
     actionsHeading: '打包动作',
     colActivation: '启用状态',
     on: '已启用',
     off: '已关闭',
-    notRunning: '未在此运行',
-    cloneCopyLabel: '{{label}}（副本）',
     cancel: '取消',
-    cloneCreated: '已创建流程「{{name}}」。',
-    cloneSwitchSourceOff: '停用「{{label}}」',
     toggleFailedHttp: '无法更改启用状态(HTTP {{status}})。',
     toggleFailed: '无法更改启用状态。',
-    reasonDetails: '详情',
     actionsSubtitle: '由已安装软件包提供的动作。在本部署中关闭后,它在所有提供它的位置都不再运行。你仍然可以在 Studio 中另行编写自己的动作。',
     colAction: '动作',
     colObject: '对象',

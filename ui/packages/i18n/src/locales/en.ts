@@ -3732,7 +3732,6 @@ const en = {
     browseMarketplace: 'Browse App Marketplace',
     quickActions: {
       title: 'Quick Actions',
-      manageObjects: 'Manage Objects',
       systemSettings: 'System Settings',
       systemSettingsDesc: 'Configure your system',
     },
@@ -3776,7 +3775,6 @@ const en = {
       systemSettings: 'System Settings',
       applications: 'Applications',
       appMarketplace: 'App Marketplace',
-      objectManager: 'Object Manager',
       users: 'Users',
       organizations: 'Organizations',
       roles: 'Roles',
@@ -5500,54 +5498,33 @@ const en = {
       bulkOperationFailed: 'Bulk operation failed: {{reason}}',
     },
   },
-  // objectui#6301 — Setup › Packaged automation (ADR-0126 §7.4): the
-  // operational surface for the flows an installed package ships. Authoring
+  // objectui#6301 — Setup › Packaged actions (ADR-0126 §7.4, §8 item 2): the
+  // operational surface for the actions an installed package ships. Authoring
   // stays in Studio, so this group has no editing vocabulary at all; it is
-  // on/off, clone, and the states those two produce.
+  // on/off and the states that produces. The flows half of the page (its list
+  // and its clone dialog) retired into Studio's Automations pillar (ADR-0146
+  // D11), and its keys left every pack with it.
   //
   // ⛔ No drift or ancestry wording anywhere in this group (ADR-0126 §9). There
   // is deliberately no "customized", no "based on v3", no "out of date" — the
   // platform does not track that lineage, and a translatable string for it is
   // the cheapest way for the surface to grow one.
   //
-  // ⛔ Server refusals are NOT in this group either. The posture gate, the
-  // subflow guard and the clone name conflict all arrive as server-authored
-  // prose and are rendered verbatim; the four `*Failed*` keys below are the
-  // last-resort fallbacks for a response that carried no message at all.
+  // ⛔ Server refusals are NOT in this group either. They arrive as
+  // server-authored prose and are rendered verbatim; the `*Failed*` keys below
+  // are the last-resort fallbacks for a response that carried no message at all.
   packagedAutomation: {
     refresh: 'Refresh',
     actionsHeading: 'Packaged actions',
     colActivation: 'Activation',
     on: 'On',
     off: 'Off',
-    // The Activation badge on a flow whose switch is ON but whose trigger the
-    // engine has not armed on this deployment (objectui#13159): the switch
-    // keeps the flag, this says the flow does not run. The same words as
-    // Studio's rail for the same state (`engine.studio.auto.notRunning`).
-    notRunning: 'Not running here',
-    // The Clone dialog's prefilled label (objectui#13344): the source flow's
-    // label, or its machine name when it has none, marked as the copy.
-    cloneCopyLabel: '{{label}} (copy)',
     cancel: 'Cancel',
-    cloneCreated: 'Created flow "{{name}}".',
-    // The clone result's next steps (objectui#13270): switch the flow the
-    // admin cloned from off through its own toggle, or open the clone where
-    // it is edited. The sharing-rule clone's words for the same offer.
-    cloneSwitchSourceOff: 'Switch "{{label}}" off',
     // Two keys per action, not one: the response arm has an HTTP status to
     // name and the transport-exception arm does not, and a single key cannot
     // carry a hole only half its call sites can fill.
-    // Artifact-neutral by wording, and shared by BOTH sections' toggles: the
-    // sentence says nothing about flows, so the actions half reuses it rather
-    // than defining a second key with the same English in ten packs.
     toggleFailedHttp: 'Could not change activation (HTTP {{status}}).',
     toggleFailed: 'Could not change activation.',
-    // The chip an unarmed flow row's platform sentence opens from
-    // (objectui#12609). ⛔ Generic on purpose: the same word on every row that
-    // carries a sentence, whatever the sentence says. The sentence itself is
-    // the server's and is never kept in a pack; a label naming its cause would
-    // be the console classifying a field the contract says not to parse.
-    reasonDetails: 'Details',
 
     // ── Packaged ACTIONS section (ADR-0126 §8 item 2, ruling 3) ────────────
     // ⛔ No clone key here on purpose: the action-clone half is unchartered,
@@ -5563,7 +5540,7 @@ const en = {
     actionsEmptyBody:
       'No installed package declares an action on this deployment. Actions you author yourself live in Studio.',
     actionsLoadFailed: 'Could not load packaged actions.',
-    // The toast after a switch the server accepted, in both sections, and
+    // The toast after a switch the server accepted, and
     // the confirm a packaged action's switch-off asks first (objectstack#27521).
     switchedOn: '"{{label}}" is switched on.',
     switchedOff: '"{{label}}" is switched off for this deployment.',
