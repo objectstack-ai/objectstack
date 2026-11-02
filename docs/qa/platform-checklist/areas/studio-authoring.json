@@ -3633,10 +3633,10 @@
     },
     {
       "id": "studio-authoring.access-permission-set-lifecycle",
-      "title": "Permission sets are created, found and locked honestly in Studio's Access pillar: the New dialog derives the identifier and refuses one already taken — published or draft — the rail searches and shows its empty states, and a read-only package offers no edit while the server refuses the forged write",
+      "title": "Permission sets are created, found and locked honestly in Studio's Access pillar: the New dialog derives the identifier and refuses one already taken — published or draft — the rail searches and shows its empty states, and on a read-only package New lands in its .custom pair while the packaged set offers no edit and the server refuses the forged write",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3656,7 +3656,7 @@
         "New permission set again with the identifier project_editor (a draft holds it): capture the refusal and the network",
         "publish; then New permission set with the identifier project_editor once more (now published): capture what happens, and GET /api/v1/meta/permission/project_editor (live) and ?state=draft",
         "rail search: type part of the label, part of the identifier, then a string nothing matches",
-        "read-only: switch to com.example.showcase → Access; read the banner and the affordances on a packaged set; then forge PUT /api/v1/meta/permission/showcase_contributor?mode=draft&package=com.example.showcase with a modified body, and a brand-new name into the same package; GET showcase_contributor before and after"
+        "read-only: switch to com.example.showcase → Access; read the banner and the affordances on a packaged set (do not press New similar or Customize — those journeys are their own items); then New permission set (+) on the read-only package: give it a fresh name, save, and capture the network — POST /api/v1/packages/com.example.showcase/ensure-customization (expected 201 on the first use, 200 once the pair exists) followed by the create into com.example.showcase.custom; GET /api/v1/meta/permission/NAME?state=draft&package=com.example.showcase.custom; delete that set at teardown. Then forge PUT /api/v1/meta/permission/showcase_contributor?mode=draft&package=com.example.showcase with a modified body, and a brand-new name into the same package; GET showcase_contributor before and after"
       ],
       "acceptance": [
         {
@@ -3678,10 +3678,10 @@
           "evidence": "the three DOM reads"
         },
         {
-          "clause": "on a read-only package the pillar shows the read-only banner, offers no New set and no editing control",
+          "clause": "on a read-only package the pillar shows the read-only banner and the packaged set offers no editing control, and New permission set creates into the base's customization pair, never into the base (ADR-0146 D3)",
           "oracle": "screenshot",
-          "verify": "the banner names the package as read-only; no + button; the set's controls are disabled or absent",
-          "evidence": "the read-only screenshot described"
+          "verify": "the banner names the package as read-only; the packaged set's controls are disabled or absent; the + is offered (openCreateSet is defined when newInPair, StudioDesignSurface.tsx) and its save calls POST /api/v1/packages/com.example.showcase/ensure-customization (packages-io.ts ensureCustomizationPackage) before the create lands in com.example.showcase.custom — corroborated by the network trace and the draft read of step 6. QA run #29002 measured ensure 201 then the set created in com.example.showcase.custom. A set created into com.example.showcase itself is the FAIL",
+          "evidence": "the read-only screenshot described + the New save's network trace and draft read"
         },
         {
           "clause": "the server refuses the forged write — 403 for the packaged set (ITEM_LOCKED), 422 WRITABLE_PACKAGE_REQUIRED for a new name — and the packaged set is byte-identical afterwards",
@@ -3698,7 +3698,7 @@
         "stale-console-bundle"
       ],
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Access pillar: the New set dialog, the taken-identifier check findTakenIdentifier and CreateTakenNotice before the create's If-None-Match: *, discardDraft, the rail search and empty states)",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Access pillar: the New set dialog, the taken-identifier check findTakenIdentifier and CreateTakenNotice before the create's If-None-Match: *, discardDraft, the rail search and empty states, openCreateSet offered on a read-only base when newInPair — ADR-0146 D3, #28572) + ui/packages/app-shell/src/views/studio-design/packages-io.ts#ensureCustomizationPackage (the ensure door the New save calls first on a read-only base)",
         "ui/packages/i18n/src/namespaces/studio/en.ts (engine.studio.access.created / createTaken / createTakenElsewhere / emptyMain / search / bannerTitleReadOnly)",
         "access-security.readonly-package-locks-studio (the sibling read-only surfaces — cross-referenced)",
         "cross-ref: the object designer and matrix locks on a read-only package are access-security.readonly-package-locks-studio; the matrix editor's own UX is studio-authoring.permission-matrix-editor-ux"
@@ -3727,6 +3727,12 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-02",
+          "change": "acceptance[3] and steps[5] re-pointed to ADR-0146 D3 (#28572): the read-only showcase package now offers New permission set, which ensures the pair and creates the set in com.example.showcase.custom. Measured input: QA run #29002 (W4-C3b1, 7fa9873f; card note 6570476620) — acceptance[3] failed only on its 'no New set' half; ensure answered 201, the set landed in the pair, the packaged set's controls were all disabled, and the forged writes got 403 ITEM_LOCKED / 422 WRITABLE_PACKAGE_REQUIRED (acceptance[4] passes as written). Re-read at base dfbe34d887 (StudioDesignSurface.tsx openCreateSet, packages-io.ts ensureCustomizationPackage). The clause now asserts New lands in the pair and never in the base; the read-only banner and the disabled controls are kept. No clause weakened",
+          "ref": "#28579"
         }
       ]
     },
