@@ -176,7 +176,7 @@ describe('InterfaceListPage: userActions toggles read the UserActionsConfigSchem
   ])('%s: the page draws what a list view parses the same block to', async (_label, block) => {
     // One key, one default, on both surfaces: a list view's `userActions`
     // is this schema, and `ListView` draws its toolbar from the parsed values.
-    const listView = UserActionsConfigSchema.parse(block) as Record<string, boolean>;
+    const listView: Record<string, unknown> = UserActionsConfigSchema.parse(block);
     const composed = await composedUserActions(unparsedPage(block));
     for (const key of Object.keys(SPEC_DEFAULT_TOOLBAR)) {
       expect([key, composed[key]]).toEqual([key, listView[key]]);
