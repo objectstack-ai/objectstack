@@ -292,6 +292,11 @@ const zh = {
       restricted: '受限文件',
       restrictedHint: '你无权查看此文件的详细信息',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: '扫码',
+      failed: '扫码失败',
+    },
     image: {
       upload: '上传图片',
       addMore: '添加更多图片',
@@ -4931,6 +4936,18 @@ const zh = {
     retry: "重试",
     emptyTitle: "没有需要连接的连接器",
     emptyBody: "已安装的应用中没有需要管理员通过 OAuth 登录的连接器。",
+    clientKeptWithSecret: "OAuth 客户端 {{clientId}}，已存储密钥",
+    clientKept: "OAuth 客户端 {{clientId}}，无密钥",
+    clientTitle: "{{name}} 的 OAuth 客户端",
+    clientIntro: "此连接器使用贵组织为本部署在供应商处注册的 OAuth 客户端登录。请输入其客户端 ID，若供应商签发了客户端密钥也一并输入，然后继续前往供应商登录。需要为该客户端登记的重定向 URI 请参阅“连接器”文档。",
+    clientStored: "已存储的客户端：{{clientId}}",
+    clientStoredSecret: "已随其存储客户端密钥，该密钥永不显示。",
+    clientStoredNoSecret: "未随其存储客户端密钥。",
+    clientResend: "重新连接会再次发送客户端：保留客户端 ID，若有密钥请重新输入；或输入另一个客户端以替换它。",
+    clientId: "客户端 ID",
+    clientSecret: "客户端密钥",
+    clientSecretHint: "公共客户端请留空。密钥随连接加密存储，之后不再显示。",
+    clientContinue: "继续登录",
   },
   setupAssignments: {
     positionsTitle: '岗位持有人',

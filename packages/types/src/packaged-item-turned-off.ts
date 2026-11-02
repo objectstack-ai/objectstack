@@ -2,8 +2,8 @@
 
 /**
  * [#27842 / #27966] The one sentence a caller reads when a packaged item an
- * administrator switched off under Setup › Packaged automation is refused
- * (ADR-0126 §7.2 for flows, §8 for actions).
+ * administrator switched off is refused (ADR-0126 §7.2 for flows, §8 for
+ * actions).
  *
  * It is written for the person who asked for the item, and it is what their
  * error toast reads: what happened, who can undo it and where, and what can
@@ -18,9 +18,13 @@
  * `@objectstack/service-automation` the flow refusal, and both already depend
  * on this package, so the one sentence adds no edge.
  *
- * The "meanwhile" clause is the one place the kinds differ, and it follows
- * what is chartered. Flow clone is (ADR-0126 §7.2: `POST /automation/:name/clone`,
- * offered on the same Setup page), so the flow sentence offers a copy.
+ * The kinds differ in two places, and both follow where the switch is
+ * (ADR-0146 D4, D11). WHERE: an action's switch is on Setup's Packaged Actions
+ * page (the `nav_packaged_actions` entry); a flow's switch is on the flow, in
+ * its package's Automations in Studio. Setup's Packaged automation page, which
+ * held both, is retired, so neither sentence names it. MEANWHILE: flow clone is
+ * chartered (ADR-0126 §7.2: `POST /automation/:name/clone`), offered as New
+ * similar on the same Studio flow, so the flow sentence offers a copy there.
  * Action-clone is not (§8 item 2), so the action sentence ⛔ never does:
  * recommending one would advertise machinery that does not exist.
  *
@@ -29,6 +33,11 @@
  */
 export type PackagedItemKind = 'action' | 'flow';
 
+const WHERE: Record<PackagedItemKind, string> = {
+    action: 'under Setup › Packaged Actions',
+    flow: "in its package's Automations in Studio",
+};
+
 const MEANWHILE: Record<PackagedItemKind, string> = {
     action: 'or you can use another action',
     flow: 'or copy it there under a new name',
@@ -36,7 +45,7 @@ const MEANWHILE: Record<PackagedItemKind, string> = {
 
 export function describeTurnedOffPackagedItem(kind: PackagedItemKind): string {
     return (
-        `This ${kind} is turned off for this deployment. An administrator can turn it on again under ` +
-        `Setup › Packaged automation, ${MEANWHILE[kind]}.`
+        `This ${kind} is turned off for this deployment. An administrator can turn it on again ` +
+        `${WHERE[kind]}, ${MEANWHILE[kind]}.`
     );
 }
