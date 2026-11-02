@@ -244,6 +244,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      list_platform_admins: {
+        label: "プラットフォーム管理者",
+        resultDialog: {
+          title: "プラットフォーム管理者",
+          description: "現在プラットフォーム管理者の資格を持つ全員：既定の組織が所有する有効期間内の admin_full_access 付与を持つ人、またはデプロイの所有者リストに確認済みのアドレスが載っている人。",
+          acknowledge: "閉じる",
+          fields: {
+            entries: "プラットフォーム管理者"
+          }
+        }
+      },
       update_my_profile: {
         label: "プロフィール更新",
         successMessage: "プロフィールを更新しました"

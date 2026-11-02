@@ -291,3 +291,68 @@ export function adminStandingColumns(table: string): readonly string[] | undefin
   const entry = ADMIN_STANDING_SURFACE[table];
   return entry?.role === 'derives' ? entry.columns : undefined;
 }
+
+/**
+ * [ADR-0095 D3] Where the POPULATION question "who holds platform-admin
+ * standing" is answered, and what it reads.
+ *
+ * `hasPlatformAdminStanding` is the per-user predicate and is deliberately not
+ * widened to a population (its own header says so). The population has ONE
+ * enumerator, the last-admin guard's (`enumerator` below), and a caller that
+ * serves its answer confirms each id through the predicate. What could still
+ * go wrong is a THIRD source of standing: a resolver that starts conferring
+ * `PLATFORM_ADMIN` from an input the enumerator never reads would leave that
+ * administrator out of every roster, silently. This declaration is the pin:
+ *
+ *  - `candidateSources` names the inputs a platform administrator comes FROM
+ *    (each names its users, and the enumerator reads each one);
+ *  - `notCandidates` names every other input of {@link ADMIN_STANDING_SURFACE}
+ *    and {@link ADMIN_STANDING_NON_TABLE_INPUTS}, with why it names nobody by
+ *    itself (it narrows a candidate, or it confers other standing).
+ *
+ * `admin-standing-surface.test.ts` holds the two lists to exactly the inputs
+ * of those two declarations, so a new input the resolver reads is red here
+ * until it is classified; `plugin-auth`'s `platform-admin-roster.pin.test.ts`
+ * holds the enumerator to `candidateSources`, so a new candidate is red there
+ * until the enumerator reads it.
+ */
+export interface AdminStandingPlatformEnumeration {
+  /** The one enumerator: its package, module and exported symbol. */
+  readonly enumerator: { readonly package: string; readonly module: string; readonly symbol: string };
+  /** Inputs a platform administrator is enumerated FROM, each with how. */
+  readonly candidateSources: Readonly<Record<string, string>>;
+  /** Every other declared input, with why it names no platform administrator by itself. */
+  readonly notCandidates: Readonly<Record<string, string>>;
+}
+
+export const ADMIN_STANDING_PLATFORM_ENUMERATION: AdminStandingPlatformEnumeration = {
+  enumerator: {
+    package: '@objectstack/plugin-auth',
+    module: 'src/last-admin-guard.ts',
+    symbol: 'resolveAdminUserIds',
+  },
+  candidateSources: {
+    sys_user_permission_set:
+      'Under a non-walled posture, every in-window `admin_full_access` grant the Default Organization '
+      + 'owns names its holder (`user_id`).',
+    OS_PLATFORM_OWNER_EMAIL:
+      'Every `sys_user` row whose verified `email` is on the list is a platform administrator, on '
+      + 'every posture.',
+  },
+  notCandidates: {
+    sys_organization:
+      'Names the Default Organization, which decides which `admin_full_access` grants anchor. Narrows '
+      + 'the grant candidates; names no user.',
+    sys_metadata_activation:
+      'Switching `admin_full_access` off un-makes every grant-derived administrator. Narrows the grant '
+      + 'candidates; names no user.',
+    admin_full_access:
+      'The catalog definition a grant names. Without it no grant confers anything. Narrows the grant '
+      + 'candidates; names no user.',
+    sys_user:
+      'Read for the `OS_PLATFORM_OWNER_EMAIL` candidates (`email`, `email_verified`). A row alone '
+      + 'confers no platform standing.',
+    sys_member:
+      'Organization owner and admin standing, which is not platform-admin standing.',
+  },
+};
