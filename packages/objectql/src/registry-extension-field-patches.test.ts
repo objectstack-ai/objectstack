@@ -344,7 +344,7 @@ describe('#28809 — an option patch is judged against the owner\'s declared opt
     expect(patchLines(warn, 'fieldPatches')).toEqual([]);
   });
 
-  it('residual, pinned as measured: an owner option an earlier extension\'s redeclaration dropped — the judge admits the patch, the fold has no such option to relabel, nothing is applied and nothing is named', () => {
+  it('residual: an owner option an earlier extension\'s redeclaration left out — the judge admits the patch, the fold has no such option to relabel, nothing of it is applied, and it is named once', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const reg = withVendor();
     takeOver(reg, 100, { dropRetail: true });
@@ -360,7 +360,31 @@ describe('#28809 — an option patch is judged against the owner\'s declared opt
     expect(industryOf(served).label).toBe('Sector');
     reg.invalidateAll();
     reg.getObject(OBJ);
-    expect(patchLines(warn, 'fieldPatches')).toEqual([]);
+    // Named once (what the fold skipped), by the same judge asked of the merged field.
+    const lines = patchLines(warn, 'fieldPatches');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('fieldPatches.industry.options.retail');
+    expect(lines[0]).toContain(EXT_PKG);
+  });
+
+  it('residual: a tenant overlay base that leaves an owner option out — admitted, nothing to relabel, named once; an option the tenant adds is not patched', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    const patch = { industry: { options: { retail: { label: 'Shops' }, wholesale: { label: 'Bulk' } } } };
+    extend(reg, patch, EXT_PKG, 200);
+    const overlay = vendorAccount();
+    overlay.fields.industry.options = [{ value: 'tech', label: 'Tech' }, { value: 'wholesale', label: 'Wholesale' }];
+    reg.registerObject({ ...overlay, _provenance: 'org' }, 'sys_metadata', undefined, 'overlay');
+
+    // The doors read the owner: `retail` admitted, `wholesale` (the tenant's) refused.
+    expect(doorRefusals(reg, [{ extend: OBJ, fieldPatches: patch }]))
+      .toEqual(['objectExtensions[0].fieldPatches.industry.options.wholesale']);
+    const served = reg.getObject(OBJ) as any;
+    expect(industryOf(served).options).toEqual([{ value: 'tech', label: 'Tech' }, { value: 'wholesale', label: 'Wholesale' }]);
+    reg.invalidateAll();
+    reg.getObject(OBJ);
+    expect(patchLines(warn, 'fieldPatches.industry.options.retail')).toHaveLength(1);
+    expect(patchLines(warn, 'fieldPatches.industry.options.wholesale')).toHaveLength(1);
   });
 });
 

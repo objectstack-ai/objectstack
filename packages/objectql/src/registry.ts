@@ -656,9 +656,10 @@ function patchedField(
  *
  * [#28809] The fold hands this only the patches the judge admitted against the
  * owner's declaration ({@link admittedFieldPatches}). An admitted option patch
- * whose option an earlier extension's `fields` redeclaration dropped finds no
- * option here, so nothing of it applies; the judge admitted it, so nothing is
- * named either.
+ * whose option an earlier layer left out (an extension's `fields`
+ * redeclaration, a tenant overlay base) finds no option here, so nothing of it
+ * applies; the fold names it after the merge, by the same judge asked of the
+ * merged fields.
  */
 function applyFieldPatches(
   fields: ServiceObject['fields'],
@@ -4423,7 +4424,21 @@ export class SchemaRegistry {
           ? { ...extension, fieldPatches: admittedFieldPatches(patches!, misses) } as ObjectExtensionBody
           : extension;
         merged = mergeObjectDefinitions(merged, admitted, tenantAuthored, tenantRules, tenantPatched, ownFields);
-        this.reportFieldPatchMisses(misses, contrib.packageId);
+        // [#28809] …and the same judge once more, over the admitted patches
+        // against the owner's fields as MERGED, which only names: an admitted
+        // option an earlier layer left out (an extension's `fields`
+        // redeclaration, a tenant overlay base) had nothing to relabel, so the
+        // fold names it as it names any patch it skipped. Never drops, never
+        // refuses; admission above stays the owner's.
+        const admittedPatches = (admitted as ObjectExtensionBody).fieldPatches;
+        const residual = admittedPatches && owner && ownFields
+          ? fieldPatchTargetMisses(
+            String(baseDefinition.name ?? extension.name ?? ''),
+            admittedPatches,
+            ownFieldsTarget(merged, ownFields, (name) => !!recordFieldOf(merged, name)),
+          )
+          : [];
+        this.reportFieldPatchMisses([...misses, ...residual], contrib.packageId);
       }
     }
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
@@ -4449,8 +4464,10 @@ export class SchemaRegistry {
    * verdict (`misses`) is the install door's and `os validate`'s own judge
    * (`fieldPatchTargetMisses`), asked by the fold of the owner's declaration
    * ({@link ownFieldsTarget}) as those doors ask it, so the boot names exactly
-   * what they refuse. With no owner registered there is nothing to judge
-   * against, and nothing is named.
+   * what they refuse — plus, asked again of the merged fields, an admitted
+   * option an earlier layer left out, which had nothing to relabel. What the
+   * fold names is what it skipped. With no owner registered there is nothing
+   * to judge against, and nothing is named.
    *
    * ⛔ Never a refusal, and worded as the state it observes: the fold runs on
    * every read while a boot is still registering packages, and an owner that
