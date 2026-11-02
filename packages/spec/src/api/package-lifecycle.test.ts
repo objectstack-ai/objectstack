@@ -21,6 +21,7 @@ import {
   PackagePublishResultSchema,
   EnsureCustomizationPackageRequestSchema,
   EnsureCustomizationPackageResponseSchema,
+  GetPackageCustomizationsResponseSchema,
 } from './package-lifecycle.zod';
 import { PackagePublishResultSchema as SystemPackagePublishResultSchema } from '../system/metadata-persistence.zod';
 
@@ -312,5 +313,108 @@ describe('EnsureCustomizationPackageResponseSchema declares the ensure door\'s a
       delete partial[key];
       expect(EnsureCustomizationPackageResponseSchema.safeParse(partial).success, key).toBe(false);
     }
+  });
+});
+
+describe('GetPackageCustomizationsResponseSchema.contributions: the entry shape is per kind (ADR-0029 D7, ADR-0146 D3)', () => {
+  const CONTRIBUTOR = 'com.example.acme-sync';
+  const FIELD = { kind: 'field', object: 'crm_account', name: 'acme_sync_id', packageId: CONTRIBUTOR };
+  const FLOW = { kind: 'flow', object: 'crm_account', name: 'acme_account_sync', packageId: CONTRIBUTOR };
+  const NAV_IN_GROUP = { kind: 'nav', app: 'crm', group: 'group_service', name: 'nav_acme_sync', packageId: CONTRIBUTOR };
+  const NAV_TOP_LEVEL = { kind: 'nav', app: 'crm', name: 'nav_acme_console', packageId: CONTRIBUTOR };
+
+  /** A whole answer around `contributions`, its count derived the way the producer derives it. */
+  const answer = (contributions: unknown[]) => ({
+    packageId: 'com.acme.crm',
+    overrides: [],
+    extensions: [],
+    switchedOff: [],
+    contributions,
+    counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: contributions.length },
+  });
+
+  /** The single issue a refused answer carries, by code and path. */
+  const refusalOf = (contributions: unknown[]) => {
+    const result = GetPackageCustomizationsResponseSchema.safeParse(answer(contributions));
+    expect(result.success).toBe(false);
+    return result.success ? [] : result.error.issues.map((issue) => ({
+      code: issue.code,
+      path: issue.path,
+      keys: (issue as { keys?: string[] }).keys,
+    }));
+  };
+
+  it('CONTROL: a field and a flow entry parse and are PRESERVED, exactly as before the nav kind', () => {
+    const served = answer([FIELD, FLOW]);
+    const result = GetPackageCustomizationsResponseSchema.safeParse(served);
+    expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
+    if (result.success) expect(result.data).toEqual(served);
+  });
+
+  it('CONTROL: a field entry still requires its `object`', () => {
+    const { object: _dropped, ...noObject } = FIELD;
+    expect(refusalOf([noObject])).toEqual([{ code: 'invalid_type', path: ['contributions', 0, 'object'], keys: undefined }]);
+  });
+
+  it('a nav entry naming the group its contribution targets parses and is PRESERVED', () => {
+    const served = answer([FIELD, NAV_IN_GROUP]);
+    const result = GetPackageCustomizationsResponseSchema.safeParse(served);
+    expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
+    if (result.success) expect(result.data).toEqual(served);
+  });
+
+  it('a nav entry contributed to the app\'s top level has no group, and none is invented', () => {
+    const result = GetPackageCustomizationsResponseSchema.safeParse(answer([NAV_TOP_LEVEL]));
+    expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
+    if (result.success) {
+      expect(result.data.contributions).toEqual([NAV_TOP_LEVEL]);
+      expect('group' in result.data.contributions[0]).toBe(false);
+    }
+  });
+
+  it('a nav entry carrying `object` is refused: the nav shape is on an app, never an object', () => {
+    expect(refusalOf([{ ...NAV_IN_GROUP, object: 'crm_account' }]))
+      .toEqual([{ code: 'unrecognized_keys', path: ['contributions', 0], keys: ['object'] }]);
+  });
+
+  it('a field or flow entry carrying `app` or `group` is refused: those shapes are on an object', () => {
+    expect(refusalOf([{ ...FIELD, app: 'crm' }]))
+      .toEqual([{ code: 'unrecognized_keys', path: ['contributions', 0], keys: ['app'] }]);
+    expect(refusalOf([{ ...FLOW, group: 'group_service' }]))
+      .toEqual([{ code: 'unrecognized_keys', path: ['contributions', 0], keys: ['group'] }]);
+  });
+
+  it('a nav entry requires its app, its item id and its package', () => {
+    for (const key of ['app', 'name', 'packageId'] as const) {
+      const partial: Record<string, unknown> = { ...NAV_IN_GROUP };
+      delete partial[key];
+      expect(refusalOf([partial]), key).toEqual([{ code: 'invalid_type', path: ['contributions', 0, key], keys: undefined }]);
+    }
+  });
+
+  it('a kind outside field, flow and nav is still refused', () => {
+    const issues = refusalOf([{ ...FIELD, kind: 'action' }]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ code: 'invalid_union', path: ['contributions', 0, 'kind'] });
+  });
+});
+
+describe('the `nav` kind of `contributions` is declared ahead of its producer (ADR-0049)', () => {
+  type Described = { description?: string };
+  const member = (GetPackageCustomizationsResponseSchema as unknown as {
+    shape: { contributions: Described & { element: { options: Described[] } } };
+  }).shape.contributions;
+  const [objectArm, navArm] = member.element.options;
+
+  it('the nav arm\'s describe opens with the planned marker and names the ADR, never a tracker id', () => {
+    expect(navArm.description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(navArm.description).toContain('ADR-0049');
+    expect(navArm.description).not.toMatch(/#\d{3,}/);
+  });
+
+  it('the member and the field / flow arm say the nav kind is not yet served, and the field / flow arm carries no marker', () => {
+    expect(member.description).toContain('not yet served');
+    expect(objectArm.description).not.toMatch(/PLANNED/);
+    expect(member.description).not.toMatch(/#\d{3,}/);
   });
 });
