@@ -1855,7 +1855,9 @@ const pt = {
       title: "Configurações",
       subtitle: "Configure seu sistema, integrações e sinalizadores de recursos.",
       loadError: "Falha ao carregar as configurações",
-      empty: "Nenhuma configuração registrada. Os plugins podem registrar manifestos de configuração pelo SettingsService.",
+      empty: "Ainda não há páginas de configuração disponíveis. Elas aparecem aqui quando um aplicativo instalado as fornece.",
+      adminManaged: "As configurações são gerenciadas pelo seu administrador",
+      adminManagedDescription: "Sua conta não pode visualizar nem alterar essas configurações. Peça a um administrador se algo precisar mudar.",
       settingsCount: "{{n}} configurações",
       beta: "Beta",
       categories: {

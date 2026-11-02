@@ -1894,7 +1894,9 @@ const zh = {
       title: '设置',
       subtitle: '配置系统、集成与功能开关。',
       loadError: '加载设置失败',
-      empty: '尚未注册任何设置。插件可通过 SettingsService 注册设置清单。',
+      empty: '暂无可用的设置页面。已安装的应用提供设置页面后，会显示在这里。',
+      adminManaged: '设置由管理员管理',
+      adminManagedDescription: '你的账号无法查看或更改这些设置。如需调整，请联系管理员。',
       settingsCount: '{{n}} 项设置',
       beta: 'Beta',
       // 分类小标题，按 manifest 的 `category` 值取键;未知(插件自定义)分类回退到原始字符串。

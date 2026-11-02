@@ -1804,7 +1804,9 @@ const ko = {
       title: "설정",
       subtitle: "시스템, 연동, 기능 플래그를 구성합니다.",
       loadError: "설정을 불러오지 못했습니다",
-      empty: "등록된 설정이 없습니다. 플러그인은 SettingsService를 통해 설정 매니페스트를 등록할 수 있습니다.",
+      empty: "아직 사용할 수 있는 설정 페이지가 없습니다. 설치된 앱이 설정 페이지를 제공하면 여기에 표시됩니다.",
+      adminManaged: "설정은 관리자가 관리합니다",
+      adminManagedDescription: "계정에 이 설정을 보거나 변경할 권한이 없습니다. 변경이 필요하면 관리자에게 요청하세요.",
       settingsCount: "설정 {{n}}개",
       beta: "베타",
       categories: {
