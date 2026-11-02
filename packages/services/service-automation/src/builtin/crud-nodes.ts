@@ -17,7 +17,7 @@ import type {
     DeleteRecordConfigParsed,
 } from '@objectstack/spec/automation';
 import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
-import { isAcceptedFilterComparand, type DroppedFieldsEvent } from '@objectstack/spec/data';
+import { isAcceptedFilterComparand, isListComparandOperator, type DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
 import {
@@ -150,16 +150,6 @@ function resolveNodeFilter(
 }
 
 /**
- * The operators whose comparand is a LIST — the split
- * `@objectstack/spec`'s comparand faces read (`LIST_COMPARAND_OPERATORS` in
- * `data/filter-comparand-operators.ts`, kept out of the published barrel on
- * purpose). `crud-filter-guard.test.ts` reconciles this set against
- * `FieldOperatorsSchema`: every declared operator whose enforced slot takes a
- * list is here, and no other.
- */
-const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$between']);
-
-/**
  * What an evaluated filter operand is when it is NOT a value its position
  * takes, worded for the refusal (`an object`, `a list`, `a list whose entry
  * [1] is an object`); `undefined` when it is one ({@link resolveNodeFilter}).
@@ -168,9 +158,9 @@ const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$
  * (`isAcceptedFilterComparand`, `@objectstack/spec/data`: a string, number,
  * bigint, boolean, `null` or `Date`); an operand that IS `null` never gets
  * here, the nothing guard owns it. At the comparand of a list operator
- * ({@link LIST_COMPARAND_OPERATORS}: the operand's path ends in that
- * operator) a list of such values is one too, provided no entry is `null`:
- * an entry that is nothing is refused as the nothing guard refuses an operand
+ * (`isListComparandOperator`, `@objectstack/spec/data`: the operand's path
+ * ends in that operator) a list of such values is one too, provided no entry
+ * is `null`: an entry that is nothing is refused as the nothing guard refuses an operand
  * that is nothing, since it adds "the field is empty" to the condition, a
  * match the author never wrote. Every other position takes one
  * value: a field's implicit equality, a scalar operator's comparand, a list
@@ -184,7 +174,7 @@ function operandValueRefusal(value: unknown, path: readonly (string | number)[])
     if (isAcceptedFilterComparand(value)) return undefined;
     if (!Array.isArray(value)) return kindOfOperand(value);
     const last = path[path.length - 1];
-    if (typeof last !== 'string' || !LIST_COMPARAND_OPERATORS.has(last)) return 'a list';
+    if (typeof last !== 'string' || !isListComparandOperator(last)) return 'a list';
     const index = value.findIndex((member) => member === null || !isAcceptedFilterComparand(member));
     return index < 0 ? undefined : `a list whose entry [${index}] is ${kindOfOperand(value[index])}`;
 }
