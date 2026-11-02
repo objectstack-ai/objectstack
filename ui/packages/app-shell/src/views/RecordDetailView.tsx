@@ -4094,8 +4094,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       : originFromState?.pathname
         ? (originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname)
         : objectListPath;
+    // objectstack#29071 — the way back replaces the record's own history
+    // entry, so the browser's Back after 「‹」 does not open the record again.
+    // A page pushed from a parent goes back in the history (above); a page a
+    // list opened carries no mark that its list is the entry below it, so it
+    // cannot pop safely and replaces instead.
     return to ? (
-      <Link to={to} className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
+      <Link to={to} replace className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
     ) : (
       <span className={phoneBackClass}>{face}</span>
     );

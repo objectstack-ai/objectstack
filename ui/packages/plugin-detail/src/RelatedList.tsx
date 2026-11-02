@@ -3715,7 +3715,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onViewAll(); }}
-              className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1 transition-colors sm:min-h-0"
             >
               {t('detail.viewAll')}
               <ExternalLink className="h-3 w-3" />
