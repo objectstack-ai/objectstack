@@ -17,6 +17,7 @@ import type { ConnectorProviderFactory } from '@objectstack/spec/integration';
 import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
+import { ConnectorConnectionStore } from './connector-connections.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -172,6 +173,28 @@ describe('a held connector instance logs its reason, and the refusal sentence en
             "connector-mcp provider: connector 'refuses_include' providerConfig.include names 'nope', which the MCP server does not list.",
         );
         await kernel.shutdown();
+    });
+
+    it('the ERROR record of a retried instance whose connections could not be read carries the reason, never "undefined"', async () => {
+        // A servable `authorization_code` instance whose connection store
+        // answers with a failure: degraded and retried on the backoff, with no
+        // thrown provider error to describe.
+        vi.spyOn(ConnectorConnectionStore.prototype, 'listFor').mockRejectedValue(new Error('dummy-store-down-28939'));
+        const entry = { ...plainAuthorizationUrl('unreadable_connections') };
+        entry.auth = { ...entry.auth, authorizationUrl: 'https://idp.example.com/authorize' };
+        const { result: booted, lines } = await captureStderr(() => boot([entry], neverCalled));
+        const reason = booted.engine.getConnectorDegradedReason('unreadable_connections');
+        expect(reason).toContain('could not be read');
+
+        const records = lines
+            .map((l) => JSON.parse(l) as LoggedRecord)
+            .filter((r) => r.level === 'error' && r.msg.includes("'unreadable_connections'"));
+        expect(records, 'the degraded instance is reported exactly once').toHaveLength(1);
+        expect(records[0].msg).toContain('retrying with backoff');
+        expect(records[0].reason).toBe(reason);
+        expect(records[0].error, 'no thrown value, so no `error` field').toBeUndefined();
+        expect(lines.join('\n')).not.toContain('"error":"undefined"');
+        await booted.kernel.shutdown();
     });
 
     it.each([

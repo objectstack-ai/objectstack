@@ -3574,7 +3574,9 @@ export class AutomationServicePlugin implements Plugin {
                     : 'instance registered degraded (no actions)') +
                 `; ${changed ? 're-checking' : 'retrying'} with backoff, attempt ${attempts}.`,
             undefined,
-            describeThrownForLog(info.cause),
+            // No thrown value (the connection store could not be read): the
+            // reason rides `meta`, never `describeThrownForLog(undefined)`.
+            info.cause === undefined ? { reason: info.reason } : describeThrownForLog(info.cause),
         );
     }
 
