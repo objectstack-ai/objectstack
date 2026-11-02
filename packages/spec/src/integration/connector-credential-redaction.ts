@@ -89,15 +89,19 @@
  *     (its dotted name included, by the whole-string fallback).
  *  8. **Every key the two nested shapes the entry declares do not declare,
  *     WHOLE — whatever its value: inside `retryConfig`, and inside each
- *     element of `actions`.** Neither nested shape refuses an undeclared key,
- *     and the save door stores the body it accepts, so such a key is stored
- *     and, but for this item, served as written; nothing reads it. The
- *     declared keys are read from {@link RetryConfigSchema} and
- *     {@link ConnectorActionSchema} themselves. An `actions` element is
- *     addressed by its index (`actions.<i>.<key>`), which the carry-forward
- *     resolves to the element's own `key`, so a save of a reordered list keeps
- *     each element's stored value on that element. A `retryConfig` or an
- *     element that is not an object is not walked.
+ *     element of `actions`.** A key no declared position names is one this
+ *     redactor cannot judge, and nothing reads it. The declared keys are read
+ *     from {@link RetryConfigSchema} and {@link ConnectorActionSchema}
+ *     themselves. An `actions` element is addressed by its index
+ *     (`actions.<i>.<key>`), which the carry-forward resolves to the element's
+ *     own `key`, so a save of a reordered list keeps each element's stored
+ *     value on that element. A `retryConfig` that is not an object, and an
+ *     `actions` that is not an array or holds an element that is not an
+ *     object, are withheld WHOLE (a cleared form excepted), as a non-object
+ *     `auth` is (item 4): the entry refuses each at every authoring door, so
+ *     only a row stored outside them carries one, and nothing in it can be
+ *     judged. An element is never removed on its own, which would shift every
+ *     later index; the carry-forward keeps the stored value at rest.
  *
  * ## Cleared forms, and what is never touched
  *
@@ -337,7 +341,8 @@ function nestedKeys(): { retryConfig: ReadonlySet<string>; action: ReadonlySet<s
 
 /**
  * Item 8: every key `retryConfig` and each `actions` element do not declare,
- * as item-relative paths (an `actions` hop is the element's index).
+ * as item-relative paths (an `actions` hop is the element's index), or the
+ * container itself when it is not the shape the entry declares.
  */
 function undeclaredNestedKeysOf(item: Record<string, unknown>): string[][] {
   const declared = nestedKeys();
@@ -345,13 +350,18 @@ function undeclaredNestedKeysOf(item: Record<string, unknown>): string[][] {
   const retryConfig = item.retryConfig;
   if (isPlainRecord(retryConfig)) {
     for (const key of Object.keys(retryConfig)) if (!declared.retryConfig.has(key)) paths.push(['retryConfig', key]);
+  } else if (!isClearedForm(retryConfig)) {
+    paths.push(['retryConfig']);
   }
   const actions = item.actions;
-  if (Array.isArray(actions)) {
+  if (Array.isArray(actions) && actions.every(isPlainRecord)) {
     actions.forEach((action, index) => {
-      if (!isPlainRecord(action)) return;
       for (const key of Object.keys(action)) if (!declared.action.has(key)) paths.push(['actions', String(index), key]);
     });
+  } else if (!isClearedForm(actions)) {
+    // Not an array, or an element is not an object: withheld whole (an element
+    // removed on its own would shift every later index).
+    paths.push(['actions']);
   }
   return paths;
 }

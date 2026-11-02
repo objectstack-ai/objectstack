@@ -48,6 +48,32 @@ describe('getPublished: the redactor judges the authored body, the bookkeeping i
     expect(served.retryConfig).toEqual({ maxAttempts: 2 });
   });
 
+  it('a package published twice (the second snapshot nests the first): withheld at every depth, scalar bookkeeping kept', async () => {
+    const m = manager();
+    await m.register('connector', 'vendor', { name: 'vendor', ...authored, apiKey: SECRET, packageId: 'com.acme.x', state: 'draft' });
+    await m.publishPackage('com.acme.x', { publishedBy: 'admin' });
+    await m.publishPackage('com.acme.x', { publishedBy: 'admin' });
+    // The stored row does nest: the second snapshot holds the first under its own `publishedDefinition`.
+    const stored = (await m.get('connector', 'vendor')) as Record<string, any>;
+    expect(stored.publishedDefinition).toHaveProperty('publishedDefinition');
+    expect(JSON.stringify(stored)).toContain(SECRET);
+    const served = (await m.getPublished('connector', 'vendor')) as Record<string, any>;
+    expect(JSON.stringify(served)).not.toContain(SECRET);
+    expect(served.packageId).toBe('com.acme.x');
+    expect(served.state).toBe('active');
+    expect(served.retryConfig).toEqual({ maxAttempts: 2 });
+    expect(served.publishedDefinition).toMatchObject({ name: 'vendor', retryConfig: { maxAttempts: 2 }, packageId: 'com.acme.x' });
+    expect(served.publishedDefinition).not.toHaveProperty('apiKey');
+  });
+
+  it('a non-scalar bookkeeping value that is not a snapshot is not served', async () => {
+    const m = manager();
+    await m.register('connector', 'vendor', { name: 'vendor', label: 'Vendor', type: 'api', packageId: 'com.acme.x', package: { secret: SECRET } });
+    const served = (await m.getPublished('connector', 'vendor')) as Record<string, unknown>;
+    expect(JSON.stringify(served)).not.toContain(SECRET);
+    expect(served).toEqual({ name: 'vendor', label: 'Vendor', type: 'api', packageId: 'com.acme.x' });
+  });
+
   it('control: a body with nothing to withhold is served by reference-equal content, bookkeeping included', async () => {
     const m = manager();
     const row = { name: 'clean', label: 'Clean', type: 'api', packageId: 'com.acme.x', state: 'draft' };

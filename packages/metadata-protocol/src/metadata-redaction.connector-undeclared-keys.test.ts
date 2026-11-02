@@ -73,4 +73,14 @@ describe('carry-forward of the keys a connector does not declare', () => {
     const out = carryForwardRedactedValues('connector', body, twin) as Record<string, any>;
     expect(JSON.stringify(out.actions)).not.toContain(P(3));
   });
+
+  it('a malformed `retryConfig` or `actions` withheld whole is kept at rest by a save of the served form', () => {
+    const malformed = { ...stored, retryConfig: P(4), actions: [stored.actions[0], P(5)] };
+    const body = JSON.parse(JSON.stringify(redactMetadataItem('connector', malformed))) as Record<string, any>;
+    expect(body).not.toHaveProperty('retryConfig');
+    expect(body).not.toHaveProperty('actions');
+    expect(JSON.stringify(body)).not.toContain('TEST_PLACEHOLDER_UNDECLARED_');
+    const out = carryForwardRedactedValues('connector', { ...body, label: 'Vendor catalog (edited)' }, malformed);
+    expect(out).toEqual({ ...malformed, label: 'Vendor catalog (edited)' });
+  });
 });

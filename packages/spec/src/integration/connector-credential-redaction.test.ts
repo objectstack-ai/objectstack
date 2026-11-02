@@ -365,11 +365,26 @@ describe('the connector redactor — keys `retryConfig` and `actions` elements d
     expect(result.item).toBe(item);
   });
 
-  it('a `retryConfig` or an `actions` element that is not an object is not walked', () => {
-    const item = { ...base, retryConfig: 'fast', actions: ['get_invoice', null] };
-    const result = redactConnectorItem(item);
-    expect(result.redactedKeys).toEqual([]);
-    expect(result.item).toBe(item);
+  it.each([
+    ['a non-object `retryConfig`', { retryConfig: P(60) }, ['retryConfig']],
+    ['an `actions` element that is not an object', { actions: [{ key: 'a', label: 'A' }, P(61)] }, ['actions']],
+    ['a `null` `actions` element', { actions: [{ key: 'a', label: 'A', token: P(62) }, null] }, ['actions']],
+    ['an `actions` that is not an array', { actions: { key: 'a', token: P(63) } }, ['actions']],
+  ] as const)('withholds the container WHOLE when it is not the declared shape: %s', (_label, extra, keys) => {
+    const item = { ...base, ...extra };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(keys);
+    for (const key of keys) expect(served).not.toHaveProperty(key);
+    expect(holds(served, P(60), P(61), P(62), P(63))).toBe(false);
+  });
+
+  it('a cleared `retryConfig` or `actions`, and an empty `actions` list, are served as written', () => {
+    for (const extra of [{ retryConfig: null }, { retryConfig: '' }, { actions: null }, { actions: [] }]) {
+      const item = { ...base, ...extra };
+      const result = redactConnectorItem(item);
+      expect(result.redactedKeys).toEqual([]);
+      expect(result.item).toBe(item);
+    }
   });
 
   it('never mutates its input', () => {

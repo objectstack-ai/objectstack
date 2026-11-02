@@ -9,7 +9,8 @@
 //    element carry an undeclared key (both accepted by the save door), are
 //    served with those keys withheld and every declared key as stored — to a
 //    member and to an administrator, in the item, layered, published and list
-//    reads. The stored rows are never touched.
+//    reads, and on the published read of a package published twice (whose
+//    second snapshot nests the first). The stored rows are never touched.
 //  - CARRY-FORWARD: a save of the served form succeeds and keeps every stored
 //    value; a `retryConfig` the author removes is removed.
 //  - CONTROL: an instance that names its secret with `credentialRef` saves,
@@ -41,6 +42,8 @@ const LEGACY = 'cuk_legacy_row';
 const RETRY = 'cuk_retry_instance';
 const DESCRIPTOR = 'cuk_actions_descriptor';
 const CONTROL = 'cuk_control';
+const TWICE = 'cuk_published_twice';
+const TWICE_PACKAGE = 'com.example.cuk-published-twice';
 
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : Array.isArray(r?.value) ? r.value : []);
 const bodyOf = (row: any): Record<string, any> =>
@@ -206,6 +209,25 @@ describe('connector metadata doors: keys a connector does not declare are withhe
       for (const token of [member, admin]) {
         await expectWithheld(token, '/meta/connector', [LEGACY, RETRY, DESCRIPTOR]);
         await expectWithheld(token, '/meta/connectors', [LEGACY, RETRY, DESCRIPTOR]);
+      }
+    });
+
+    it('the published read of a package published twice (the second snapshot nests the first), for a member and for an administrator', async () => {
+      const metadata = await stack.kernel.getServiceAsync<any>('metadata');
+      await metadata.register('connector', TWICE, {
+        ...instance(TWICE),
+        apiKey: PLACEHOLDERS.topLevel,
+        retryConfig: { maxAttempts: 2, secret: PLACEHOLDERS.retry },
+        packageId: TWICE_PACKAGE,
+      });
+      await metadata.publishPackage(TWICE_PACKAGE, { publishedBy: 'cuk-admin' });
+      await metadata.publishPackage(TWICE_PACKAGE, { publishedBy: 'cuk-admin' });
+      // Guard the guard: the snapshot nests, and the nested one holds the keys.
+      const row = await metadata.get('connector', TWICE);
+      expect(row?.publishedDefinition?.publishedDefinition).toBeTruthy();
+      expect(holdsAPlaceholder(row.publishedDefinition.publishedDefinition)).toBe(true);
+      for (const token of [member, admin]) {
+        await expectWithheld(token, `/meta/connector/${TWICE}/published`, [TWICE]);
       }
     });
 
