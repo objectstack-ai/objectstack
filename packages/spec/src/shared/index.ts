@@ -37,6 +37,10 @@ export * from './resilient-fetch';
 // specifiers and object fields (maintainer ruling 2026-09-02). Declared here so
 // `system/` and `data/` both reference one schema instead of carrying a copy.
 export * from './value-domain.zod';
+// The CLDR region → currency table and its lookup, read by plugin-auth (a new
+// organization's default currency) and by the console's workspace prompt, so
+// neither carries its own copy. Imports nothing.
+export * from './region-currency';
 // [#15676] The shared epoch-milliseconds INSTANT (`EpochMs`), and the first of
 // the two structural exemptions ruling B of #14478 declares ON THE SCHEMA
 // rather than in a gate ledger: a key whose value is this schema is an instant,

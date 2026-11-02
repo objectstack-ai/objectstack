@@ -41,6 +41,7 @@
 import {
     buildEffectiveFieldPermissions,
     buildEffectiveObjectPermissions,
+    registryObjectPackageDisabled,
     IDataEngine,
     resolveLocalizationContext,
     resolveRequestExecutionContext,
@@ -1005,6 +1006,9 @@ export function registerCurrentUserEndpoints(
                 allSchemas: () => ql?.registry?.getAllObjects?.() as ApiExposureSchemaLike[] | undefined,
                 schemaOf: (name) =>
                     ql?.getSchema?.(name) as (ManagedSchemaLike & ApiExposureSchemaLike) | undefined,
+                // [#28877] The data plane's own predicate: a disabled package's
+                // objects leave the map, as the data plane refuses them.
+                isObjectPackageDisabled: registryObjectPackageDisabled(ql?.registry),
                 logger: ctx.logger,
             });
             // Spread into a literal ON PURPOSE, here and in the `catch`: the
