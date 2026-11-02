@@ -587,7 +587,9 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       // `=== true` drew a control only after a parse had materialised the
       // default, so the same page opened with a different toolbar depending
       // on how it reached the console. A curated page keeps a control closed
-      // by writing `false` for it.
+      // by writing `false` for it. ADR-0047 as amended 2026-11-02: the rest of
+      // interface mode (quick filters, the visualization lock, user-created
+      // views, export) stays closed.
       userActions: {
         search: userActions.search !== false,
         sort: userActions.sort !== false,

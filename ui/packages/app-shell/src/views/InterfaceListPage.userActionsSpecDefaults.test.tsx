@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
-import { PageSchema } from '@objectstack/spec/ui';
+import { PageSchema, UserActionsConfigSchema } from '@objectstack/spec/ui';
 
 vi.mock('react-router-dom', () => ({
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
@@ -166,6 +166,21 @@ describe('InterfaceListPage: userActions toggles read the UserActionsConfigSchem
 
   it.each(ON_BY_DEFAULT)('an explicit `%s: true` keeps that control', async (key) => {
     expect((await composedUserActions(unparsedPage({ [key]: true })))[key]).toBe(true);
+  });
+
+  it.each([
+    ['no keys', {}],
+    ['a curated block', { sort: true, search: true, filter: false, rowHeight: false }],
+    ['every control withheld', { filter: false, rowHeight: false, group: false, hideFields: false, rowColor: false }],
+    ['row colour opted in', { rowColor: true, hideFields: false }],
+  ])('%s: the page draws what a list view parses the same block to', async (_label, block) => {
+    // One key, one default, on both surfaces: a list view's `userActions`
+    // is this schema, and `ListView` draws its toolbar from the parsed values.
+    const listView = UserActionsConfigSchema.parse(block) as Record<string, boolean>;
+    const composed = await composedUserActions(unparsedPage(block));
+    for (const key of Object.keys(SPEC_DEFAULT_TOOLBAR)) {
+      expect([key, composed[key]]).toEqual([key, listView[key]]);
+    }
   });
 
   it('rowColor stays opt-in, as the spec declares it: off when omitted, on only for `true`', async () => {
