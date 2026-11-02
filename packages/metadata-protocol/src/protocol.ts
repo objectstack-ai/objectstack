@@ -16,6 +16,7 @@ import type { MetadataHostEngine } from './host-engine.js';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
+    SDUI_MANIFEST_SERVICE,
     stampHtmlPageRequires,
     type RuntimePendingDeclarations,
 } from './runtime-authoring-gate.js';
@@ -23,6 +24,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import {
+    backfillOverlayBundleMembers,
     overlayMemberWhere,
 } from './migrations/overlay-index.js';
 import {
@@ -33,12 +35,14 @@ import {
     packageScopedRowWhere,
     packagelessAddressAmbiguityRefusal,
     resetEnvWritableMetadataTypes,
+    unboundItemDraftAddress,
     versionNotFoundError,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
 import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveItemLock,
+    resolveItemLockLazily,
     resolveOverlayLockLayer,
     storedRowDocument,
     withItemLockFamily,
@@ -115,6 +119,7 @@ import { authoringClientOf, storedDraftChanges } from './draft-changes.js';
 import {
     parseFilterAST,
     isFilterAST,
+    REFERENCE_VALUE_TYPES,
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS,
     QUERY_TRANSPORT_DOLLAR_ALIASES,
@@ -122,6 +127,7 @@ import {
     type DroppedFieldsEvent,
     type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
+    externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
@@ -180,6 +186,15 @@ import {
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { REFERENCE_SITES } from './reference-sites.js';
+// [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
+// `validateApiEndpointDeclarations`, `type ApiEndpoint` — went with
+// `gateApiDraftsForPublish` (see its retirement note in `publishPackageDrafts`).
+// This module no longer judges endpoints at all: `api` is code-only since #5488,
+// so no `api` draft can be authored here, and the ONE judge of what is servable
+// stays `validateApiEndpointDeclarations` on the artifact route (stack schema,
+// `publishPackage` #5189, and `buildEndpointIndex` at load, PR #5203). An
+// endpoint-shaped import left behind with no caller reads as a capability this
+// module still has (#3950), so it is removed rather than parked.
 import {
     computeMetadataDiagnostics,
     computeViewReferenceDiagnostics,
@@ -204,6 +219,9 @@ import {
     storedMetadataBodyGroupingRefusal,
     storedMetadataBodyPredicateRefusal,
     storedMetadataBodyProjection,
+    // [#21207] The stored content hash of the same rows: served keyed, never
+    // evaluated — see `STORED_METADATA_HASH_COLUMNS`.
+    ephemeralStoredHashDigest,
     servedContentHash,
     serveStoredHashTokens,
     serveStoredMetadataHashColumnRows,

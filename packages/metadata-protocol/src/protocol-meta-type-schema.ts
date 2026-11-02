@@ -12,6 +12,11 @@
 // `{ not: {} }` — is dropped from it. See the module header for the channels
 // that keep carrying the retirement's prescription.
 import { stripUnauthorableProperties } from './unauthorable-nodes.js';
+// [#19295] The output derivation of a `ZodPipe` erases the arm's own input
+// type, so an authoring arm that accepts a bare string is served as the
+// anonymous `{}`. This annotates that husk — and only that husk — so a
+// consumer can tell an ERASED authoring type from a member that genuinely
+// admits anything. See the module header for the predicate and its controls.
 import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
     applyAuditFieldGovernance,
