@@ -187,18 +187,25 @@ function plant(rows: Map<string, Row>, body: Record<string, unknown>, state: 'dr
     rows.set(keyOf(data), { ...data, id: `planted_${state}_${String(body.name)}` });
 }
 
-/** The finding's first sentence, spelled out. */
-const unknownFinding = (setName: string, objectName: string) =>
+/**
+ * The finding's first sentence, spelled out. [#29279] A draft's publish says
+ * what it looked for there: a published object or an object draft of its
+ * batch, not an object "saved here" (a draft of it may be saved here).
+ */
+const unknownFinding = (setName: string, objectName: string, door: 'save' | 'publish' = 'save') =>
     `Permission '${setName}' grants on object '${objectName}' which is not defined in objects: no package registers `
-    + 'an object of that name and none is saved here, so the grant applies to nothing.';
+    + (door === 'publish'
+        ? 'an object of that name, and no published object, or object draft of this batch, carries it'
+        : 'an object of that name and none is saved here')
+    + ', so the grant applies to nothing.';
 
-const expectRefusal = (err: any, setName: string, objectNames: string[]) => {
+const expectRefusal = (err: any, setName: string, objectNames: string[], door: 'save' | 'publish' = 'save') => {
     expect({ code: err?.code, status: err?.status }, String(err?.message)).toEqual({ code: 'INVALID_METADATA', status: 422 });
     expect(String(err.message).startsWith(`permission/${setName} failed spec validation: `), String(err.message)).toBe(true);
     expect(err.issues.map((i: any) => i.path)).toEqual(objectNames.map((o) => `objects.${o}`));
     for (const [index, objectName] of objectNames.entries()) {
         expect(err.issues[index].code).toBe('custom');
-        expect(String(err.issues[index].message).startsWith(unknownFinding(setName, objectName)), err.issues[index].message).toBe(true);
+        expect(String(err.issues[index].message).startsWith(unknownFinding(setName, objectName, door)), err.issues[index].message).toBe(true);
     }
 };
 
@@ -237,7 +244,7 @@ describe('[#28990] the permission-set save door — a grant on an object that do
         // The set alone goes live; its object stays a draft.
         const err = await refusalOf(protocol.publishMetaItem({ type: 'permission', name: 'qa_probe' }));
 
-        expectRefusal(err, 'qa_probe', ['qa_widget']);
+        expectRefusal(err, 'qa_probe', ['qa_widget'], 'publish');
         expect(stored(rows, 'permission', 'qa_probe')).toEqual(['draft|-|qa_widget']);
     });
 });
@@ -249,7 +256,7 @@ describe('[#28990] the publish doors — a set draft stored before the rule', ()
 
         const err = await refusalOf(protocol.publishMetaItem({ type: 'permission', name: 'qa_probe' }));
 
-        expectRefusal(err, 'qa_probe', ['qa_no_such_object']);
+        expectRefusal(err, 'qa_probe', ['qa_no_such_object'], 'publish');
         expect(stored(rows, 'permission', 'qa_probe')).toEqual(['draft|-|qa_no_such_object']);
     });
 
@@ -263,10 +270,39 @@ describe('[#28990] the publish doors — a set draft stored before the rule', ()
         expect(res).toMatchObject({ outcome: 'refused', success: false, publishedCount: 0, published: [] });
         const causal = res.failed.find((f: any) => f.name === 'qa_probe');
         expect(causal, JSON.stringify(res.failed)).toMatchObject({ type: 'permission', code: 'INVALID_METADATA' });
-        expect(JSON.stringify(causal)).toContain("grants on object 'qa_no_such_object'");
+        expect(JSON.stringify(causal)).toContain(unknownFinding('qa_probe', 'qa_no_such_object', 'publish'));
         // (The double's `transaction` does not roll back, so the sibling's
         // promotion is not read here: `publishedCount: 0` is the batch's word.)
         expect(stored(rows, 'permission', 'qa_probe')).toEqual([`draft|${PKG}|qa_no_such_object`]);
+    });
+});
+
+describe('[#29279] the stored-metadata healing pass — a draft-only set stored before the rule', () => {
+    it('`migrate-stored` rewrites it (a legacy key stripped), and its publish is still refused', async () => {
+        const { protocol, rows } = makeSession();
+        plant(rows, set('qa_probe', ['qa_no_such_object'], { managedBy: 'user' }), 'draft', null);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, types: ['permission'] });
+
+        const row = report.rows.find((r: any) => r.name === 'qa_probe');
+        expect(row, JSON.stringify(row)).toMatchObject({ state: 'draft', outcome: 'rewritten' });
+        const bodies = [...rows.values()].filter((r) => r.type === 'permission').map((r) => JSON.parse(r.metadata));
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]).not.toHaveProperty('managedBy');
+        expect(stored(rows, 'permission', 'qa_probe')).toEqual(['draft|-|qa_no_such_object']);
+        const err = await refusalOf(protocol.publishMetaItem({ type: 'permission', name: 'qa_probe' }));
+        expectRefusal(err, 'qa_probe', ['qa_no_such_object'], 'publish');
+    });
+
+    it('an author re-saving the same draft is still refused', async () => {
+        const { protocol, rows } = makeSession();
+        plant(rows, set('qa_probe', ['qa_no_such_object'], { managedBy: 'user' }), 'draft', null);
+
+        const err = await refusalOf(protocol.saveMetaItem({
+            type: 'permission', name: 'qa_probe', item: set('qa_probe', ['qa_no_such_object']), mode: 'draft',
+        }));
+
+        expectRefusal(err, 'qa_probe', ['qa_no_such_object']);
     });
 });
 
