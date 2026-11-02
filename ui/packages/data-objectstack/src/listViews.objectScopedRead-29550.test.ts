@@ -136,6 +136,41 @@ describe('objectstack#29550 — an object route reads one object\'s views', () =
     expect(answered.overrides).toEqual(expected.overrides);
   });
 
+  it.each([
+    ['a view write (invalidateViewKeys)', (ds: any) => ds.invalidateViewKeys('crm_lead', 'crm_lead.all')],
+    ['a write of the view list through the console client (invalidateCache)', (ds: any) => ds.invalidateCache('list:view')],
+    ['an organization, session or locale switch (clearCache)', (ds: any) => ds.clearCache()],
+  ])('%s detaches the one-object read in flight: a read after it asks again', async (_name, drop) => {
+    const gate: { open?: () => void } = {};
+    const opened = new Promise<void>((resolve) => { gate.open = resolve; });
+    const { fetchImpl, requests } = makeServer();
+    const held = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const answer = await fetchImpl(input, init);
+      if (new URL(String(input)).searchParams.has('object') && viewReads(requests).length === 1) await opened;
+      return answer;
+    });
+    const ds = makeAdapter(held);
+
+    const before = ds.listViews('crm_lead');
+    await vi.waitFor(() => expect(viewReads(requests)).toHaveLength(1));
+    drop(ds);
+    const after = ds.listViews('crm_lead');
+    gate.open!();
+    await Promise.all([before, after]);
+
+    expect(viewReads(requests).map((r) => r.url)).toEqual([
+      '/api/v1/meta/view?object=crm_lead',
+      '/api/v1/meta/view?object=crm_lead',
+    ]);
+  });
+
+  it('CONTROL: with nothing dropped, a read in flight is joined', async () => {
+    const { fetchImpl, requests } = makeServer();
+    const ds = makeAdapter(fetchImpl);
+    await Promise.all([ds.listViews('crm_lead'), ds.listViews('crm_lead')]);
+    expect(viewReads(requests)).toHaveLength(1);
+  });
+
   it('a second object route asks its own object only', async () => {
     const { fetchImpl, requests } = makeServer();
     const ds = makeAdapter(fetchImpl);

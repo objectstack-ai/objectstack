@@ -3404,7 +3404,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // objectstack#29550 — the one-object view reads on the wire
   // (`readObjectViewRows`), by object name: `listViews` and
   // `listViewOverrides` open one object's route together and share one request.
-  private readonly objectViewReads = new Map<string, Promise<any[]>>();
+  private readonly objectViewReads = new Map<string, { since: number; read: Promise<any[]> }>();
   private connectionState: ConnectionState = 'disconnected';
   private connectionStateListeners: ConnectionStateListener[] = [];
   private batchProgressListeners: BatchProgressListener[] = [];
@@ -6243,7 +6243,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * here, the way {@link downloadImportTemplate}'s is: this adapter's origin
    * and auth, and the client's locale, because the server translates the list
    * it serves. The answer is not stored, so the paths that drop the stored list
-   * (listed in {@link VIEW_LIST_KEY}'s doc) need no second key. A failure
+   * (listed in {@link VIEW_LIST_KEY}'s doc) need no second key; and each of
+   * them detaches the one-object request in flight, as it detaches the list
+   * request in flight ({@link MetadataCache.invalidatedAt}): a reader asking
+   * after a view write or a switch never joins a request sent before it. A failure
    * rejects, as the client's read does, carrying the server's `status` and
    * ADR-0112 `code`, so each reader keeps its own failure contract.
    *
@@ -6261,13 +6264,21 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     if (listing) {
       return listing.then((answer) => ObjectStackAdapter.objectBoundViewRows(structuredClone(answer), objectName));
     }
-    let read = this.objectViewReads.get(objectName);
-    if (!read) {
-      const started: Promise<any[]> = this.requestObjectViewRows(objectName).finally(() => {
-        if (this.objectViewReads.get(objectName) === started) this.objectViewReads.delete(objectName);
+    // A request sent before the view list was last invalidated (a view
+    // write, an organization, session or locale switch) is detached, as the
+    // whole-list read in flight is: a reader asking after it asks again.
+    const since = this.metadataCache.invalidatedAt(VIEW_LIST_KEY);
+    const joined = this.objectViewReads.get(objectName);
+    let read: Promise<any[]>;
+    if (joined && joined.since === since) {
+      read = joined.read;
+    } else {
+      const entry = { since, read: undefined as unknown as Promise<any[]> };
+      entry.read = this.requestObjectViewRows(objectName).finally(() => {
+        if (this.objectViewReads.get(objectName) === entry) this.objectViewReads.delete(objectName);
       });
-      this.objectViewReads.set(objectName, started);
-      read = started;
+      this.objectViewReads.set(objectName, entry);
+      read = entry.read;
     }
     return read.then((rows) => structuredClone(rows));
   }
