@@ -75,6 +75,14 @@ function showcaseRig() {
         const item = (doc?.item ?? doc) as Record<string, unknown>;
         return { status: read.status, subject: item.subject, locale: item.locale, _packageId: item._packageId };
     };
+    /** `GET /meta/email_template/:name/layers` at one member — the subjects of `code`, `overlay` and `effective`, or the status. */
+    const layers = async (member: string, pkg?: string) => {
+        const read = await call('GET', `/meta/email_template/${NAME}/layers?member=${member}${pkg ? `&package=${pkg}` : ''}`);
+        if (read.status !== 200) return { status: read.status };
+        const doc = read.json?.data ?? read.json;
+        const subject = (layer: any) => (layer === null || layer === undefined ? null : layer.subject);
+        return { status: 200, code: subject(doc?.code), overlay: subject(doc?.overlay), effective: subject(doc?.effective) };
+    };
     const rowsOf = (items: any[]) => items
         .filter((i) => i?.name === NAME)
         .map((i) => [i.locale, i._packageId, i.subject])
@@ -133,7 +141,7 @@ function showcaseRig() {
         const doc = read.json?.data ?? read.json?.item ?? read.json;
         rig.shipped = doc?.item ?? doc;
     };
-    return { rig, boot, byName, listed, executing, rendered, body, saveInto, publishInto, createDependent, ensurePair };
+    return { rig, boot, byName, layers, listed, executing, rendered, body, saveInto, publishInto, createDependent, ensurePair };
 }
 
 const BASE_EN = { status: 200, subject: SHIPPED_SUBJECT, locale: 'en-US', _packageId: BASE };
@@ -179,6 +187,16 @@ describe('[#28802] a dependent\'s email template locale the base does not ship s
         expect(await r.byName('en-US')).toEqual(BASE_EN);
     });
 
+    it('[#28830] the layered read naming the base or no package stays 404 for the dependent\'s `fr-FR`; naming the dependent it answers', async () => {
+        expect(await r.layers('fr-FR', BASE)).toEqual({ status: 404 });
+        expect(await r.layers('fr-FR')).toEqual({ status: 404 });
+        expect(await r.layers('fr-FR', DEPENDENT))
+            .toEqual({ status: 200, code: null, overlay: DEPENDENT_SUBJECT, effective: DEPENDENT_SUBJECT });
+        // Control: the base's own member.
+        expect(await r.layers('en-US', BASE))
+            .toEqual({ status: 200, code: SHIPPED_SUBJECT, overlay: null, effective: SHIPPED_SUBJECT });
+    });
+
     it('the env-wide, base-scoped and executing lists leave the dependent\'s `fr-FR` out, so a `fr-FR` send renders the base\'s `en-US`', async () => {
         expect(await r.listed()).toEqual([BASE_EN_ROW]);
         expect(await r.listed(BASE)).toEqual([BASE_EN_ROW]);
@@ -195,6 +213,9 @@ describe('[#28802] a dependent\'s email template locale the base does not ship s
         expect(await r.byName('en-US')).toEqual(OVERRIDE_EN);
         expect(await r.listed()).toEqual([['en-US', BASE, OVERRIDE_SUBJECT]]);
         expect(await r.rendered('en-US')).toBe('Override: T');
+        expect(await r.layers('en-US', BASE))
+            .toEqual({ status: 200, code: SHIPPED_SUBJECT, overlay: OVERRIDE_SUBJECT, effective: OVERRIDE_SUBJECT });
+        expect(await r.layers('fr-FR', BASE)).toEqual({ status: 404 });
 
         expect(await r.byName('fr-FR', BASE)).toEqual({ status: 404 });
         expect(await r.byName('fr-FR')).toEqual({ status: 404 });
@@ -223,6 +244,16 @@ describe('[#28802] the pair\'s own email template locale the base does not ship 
         expect(await r.byName('en-US')).toEqual(BASE_EN);
     });
 
+    it('[#28830] the layered read naming the base or no package answers the pair\'s `fr-FR` layer, as the other reads serve it', async () => {
+        const PAIR_LAYERS = { status: 200, code: null, overlay: PAIR_SUBJECT, effective: PAIR_SUBJECT };
+        expect(await r.layers('fr-FR', BASE)).toEqual(PAIR_LAYERS);
+        expect(await r.layers('fr-FR')).toEqual(PAIR_LAYERS);
+        // Unchanged: the pair's own address, and the base's member.
+        expect(await r.layers('fr-FR', PAIR)).toEqual(PAIR_LAYERS);
+        expect(await r.layers('en-US', BASE))
+            .toEqual({ status: 200, code: SHIPPED_SUBJECT, overlay: null, effective: SHIPPED_SUBJECT });
+    });
+
     it('the env-wide, base-scoped and executing lists carry the pair\'s `fr-FR` beside the base\'s `en-US`, so a `fr-FR` send renders it', async () => {
         expect(await r.listed()).toEqual([BASE_EN_ROW, PAIR_FR_ROW]);
         expect(await r.listed(BASE)).toEqual([BASE_EN_ROW, PAIR_FR_ROW]);
@@ -240,6 +271,8 @@ describe('[#28802] the pair\'s own email template locale the base does not ship 
         expect(await r.byName('fr-FR', DEPENDENT)).toEqual(DEPENDENT_FR);
         expect(await r.byName('fr-FR', BASE)).toEqual(PAIR_FR);
         expect(await r.byName('fr-FR')).toEqual(PAIR_FR);
+        expect(await r.layers('fr-FR', BASE))
+            .toEqual({ status: 200, code: null, overlay: PAIR_SUBJECT, effective: PAIR_SUBJECT });
         expect(await r.listed()).toEqual([BASE_EN_ROW, PAIR_FR_ROW]);
         expect(await r.listed(BASE)).toEqual([BASE_EN_ROW, PAIR_FR_ROW]);
         expect(await r.executing()).toEqual([BASE_EN_ROW, PAIR_FR_ROW]);
