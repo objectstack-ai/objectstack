@@ -87,6 +87,15 @@ export const REACT_OVERLAY_SHADOWS: Readonly<Record<string, readonly string[]>> 
   // REQUIRED to write on this tier — the binding `objectName` carried until
   // its retirement, now spelled `data={{ provider: 'object', object }}` only.
   ListView: ['data', 'navigation'],
+  // `drawerSide` / `drawerWidth` — [#29012] the schema member is a `retiredKey()`
+  // tombstone, not a live prop: a form VIEW never opens in a drawer, so
+  // `FormViewSchema` refuses both, while this block's `formType='drawer'`
+  // container still reads them. The overlay is now the block's only
+  // declaration of the two props, with the meaning the block always published
+  // (the #9392 rule: a prop only the react/registry tier reads lives here, not
+  // in `dataProps`). The collision is the tombstone's name, never a second
+  // meaning.
+  ObjectForm: ['drawerSide', 'drawerWidth'],
 };
 
 /**
@@ -239,7 +248,9 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
     summary: "Server-connected create/edit/view form for one object. Config props come from the spec FormView schema; bind + wire it with the React props below.",
     schema: FormViewSchema,
     // [#27159] `splitDirection` left with the split form renderer (ADR-0050).
-    dataProps: ['layout', 'columns', 'tabPosition', 'drawerSide', 'drawerWidth', 'modalSize', 'sections', 'subforms', 'submitBehavior'],
+    // [#29012] `drawerSide` / `drawerWidth` left the form view (tombstones) and
+    // moved to the overlay below: the block's drawer container still reads them.
+    dataProps: ['layout', 'columns', 'tabPosition', 'modalSize', 'sections', 'subforms', 'submitBehavior'],
     interactions: [
       OBJECT_NAME,
       { name: 'mode', type: "'create' | 'edit' | 'view'", kind: 'controlled', description: 'Create a new record, or edit/view an existing one — drive from React state.' },
@@ -263,6 +274,12 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
       // navigation family ruling — see the baseline note on #9392).
       { name: 'customFields', type: 'any[]', kind: 'binding', description: 'Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source.' },
       { name: 'readOnly', type: 'boolean', kind: 'binding', description: 'Render every field read-only, whatever `mode` says.' },
+      // [#29012] Retired from FormViewSchema (a form view never opens in a
+      // drawer) and declared here, with the description the block published
+      // from the schema: only this block's `formType='drawer'` container
+      // (objectui `ObjectFormContainer` → `DrawerForm`) reads them.
+      { name: 'drawerSide', type: "'top' | 'bottom' | 'left' | 'right'", kind: 'binding', description: "Edge the drawer container opens from, when the React `ObjectForm` block opens this form with formType 'drawer'" },
+      { name: 'drawerWidth', type: 'string', kind: 'binding', description: 'Size of the drawer container the React `ObjectForm` block opens with formType \'drawer\', as a CSS length such as "480px": its width when drawerSide is left or right, its height when top or bottom. Unset, the drawer keeps its default size.' },
       { name: 'modalCloseButton', type: 'boolean', kind: 'binding', description: "Show the close button of the block's modal container (formType 'modal')." },
       { name: 'contentLayout', type: "'simple' | 'tabbed'", kind: 'binding', description: "How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'." },
       { name: 'confirmOnDiscard', type: 'boolean', kind: 'binding', description: 'Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately.' },

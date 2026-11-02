@@ -43,9 +43,10 @@
  *     `POST {dataPrefix}/:object/query`. The query door has no switch of its
  *     own, so a pin asserting "the list route disappeared" passes while half
  *     the intent is broken.
- *   - `metadata.endpoints.item` gates TWELVE — the per-item reads, `PUT`,
- *     `DELETE` and the whole history family. A pin that only watched
- *     `GET {prefix}/:type/:name` would sit green through eleven of them
+ *   - `metadata.endpoints.item` gates THIRTEEN — the per-item reads, `PUT`,
+ *     `DELETE`, the whole history family and the app metadata bundle
+ *     (#27627). A pin that only watched
+ *     `GET {prefix}/:type/:name` would sit green through twelve of them
  *     moving, which is the state #15854 measured.
  *   - `metadata.endpoints.maintenance` gates THREE, one of them the write
  *     door `POST {prefix}/_migrate-stored`.
@@ -195,7 +196,7 @@ const CASES: Array<{ path: string; removes: string[] }> = [
         path: 'metadata.endpoints.maintenance',
         removes: [`GET ${META}/_drafts`, `GET ${META}/diagnostics`, `POST ${META}/_migrate-stored`],
     },
-    // [#15854] TWELVE routes — the WHOLE per-item face, which is what the
+    // [#15854] TWELVE routes (thirteen since #27627, below) — the WHOLE per-item face, which is what the
     // switch's name has always promised: the reads, the per-item WRITES
     // (`PUT` / `DELETE {prefix}/:type/:name`) and the history family
     // (`history`, `audit`, `diff`, `published`, `publish`, `rollback`). Before
