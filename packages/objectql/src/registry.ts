@@ -7651,11 +7651,12 @@ export class SchemaRegistry {
    * claims and record (each step's reason is on it below).
    *
    * @param options.keepBootSeed [#28697] Keep `id` in the boot seed of
-   *   disabled packages ({@link setInitialDisabledPackageIds}). The engine's
-   *   withdrawal of a package refused part-way through its first registration
-   *   passes it: that package never existed for an operator, so the persisted
-   *   disable state its next install must honour is not forgotten with the
-   *   row. An operator's uninstall omits it.
+   *   disabled packages ({@link setInitialDisabledPackageIds}), for a caller
+   *   taking back a package that never existed for an operator, so the
+   *   persisted disable state its next install must honour is not forgotten
+   *   with the row. An operator's uninstall omits it. (A registration the
+   *   engine refuses part-way is put back by {@link restoringOnRefusal}
+   *   instead, which never touches the boot seed.)
    */
   uninstallPackage(id: string, options?: { keepBootSeed?: boolean }): boolean {
     const pkg = this.getPackage(id);

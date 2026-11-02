@@ -8,17 +8,24 @@
  *
  * The record-change trigger hands a record-triggered run the triggering
  * write's notice channel (`AutomationContext.saveNotice`). A `save_notice`
- * node BEFORE the approval node sets the sentence on that write's answer. The
- * approval node then suspends the run, the run state is persisted as JSON in
+ * node BEFORE the approval sets the sentence on that write's answer. The
+ * approval then suspends the run, the run state is persisted as JSON in
  * `sys_automation_run`, and the decision resumes it from there. JSON keeps the
  * channel's `locale` and drops its `set` function, so a `save_notice` node on
  * the resumed leg finds no channel and is refused by name: there is no write
  * left to answer.
  *
- * The executor's own suite pins that refusal with a hand-built context. This
- * suite pins it through the real round trip, so a store that started keeping
- * (or re-binding) the channel, or an engine that resumed from an in-memory copy
- * instead of the store, is caught here.
+ * [#28806] A `save_notice` that a suspending node reaches on the flow's own
+ * graph is now refused at the parse, so the resumed leg is reached through a
+ * `subflow` that asks the approval: the parse cannot see that a subflow
+ * pauses (it does only when its child does), so that is where the run-time
+ * refusal is still the guard. The parse refusal itself is pinned at
+ * `registerFlow` in the second case.
+ *
+ * The executor's own suite pins the run-time refusal with a hand-built
+ * context. This suite pins it through the real round trip, so a store that
+ * started keeping (or re-binding) the channel, or an engine that resumed from
+ * an in-memory copy instead of the store, is caught here.
  *
  * ## The rig
  *
@@ -27,10 +34,10 @@
  * (`ObjectStoreSuspendedRunStore` over `sys_automation_run`, which the plugin
  * registers), and `RecordChangeTriggerPlugin`. The real `ApprovalService` is
  * attached to the real automation engine behind the real approval node, so the
- * decision resumes the run the way a deployment does. A resumed leg that fails
- * makes the decision answer the approvals' stranded-decision failure (#4420),
- * which names the run's own refusal; that is existing behaviour, read here,
- * not a new refusal.
+ * decision resumes the run the way a deployment does. A resumed subflow parent
+ * that fails makes the decision answer the approvals' existing subflow-parent
+ * strand (#4420: `resumeFailure` names the parent run, `resumeError` its
+ * refusal); that is existing behaviour, read here, not a new refusal.
  *
  * ## Coverage pin
  *
@@ -46,7 +53,6 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
-import { strandedDecisionDetails } from '@objectstack/types';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { registerApprovalNode } from './approval-node.js';
@@ -74,18 +80,64 @@ const deal = {
 
 /**
  * The shape #28251 documents: tell the saver it went for approval, then ask.
- * The approve leg carries a second `save_notice`, which runs only after the
- * decision resumed the run from storage.
+ *
+ * [#28806] A `save_notice` that a suspending node reaches on the flow's own
+ * graph is refused at the parse now, so the second notice cannot stand right
+ * after the `approval` node any more (`DIRECT_AFTER` below is that refusal's
+ * pin at `registerFlow`). The approval is asked in a SUBFLOW instead: a
+ * `subflow` pauses only when its child does, which the parse cannot see, so
+ * the graph is accepted, the parent suspends with its child, persists, and
+ * resumes from storage when the decision completes the child. The resumed
+ * parent leg is where the second `save_notice` meets the run-time refusal.
  */
+const CHILD = 'deal_manager_review';
+const child = {
+  name: CHILD,
+  label: 'Manager review',
+  type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'ask', type: 'approval', label: 'Manager', config: { approvers: [{ type: 'user', value: APPROVER }] } },
+    { id: 'ok', type: 'end', label: 'Approved' },
+    { id: 'no', type: 'end', label: 'Rejected' },
+  ],
+  edges: [
+    { id: 'c1', source: 'start', target: 'ask' },
+    { id: 'c2', source: 'ask', target: 'ok', label: 'approve' },
+    { id: 'c3', source: 'ask', target: 'no', label: 'reject' },
+  ],
+};
+const START = { id: 'start', type: 'start', label: 'Start', config: { objectName: deal.name, triggerType: 'record-after-create' } };
+const TELL = { id: 'tell', type: 'save_notice', label: 'Tell', config: { message: 'Sent {{ record.name }} to your manager for approval' } };
+const TELL_AFTER = { id: 'tell_after', type: 'save_notice', label: 'Tell again', config: { message: '{{ record.name }} was approved' } };
 const flow = {
   name: FLOW,
   label: 'Deal sent for approval',
   type: 'record_change',
   nodes: [
-    { id: 'start', type: 'start', label: 'Start', config: { objectName: deal.name, triggerType: 'record-after-create' } },
-    { id: 'tell', type: 'save_notice', label: 'Tell', config: { message: 'Sent {{ record.name }} to your manager for approval' } },
+    START,
+    TELL,
+    { id: 'review', type: 'subflow', label: 'Manager review', config: { flowName: CHILD } },
+    TELL_AFTER,
+    { id: 'ok', type: 'end', label: 'Done' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'tell' },
+    { id: 'e2', source: 'tell', target: 'review' },
+    { id: 'e3', source: 'review', target: 'tell_after' },
+    { id: 'e4', source: 'tell_after', target: 'ok' },
+  ],
+};
+/** The #28786 shape: the second notice right after the approval, on this flow's own graph. */
+const DIRECT_AFTER = {
+  name: 'deal_notice_after_approval',
+  label: 'Deal notice after approval',
+  type: 'record_change',
+  nodes: [
+    START,
+    TELL,
     { id: 'ask', type: 'approval', label: 'Manager', config: { approvers: [{ type: 'user', value: APPROVER }] } },
-    { id: 'tell_after', type: 'save_notice', label: 'Tell again', config: { message: '{{ record.name }} was approved' } },
+    TELL_AFTER,
     { id: 'ok', type: 'end', label: 'Approved' },
     { id: 'no', type: 'end', label: 'Rejected' },
   ],
@@ -145,6 +197,7 @@ describe('[#28786] a save_notice before an approval answers the write, and one o
     svc = new ApprovalService({ engine: ql as any, logger: silent });
     svc.attachAutomation(automation as any);
     registerApprovalNode(automation as any, svc, silent);
+    automation.registerFlow(CHILD, child as any);
     automation.registerFlow(FLOW, flow as any);
   });
 
@@ -164,40 +217,51 @@ describe('[#28786] a save_notice before an approval answers the write, and one o
 
     // ── Suspended and persisted: one live row, its context stored as JSON.
     const [pause] = await runRows();
-    expect(pause, 'the run suspended at the approval node and was persisted').toBeDefined();
-    expect(pause.node_id).toBe('ask');
+    expect(pause, 'the run suspended with its child and was persisted').toBeDefined();
+    expect(pause.node_id).toBe('review');
     expect(pause.status, 'a live pause, not a terminal history row').toBe('paused');
     const stored = JSON.parse(String(pause.context_json));
     // What survives JSON: the channel object without its function.
     expect(stored.saveNotice === undefined || typeof stored.saveNotice === 'object').toBe(true);
     expect(typeof stored.saveNotice?.set, 'no function survives the persisted context').toBe('undefined');
 
-    // ── The decision resumes the run from the store.
+    // ── The decision completes the child, which resumes the parent from the store.
     const [request] = await ql.find('sys_approval_request', {
       where: { record_id: created.id, status: 'pending' }, context: SYSTEM,
     } satisfies EngineQueryOptions);
-    expect(request?.flow_node_id, 'the approval node opened its request').toBe('ask');
-    // The resumed leg fails at its save_notice, so the decision answers the
-    // approvals' existing stranded-decision failure (#4420): the decision is
-    // recorded and the run's own refusal is named in it.
-    let thrown: unknown;
-    try {
-      await svc.decide(request.id, { decision: 'approve', actorId: APPROVER }, asUser(APPROVER));
-    } catch (err) {
-      thrown = err;
-    }
-    expect(String((thrown as Error | undefined)?.message)).toContain(
-      "save_notice 'tell_after': this run holds no record write to answer",
-    );
-    expect(strandedDecisionDetails(thrown)).toMatchObject({ finalized: true, decision: 'approve', runId: pause.id });
+    expect(request?.flow_node_id, "the child's approval node opened its request").toBe('ask');
+    // The parent's resumed leg fails at its save_notice. The child's own run
+    // resumed and completed, so the decision answers with the parent named as
+    // the stranded run (the approvals' existing subflow-parent strand, #4420):
+    // recorded, not thrown, and the parent's own refusal named in it.
+    const answered: any = await svc.decide(request.id, { decision: 'approve', actorId: APPROVER }, asUser(APPROVER));
+    expect([answered.finalized, answered.decision, answered.resumed]).toEqual([true, 'approve', true]);
+    expect(answered.resumeFailure).toMatchObject({ code: 'RESUME_FAILED', runId: pause.id, status: 'stranded' });
+    expect(String(answered.resumeError)).toContain("save_notice 'tell_after': this run holds no record write to answer");
 
     // ── The resumed leg's save_notice is refused by name, and nothing reaches the write.
-    const rows = await runRows();
-    expect(rows.some((r) => r.id === pause.id), 'the live pause was consumed').toBe(false);
-    const terminal = rows.find((r) => String(r.id) === `run_${pause.id}`);
-    expect(terminal, 'the resumed run left its history row').toBeDefined();
+    let terminal: any;
+    for (let i = 0; i < 100 && !terminal; i++) {
+      terminal = (await runRows()).find((r) => String(r.id) === `run_${pause.id}`);
+      if (!terminal) await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(terminal, 'the resumed parent left its history row').toBeDefined();
+    expect((await runRows()).some((r) => r.id === pause.id), 'the live pause was consumed').toBe(false);
     expect(terminal.status).toBe('failed');
     expect(String(terminal.error)).toContain("save_notice 'tell_after': this run holds no record write to answer");
     expect(heard, 'the resumed leg set nothing on the answer already sent').toEqual(['Sent Acme to your manager for approval']);
   }, 20000);
+
+  it('[#28806] the same notice right after the approval on the flow\'s own graph is refused at registerFlow, naming the approval', () => {
+    const automation = kernel.getService<AutomationEngine>('automation');
+    let thrown: unknown;
+    try {
+      automation.registerFlow(DIRECT_AFTER.name, DIRECT_AFTER as any);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(String((thrown as Error | undefined)?.message)).toContain(
+      "This one is reached after `approval` node 'ask' suspends the run.",
+    );
+  });
 });
