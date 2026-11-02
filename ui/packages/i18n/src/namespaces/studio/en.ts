@@ -1069,6 +1069,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.action.scriptLanguage': 'Script language',
   'engine.inspector.action.scriptBody': 'Script body',
   'engine.inspector.action.scriptBodyHint': 'Runs in the sandbox as {signature}.',
+  'engine.inspector.action.capabilitiesHint': 'The ctx APIs this body may call. A call it is not granted is refused when the action runs.',
   'engine.inspector.action.method': 'Method',
   // objectstack#26736 — Body Shape as the spec's two shapes.
   'engine.inspector.action.bodyShape': 'Body shape',
