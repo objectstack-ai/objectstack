@@ -10,8 +10,9 @@
  * answer still waits below the organization gate and the metadata shell. These
  * pin what the provider does with that request: the same endpoint and key take
  * it as the first attempt (no second request); any other question asks as
- * before and drops it; a request nobody took can be released; and a transient
- * failure of the held request is retried like the provider's own.
+ * before and drops it; a request nobody took can be released; a StrictMode
+ * replay of either end asks nothing extra; and a transient failure of the held
+ * request is retried like the provider's own.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -58,21 +59,24 @@ function renderProvider(fetcher: typeof fetch, requestKey?: string) {
   );
 }
 
+let n = 0;
+/** A key no earlier case asked for, so nothing held by one case reaches the next. */
+const freshKey = () => `u${++n}:org_1`;
+const nextTask = () => new Promise((r) => setTimeout(r, 0));
+
 beforeEach(() => {
   cleanup();
-  // Nothing held across cases: a take empties the slot, and so does this.
-  releaseMePermissionsRequest(ENDPOINT, 'u1:org_1');
-  releaseMePermissionsRequest(ENDPOINT, 'u1:org_2');
 });
 
 describe('MePermissionsProvider takes the request asked before it mounted (objectstack#29114)', () => {
   it('the same endpoint and key: the held request is the answer, and the provider asks nothing', async () => {
+    const key = freshKey();
     const early = vi.fn(async () => answer(true));
-    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key: 'u1:org_1' });
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
     expect(early).toHaveBeenCalledTimes(1);
 
     const own = vi.fn(async () => answer(false));
-    renderProvider(own as unknown as typeof fetch, 'u1:org_1');
+    renderProvider(own as unknown as typeof fetch, key);
     await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
     expect(screen.getByTestId('edit').textContent).toBe('true');
     expect(own).not.toHaveBeenCalled();
@@ -80,39 +84,42 @@ describe('MePermissionsProvider takes the request asked before it mounted (objec
   });
 
   it('starting the same request twice asks once', () => {
+    const key = freshKey();
     const early = vi.fn(async () => answer(true));
-    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key: 'u1:org_1' });
-    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key: 'u1:org_1' });
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
     expect(early).toHaveBeenCalledTimes(1);
   });
 
-  it('taken once: a second provider for the same key asks for itself', async () => {
+  it('used once: a second provider for the same key asks for itself', async () => {
+    const key = freshKey();
     const early = vi.fn(async () => answer(true));
-    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key: 'u1:org_1' });
-    renderProvider(vi.fn(async () => answer(false)) as unknown as typeof fetch, 'u1:org_1');
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
+    renderProvider(vi.fn(async () => answer(false)) as unknown as typeof fetch, key);
     await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
     cleanup();
 
     const own = vi.fn(async () => answer(false));
-    renderProvider(own as unknown as typeof fetch, 'u1:org_1');
+    renderProvider(own as unknown as typeof fetch, key);
     await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
     expect(own).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('edit').textContent).toBe('false');
   });
 
   it('another key is another question: the provider asks, and the held request is dropped', async () => {
+    const key = freshKey();
     const early = vi.fn(async () => answer(true));
-    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key: 'u1:org_1' });
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
     const own = vi.fn(async () => answer(false));
-    renderProvider(own as unknown as typeof fetch, 'u1:org_2');
+    renderProvider(own as unknown as typeof fetch, `${key}:other`);
     await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
     expect(own).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('edit').textContent).toBe('false');
     cleanup();
 
-    // Dropped, not kept for later: the org_1 provider now asks for itself.
+    // Dropped, not kept for later: a provider for the first key now asks for itself.
     const later = vi.fn(async () => answer(false));
-    renderProvider(later as unknown as typeof fetch, 'u1:org_1');
+    renderProvider(later as unknown as typeof fetch, key);
     await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
     expect(later).toHaveBeenCalledTimes(1);
   });
@@ -124,21 +131,56 @@ describe('MePermissionsProvider takes the request asked before it mounted (objec
     expect(own).toHaveBeenCalledTimes(1);
   });
 
-  it('a released request is not taken', async () => {
+  it('a released request is dropped on the next task and is not taken', async () => {
+    const key = freshKey();
     const early = vi.fn(async () => answer(true));
-    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key: 'u1:org_1' });
-    releaseMePermissionsRequest(ENDPOINT, 'u1:org_1');
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
+    releaseMePermissionsRequest(ENDPOINT, key);
+    await nextTask();
     const own = vi.fn(async () => answer(false));
-    renderProvider(own as unknown as typeof fetch, 'u1:org_1');
+    renderProvider(own as unknown as typeof fetch, key);
     await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
     expect(own).toHaveBeenCalledTimes(1);
   });
 
+  it('a replayed starter (start, release, start) asks once, and the provider takes that request', async () => {
+    const key = freshKey();
+    const early = vi.fn(async () => answer(true));
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
+    releaseMePermissionsRequest(ENDPOINT, key);
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
+    await nextTask();
+    const own = vi.fn(async () => answer(false));
+    renderProvider(own as unknown as typeof fetch, key);
+    await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
+    expect(early).toHaveBeenCalledTimes(1);
+    expect(own).not.toHaveBeenCalled();
+  });
+
+  it('under StrictMode (the provider effect mounts, unmounts, mounts) the held request is still the only one', async () => {
+    const key = freshKey();
+    const early = vi.fn(async () => answer(true));
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
+    const own = vi.fn(async () => answer(false));
+    render(
+      <React.StrictMode>
+        <MePermissionsProvider endpoint={ENDPOINT} fetcher={own as unknown as typeof fetch} requestKey={key} retryBaseDelayMs={1}>
+          <Probe />
+        </MePermissionsProvider>
+      </React.StrictMode>,
+    );
+    await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
+    expect(screen.getByTestId('edit').textContent).toBe('true');
+    expect(own).not.toHaveBeenCalled();
+    expect(early).toHaveBeenCalledTimes(1);
+  });
+
   it('a transient failure of the held request is retried by the provider', async () => {
+    const key = freshKey();
     const early = vi.fn(async () => answer(true, 503));
-    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key: 'u1:org_1' });
+    startMePermissionsRequest({ endpoint: ENDPOINT, fetcher: early as unknown as typeof fetch, key });
     const own = vi.fn(async () => answer(true));
-    renderProvider(own as unknown as typeof fetch, 'u1:org_1');
+    renderProvider(own as unknown as typeof fetch, key);
     await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
     expect(early).toHaveBeenCalledTimes(1);
     expect(own).toHaveBeenCalledTimes(1);

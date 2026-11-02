@@ -92,17 +92,25 @@ export interface MePermissionsProviderProps {
 const DEFAULT_ENDPOINT = '/api/v1/auth/me/permissions';
 
 /**
- * [objectstack#29114] The request asked before its reader mounted. Held with
- * the endpoint and the identity it was asked for, and taken once, by the first
- * provider that asks for that same endpoint and key; any other take drops it.
- * Not a cache: the answer is used for the moment it was asked in, never for a
- * later question, which is why the caller also releases it when the reason it
- * was asked goes away ({@link releaseMePermissionsRequest}).
+ * [objectstack#29114] The request asked before its reader mounted, held with
+ * the endpoint and the identity it was asked for. The first provider that asks
+ * for that same endpoint and key uses it as its first attempt, and it is gone
+ * once that provider has its answer; a take for anything else drops it. Not a
+ * cache: the answer is used for the moment it was asked in, never for a later
+ * question, which is also why the caller releases it when the reason it was
+ * asked goes away ({@link releaseMePermissionsRequest}).
+ *
+ * `holders` counts the callers still asking for it. StrictMode replays every
+ * effect (mount, unmount, mount) and the provider's effect with it, so both
+ * ends are written to survive a replay without asking twice: a release drops
+ * the request only if nobody asked for it again before the next task, and a
+ * provider whose effect is torn down before it used the answer leaves it held.
  */
 interface HeldRequest {
   endpoint: string;
   key: string;
   answer: Promise<Response>;
+  holders: number;
 }
 
 let heldRequest: HeldRequest | null = null;
@@ -127,43 +135,68 @@ export interface StartMePermissionsRequestOptions {
  * server answers it for the session's active organization, which the session
  * answer already names. The route calls this as soon as the session names that
  * organization, so the request leaves in the same wave; the provider then
- * takes it (its `requestKey` matches) instead of asking a second time.
+ * uses it (its `requestKey` matches) instead of asking a second time.
  *
- * Asking again for the same endpoint and key while a request is held does
- * nothing, so a replayed effect does not ask twice. The request is a single
- * attempt; a transient failure is retried by the provider that takes it, the
- * same way it retries its own.
+ * Asking again for the same endpoint and key while a request is held asks
+ * nothing. The request is a single attempt; a transient failure is retried by
+ * the provider that takes it, the same way it retries its own.
  */
 export function startMePermissionsRequest({
   endpoint = DEFAULT_ENDPOINT,
   fetcher,
   key,
 }: StartMePermissionsRequestOptions): void {
-  if (heldRequest && heldRequest.endpoint === endpoint && heldRequest.key === key) return;
+  if (heldRequest && heldRequest.endpoint === endpoint && heldRequest.key === key) {
+    heldRequest.holders += 1;
+    return;
+  }
   const answer = (fetcher ?? fetch)(endpoint, {
     credentials: 'include',
     headers: { Accept: 'application/json' },
   });
   // Taken later, or dropped: either way a failure must not surface as unhandled.
   answer.catch(() => undefined);
-  heldRequest = { endpoint, key, answer };
+  heldRequest = { endpoint, key, answer, holders: 1 };
 }
 
 /**
- * Drop the held request if it is still the one asked for `endpoint` and `key`
- * and nothing took it: the route that asked was left, or the session no longer
- * names that organization.
+ * The caller that asked for `endpoint` and `key` no longer needs the answer:
+ * the route that asked was left, or the session no longer names that
+ * organization. Once no caller asks for it, the held request is dropped on the
+ * next task, unless something asked for it again by then.
  */
 export function releaseMePermissionsRequest(endpoint: string = DEFAULT_ENDPOINT, key?: string): void {
-  if (heldRequest && heldRequest.endpoint === endpoint && heldRequest.key === key) heldRequest = null;
+  const held = heldRequest;
+  if (!held || held.endpoint !== endpoint || held.key !== key) return;
+  held.holders = Math.max(0, held.holders - 1);
+  setTimeout(() => {
+    if (heldRequest === held && held.holders === 0) heldRequest = null;
+  }, 0);
 }
 
-/** Take the held request for `endpoint` and `key`, once. Any other take drops it. */
-function takeHeldRequest(endpoint: string, key: string | undefined): Promise<Response> | null {
+/**
+ * The held request for `endpoint` and `key`, if that is what is held; a held
+ * request for anything else is dropped. It stays held until
+ * {@link settleHeldRequest}.
+ */
+function takeHeldRequest(endpoint: string, key: string | undefined): HeldRequest | null {
   const held = heldRequest;
   if (!held || key === undefined) return null;
-  heldRequest = null;
-  return held.endpoint === endpoint && held.key === key ? held.answer : null;
+  if (held.endpoint !== endpoint || held.key !== key) {
+    heldRequest = null;
+    return null;
+  }
+  return held;
+}
+
+/** The provider that took `held` has used it: nobody else may. */
+function settleHeldRequest(held: HeldRequest): void {
+  if (heldRequest === held) heldRequest = null;
+}
+
+/** The held answer, readable by its taker even when an earlier taker was torn down mid-read. */
+function readHeldAnswer(held: HeldRequest): Promise<Response> {
+  return held.answer.then((res) => (typeof res.clone === 'function' ? res.clone() : res));
 }
 
 /**
@@ -255,7 +288,7 @@ async function loadPermissions(
   { setData, setError, setLoading }: FetchSink,
   token?: { cancelled: boolean },
   /** A request already in flight for this question, used as the first attempt (objectstack#29114). */
-  firstAttempt?: Promise<Response> | null,
+  firstAttempt?: { answer: Promise<Response>; used: () => void } | null,
 ): Promise<void> {
   const live = () => !token?.cancelled;
   setLoading(true);
@@ -264,12 +297,20 @@ async function loadPermissions(
   const attempts = Math.max(0, maxRetries) + 1;
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const res = attempt === 0 && firstAttempt
-        ? await firstAttempt
-        : await doFetch(endpoint, {
+      let res: Response;
+      if (attempt === 0 && firstAttempt) {
+        try {
+          res = await firstAttempt.answer;
+        } finally {
+          // Only a live run uses it up; a torn-down one leaves it for its replay.
+          if (live()) firstAttempt.used();
+        }
+      } else {
+        res = await doFetch(endpoint, {
           credentials: 'include',
           headers: { Accept: 'application/json' },
         });
+      }
       if (!res.ok) {
         throw new HttpFetchError(
           res.status,
@@ -346,11 +387,12 @@ export function MePermissionsProvider({
   useEffect(() => {
     if (initialPermissions) return;
     const token = { cancelled: false };
+    const held = takeHeldRequest(endpoint, requestKey);
     void loadPermissions(
       { endpoint, fetcher, maxRetries, retryBaseDelayMs },
       { setData, setError, setLoading },
       token,
-      takeHeldRequest(endpoint, requestKey),
+      held && { answer: readHeldAnswer(held), used: () => settleHeldRequest(held) },
     );
     return () => { token.cancelled = true; };
   }, [endpoint, fetcher, maxRetries, retryBaseDelayMs, initialPermissions, requestKey]);
