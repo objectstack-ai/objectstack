@@ -28,9 +28,21 @@ import { logError } from './log.js';
  * writes no response of its own.
  */
 export function earnedWriteDespiteStaleSummary(error: unknown, res: any, object: string | undefined): Record<string, unknown> | undefined {
+  const earned = earnedAnswerLogged(error, object);
+  if (earned !== undefined) applyDroppedFieldsHeader(res, earned);
+  return earned;
+}
+
+/**
+ * [#28782] The same reading for a door whose success path sets no
+ * dropped-fields header (public form submit, `createMany`, clone): the answer
+ * the write `error` earned, logged once per stale field; `undefined` for every
+ * other error. The door relays it as its own success path relays the
+ * protocol's result.
+ */
+export function earnedAnswerLogged(error: unknown, object: string | undefined): Record<string, unknown> | undefined {
   const earned = earnedAnswerOf(error);
   if (earned === undefined) return undefined;
   for (const line of staleSummaryAnswerLines(error as SummaryRecomputeRefusal, object)) logError(`[REST] ${line}`);
-  applyDroppedFieldsHeader(res, earned);
   return earned;
 }

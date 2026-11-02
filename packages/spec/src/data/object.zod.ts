@@ -4835,7 +4835,7 @@ const FieldDisplayPatchSchema = lazySchema(() => {
       error: (issue) =>
         issue.code === 'invalid_type' && Array.isArray(issue.input)
           ? 'A field patch\'s `options` is a map keyed by each option\'s stored value — ' +
-            '`options: { tech: { label: \'Technology\' } }` — not the field\'s option list: which options ' +
+            '`options: { technology: { label: \'Tech\' } }` — not the field\'s option list: which options ' +
             'exist stays the vendor\'s (ADR-0146 D6).'
           : undefined,
     }).optional().describe(
@@ -4879,7 +4879,7 @@ function refuseExtensionFieldPatchKeys(fieldPatches: unknown, ctx: z.RefinementC
  *   fields: { sales_stage: Field.select([...]) },
  *   // A base field's display properties only (ADR-0146 D10), applied by the
  *   // registry merge (`mergeObjectDefinitions`) — see `fieldPatches`.
- *   fieldPatches: { industry: { label: 'Sector', options: { tech: { label: 'Technology' } } } },
+ *   fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } },
  * }]
  * ```
  */
@@ -4964,8 +4964,8 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
     'the additive merges, on every object read: a tenant\'s own text keeps winning, and between two ' +
     'extensions the higher `priority` wins. A patch naming a field or option value the target does not ' +
     'have is refused at install and by `os validate`. Example: `fieldPatches: { industry: { label: ' +
-    '\'Sector\', inlineHelpText: \'The market the account sells into\', options: { tech: { label: ' +
-    '\'Technology\' } } } }`.',
+    '\'Sector\', inlineHelpText: \'The market the account sells into\', options: { technology: { label: ' +
+    '\'Tech\' } } } }`.',
   ),
 
   /** Override label */

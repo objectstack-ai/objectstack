@@ -131,6 +131,124 @@ describe('FlowSchema — a save_notice node stands only in a flow a record creat
   });
 });
 
+/**
+ * [#28806] A `save_notice` reachable from a node that suspends the run. On that
+ * path the write has already answered, so the node is refused by name at run
+ * time and, after an approval, the decision strands its run. The parse refuses
+ * it: a path start → … → suspending node → … → `save_notice` exists (loops
+ * included), whichever other paths also reach it.
+ */
+describe('FlowSchema — a save_notice reachable from a suspending node is refused (#28806)', () => {
+  const START = { id: 'start', type: 'start', label: 'Start', config: { objectName: 'deal', triggerType: 'record-after-create' } };
+  const TELL = { id: 'tell', type: 'save_notice', label: 'Tell the saver', config: { message: NOTICE } };
+  const ASK = { id: 'ask', type: 'approval', label: 'Manager', config: { approvers: [{ type: 'user', value: 'u_mgr' }] } };
+  const END = { id: 'end', type: 'end', label: 'End' };
+  const flow = (nodes: Array<Record<string, unknown>>, edges: Array<[string, string, string?]>) => ({
+    name: 'deal_submit',
+    label: 'Deal submit',
+    type: 'record_change',
+    nodes,
+    edges: edges.map(([source, target, label], i) => ({ id: `e${i + 1}`, source, target, ...(label ? { label } : {}) })),
+  });
+  const sentence = (type: string, id: string) =>
+    `This one is reached after \`${type}\` node '${id}' suspends the run. A suspended run resumes after the write `
+    + 'has already answered, so on that path the node is refused by name at run time, and after an approval the '
+    + `decision cannot finish its run. Move the \`save_notice\` ahead of '${id}', or tell the person after it with a `
+    + '`notify` node.';
+
+  it('is refused after an approval, at the node\'s `type`, naming the approval', () => {
+    const issues = placementIssues(FlowSchema.safeParse(flow(
+      [START, ASK, TELL, END],
+      [['start', 'ask'], ['ask', 'tell', 'approve'], ['ask', 'end', 'reject'], ['tell', 'end']],
+    )));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['nodes', 2, 'type']]]);
+    expect(issues[0].message).toContain(sentence('approval', 'ask'));
+  });
+
+  it.each([
+    ['wait', { id: 'pause', type: 'wait', label: 'Pause', waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' } }],
+    ['screen', { id: 'pause', type: 'screen', label: 'Pause', config: {} }],
+    ['approval_revise', { id: 'pause', type: 'approval_revise', label: 'Pause', config: {} }],
+  ])('is refused after a `%s` node', (type, pause) => {
+    const issues = placementIssues(FlowSchema.safeParse(flow(
+      [START, pause, TELL, END],
+      [['start', 'pause'], ['pause', 'tell'], ['tell', 'end']],
+    )));
+    expect(issues.map((i) => i.path)).toEqual([['nodes', 2, 'type']]);
+    expect(issues[0].message).toContain(sentence(type, 'pause'));
+  });
+
+  it('is refused several hops after the suspension', () => {
+    const issues = placementIssues(FlowSchema.safeParse(flow(
+      [START, ASK, { id: 'set', type: 'assignment', label: 'Set', config: {} }, TELL, END],
+      [['start', 'ask'], ['ask', 'set', 'approve'], ['set', 'tell'], ['tell', 'end'], ['ask', 'end', 'reject']],
+    )));
+    expect(issues.map((i) => i.path)).toEqual([['nodes', 3, 'type']]);
+    expect(issues[0].message).toContain(sentence('approval', 'ask'));
+  });
+
+  it('is refused when only ONE path reaches it through the suspension (a mixed graph)', () => {
+    const issues = placementIssues(FlowSchema.safeParse(flow(
+      [START, { id: 'big', type: 'decision', label: 'Big deal?' }, ASK, TELL, END],
+      [['start', 'big'], ['big', 'ask', 'true'], ['big', 'tell', 'false'], ['ask', 'tell', 'approve'], ['ask', 'end', 'reject'], ['tell', 'end']],
+    )));
+    expect(issues.map((i) => i.path)).toEqual([['nodes', 3, 'type']]);
+    expect(issues[0].message).toContain(sentence('approval', 'ask'));
+  });
+
+  it('is refused when an edge after the approval loops back to before the notice', () => {
+    const issues = placementIssues(FlowSchema.safeParse(flow(
+      [START, { id: 'set', type: 'assignment', label: 'Set', config: {} }, TELL, ASK, END],
+      [['start', 'set'], ['set', 'tell'], ['tell', 'ask'], ['ask', 'end', 'approve'], ['ask', 'set', 'reject']],
+    )));
+    expect(issues.map((i) => i.path)).toEqual([['nodes', 2, 'type']]);
+    expect(issues[0].message).toContain(sentence('approval', 'ask'));
+  });
+
+  it('is refused inside a region body whose container stands after the approval', () => {
+    const loop = {
+      id: 'each', type: 'loop', label: 'Each',
+      config: {
+        collection: [1, 2],
+        iteratorVariable: 'item',
+        body: { nodes: [{ ...TELL }], edges: [] },
+      },
+    };
+    const issues = placementIssues(FlowSchema.safeParse(flow(
+      [START, ASK, loop, END],
+      [['start', 'ask'], ['ask', 'each', 'approve'], ['ask', 'end', 'reject'], ['each', 'end']],
+    )));
+    expect(issues.map((i) => i.path)).toEqual([['nodes', 2, 'config', 'body', 'nodes', 0, 'type']]);
+    expect(issues[0].message).toContain(sentence('approval', 'ask'));
+  });
+
+  it('CONTROL — a save_notice before the approval still parses', () => {
+    const result = FlowSchema.safeParse(flow(
+      [START, TELL, ASK, END],
+      [['start', 'tell'], ['tell', 'ask'], ['ask', 'end', 'approve'], ['ask', 'end', 'reject']],
+    ));
+    expect(placementIssues(result)).toEqual([]);
+    expect(result.success).toBe(true);
+  });
+
+  it('CONTROL — a save_notice on a branch the approval never reaches still parses', () => {
+    const result = FlowSchema.safeParse(flow(
+      [START, { id: 'big', type: 'decision', label: 'Big deal?' }, ASK, TELL, END],
+      [['start', 'big'], ['big', 'ask', 'true'], ['big', 'tell', 'false'], ['ask', 'end', 'approve'], ['ask', 'end', 'reject'], ['tell', 'end']],
+    ));
+    expect(placementIssues(result)).toEqual([]);
+    expect(result.success).toBe(true);
+  });
+
+  it('CONTROL — a subflow ahead of the notice is not a suspending node (it pauses only when its child does)', () => {
+    const result = FlowSchema.safeParse(flow(
+      [START, { id: 'child', type: 'subflow', label: 'Child', config: { flowName: 'deal_child' } }, TELL, END],
+      [['start', 'child'], ['child', 'tell'], ['tell', 'end']],
+    ));
+    expect(placementIssues(result)).toEqual([]);
+  });
+});
+
 describe('flows.<flow>.notices.<node_id>.message — the translation address', () => {
   it('is spelled by flowNoticeMessageKey', () => {
     expect(flowNoticeMessageKey('deal_submit', 'tell')).toBe('flows.deal_submit.notices.tell.message');

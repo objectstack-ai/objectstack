@@ -50,7 +50,7 @@ import { StandardErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -1332,6 +1332,14 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
+          // [#28782] A record the engine stored but whose parent roll-up it
+          // could not recompute answers the create it is (#28781's carrier),
+          // not the refusal: an agent that read an error would create it again.
+          const earned = earnedAnswerOf(err);
+          if (earned) {
+            for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) console.error(`[MCP] ${line}`);
+            return textResult(earned);
+          }
           return errorResultWithCode(err);
         }
       },
