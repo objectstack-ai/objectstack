@@ -136,15 +136,18 @@ const CRED = {
 };
 
 /** The covered columns of {@link OBJ}: both unique surfaces, three scopes. */
-const COVERED = { sku: '', tax_id: '', email: '', code: '' };
+const COVERED_NAMES = ['sku', 'tax_id', 'email', 'code'];
 /** The columns that keep their `''`: no unique constraint, or not text-like. */
-const KEPT = { note: '', plain_idx: '', off: '', pick: '', ref: '' };
+const KEPT_NAMES = ['note', 'plain_idx', 'off', 'pick', 'ref'];
+const blanksOf = (names: readonly string[]) => Object.fromEntries(names.map((n) => [n, '']));
+const COVERED = blanksOf(COVERED_NAMES);
+const KEPT = blanksOf(KEPT_NAMES);
 
 function expectCoveredNull(data: Record<string, unknown>) {
-  for (const k of Object.keys(COVERED)) expect(data[k], k).toBeNull();
+  for (const k of COVERED_NAMES) expect(data[k], k).toBeNull();
 }
 function expectKeptBlank(data: Record<string, unknown>) {
-  for (const k of Object.keys(KEPT)) expect(data[k], k).toBe('');
+  for (const k of KEPT_NAMES) expect(data[k], k).toBe('');
 }
 
 async function refusal(fn: () => Promise<unknown>) {
