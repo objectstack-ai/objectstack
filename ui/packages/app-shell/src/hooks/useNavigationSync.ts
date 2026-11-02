@@ -206,10 +206,12 @@ export function isPlatformArtifact(item: unknown): boolean {
  * overlay channel (`allowEnvironmentOverlay: false`), so the server refuses
  * every package-less write onto a packaged app with `403 NOT_OVERRIDABLE`,
  * whatever its lock (objectstack#29182). The app read marks such an app by its
- * ADR-0010 provenance: the artifact loader stamps `_provenance: 'package'`,
- * while a stored row (a package-less app, or an app of a package authored at
- * runtime) is served as `_provenance: 'org'`, its `_packageId` naming that
- * package. So provenance decides, never `_packageId`.
+ * ADR-0010 provenance: the artifact loader stamps `_provenance: 'package'`
+ * (the stock showcase serves `showcase_app` so, with no `_lock`). A stored row
+ * carries no such stamp: a package-less app is served with no provenance keys,
+ * and an app of a package authored at runtime with `_packageId` alone, and the
+ * server takes a navigation write into either. So provenance decides, never
+ * `_packageId`.
  */
 export function isNavigationSyncableApp(app: unknown): boolean {
   if (!app || typeof app !== 'object') return false;

@@ -93,7 +93,10 @@ describe('isNavigationSyncableApp', () => {
   });
 
   it('accepts a stored app, a package-bound one included: provenance decides, not _packageId', () => {
-    expect(isNavigationSyncableApp({ name: 'rthree_app', _provenance: 'org', _packageId: 'rthree' })).toBe(true);
+    // As the stock showcase serves them: an app of a package authored at
+    // runtime carries `_packageId` alone, a package-less app no stamp at all.
+    expect(isNavigationSyncableApp({ name: 'rthree_app', _packageId: 'com.probe.rthree' })).toBe(true);
+    expect(isNavigationSyncableApp({ name: 'probe_app' })).toBe(true);
     expect(isNavigationSyncableApp({ name: 'mine', _provenance: 'org' })).toBe(true);
   });
 
@@ -411,7 +414,7 @@ describe('useNavigationWrites writes no record page and no sealed app (objectsta
       _packageId: 'com.example.showcase',
       navigation: [{ id: 'n1', type: 'page', pageName: 'gone' }],
     };
-    const runtimePkgApp = { name: 'rthree_app', _provenance: 'org', _packageId: 'rthree', navigation: [] };
+    const runtimePkgApp = { name: 'rthree_app', _packageId: 'com.probe.rthree', navigation: [] };
     const { saveItem } = await withWrites({ apps: [sealed, runtimePkgApp] }, async (w) => {
       await w.created('page', 'landing', { name: 'landing', type: 'app' });
       await w.created('dashboard', 'kpis');
