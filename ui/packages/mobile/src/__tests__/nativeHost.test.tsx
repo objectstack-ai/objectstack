@@ -20,6 +20,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, cleanup, act } from '@testing-library/react';
 import {
+  NATIVE_BRIDGE_VERSION,
   NATIVE_CONNECTION_REMOVED_EVENT,
   NATIVE_HOST_GLOBAL,
   NATIVE_NAVIGATE_EVENT,
@@ -128,6 +129,40 @@ describe('detection', () => {
     install(bridge);
     render(<Probe />);
     expect(seen.at(-1)).toBe(bridge);
+  });
+});
+
+describe('an open platform set and the bridge protocol version', () => {
+  it('a platform other than ios or android is a bridge like any other', () => {
+    const bridge = { ...fakeBridge(['haptic']), platform: 'desktop' };
+    install(bridge);
+    expect(getNativeHost()).toBe(bridge);
+    expect(getNativeHost()?.platform).toBe('desktop');
+  });
+
+  it('this package speaks protocol version 1', () => {
+    expect(NATIVE_BRIDGE_VERSION).toBe(1);
+  });
+
+  it.each([
+    ['a newer version', NATIVE_BRIDGE_VERSION + 1],
+    ['a string version', '1'],
+    ['NaN', Number.NaN],
+    ['no version', undefined],
+  ])('%s reads as no bridge: getNativeHost is null and every call is unavailable', async (_label, version) => {
+    const bridge = { ...fakeBridge(), version };
+    install(bridge);
+    expect(getNativeHost()).toBeNull();
+    await expect(nativeHaptic('light')).resolves.toEqual({ status: 'unavailable' });
+    expect(bridge.haptic).not.toHaveBeenCalled();
+  });
+
+  it('control: the version this package speaks, and an older one, are the bridge', () => {
+    for (const version of [NATIVE_BRIDGE_VERSION, 0]) {
+      const bridge = { ...fakeBridge(), version };
+      install(bridge);
+      expect(getNativeHost()).toBe(bridge);
+    }
   });
 });
 
@@ -358,6 +393,17 @@ describe('useNativeHostRouting', () => {
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('a bridge speaking a newer protocol gets no ready, no route and no navigate listener', () => {
+    const bridge = { ...fakeBridge(), version: NATIVE_BRIDGE_VERSION + 1 };
+    install(bridge);
+    const add = vi.spyOn(window, 'addEventListener');
+    const navigate = vi.fn();
+    render(<Router route="/home" navigate={navigate} />);
+    expect(bridge.ready).not.toHaveBeenCalled();
+    expect(bridge.routeChanged).not.toHaveBeenCalled();
+    expect(add.mock.calls.some(([type]) => type === NATIVE_NAVIGATE_EVENT)).toBe(false);
   });
 
   it('control: outside shell mode no navigate listener is installed and nothing is posted', () => {

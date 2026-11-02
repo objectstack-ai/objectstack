@@ -75,7 +75,8 @@ const getServerSnapshot = (): ObjectStackNative | null => null;
  * re-read at `DOMContentLoaded`, `load` and a few timed points after `load`,
  * so a bridge the shell injects after the first render re-renders the caller
  * with it. Without the global the hook returns `null` for good and changes
- * nothing.
+ * nothing; so does a bridge speaking a newer protocol than
+ * `NATIVE_BRIDGE_VERSION` (see `getNativeHost`).
  */
 export function useNativeHost(): ObjectStackNative | null {
   const host = useSyncExternalStore(subscribe, getNativeHost, getServerSnapshot);
@@ -109,7 +110,12 @@ export interface UseNativeHostRoutingOptions {
  * component that renders beside the routes. In the shell it:
  *
  * - posts `ready()` once per page load, after the first commit of the router
- *   tree (or as soon as a late bridge appears);
+ *   tree (or as soon as a late bridge appears). That commit is the Console's
+ *   own UI and may be a loading fallback, such as the auth guard's spinner
+ *   while the session is read on a cold start: `ready` means "the Console has
+ *   painted", not "the page's data has settled". The shell lifts its loading
+ *   cover on it, handing over to that spinner instead of holding the native
+ *   cover through the session round-trip;
  * - posts `routeChanged(route)` on every navigation, once per route change;
  * - listens for the shell's `objectstack-native:navigate` event, moves the
  *   router to `detail.route` when it is an in-app path, and cancels the event

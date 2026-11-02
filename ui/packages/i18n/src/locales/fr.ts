@@ -884,8 +884,6 @@ const fr = {
     pullToRefresh: "Tirer pour actualiser",
     refreshing: "Actualisation…",
     share: "Partager",
-    sharingPersonal: "Vue personnelle",
-    sharingCollaborative: "Vue partagée",
     sharingLockedBy: "Verrouillée par {{user}}",
     print: "Imprimer",
     hideFieldsTitle: "Masquer les champs",
