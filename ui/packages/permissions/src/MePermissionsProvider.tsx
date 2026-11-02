@@ -439,6 +439,9 @@ export function MePermissionsProvider({
     // `current_user.can(object, verb)` is answered from. Keyed on `dataKey`
     // like every member here, so it is the SAME object for the same payload.
     effectiveObjects: authed?.objects,
+    // [objectstack#28508] The server's one has-queues boolean, verbatim;
+    // `undefined` with no authenticated answer.
+    hasAnyQueue: authed?.hasAnyQueue,
     isLoaded,
   }));
 
