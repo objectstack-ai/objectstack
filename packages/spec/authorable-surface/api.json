@@ -215,6 +215,7 @@
     "api/AuthFeaturesConfig:passkeys [RETIRED]",
     "api/AuthFeaturesConfig:phoneNumber",
     "api/AuthFeaturesConfig:phoneNumberOtp",
+    "api/AuthFeaturesConfig:sso",
     "api/AuthFeaturesConfig:ssoEnforced",
     "api/AuthFeaturesConfig:turnstileSiteKey",
     "api/AuthFeaturesConfig:twoFactor",
