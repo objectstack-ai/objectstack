@@ -42,7 +42,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // objectui's keyed `{ key, defaultValue, params }` ref — that vocabulary lives
 // on the FLAT `schema.ariaLabel` and is resolved by `SchemaRenderer` instead
 // (objectui#5134).
-import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
+import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema, ViewSharingSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
 import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
@@ -1357,6 +1357,23 @@ function readSpecDisplayPageSize(): number {
   return declared;
 }
 const DEFAULT_LIST_DISPLAY_PAGE_SIZE = readSpecDisplayPageSize();
+
+/**
+ * The ownership type a `sharing` block means when it declares none. READ from
+ * `@objectstack/spec`, not restated, the same read as the page size above:
+ * `ViewSharingSchema` declares `type` with a default, nothing on the render
+ * path parses the served view, so an authored `{ lockedBy }` arrives with
+ * `type` absent, and parsing an empty block is the spec's own answer.
+ */
+const SPEC_DEFAULT_SHARING_TYPE = ViewSharingSchema.parse({}).type;
+
+/**
+ * Whether the toolbar draws the sharing indicator: a declared `type` or a
+ * `lockedBy`. The lock keys on `lockedBy` alone and never waits on `type`.
+ */
+function hasSharingIndicator(sharing: { type?: string; lockedBy?: string } | undefined): boolean {
+  return !!(sharing?.type || sharing?.lockedBy);
+}
 
 /**
  * The `$top` of the ONE unpaged fetch a list view makes when no usable page
@@ -6543,12 +6560,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               (`type` + optional `lockedBy`), never a button. No view-sharing
               control or endpoint exists to open, so a clickable "Share" here
               was a dead button. `lockedBy` is the spec's free string ("User
-              who locked the view configuration"), rendered as written. */}
-          {schema.sharing?.type && (() => {
-            const sharingLabel = schema.sharing.type === 'personal'
+              who locked the view configuration"), rendered as written. A
+              block with `lockedBy` and no `type` shows the lock beside the
+              spec's default type. */}
+          {hasSharingIndicator(schema.sharing) && (() => {
+            const sharingType = schema.sharing?.type ?? SPEC_DEFAULT_SHARING_TYPE;
+            const sharingLabel = sharingType === 'personal'
               ? t('list.sharingPersonal')
               : t('list.sharingCollaborative');
-            const lockedBy = schema.sharing.lockedBy;
+            const lockedBy = schema.sharing?.lockedBy;
             const lockedLabel = lockedBy ? t('list.sharingLockedBy', { user: lockedBy }) : undefined;
             const hint = lockedLabel ? `${sharingLabel} · ${lockedLabel}` : sharingLabel;
             return (
@@ -6597,7 +6617,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
           {/* --- Separator: Print/Share/Export | Search --- */}
           {(() => {
-            const hasLeftSideItems = schema.allowPrinting || !!schema.sharing?.type
+            const hasLeftSideItems = schema.allowPrinting || hasSharingIndicator(schema.sharing)
               || (!toolbarFlags.compactToolbar && resolvedExportOptions && exportPermitted && exportableFormats.length > 0);
             return toolbarFlags.showSearch && hasLeftSideItems ? (
               <div className="h-5 w-px bg-border/50 mx-1 shrink-0" />
