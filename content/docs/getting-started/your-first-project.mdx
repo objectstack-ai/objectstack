@@ -36,9 +36,9 @@ from an empty database, stop the server and delete `.objectstack/data/`, or run
 the npm that Node 22 ships, crashed this way installing the CLI (measured on
 10.9.4 and 10.9.9) while vitest 4's newest release had no matching
 `@vitest/browser-webdriverio`. That release, 4.1.12, is now published, and npm
-10.9.9 installs `@objectstack/cli` 18.2.0 again. If you still hit it, upgrade
-with `npm install -g npm@11` (npm 11 needs Node 22.9+) or use pnpm, then run
-`npm install` in the project.
+10.9.9 installs `@objectstack/cli` again (measured on 18.2.0). If you still hit
+it, upgrade with `npm install -g npm@11` (npm 11 needs Node 22.9+) or use pnpm,
+then run `npm install` in the project.
 [Troubleshooting](/docs/deployment/troubleshooting#cannot-read-properties-of-null-reading-edgesout-from-npm-install)
 has the other fix.
 </Callout>
@@ -275,7 +275,7 @@ Console — data browser, metadata explorer, API docs — is served at
 (`admin@objectos.ai` / `admin123`).
 
 <Callout type="info">
-**The starter has no app, so the Console has no page for `my_app_note`.** You
+**The starter has no app, so `my_app_note` is in no Console navigation.** You
 will see the platform's own apps and not the note object: this template ships
 objects only, with no app and no views. That is the intended starting point,
 not a broken install — the object is live, and the REST calls in step 4 read
