@@ -1309,7 +1309,11 @@ export const CEILINGS = new Map([
   // same convention (lowering is always legitimate).
   // Lowered 103 → 102 when the whole-card cloud route (PR #26749) merged with
   // main's cloud-involvement lines; landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 102],
+  // Lowered 102 → 99 by the triage push-list card (#28921): lines 10-11 and
+  // 94-95 each merged after deleting what contract-review.md and AGENTS.md
+  // already state, and the reporting pair 101-102 replaced by one pointer to the
+  // push list in lanes/triage.md. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 99],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1496,7 +1500,19 @@ export const CEILINGS = new Map([
   // maintainer 「#25558 记为 D」 (2026-10-24), adopting the record's workload
   // 「`lanes/triage.md`「应用仓无分诊席」之后补「应用仓业务理由由该项目召唤的
   // 总监席复核;第三方应用的总监是其自身维护者」」. Measured +1, ceiling +1.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 8],
+  // 8 → 15 by the triage push-list card (#28921). Ruling of record: the card
+  // body's maintainer words, verbatim and untranslated, 「由分诊每天出一次中文进度
+  // 表，频率太低，而且有问题的时候要找我，没问题我也不需要看」, 「需要我协助的时候你
+  // 应该推送消息给我 os-zhuang，但是需要和我沟通哪些情况下」 and 「同意推送清单，立卡？」,
+  // which name this file, plus the addendum comment 6568980556 「pr 超过 6小时没更
+  // 新，如果不是带决策或者是被阻塞，应该都属于有问题吧」. The text is the push list:
+  // no progress table, the seven cases split at-once / end-of-round, one push per
+  // round, the 6 h stale-PR case and the not-pushed list. Eight lines landed, one
+  // paid in place (the scope line, which cross-repo-coordination.md states for
+  // the same reader), so the measured delta is +7; triage-duties.md fell 102 → 99
+  // in the same PR, net +4 over both. Not a CROSS_FILE_MOVES destination, so no
+  // `ruledRaises` record applies. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 15],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
