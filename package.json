@@ -109,6 +109,7 @@
     "check:pnpm-flag-spellings": "node scripts/check-pnpm-flag-spellings.mjs --self-test && node scripts/check-pnpm-flag-spellings.mjs",
     "check:turbo-task-graph": "node scripts/check-turbo-task-graph.mjs --self-test && node scripts/check-turbo-task-graph.mjs",
     "check:workspace-manifest-cycles": "node scripts/check-workspace-manifest-cycles.mjs --self-test && node scripts/check-workspace-manifest-cycles.mjs",
+    "check:package-naming": "node scripts/check-package-naming.mjs --self-test && node scripts/check-package-naming.mjs",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs --self-test && node scripts/check-adr-anchors.mjs",
     "check:adr-links": "node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs",
     "adr:index": "node scripts/adr-index.mjs",
