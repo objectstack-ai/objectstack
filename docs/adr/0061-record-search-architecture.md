@@ -67,7 +67,7 @@ The default contract is `$search: string` (plus existing `$filter`/scope). **Fie
   > not a `FieldType`), so such a column marked `searchable: true` is neither scanned nor accepted as an override. The
   > third channel, an `internal: true` column, holds by the pre-existing withhold rather than by
   > `SEARCH_FLAG_EXCLUDED_TYPES`: the engine strips `internal: true` and credential fields from the field map before it
-  > resolves the set (`packages/objectql/src/engine.ts#scanFields`, #22646), and the door refuses an explicit override
+  > resolves the set (`scanFields` in `packages/objectql/src/engine.ts#expandSearchOnAst`, #22646), and the door refuses an explicit override
   > naming one before the resolver runs (above), so the flag never reaches it. The resolver reads no PII marker, before or
   > after this ruling, and the flag changes which fields resolve, not how a search executes: it still runs through the
   > gated `find()` pipeline, so the rest of D5 is untouched.
