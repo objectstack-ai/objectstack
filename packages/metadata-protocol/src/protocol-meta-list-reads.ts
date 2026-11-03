@@ -89,19 +89,19 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // and exports every package, enabled or not); the effective and the
     // execution reads hide them, at the registry and after the merges below.
     const keepDisabledPackages = layer === 'per-package';
-    // [#29903, ADR-0146 D8 item 3] …and it serves a package's objects as the
-    // package declares them: its `.custom` pair's extension of one is the
-    // pair's item, exported as the pair's `objectExtensions` entry, never
-    // folded into the base's object for the base's export (a field and its
-    // patches would travel twice, the second time as the base's). Every
-    // other contributor folds as on the effective read, and the effective
-    // and execution reads keep the pair's extension in the object they serve.
-    const pairOfLayer = layer === 'per-package' && packageId ? customizationPackageId(packageId) : undefined;
-    const withoutExtensionsOf = pairOfLayer?.ok ? pairOfLayer.value : undefined;
+    // [#29903, #29872, ADR-0146 D8 item 3] …and it serves a package's objects
+    // as the package declares them: another package's extension of one (the
+    // `.custom` pair's, or any other installed package's) is that package's,
+    // exported as its own `objectExtensions` entry, never folded into the
+    // owner's object for the owner's export (a field and its patches would
+    // travel twice, the second time as the owner's). Only the package's own
+    // extensions fold, and the effective and execution reads keep every
+    // extension in the object they serve.
+    const onlyExtensionsOf = layer === 'per-package' && packageId ? packageId : undefined;
     const listRegistry = (type: string): unknown[] => (keepDisabledPackages
         ? host.engine.registry.listItems(type, packageId, {
             includeDisabledPackages: true,
-            ...(withoutExtensionsOf !== undefined ? { withoutExtensionsOf } : {}),
+            ...(onlyExtensionsOf !== undefined ? { onlyExtensionsOf } : {}),
         })
         : host.engine.registry.listItems(type, packageId));
     // ── [ADR-0131 D6] The environment → code read ──────────────────────
@@ -263,10 +263,10 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 // object disagree the moment a row exists. Both routes were
                 // wrong here together, which is why #7556's byName===listed
                 // pin stayed green through this defect.
-                // [#29903] …without the package's pair's extension on the
-                // per-package layer, as its registry items are listed.
+                // [#29903, #29872] …with only the package's own extensions on
+                // the per-package layer, as its registry items are listed.
                 return host.foldObjectExtendersFromRegistry(
-                    request.type, (data as { name?: unknown } | null)?.name, data, withoutExtensionsOf,
+                    request.type, (data as { name?: unknown } | null)?.name, data, onlyExtensionsOf,
                 );
             }, unseated, { servedOverride });
 
