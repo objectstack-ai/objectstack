@@ -4358,6 +4358,12 @@ export default class Serve extends Command {
               appName: resolveDeploymentAppName((config as any).email ?? {}, process.env, (config as any).appName),
               socialProviders: Object.keys(socialProviders).length > 0 ? socialProviders : undefined,
               trustedOrigins: trustedOrigins.length ? trustedOrigins : undefined,
+              // The native app schemes the mobile sign-in hand-off may redirect a
+              // token to, from `OS_TRUSTED_APP_SCHEMES` (#29972). Unset stays
+              // unset: no scheme registered, the `one-time-token` plugin is not
+              // mounted and the hand-off refuses every target. A bad entry is
+              // refused by AuthPlugin at construction, never dropped.
+              trustedAppSchemes: resolveTrustedAppSchemes(process.env),
               // The stack's `server.trustProxy`, the same authored value the
               // dispatcher's inbound rate limiter receives below: whether the
               // ADR-0069 D5 IP allow-list and the D7 login audit may believe
@@ -6874,6 +6880,35 @@ export function formatUnusableAuthBaseUrlDiagnostic(
     + '    Fix: set OS_AUTH_URL to this deployment\'s public origin (e.g.\n'
     + '    https://app.example.com), or remove the variable entirely to fall back to\n'
     + '    OS_BASE_URL / http://localhost:<port>.';
+}
+
+/** The variable `serve` reads the deployment's registered app schemes from (#29972). */
+export const TRUSTED_APP_SCHEMES_ENV_NAME = 'OS_TRUSTED_APP_SCHEMES';
+
+/**
+ * The app schemes this deployment registers for the mobile sign-in hand-off
+ * (`AuthConfig.trustedAppSchemes`), read from `OS_TRUSTED_APP_SCHEMES` in the
+ * shape `OS_TRUSTED_ORIGINS` is read: comma-separated, each entry trimmed,
+ * empty entries dropped, repeats folded (#29972).
+ *
+ * Unset (or nothing but separators and spaces) answers `undefined`: no scheme
+ * is registered, so plugin-auth mounts no `one-time-token` plugin and the
+ * hand-off route refuses every target. There is no default scheme — the
+ * hand-off is opt-in per deployment.
+ *
+ * ⛔ An entry is never validated, lower-cased or dropped here. A bad one goes
+ * through to `new AuthPlugin(...)` as typed, where `assertTrustedAppSchemes`
+ * refuses it at construction naming the entry, so a misspelt scheme fails the
+ * boot instead of booting a hand-off that refuses the deployment's own app.
+ */
+export function resolveTrustedAppSchemes(env: NodeJS.ProcessEnv): string[] | undefined {
+  const raw = env[TRUSTED_APP_SCHEMES_ENV_NAME];
+  if (raw === undefined) return undefined;
+  const schemes: string[] = [];
+  for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (!schemes.includes(entry)) schemes.push(entry);
+  }
+  return schemes.length ? schemes : undefined;
 }
 
 // [#22301] The constructor arguments a served boot hands the `storage`, `email`
