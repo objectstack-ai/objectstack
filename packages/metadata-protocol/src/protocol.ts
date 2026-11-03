@@ -716,7 +716,8 @@ import {
 // [#25467 E2 cut 1b] The metadata item reads and the layered reads.
 import { getMetaItem, getMetaItemForExecution, readMetaItem } from './protocol-meta-item-reads.js';
 import { getMetaItemLayered, packagelessLayeredReadRefusal } from './protocol-meta-layered-reads.js';
-// imports at EOF
+// [#25467 E2 section 3] The single-record data writes.
+import { createData, deleteData, updateData, validateData } from './protocol-data-writes.js';
 
 /**
  * [#4435/#5138] The 404 a single-record operation answers when the id names no
@@ -22687,10 +22688,3 @@ export function packagePersistFailureError(cause: unknown, packageId: string, ve
     return err;
 }
 
-// [#25467 E2 section 3] The single-record data writes. Imported here, after the
-// class, and not in the import block at the top: tsc's declaration emit of
-// `getMetaTypes()`'s inferred return type prints a docblock of THIS file picked
-// by character offset, so any net shift of the text above the class changes the
-// published `.d.ts` (measured on this cut: only a net-zero shift keeps it
-// byte-identical). An import below the class shifts nothing that emit reads.
-import { createData, deleteData, updateData, validateData } from './protocol-data-writes.js';
