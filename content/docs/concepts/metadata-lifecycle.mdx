@@ -158,7 +158,9 @@ document **whole** for every read that serves the base's name
   layered read in `overlay` with `effective` = the base's document.
 - **Export carries the declaration.** `GET /packages/hotcrm.custom/export` carries the
   overriding item with its `overrides` block; `GET /packages/hotcrm/export` carries the
-  base unchanged.
+  base unchanged. `GET /packages/export` (`os package export`) answers the whole
+  deployment in one read: every installed package its own code does not register, the
+  pair as its own entry after its base, each entry exactly the per-package export.
 
 ## Overlay whitelist (shared-DB tenancy invariant)
 

@@ -39,6 +39,7 @@ import { PreviewShell, PreviewErrorBoundary, PreviewMessage } from './PreviewShe
 import { primaryVariantBinding } from '../view-variant-model.js';
 import { t as tr, tFormat } from '../i18n.js';
 import { withNodes } from './row-nodes.js';
+import { resolveFormViewChrome, type FormViewDefinition } from '../../../utils/recordFormNavigation.js';
 
 /**
  * The object a stored `view` draft is bound to, read under the spellings the
@@ -79,9 +80,15 @@ function toFormFieldEntry(f: unknown): string | Record<string, unknown> {
   return String(f);
 }
 
-function buildFormPreviewSchema(
+/**
+ * The `object-form` schema the form view canvas renders from a form view's
+ * `config` body: Studio Design and Run both draw through it. Exported for its
+ * pin (objectstack#29676); no other module reads it.
+ */
+export function buildFormPreviewSchema(
   objectName: string,
   body: Record<string, unknown>,
+  locale: string | undefined,
 ): Record<string, unknown> {
   const rawType = typeof body.type === 'string' ? body.type : 'simple';
   const formType = toInlineFormType(rawType);
@@ -100,6 +107,26 @@ function buildFormPreviewSchema(
     formType,
     sections,
     fields: Array.isArray(body.fields) ? body.fields : undefined,
+    // objectstack#29676 — the form view's keys `ObjectForm` and its layouts
+    // read, which this canvas dropped, so Studio Design and Run drew a view
+    // otherwise than the console does. `layout` (the label above or beside its
+    // control) goes through the console form hosts' own mapping,
+    // `resolveFormViewChrome`, so the canvas and the runtime read it one way;
+    // only its layout is taken, as the canvas draws no submit / cancel and
+    // seeds no create values. The rest are read as the record page reads
+    // them: `columns` by the field grid, `defaultTab` / `tabPosition` by the
+    // tabbed layout, `allowSkip` / `showStepIndicator` by the wizard.
+    layout: resolveFormViewChrome(body as FormViewDefinition, {
+      flow: 'create',
+      language: locale ?? 'en',
+      submitText: '',
+      cancelText: '',
+    }).layout,
+    columns: body.columns,
+    defaultTab: body.defaultTab,
+    tabPosition: body.tabPosition,
+    allowSkip: body.allowSkip,
+    showStepIndicator: body.showStepIndicator,
     showSubmit: false,
     showCancel: false,
   };
@@ -267,7 +294,7 @@ export function ViewPreview({ name, draft, editing, locale, diagnostics }: Metad
   // -------------------------------------------------------------------------
   if ((draft as any).viewKind === 'form' && body) {
     const rawType = String((body as any).type ?? 'simple');
-    const formSchema = buildFormPreviewSchema(objectName, body as Record<string, unknown>);
+    const formSchema = buildFormPreviewSchema(objectName, body as Record<string, unknown>, locale);
     return (
       <PreviewShell hint={`view · ${rawType} · form${designMode ? ' · design' : ''}`}>
         <ViewLabelHeading label={viewLabel} />

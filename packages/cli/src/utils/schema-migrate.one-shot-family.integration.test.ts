@@ -67,6 +67,7 @@ import MigrateAuditMailBodies from '../commands/migrate/audit-mail-bodies.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
 import MigrateBlankSingleValues from '../commands/migrate/blank-single-values.js';
 import MigrateOptionCodes from '../commands/migrate/option-codes.js';
+import MigrateTextScalars from '../commands/migrate/text-scalars.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
@@ -200,6 +201,11 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateOptionCodes),
     noWrite: [{ label: 'migrate option-codes', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate option-codes --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/text-scalars.ts': {
+    run: invoke(MigrateTextScalars),
+    noWrite: [{ label: 'migrate text-scalars', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate text-scalars --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/comment-parent-pair.ts': {
     run: invoke(MigrateCommentParentPair),

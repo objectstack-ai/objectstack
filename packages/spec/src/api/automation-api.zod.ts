@@ -709,7 +709,10 @@ export type CloneFlowRequestParsed = z.infer<typeof CloneFlowRequestSchema>;
  * relabelled and switched off (`status: 'obsolete'`), with no package
  * envelope and no reference to the source (ADR-0126 §9: no clone lineage).
  * `data.packageId` is the package the copy landed in, so a console opens the
- * copy where it lives.
+ * copy where it lives. `data.notice` is the server's English sentence;
+ * `data.noticeCode`, when present, names that sentence by a stable code so a
+ * console can show its own translation, falling back to `notice` for a code it
+ * does not know or when the code is absent.
  */
 export const CloneFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: z.object({
@@ -721,6 +724,12 @@ export const CloneFlowResponseSchema = lazySchema(() => BaseResponseSchema.exten
     notice: z.string().describe(
       'One line for the administrator, in the server\'s words: the copy is switched off until '
       + 'someone switches it on, and its references are not re-pointed.',
+    ),
+    noticeCode: z.string().optional().describe(
+      'A stable code naming the `notice` sentence beside it, so a client can show that sentence in '
+      + 'its own language: a client maps a code it knows to its own translated sentence, and falls '
+      + 'back to `notice` verbatim for a code it does not know or when this key is absent (an older '
+      + 'server sends none). The values are the server\'s; `notice` stays the English fallback.',
     ),
   }),
 }));
