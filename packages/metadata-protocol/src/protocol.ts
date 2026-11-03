@@ -3776,8 +3776,10 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#29673] The write-path inverse of the `/meta` read's translation, for an
      * `object` body: every label the read served translated is put back to its
-     * source text before anything judges or stores the body
-     * ({@link restoreTranslatedEchoes}, whose module header is the contract).
+     * source text before the body is stored ({@link restoreTranslatedEchoes},
+     * whose module header is the contract). Its pure half,
+     * {@link restoreInjectedColumnEchoes}, already ran before the served-column
+     * strip; this half reads the stored row, so it runs after every refusal.
      *
      * The source is the row this save overwrites, read as the credential
      * carry-forward reads it ({@link storedBodyForCarryForward}: the row at the
@@ -3792,18 +3794,35 @@ export class ObjectStackProtocolImplementation implements
      * type's body is returned as it came. No `try`/`catch`: a failed stored-row
      * read fails the save rather than storing a body this door could not judge.
      */
-    private async restoreTranslatedObjectEchoes(request: SaveMetaItemRequest): Promise<SaveMetaItemRequest['item']> {
+    private async restoreTranslatedObjectEchoes(
+        request: SaveMetaItemRequest,
+        repo: SysMetadataRepository,
+        ref: Parameters<SysMetadataRepository['get']>[0],
+        mode: 'draft' | 'publish',
+    ): Promise<SaveMetaItemRequest['item']> {
         if (canonicalMetaType(request.type) !== 'object') return request.item;
         if (!request.item || typeof request.item !== 'object' || Array.isArray(request.item)) return request.item;
-        const repo = this.getOverlayRepo();
         const source = await this.storedBodyForCarryForward({
             type: 'object',
             repo,
-            ref: { type: 'object', name: request.name, org: 'env' } as Parameters<SysMetadataRepository['get']>[0],
-            state: request.mode === 'draft' ? 'draft' : 'active',
+            ref,
+            state: mode === 'draft' ? 'draft' : 'active',
             packageId: request.packageId ?? null,
         });
         return restoreTranslatedEchoes(request.item, { source, bundle: this.registeredTranslationBundle() }).item;
+    }
+
+    /**
+     * [#29673] The pure half of {@link restoreTranslatedObjectEchoes}, run
+     * before the served-column strip: each injected column's slots compared
+     * with the platform's own definition only (no stored row, so no read).
+     * A column that came back translated is the platform's definition again,
+     * and the strip removes it.
+     */
+    private restoreInjectedColumnEchoes(request: SaveMetaItemRequest): SaveMetaItemRequest['item'] {
+        if (canonicalMetaType(request.type) !== 'object') return request.item;
+        if (!request.item || typeof request.item !== 'object' || Array.isArray(request.item)) return request.item;
+        return restoreTranslatedEchoes(request.item, { source: undefined, bundle: this.registeredTranslationBundle() }).item;
     }
 
     /**
@@ -3961,10 +3980,18 @@ export class ObjectStackProtocolImplementation implements
         const pkg = packageId ?? undefined;
         const fromService = await this.readItemFromMetadataService(type, name, pkg);
         if (fromService.data !== undefined && fromService.data !== null) return fromService.data;
-        let item: unknown = this.lookupArtifactItem(type, name, pkg) ?? this.engine.registry.getItem(type, name, pkg);
+        // [#29673] A registry with no `getItem` has no code layer to read — the
+        // guard `lookupArtifactItem` and the authoring gate already apply.
+        // Every save of an object now reads its source here (the translated-
+        // echo restoration), not only one carrying a credential.
+        const registry = this.engine.registry;
+        const getItem = typeof registry?.getItem === 'function'
+            ? (t: string) => registry.getItem(t, name, pkg)
+            : () => undefined;
+        let item: unknown = this.lookupArtifactItem(type, name, pkg) ?? getItem(type);
         if (item === undefined) {
             const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-            if (alt) item = this.engine.registry.getItem(alt, name, pkg);
+            if (alt) item = getItem(alt);
         }
         if (item !== undefined && item !== null) return item;
         if (fromService.degraded) this.throwMetadataServiceUnavailable(fromService.errors);
@@ -13689,13 +13716,14 @@ export class ObjectStackProtocolImplementation implements
         // separate strip from the decoration list and not another entry in it.
         //
         // [#29673] …and, one beat BEFORE that strip, the read's TRANSLATION
-        // taken back off: a label the `/meta` read served in the caller's
-        // language (an injected column's through the built-in table, a field's
-        // through the catalog) is stored as its source text, never as the
-        // document. Before the strip, so an injected column that came back
-        // translated is the platform's own definition again and comes off with
-        // the rest. See {@link restoreTranslatedObjectEchoes}.
-        request.item = await this.restoreTranslatedObjectEchoes(request);
+        // of an injected column taken back off: a label the `/meta` read served
+        // in the caller's language through the built-in table is put back to
+        // the platform's own text, so the column is the platform's definition
+        // again and comes off with the rest. Pure — no read, so it runs before
+        // the refusals. The author's own slots are compared with the stored
+        // row later, beside the credential carry-forward that reads the same
+        // row. See {@link restoreInjectedColumnEchoes}.
+        request.item = this.restoreInjectedColumnEchoes(request);
         request.item = this.stripServedObjectColumns(request.type, request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
@@ -15109,6 +15137,12 @@ export class ObjectStackProtocolImplementation implements
         // no door accepts and nothing reads): those are never re-grafted, so
         // this save drops them from the row at rest, and the answer names each
         // one on `advisories` (`droppedWithheldKeyNotices`) — loud, never silent.
+        // [#29673] The author's own slots the `/meta` read translated (a field's
+        // label through the catalog, the object's own label), put back to the
+        // stored row's source text. After every refusal, so a refused save
+        // costs no read; before the carry-forward and the put, so what is
+        // stored is the source. See {@link restoreTranslatedObjectEchoes}.
+        request.item = await this.restoreTranslatedObjectEchoes(request, repo, ref, mode);
         const carried = await this.carryForwardRedactedCredentials({
             type: singularTypeForRepo,
             repo,
