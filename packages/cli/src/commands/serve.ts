@@ -3025,6 +3025,11 @@ export default class Serve extends Command {
       const tiers: Set<string> = resolveStackTiers({ declaredTiers, requires, preset: presetName });
       const tierEnabled = (t: string) => tiers.has(t);
       const requiresCapability = (c: string) => requires.includes(c);
+      // [#29820] A stack `push` key with no `push` in `requires` mounts nothing
+      // and is read by nothing: push is requested, never on the always-on
+      // slate. Say so once instead of booting as if the key took effect.
+      const unrequestedPushKey = formatUnrequestedPushKeyWarning(config, requires);
+      if (unrequestedPushKey) console.warn(chalk.yellow(`  ⚠ ${unrequestedPushKey}`));
 
       // Import ObjectStack runtime
       const { Runtime } = await import('@objectstack/runtime');
@@ -6485,6 +6490,22 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
   }
 }
 
+
+/**
+ * The boot warning for a stack whose `push` key is set while its served
+ * capabilities do not include `push` (#29820), or `null` when there is nothing
+ * to say. Push is a requested capability, never on the always-on slate, so
+ * without the token `PushServicePlugin` is not mounted and the key is read by
+ * nothing; the operator who wrote the key is told how to turn it on.
+ *
+ * Returns PLAIN text; the caller owns the channel (`console.warn`, stderr).
+ */
+export function formatUnrequestedPushKeyWarning(stack: unknown, requires: readonly string[]): string | null {
+  const push = stack && typeof stack === 'object' ? (stack as { push?: unknown }).push : undefined;
+  if (push === undefined || push === null || requires.includes('push')) return null;
+  return "The stack definition sets a push key, but requires does not name 'push', so the push service is not "
+    + "started and the key is not read. Add 'push' to requires to turn mobile push on.";
+}
 
 /**
  * The diagnosis the optional i18n service load prints when it fails — a

@@ -67,7 +67,9 @@ export default defineStack({
 });
 ```
 
-`objectstack serve` then mounts `PushServicePlugin` from
+A `push` key without `push` in `requires` is not read: `objectstack serve` logs
+one boot warning naming the key and the fix. With the token, `objectstack serve`
+mounts `PushServicePlugin` from
 `@objectstack/service-push`, which the CLI ships with. `@objectstack/verify`'s
 `bootStack` mounts it the same way, so an app's tests run with the same push
 service its server gets.

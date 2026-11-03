@@ -10,7 +10,7 @@ feat(push): `requires: ['push']` and the stack's `push` key turn mobile push on 
 
 Clause-②: yes (widening)
 Metadata-protocol: added
-Skills-docs: follow-up owed — skills/objectstack-platform/evals/config-plugins-ops.json (no eval asks for `requires: ['push']` or the `push` key); this diff teaches both in `skills/objectstack-platform/SKILL.md` (the top-level key enumeration and the `requires` table) and in the new `content/docs/kernel/runtime-services/push-service.mdx`
+Skills-docs: follow-up owed — #29969 (skills/objectstack-platform/evals/config-plugins-ops.json: no eval asks for `requires: ['push']` or the `push` key); this diff teaches both in `skills/objectstack-platform/SKILL.md` (the top-level key enumeration and the `requires` table) and in the new `content/docs/kernel/runtime-services/push-service.mdx`
 
 A deployment that runs `objectstack serve` from a stack file can now turn on mobile push without host code. Before this, the only way to register a push service was a host that composed `PushServicePlugin` in code, so a `notify` node naming `push` had nothing to deliver through on a served stack.
 
@@ -29,4 +29,4 @@ push: {
 },
 ```
 
-In the open tier each `credentialRef` is the name of an environment variable holding the secret. The runtime-services chapter has a new `services.push` page.
+In the open tier each `credentialRef` is the name of an environment variable holding the secret. A `push` key on a stack whose `requires` does not name `push` is not read, and `objectstack serve` logs one boot warning saying so. The runtime-services chapter has a new `services.push` page.
