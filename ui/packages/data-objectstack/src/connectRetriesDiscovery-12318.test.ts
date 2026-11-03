@@ -156,7 +156,10 @@ describe('a failed first connect() retries discovery as a new attempt (objectui#
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(outcome.settled).toBe('rejected');
     expect(outcome.error).toBeInstanceOf(ConnectionError);
-    expect(outcome.error).toMatchObject({ code: 'CONNECTION_ERROR', statusCode: 503 });
+    expect(outcome.error).toMatchObject({ code: 'CONNECTION_ERROR' });
+    // Discovery was refused, never answered: the error carries no status
+    // (objectstack#29916; it used to carry an invented 503).
+    expect((outcome.error as ConnectionError).statusCode).toBeUndefined();
     expect(adapter.getConnectionState()).toBe('error');
     expect(adapter.isConnected()).toBe(false);
     expect(states).toEqual([
