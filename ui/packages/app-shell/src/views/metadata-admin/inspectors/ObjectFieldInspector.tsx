@@ -488,6 +488,17 @@ function isLookup(type: string): boolean {
 }
 
 /**
+ * The two types `FieldSchema` accepts `referenceNameVisible` on (objectstack#29171,
+ * ruling 6574398310 letter B): a `lookup`, and a `user` field (the `sys_user`
+ * reference). Every other type is refused the key at parse, an authored
+ * `false` included, `master_detail` and `tree` among them — which is why the
+ * toggle is offered here and the key is dropped by a retype to anything else.
+ */
+function offersReferenceNameVisible(type: string): boolean {
+  return type === 'lookup' || type === 'user';
+}
+
+/**
  * objectui#11786 — what the object write guard holds this field for: its
  * options (a choice type with no option source) or its target (a relationship
  * with no usable `reference`), else nothing. Asked of the guard itself, on the
@@ -1079,7 +1090,10 @@ export function ObjectFieldInspector({
       Array.isArray(def.options)
       && !takesOptionKind(nextType, def.multiple)
       && withoutOptionKinds(def.options).some((o, i) => o !== (def.options as unknown[])[i]);
-    if (keepsPicklist && !dropsKinds) {
+    // The spec refuses `referenceNameVisible` off `lookup` / `user`, `false`
+    // included, so a retype to any other type removes the key outright.
+    const dropsNameVisible = 'referenceNameVisible' in def && !offersReferenceNameVisible(nextType);
+    if (keepsPicklist && !dropsKinds && !dropsNameVisible) {
       patchDef(requireMaster ? { type: nextType, required: true } : { type: nextType });
       return;
     }
@@ -1087,10 +1101,28 @@ export function ObjectFieldInspector({
     if (requireMaster) nextDef.required = true;
     if (!keepsPicklist) delete nextDef.picklist;
     if (dropsKinds) nextDef.options = withoutOptionKinds(def.options as unknown[]);
+    if (dropsNameVisible) delete nextDef.referenceNameVisible;
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: nextDef };
     writeView({ shape: view.shape, entries: nextEntries });
   };
+
+  /**
+   * The declared name exposure, offered on `lookup` (beside its picker config)
+   * and on `user`. Checking writes `true`; clearing removes the key, so an
+   * unset field carries no `referenceNameVisible` at all.
+   */
+  const nameVisibleToggle = (
+    <DisplayPatchLock>
+      <ReferenceNameVisibleField
+        value={def.referenceNameVisible === true}
+        divided={type === 'lookup'}
+        onCommit={(on) => (on ? patchDef({ referenceNameVisible: true }) : unsetDefKey('referenceNameVisible'))}
+        disabled={locked}
+        locale={locale}
+      />
+    </DisplayPatchLock>
+  );
 
   /** The names the object's other fields carry: what the API name box refuses. */
   const takenNames = view.entries.filter((_, i) => i !== idx).map((e) => e.name);
@@ -1452,7 +1484,7 @@ export function ObjectFieldInspector({
       </Section>
 
       {/* Type-specific */}
-      {(isPicklist(type) || isLookup(type) || isComputed(type) || isNumeric(type) || isTexty(type) || offersValueDomain(type)) && (
+      {(isPicklist(type) || isLookup(type) || offersReferenceNameVisible(type) || isComputed(type) || isNumeric(type) || isTexty(type) || offersValueDomain(type)) && (
         <Section title={tFormat('designer.field.section.options', locale, { type: typeMetaLabel ?? type })}>
           {isPicklist(type) && (
             <DisplayPatchLock>
@@ -1511,6 +1543,7 @@ export function ObjectFieldInspector({
                   locale={locale}
                 />
               </DisplayPatchLock>
+              {type === 'lookup' && nameVisibleToggle}
               {(type === 'lookup' || type === 'master_detail') && (
                 <DisplayPatchLock>
                   <RelatedListFields
@@ -1525,6 +1558,8 @@ export function ObjectFieldInspector({
               )}
             </>
           )}
+          {/* A `user` field's target is always `sys_user`: no picker config, only this key. */}
+          {type === 'user' && nameVisibleToggle}
           {type === 'formula' && (
             <DisplayPatchLock>
               <CelPredicateField
@@ -2476,6 +2511,53 @@ function LookupConfigFields({
           <InspectorCheckboxField label={tr('designer.field.lookup.allowCreate')} value={allowCreate} onCommit={(v) => patchDef({ allowCreate: v || undefined })} disabled={readOnly} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ─────────────── Declared name exposure (referenceNameVisible) ─────────────── */
+
+/**
+ * The `referenceNameVisible` checkbox (objectstack#29171, ruling 6574398310
+ * letter B): a reader of this record may see the referenced record's name, as
+ * plain text with no link, when they cannot open that record. Its label and
+ * help text are the generic `field` form's row for the same key, so the two
+ * authoring surfaces describe it in one wording. The help text is the input's
+ * description, not a separate note.
+ */
+function ReferenceNameVisibleField({
+  value,
+  onCommit,
+  disabled,
+  divided,
+  locale,
+}: {
+  value: boolean;
+  onCommit: (on: boolean) => void;
+  disabled?: boolean;
+  /** Ruled off from the controls above it (a lookup's picker config); a `user` field shows it alone. */
+  divided?: boolean;
+  locale?: string;
+}) {
+  const id = React.useId();
+  const helpId = `${id}-help`;
+  return (
+    <div className={divided ? 'space-y-1 border-t pt-2.5' : 'space-y-1'} data-testid="field-reference-name-visible">
+      <label htmlFor={id} className="flex items-center gap-2 text-xs cursor-pointer select-none">
+        <input
+          id={id}
+          type="checkbox"
+          checked={value}
+          disabled={disabled}
+          aria-describedby={helpId}
+          onChange={(e) => onCommit(e.target.checked)}
+          className="h-3.5 w-3.5"
+        />
+        <span>{t('designer.field.lookup.referenceNameVisible', locale)}</span>
+      </label>
+      <p id={helpId} className="text-[10px] leading-snug text-muted-foreground">
+        {t('designer.field.lookup.referenceNameVisible.help', locale)}
+      </p>
     </div>
   );
 }

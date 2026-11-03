@@ -297,6 +297,41 @@ function boundPackageOf(packageId: unknown): string | undefined {
 }
 
 /**
+ * [#29600] The types whose stored row stays out of the registry's bare slot
+ * when it is bound to a package that ships no artifact of its name while
+ * another package does: the row would wear the other package's envelope
+ * there, and the per-package layer would list the copy under that package.
+ * Every protocol read of these types serves such a row from the row itself
+ * (the by-name read, both lists, the layered read), so the bare entry served
+ * no reader the row does not. `view` is not here: it has its own, wider rule
+ * (#22057, `anotherPackageShips`).
+ *
+ * ⛔ A closed list, judged on the canonical type. `page`, `app`, `dataset`,
+ * `doc` and `book` are left out on purpose: their reads serve a `.custom`
+ * pair's override FROM the bare entry (the by-name read, the list, and
+ * `registry.getAllApps`), so they need a row-served path before their bare
+ * entry can go. `flow` registers with no artifact envelope at all (Regime C,
+ * #20913), and the boot pull arms its declared override from the bare slot.
+ */
+const BORROWED_ENVELOPE_DECLINED_TYPES: ReadonlySet<string> = new Set(['dashboard', 'report', 'email_template']);
+
+/**
+ * [#29600] Whether the hydrator keeps a stored row of `canonicalType`, bound
+ * to `packageId`, out of the registry's bare slot because `artifact` (the
+ * envelope it would graft on) is ANOTHER package's: the artifact lookup
+ * scopes to the row's package and falls back to whichever package ships the
+ * name. A row of a package that ships its own artifact of the name keeps its
+ * bare entry with its own envelope (#4624, ADR-0048); a package-less row, and
+ * a row of a name (or bundle member) no package ships, register as before.
+ */
+function declinesBorrowedEnvelope(canonicalType: string, packageId: unknown, artifact: unknown): boolean {
+    if (!BORROWED_ENVELOPE_DECLINED_TYPES.has(canonicalType)) return false;
+    const bound = boundPackageOf(packageId);
+    if (bound === undefined || !artifact || typeof artifact !== 'object') return false;
+    return (artifact as { _packageId?: unknown })._packageId !== bound;
+}
+
+/**
  * [#16702] ADR-0010 §3.3 — the three protection keys that are READ-SIDE
  * DERIVED, and therefore must never be persisted from a caller's body.
  *
@@ -422,6 +457,7 @@ function isShippedViewItem(artifact: unknown): boolean {
 export {
     boundPackageOf,
     bundleMemberOf,
+    declinesBorrowedEnvelope,
     envelopePackageId,
     isShippedViewItem,
     mergeArtifactProtection,
