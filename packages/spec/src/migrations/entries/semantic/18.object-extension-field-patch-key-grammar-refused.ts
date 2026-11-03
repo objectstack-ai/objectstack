@@ -8,12 +8,11 @@ import type { SemanticMigration } from '../../types.js';
 // the spelling (lower-casing, `-` to `_`) can land on a different field or on
 // none, so which field is the author's to name.
 //
-// No `REFUSED_STORED_SHAPES` detector lists a stored row in this shape, because
-// none could be reached: `applyConversionsToStoredItem` maps a row type onto a
-// stack collection, and `object_extension` has none (it is in neither
-// `SINGULAR_TO_PLURAL` nor the stored-only map), so the stored pass hands the
-// row back untouched and runs no conversion or detector over it. The criteria
-// below say so, and name the query that finds such a row instead.
+// A stored row in this shape is listed, not rewritten: the stored pass wraps an
+// `object_extension` row as an `objectExtensions` entry (the stored-only map in
+// `conversions/stored.ts`), and the `REFUSED_STORED_SHAPES` detector of this id
+// (`conversions/refused-shapes.ts`) lists each key the extension's own parse
+// refuses as a key, under its row, through `os migrate meta --stored`.
 export const entry: SemanticMigration = {
   id: 'object-extension-field-patch-key-grammar-refused',
   surface:
@@ -37,8 +36,7 @@ export const entry: SemanticMigration = {
     + 'at `fieldPatches.KEY` that names the grammar and an example. A stored `object_extension` row whose '
     + 'body still carries such a key no longer parses, so the sync that registers stored extensions names '
     + 'the row (`INVALID_METADATA`) and registers none of it, its `fields` included, and its next save is '
-    + 'refused until the key is renamed to the field it meant. `os migrate meta --stored` does not list such '
-    + 'a row: the stored pass maps no `object_extension` row onto a stack collection, so it reads the row as '
-    + 'already on protocol. Find one before upgrading by reading each stored `object_extension` row\'s '
-    + '`fieldPatches` keys against the snake_case grammar of `fields` keys.',
+    + 'refused until the key is renamed to the field it meant. `os migrate meta --stored` lists such a row '
+    + 'before the upgrade, one TODO for each refused key at `fieldPatches.KEY` naming the extended object, '
+    + 'and leaves it as stored: rename each listed key to the field it meant and save the extension.',
 };
