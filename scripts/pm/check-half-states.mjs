@@ -8154,9 +8154,20 @@ export function isTriageRulingComment(body) {
 export const H74_POPULATION_LABELS = Object.freeze(['pm:queue', 'pm:blocked']);
 
 /**
- * Exempt by label — the filing card's own list. Tracking anchors, epics, seat
- * posts, QA runs, parked cards and merge-queue flake anchors are never
- * first-touched the way a lane card is, so their silence is the design.
+ * Exempt by label — the filing card's own list, plus the one in-tree anchor
+ * template that is filed AS `pm:queue` and whose title the main-red regex
+ * below does not open: `fleet-patrols.yml`'s platform-checklist watchdog
+ * (title `check:platform-checklist is red on main`, routing labels
+ * `pm:queue,tooling`, identity label `platform-checklist-watchdog`). Read by
+ * its identity label the way `queue-flake-anchor` is, because the identity
+ * label is the machine's and is never graded off, while the title is one
+ * template's wording. Tracking anchors, epics, seat posts, QA runs, parked
+ * cards and both machine anchors are never first-touched the way a lane card
+ * is, so their silence is the design. Census 2026-11-03 of every
+ * `.github/workflows/**` template that files a card: only this one applies
+ * `pm:queue` on create (`test-nightly-tiers.yml` and the scheduled full-run
+ * card file without it — the full-run refresh may re-queue an unassigned card —
+ * and both titles open `: red on main`, which the regex below reads).
  */
 export const H74_EXEMPT_LABELS = Object.freeze([
   TRACKING_ANCHOR_LABEL,
@@ -8165,6 +8176,7 @@ export const H74_EXEMPT_LABELS = Object.freeze([
   'qa-run',
   'status:parked',
   'queue-flake-anchor',
+  'platform-checklist-watchdog',
 ]);
 
 /**
@@ -8324,7 +8336,7 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
     'audit` on the triage mailbox in the same round (`record-recognisers.mjs --mailbox-keys` prints the shape) ' +
     '— ⛔ never a silent wait, and never a report to the maintainer in the mailbox\'s place. Report-only: ⛔ ' +
     'never a label, comment or body written from this script. Exempt by design: `tracking`, `pm:epic`, ' +
-    '`pm:seat`, `qa-run`, `status:parked` and `queue-flake-anchor` carriers; a non-fleet card (human ' +
+    '`pm:seat`, `qa-run`, `status:parked`, `queue-flake-anchor` and `platform-checklist-watchdog` carriers; a non-fleet card (human ' +
     'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s domain or grade.'
   );
 }
@@ -28637,7 +28649,7 @@ async function selfTest() {
   b(BATTERY74, 'H74 thread states: UNREADABLE fires UNJUDGED, never clean', row74(null).startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(row74(null)) && row74(null).includes('not empty'), true);
   b(BATTERY74, 'H74 population: `pm:blocked` is spoken about too, and the row names it', row74([], { labels: [{ name: 'pm:blocked' }, { name: 'domain:spec' }] }).startsWith('`pm:blocked` with'), true);
   b(BATTERY74, '⛔ H74 population: a `pm:dispatched` card is out of scope (its claim is H2\'s subject)', h74([], { labels: [{ name: 'pm:dispatched' }, { name: 'domain:spec' }] }), null);
-  for (const exempt of ['tracking', 'pm:epic', 'pm:seat', 'qa-run', 'status:parked', 'queue-flake-anchor']) {
+  for (const exempt of ['tracking', 'pm:epic', 'pm:seat', 'qa-run', 'status:parked', 'queue-flake-anchor', 'platform-checklist-watchdog']) {
     b(BATTERY74, `⛔ H74 exempt: a \`${exempt}\` carrier is silent`, h74([], { labels: [{ name: 'pm:queue' }, { name: exempt }] }), null);
   }
   b(BATTERY74, 'H74 exempt control: the same card with an unrelated label beside `pm:queue` still fires', typeof h74([], { labels: [{ name: 'pm:queue' }, { name: 'tooling' }] }), 'string');
@@ -28669,7 +28681,13 @@ async function selfTest() {
   b(BATTERY74, 'H74 inherit reader: a null, undefined or sentinel parent inherits nothing, never a crash', [h74InheritsFromParent(card74(), null), h74InheritsFromParent(card74(), undefined), h74InheritsFromParent(card74(), H74_PARENT_UNREADABLE), h74InheritsFromParent(card74(), { labels: undefined })].some(Boolean), false);
   b(BATTERY74, '⛔ H74 population: a closed card, a PR row, an unreadable `labels` and a missing row are all silent, none a crash', [h74([], { state: 'closed' }), h74([], { pull_request: {} }), h74([], { labels: undefined }), h74QueuedWithoutTriageAudit(undefined, [])].every((v) => v === null), true);
   b(BATTERY74, 'H74 population: a null body is no crash and no record — the card still fires on an empty thread', typeof h74([], { body: null }), 'string');
-  b(BATTERY74, 'H74 exempt list: the constant carries exactly the filing card\'s six labels', [...H74_EXEMPT_LABELS].sort().join(), ['pm:epic', 'pm:seat', 'qa-run', 'queue-flake-anchor', 'status:parked', 'tracking'].join());
+  b(BATTERY74, 'H74 exempt list: the constant carries exactly the filing card\'s six labels plus the watchdog anchor\'s identity label', [...H74_EXEMPT_LABELS].sort().join(), ['platform-checklist-watchdog', 'pm:epic', 'pm:seat', 'qa-run', 'queue-flake-anchor', 'status:parked', 'tracking'].join());
+  // The watchdog anchor as fleet-patrols.yml files it: App author, `pm:queue,tooling` routing, identity label. Its
+  // title does NOT open the main-red regex (no colon before `red on main`), so the identity label is what exempts it.
+  const WATCHDOG74 = { title: 'check:platform-checklist is red on main', user: APP74, body: 'os-platform-checklist-watchdog\n\nThe gate is red on main.' };
+  b(BATTERY74, '⛔ H74 exempt: the platform-checklist watchdog anchor is silent by its identity label', h74([], { ...WATCHDOG74, labels: [{ name: 'platform-checklist-watchdog' }, { name: 'pm:queue' }, { name: 'tooling' }] }), null);
+  b(BATTERY74, 'H74 exempt control: the same card WITHOUT the identity label is in the population — the title alone does not exempt it', typeof h74([], { ...WATCHDOG74, labels: [{ name: 'pm:queue' }, { name: 'tooling' }] }), 'string');
+  b(BATTERY74, 'H74 exempt control: …because its title does not open the main-red regex', H74_MAIN_RED_ANCHOR_TITLE.test(WATCHDOG74.title), false);
   b(BATTERY74, 'H74 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row74([])) || /#[0-9]/.test(row74([])) || /[<>]/.test(row74(null)) || /#[0-9]/.test(row74(null)), false);
   b(BATTERY74, 'H74 text: names both remedies — the triage first touch and the lane\'s bell — and the report-only boundary', ['audit it in THIS round', '`Request: triage · #n · first-touch audit`', '--mailbox-keys', 'never a label, comment or body written'].every((x) => row74([]).includes(x)), true);
   b(BATTERY74, 'H74 summary: the coverage pair is reported', saidBy('h74Audit', summaryLine({ triageAuditCandidates: 15, triageAuditProbed: 15 }, 0)).includes('comment threads read on 15 of 15 body-clean'), true);
