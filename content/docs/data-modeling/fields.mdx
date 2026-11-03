@@ -292,9 +292,9 @@ Clearing a relationship is not a dangling reference: `null`, `""` and `[]` all m
 "no link". Which of them `deleteBehavior: 'set_null'` writes when the referenced
 record goes away depends on the field: a single-value lookup is set to `null`, while
 a `multiple: true` lookup keeps its other members and loses only the deleted one —
-and a set emptied that way is written as `[]`, never `null` (the `multiple` doc block
-in `packages/spec/src/data/field.zod.ts`, rendered in the
-[Field reference](/docs/references/data/field)).
+and on an optional field a set emptied that way is stored as `null`, the same as one
+never set (the `multiple` doc block in `packages/spec/src/data/field.zod.ts`, rendered
+in the [Field reference](/docs/references/data/field)).
 
 <Callout type="info">
 `deleteBehavior` governs what happens to *this* record when the **referenced**
