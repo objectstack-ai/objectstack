@@ -1166,6 +1166,14 @@ export const ERROR_CODE_LEDGER = {
     // routes answer through `handleRouteError`, which resolves the thrown
     // refusal through this table. The code itself is metadata-protocol's.
     'METADATA_CONFLICT',
+    // The data API's host-configured read limits (`query-read-limits.ts`,
+    // `OS_DATA_DEFAULT_PAGE_SIZE` / `OS_DATA_MAX_PAGE_SIZE` /
+    // `OS_DATA_QUERY_ROW_BUDGET`): `QueryReadLimitError` carries both, 400,
+    // naming the limit. Thrown by `metadata-protocol`'s `findData` (the list
+    // doors) and `service-analytics`' `query` / `queryDataset` (the analytics,
+    // report and dashboard reads), before the driver is asked.
+    'QUERY_PAGE_SIZE_EXCEEDED',   // a `limit` over the maximum page size, or an unpaged analytics answer larger than the default page
+    'QUERY_ROW_BUDGET_EXCEEDED',  // `offset` plus the rows a query returns is over the per-query row budget
     'UNIQUE_VIOLATION',
   ],
   '@objectstack/hono': [
