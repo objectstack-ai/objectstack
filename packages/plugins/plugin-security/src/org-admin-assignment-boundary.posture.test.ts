@@ -304,7 +304,15 @@ async function seedIn(h: Harness, table: Table, id: string, organizationId: stri
 }
 
 const ORG_ADMINS = ['orgAdmin', 'orgAdminNoBypass'] as const;
-const write = (h: Harness, table: Table, op: 'update' | 'delete', id: string, context: object) =>
+
+/** `caller`'s own by-id read of `id`: the read door's answer to it. */
+function readAs(h: Harness, table: Table, id: string, caller: Caller) {
+  const { positions, permissions, ...rest } = CALLERS[caller];
+  const context = { ...rest, positions: [...positions], permissions: [...permissions] };
+  return h.engine.findOne(table, { where: { id }, context });
+}
+
+const write =(h: Harness, table: Table, op: 'update' | 'delete', id: string, context: object) =>
   answerOf(() => op === 'update'
     ? h.engine.update(table, { reason: 'edited' }, { where: { id }, context } as any)
     : h.engine.delete(table, { where: { id }, context } as any));
@@ -322,7 +330,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
           for (const caller of ORG_ADMINS) {
             const context = CALLERS[caller];
             // The precondition, read off the read door: this caller reads no such row.
-            expect(await h.engine.findOne(table, { where: { id }, context } as any), `${caller} reads ${table} ${id}`).toBeFalsy();
+            expect(await readAs(h, table, id, caller), `${caller} reads ${table} ${id}`).toBeFalsy();
             for (const op of ['update', 'delete'] as const) {
               const row = await write(h, table, op, id, context);
               const none = await write(h, table, op, NOWHERE, context);
@@ -340,7 +348,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
           await seed(h, table, 'own_out', 'out');
           for (const caller of ORG_ADMINS) {
             const context = CALLERS[caller];
-            expect(await h.engine.findOne(table, { where: { id: 'own_out' }, context } as any), `${caller} reads ${table}`).toBeTruthy();
+            expect(await readAs(h, table, 'own_out', caller), `${caller} reads ${table}`).toBeTruthy();
             const own = await write(h, table, 'delete', 'own_out', context);
             expect([own.status, own.code], `${caller} ${table}: ${own.message}`).toEqual([403, 'PERMISSION_DENIED']);
             expect(own.message).toMatch(/'admin_full_access'.*by name/);
@@ -373,7 +381,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
       await seedIn(h, table, id, ORG_B, 'u_other_org');
       for (const caller of ORG_ADMINS) {
         const context = CALLERS[caller];
-        expect(await h.engine.findOne(table, { where: { id }, context } as any), `${caller} reads ${table}`).toBeTruthy();
+        expect(await readAs(h, table, id, caller), `${caller} reads ${table}`).toBeTruthy();
         const row = await write(h, table, 'delete', id, context);
         expect([row.status, row.code], `${caller} ${table}: ${row.message}`).toEqual([403, 'PERMISSION_DENIED']);
         expect(row.message).toMatch(/belongs to organization 'org_b'/);
