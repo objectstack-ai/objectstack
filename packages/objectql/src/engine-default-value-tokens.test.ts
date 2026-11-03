@@ -103,8 +103,11 @@ describe('[#4560] the `current_user` defaultValue token is engine-owned', () => 
     // decision a column DEFAULT used to override, writing the literal string
     // `current_user` into a lookup('sys_user') column (#4560).
     const row: any = await engine.insert('tok_doc', { title: 'B' }, { context: { isSystem: true } } as any);
-    expect(row.owner).toBeUndefined();
-    expect(row.owner).not.toBe('current_user');
+    // [#29538] The answer is the next read's record: a column nothing was
+    // stored in reads `null`. "Unset" is the STORED row's own: no key at all.
+    expect(row.owner).toBeNull();
+    const stored = await engine.getDriverForObject('tok_doc')!.findOne('tok_doc', { where: { id: row.id } });
+    expect(stored).not.toHaveProperty('owner');
   });
 
   it('an explicit null is treated as "not supplied" and still resolves the token (#2706)', async () => {

@@ -392,6 +392,7 @@ import {
   rowsWithDeclaredColumnsOnly,
   rowsWithSelectedColumnsAnswered,
   selectedStoredColumns,
+  storedColumnsLeftUnwritten,
   withDeclaredColumnsOnly,
   withSelectedColumnsAnswered,
 } from './declared-read-columns.js';
@@ -4733,6 +4734,12 @@ export interface DatasourceDef {
      * schema mode.
      */
     credentialsRef?: string;
+    /**
+     * [#29762] The datasource's plugin-driver row cap (`external.rowCap`).
+     * Read by the floor on every read (`resolveExternalRowCap`), so a
+     * redefinition takes effect without re-wrapping the driver.
+     */
+    rowCap?: number;
   };
 }
 
@@ -9941,6 +9948,9 @@ export class ObjectQL implements IObjectQLEngine {
       this.drivers.set(name, createExternalDriverFloor(current, {
         datasource: name,
         fieldsOf: (object) => this._registry.getObject(object)?.fields,
+        // [#29762] Read from the def held NOW, on every read: a redefinition
+        // that keeps the floor returns above without re-wrapping the driver.
+        rowCap: () => this.datasourceDefs.get(name)?.external?.rowCap,
         logger: this.logger,
       }));
       this.logger.info('Datasource served by a plugin driver: the engine applies each query in memory', {
@@ -16686,6 +16696,22 @@ export class ObjectQL implements IObjectQLEngine {
         result = isBatch
           ? rowsWithDeclaredColumnsOnly(result as unknown[], declaredInsertColumns)
           : withDeclaredColumnsOnly(result, declaredInsertColumns);
+        // [#29538] …and answered on every stored declared column, as the next
+        // read of the row answers it (#29408): a column the driver did not
+        // echo (driver-mongodb and driver-memory store only written keys) is
+        // `null`. A write names no projection, so it selects the whole stored
+        // record. Before the formulas, so a formula over an unwritten column
+        // evaluates against `null` as the read's does; inside the verb, so the
+        // security middleware's field mask still deletes an FLS-refused key.
+        // A column the row's payload carried a value for is stored, so it is
+        // never answered `null`: a driver that did not echo it leaves it
+        // absent (`storedColumnsLeftUnwritten`). Rows pair with `liveRows` by
+        // index, which the one-row-per-input guard above holds.
+        const insertAnswerColumns = selectedStoredColumns(schemaForValidation, undefined);
+        result = isBatch
+          ? (result as unknown[]).map((row, i) =>
+              withSelectedColumnsAnswered(row, storedColumnsLeftUnwritten(insertAnswerColumns, liveRows[i])))
+          : withSelectedColumnsAnswered(result, storedColumnsLeftUnwritten(insertAnswerColumns, liveRows[0]));
 
         // Coerce `boolean` fields (SQLite/libsql return 0/1) to real booleans on
         // the after-hook view so flow trigger conditions (`record.is_escalated
@@ -18355,6 +18381,12 @@ export class ObjectQL implements IObjectQLEngine {
                // `data.record.updated` event and the door's ingress strip. A
                // `null` readback (the row left the caller's scope) stays `null`.
                result = withDeclaredColumnsOnly(result, declaredColumnSet(updateSchema));
+               // [#29538] Same answer on the stored declared columns as the
+               // insert result and the next read (#29408), less those the
+               // PATCH or the stored row before it carried a value for.
+               result = withSelectedColumnsAnswered(result, storedColumnsLeftUnwritten(
+                 selectedStoredColumns(updateSchema, undefined), hookContext.input.data, priorRecord,
+               ));
                // [#27495] The handle the stored row named before, where this
                // statement cleared or replaced it.
                retiredSecrets = retiredSecretSlots(updateSchema, [priorRecord], hookContext.input.data);
@@ -19470,11 +19502,12 @@ export class ObjectQL implements IObjectQLEngine {
    *   - `set_null` → clear the foreign key. On a MULTI-VALUED field
    *                  ([#18408] {@link declaredMultiValued}, ⛔ not the raw
    *                  flag) the FK is a SET, so "clear" means remove the
-   *                  deleted MEMBER and keep the rest; an emptied set is
-   *                  written as `[]`,
-   *                  never `null` — the representation `FieldSchema` pins
+   *                  deleted MEMBER and keep the rest; an emptied set on
+   *                  an optional field is stored as `null`, the same as one
+   *                  never set — the representation `FieldSchema` pins
    *                  (`packages/spec/src/data/field.zod.ts`, the `multiple`
-   *                  doc block, #9447 maintainer ruling 2026-08-18),
+   *                  doc block, ruling A on #29343, record 6591577985,
+   *                  amending #9447),
    *   - `restrict` → refuse the delete when dependents exist.
    * `master_detail` defaults to `cascade` (the parent owns the child
    * lifecycle); `lookup` and `tree` default to `set_null` — except a `set_null` default
@@ -20249,10 +20282,12 @@ export class ObjectQL implements IObjectQLEngine {
                 // The residual shape when the last member goes is not this
                 // engine's call to make: `FieldSchema` pins it —
                 // `packages/spec/src/data/field.zod.ts`, the `multiple` and
-                // `required` doc blocks (#9447, maintainer ruling 2026-08-18) —
-                // and this write consumes that contract: the emptied set is
-                // written as `[]`, which `Array.prototype.filter` already
-                // yields, never `null`.
+                // `required` doc blocks (ruling A on #29343, record
+                // 6591577985, amending #9447) — and this write consumes that
+                // contract: it hands the write door the `[]` that
+                // `Array.prototype.filter` yields, and the door stores an
+                // emptied optional set as `null` (`blankAsNullColumns`, reach
+                // `'emptyList'`), the same as one never set.
                 //
                 // [#9688] The remainder is computed by
                 // `remainderAfterMemberRemoval`, which the per-row required

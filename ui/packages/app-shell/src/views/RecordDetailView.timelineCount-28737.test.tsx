@@ -184,13 +184,13 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-async function boot(answers: Answers = {}, entry = `/apps/demo/${OBJECT}/record/c1`) {
+async function boot(answers: Answers = {}, entry = `/apps/demo/${OBJECT}/record/c1`, objects: readonly unknown[] = ALL) {
   const { fetch, held } = heldTransport(answers);
   vi.stubGlobal('fetch', fetch);
   const ds = new ObjectStackAdapter({ baseUrl: BASE, fetch, autoReconnect: false });
   await ds.connect();
   const metadata = {
-    objects: ALL, pages: [], loading: false, error: null,
+    objects, pages: [], loading: false, error: null,
     refresh: async () => {}, invalidate: () => {},
     ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
   } as never;
@@ -198,7 +198,7 @@ async function boot(answers: Answers = {}, entry = `/apps/demo/${OBJECT}/record/
     <React.StrictMode>
       <MemoryRouter initialEntries={[entry]}>
         <MetadataCtx.Provider value={metadata}>
-          <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride="c1" />
+          <RecordDetailView dataSource={ds as never} objects={objects as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride="c1" />
         </MetadataCtx.Provider>
       </MemoryRouter>
     </React.StrictMode>,
@@ -270,5 +270,32 @@ describe('objectstack#28737 — the 动态 count is the server\'s, and the page 
     await settle(held);
     // One comment + five activity rows: what the page holds, not the record's stream.
     expect(chipOf(view.container)).toBe('6');
+  });
+});
+
+/**
+ * objectstack#29878 — the page's `timeline` ask counts the field changes when
+ * the record's object declares `enable.trackHistory` and the objects the view
+ * is handed hold `sys_audit_log` (the record route asks it by name for such an
+ * object: `appObjectScope.ts`). Without the audit object in hand it asks none.
+ */
+describe('objectstack#29878 — the timeline ask counts the field changes of a tracked object', () => {
+  const tracked = { ...contactDef, enable: { ...contactDef.enable, trackHistory: true } };
+  const auditDef = { name: 'sys_audit_log', label: 'Audit Log', fields: { id: { label: 'Id', type: 'text' } } };
+
+  it('with sys_audit_log in the objects, the page asks fieldChanges: true', async () => {
+    const { held, open } = await boot({ timeline: { total: 3 } }, undefined, [tracked, accountDef, childDef, auditDef]);
+    open();
+    await settle(held);
+    const [page] = held.filter(isPage);
+    expect(page.body.timeline).toEqual({ discussion: true, activity: true, fieldChanges: true });
+  });
+
+  it('CONTROL: without sys_audit_log in the objects, it asks fieldChanges: false', async () => {
+    const { held, open } = await boot({ timeline: { total: 3 } }, undefined, [tracked, accountDef, childDef]);
+    open();
+    await settle(held);
+    const [page] = held.filter(isPage);
+    expect(page.body.timeline).toEqual({ discussion: true, activity: true, fieldChanges: false });
   });
 });

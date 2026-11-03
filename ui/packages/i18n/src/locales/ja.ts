@@ -296,6 +296,8 @@ const ja = {
       takePhoto: '写真を撮る',
       takeSelfie: '自撮り',
       cameraCapture: 'カメラ撮影',
+      choosePhoto: '写真を選択',
+      photoFailed: '写真を取得できませんでした',
       uploading: 'アップロード中…',
       uploadingPct: 'アップロード中…（{{pct}}%）',
       fileFallback: 'ファイル',
@@ -3002,6 +3004,12 @@ const ja = {
       saved: "言語の設定を更新しました。",
       readOnly: "このアカウントの言語は管理者が管理しています。",
     },
+    appLock: {
+      title: "アプリロック",
+      off: "オフ",
+      onImmediately: "オン：アプリを離れるとすぐにロック",
+      onAfter: "オン：アプリを離れて{{duration}}後にロック",
+    },
     password: {
       changeTitle: "パスワードを変更",
       setTitle: "ローカルパスワードを設定",
@@ -3304,6 +3312,8 @@ const ja = {
     appNothingAvailableGrantDescription: "このアプリには、お使いのアカウントで開けるページがありません。設定でアクセス権を付与できます。",
     appNoReadableObjectDescription: "お使いのアカウントでは、このアプリのレコードをまだ読み取れません。管理者に権限セットの割り当てを依頼してください。",
     appNoReadableObjectGrantDescription: "お使いのアカウントでは、このアプリのレコードをまだ読み取れません。設定でアクセス権を付与できます。",
+    appOpensFromMenu: "{{app}} はメニューから使います",
+    appOpensFromMenuDescription: "このアプリには専用のページがありません。メニューの項目を選んで、リンクを開くか操作を実行してください。",
     openSetup: "設定を開く",
     createFirstApp: "最初のアプリを作成",
     systemSettings: "システム設定",
@@ -3981,25 +3991,12 @@ const ja = {
     buyCredits: "クレジットパックを購入",
     upgradePlan: "プランをアップグレード",
   },
-  planTier: {
-    teamAndUp: "Team プラン以上",
-  },
   environment: {
     setUpProduction: "本番環境をセットアップ",
-    addDevelopment: "開発環境を追加",
-    developmentLocked: "開発環境 · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "本番環境はすでに作成済みです",
       productionLimitBody: "各組織に含まれる本番環境は 1 つだけです。もう 1 つ必要な場合は別の組織を作成するか、エンタープライズ契約についてお問い合わせください。",
-      planLockedTitle: "開発環境は有料機能です",
-      planLockedBody: "{{plan}}には本番環境が 1 つ含まれます。アップグレードすると開発環境を追加できます（開発環境で構築し、本番環境に公開します）。",
-      limitTitle: "開発環境の上限に達しました",
-      limitBody: "上限は AI シート数に応じて増えます。AI シートを追加するか、使用していない開発環境をアーカイブして空きを作ってください。",
-      limitBodyWithCount: "開発環境を {{used}}/{{limit}} 使用中です。上限は AI シート数に応じて増えます。AI シートを追加するか、使用していない開発環境をアーカイブしてください。",
-      freePlan: "無料プラン",
-      namedPlan: "{{plan}} プラン",
-      upgradeCta: "プランをアップグレード",
       contactSalesCta: "営業に問い合わせる",
     },
   },
@@ -4508,6 +4505,7 @@ const ja = {
       draftedByMcp: 'MCP クライアントが下書きした変更を含みます',
       detailChangedKeys: 'その他の変更：',
       detailNewKeys: '含まれるもの：',
+      detailNewItem: '公開するとこの項目が追加されます。',
       generatedGroup: 'プラットフォームが生成（{{n}}）',
       confirmNote: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて公開されます。すべて公開されるか、何も公開されないかのどちらかです。',
       confirmNote_one: '公開すると、このパッケージの保留中ドラフト {{count}} 件が公開されます。公開されるか、何も変わらないかのどちらかです。',
@@ -4558,6 +4556,9 @@ const ja = {
         email_template: 'メールテンプレート {{count}}',
         email_template_one: 'メールテンプレート {{count}}',
         email_template_other: 'メールテンプレート {{count}}',
+        object_extension: 'オブジェクト拡張 {{count}}',
+        object_extension_one: 'オブジェクト拡張 {{count}}',
+        object_extension_other: 'オブジェクト拡張 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

@@ -299,6 +299,8 @@ const fr = {
       takePhoto: 'Prendre une photo',
       takeSelfie: 'Prendre un selfie',
       cameraCapture: 'Capture photo',
+      choosePhoto: 'Choisir une photo',
+      photoFailed: "Impossible d'obtenir la photo",
       uploading: 'Téléversement…',
       uploadingPct: 'Téléversement… ({{pct}} %)',
       fileFallback: 'Fichier',
@@ -3059,6 +3061,12 @@ const fr = {
       saved: "Préférence de langue mise à jour.",
       readOnly: "La langue de votre compte est gérée par votre administrateur.",
     },
+    appLock: {
+      title: "Verrouillage de l'app",
+      off: "Désactivé",
+      onImmediately: "Activé, se verrouille dès que vous quittez l'app",
+      onAfter: "Activé, se verrouille {{duration}} après avoir quitté l'app",
+    },
     password: {
       changeTitle: "Changer le mot de passe",
       setTitle: "Définir un mot de passe local",
@@ -3365,6 +3373,8 @@ const fr = {
     appNothingAvailableGrantDescription: "Cette application ne contient aucune page que votre compte peut ouvrir. Vous pouvez accorder l'accès dans la configuration.",
     appNoReadableObjectDescription: "Votre compte ne peut encore lire aucun enregistrement de cette application. Demandez à un administrateur de vous attribuer un ensemble d'autorisations.",
     appNoReadableObjectGrantDescription: "Votre compte ne peut encore lire aucun enregistrement de cette application. Vous pouvez accorder l'accès dans la configuration.",
+    appOpensFromMenu: "{{app}} s'utilise depuis son menu",
+    appOpensFromMenuDescription: "Cette application n'a pas de page propre. Choisissez une entrée de son menu pour ouvrir un lien ou lancer une action.",
     openSetup: "Ouvrir la configuration",
     createFirstApp: "Créer la première application",
     systemSettings: "Paramètres système",
@@ -4058,25 +4068,12 @@ const fr = {
     buyCredits: "Acheter un pack de crédits",
     upgradePlan: "Changer d'offre",
   },
-  planTier: {
-    teamAndUp: "À partir de l'offre Team",
-  },
   environment: {
     setUpProduction: "Configurer votre environnement de production",
-    addDevelopment: "Ajouter un environnement de développement",
-    developmentLocked: "Environnements de développement · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "Vous avez déjà votre environnement de production",
       productionLimitBody: "Chaque organisation comprend exactement un environnement de production. Créez une organisation distincte pour en avoir un autre, ou contactez-nous au sujet d'une offre Enterprise.",
-      planLockedTitle: "Les environnements de développement sont une fonctionnalité payante",
-      planLockedBody: "Votre {{plan}} comprend un environnement de production. Passez à une offre supérieure pour ajouter des environnements de développement — développez en dev, puis publiez en production.",
-      limitTitle: "Limite d'environnements de développement atteinte",
-      limitBody: "La capacité évolue avec les sièges IA. Ajoutez un siège IA, ou archivez un environnement de développement inutilisé pour libérer une place.",
-      limitBodyWithCount: "Vous utilisez {{used}} environnements de développement sur {{limit}}. La capacité évolue avec les sièges IA — ajoutez un siège IA, ou archivez un environnement de développement inutilisé.",
-      freePlan: "offre gratuite",
-      namedPlan: "offre {{plan}}",
-      upgradeCta: "Changer d'offre",
       contactSalesCta: "Contacter le service commercial",
     },
   },
@@ -4602,6 +4599,7 @@ const fr = {
       draftedByMcp: 'Inclut des modifications rédigées par un client MCP',
       detailChangedKeys: 'Également modifié :',
       detailNewKeys: 'Inclut :',
+      detailNewItem: 'La publication ajoute cet élément.',
       generatedGroup: 'Généré par la plateforme ({{n}})',
       confirmNote: 'La publication libère ensemble les {{count}} brouillons en attente de ce paquet : tous sont mis en ligne, ou aucun.',
       confirmNote_one: 'La publication libère {{count}} brouillon en attente de ce paquet : il est mis en ligne, ou rien ne change.',
@@ -4666,6 +4664,10 @@ const fr = {
         email_template_one: '{{count}} modèle d’e-mail',
         email_template_many: '{{count}} de modèles d’e-mail',
         email_template_other: '{{count}} modèles d’e-mail',
+        object_extension: '{{count}} extensions d’objet',
+        object_extension_one: '{{count}} extension d’objet',
+        object_extension_many: '{{count}} d’extensions d’objet',
+        object_extension_other: '{{count}} extensions d’objet',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

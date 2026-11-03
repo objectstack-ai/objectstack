@@ -55,6 +55,7 @@ import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
 import { refuseDeclarativeUpdateContradictions, type DeclarativeUpdateSurface } from './action-declarative-update';
+import { CONFIRM_BESIDE_PARAMS_REFUSAL, declaresConfirmBesideParams } from './action-confirm-beside-params';
 import { navigationTargetRefusal } from './navigation-target';
 
 /**
@@ -1511,16 +1512,20 @@ const actionObject = () => strictObject({
 
   /** UX Behavior */
   // NB this describe() renders into the InlineAction reference table too (both
-  // tables derive from this one field factory), and the #7428 refusal lives on
-  // `ActionSchema`'s refine chain alone — hence "a registered action" rather
-  // than an unqualified claim that would be false on the inline surface.
+  // tables derive from this one field factory). The #7428 refusal lives on
+  // both these tables' refine chains — `ActionSchema`'s and, since #29383,
+  // `InlineActionSchema`'s — so the pair sentence below is unqualified; a
+  // view's `bulkActionDefs` declares its own `confirmText`, not this one. The
+  // page `action:button` row declares its own `confirmText` too and, since
+  // #29844, refuses the pair through the same predicate
+  // (`./action-confirm-beside-params.ts`).
   //
   // [#24814, ADR-0032 Decisions 2–3] `confirmText` and `successMessage` are
   // `template` slots, one family with the page action rows' copy keys
   // (`./action-copy-template.ts`): the runner reads the same key from both.
   // The inline locale map `I18nLabelSchema` took stays an arm, so the parse
   // does not narrow; each of its values is a sentence the doors judge alike.
-  confirmText: actionCopy('confirmText').optional().describe(`Confirmation message before execution — ${ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence. On a registered action, pairing this with a non-empty \`params\` is refused — that opens a second dialog for one decision; put the question on \`description\` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.`),
+  confirmText: actionCopy('confirmText').optional().describe(`Confirmation message before execution — ${ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence. Pairing this with a non-empty \`params\` is refused — that opens a second dialog for one decision; put the question on \`description\` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.`),
   // `result` is the payload `onSuccess.navigate` reads as `${result.*}` (see
   // that key's docblock for its members) — the copy reads the same payload,
   // as a `{{ result.* }}` hole since #24814 (the `${result.*}` spelling it
@@ -2294,26 +2299,18 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // dialog that has not opened. That schema is a separate `strictObject` with
   // its own refinements, so this refusal is structurally incapable of
   // reaching it; `action-confirm-params-guard.test.ts` pins that both ways.
-  // The same holds for {@link InlineActionSchema}, which `.pick()`s from the
-  // field factory rather than deriving from this chain, so this refusal does
-  // not reach an inline action. The inline pick does carry `description` now,
-  // so the remedy below has a slot there too; whether the inline door should
-  // also refuse the pair is a separate narrowing question, not decided here.
-  if (data.confirmText != null && Array.isArray(data.params) && data.params.length > 0) {
-    return false;
-  }
-  return true;
-}, {
-  message:
-    'An action that declares `confirmText` beside a non-empty `params` shows the user TWO dialogs '
-    + 'for one decision — the confirm, then the param prompt, with nothing sent until the second. '
-    + "Carry the confirm question in the action's top-level `description` instead (it renders under "
-    + 'the param dialog\'s title) and drop `confirmText`: one condition, one wording, one dialog. '
-    + 'Not `ai.description` — that is the LLM-facing tool contract. `confirmText` stays '
-    + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
-    + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
-  path: ['confirmText'],
-}).refine((data) => {
+  //
+  // {@link InlineActionSchema} `.pick()`s from the field factory rather than
+  // deriving from this chain, so it carries the same refusal on its own chain
+  // (#29383, ruling record 6595808462 letter A): an inline action is drawn by
+  // the same runner, so the pair opens the same two dialogs there, and its
+  // pick carries `description`, so the remedy has a slot on that door too.
+  // The page `action:button` row (`ActionButtonPropsSchema`, `component.zod.ts`)
+  // is the third door (#29844, ruling record 6597621758 letter A): it forwards
+  // its `confirmText` and an array `params` to the same runner. All three read
+  // the predicate and the refusal from `./action-confirm-beside-params.ts`.
+  return !declaresConfirmBesideParams(data);
+}, CONFIRM_BESIDE_PARAMS_REFUSAL).refine((data) => {
   // [#27944] The mirror of the rule above, for the param dialog's button copy.
   // The console's action runner opens the param dialog only for a non-empty
   // `params` array (objectui `ActionRunner.execute`), so `submitText` on any
@@ -2622,7 +2619,14 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
   }, {
     message: "Inline action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form' (`to` is accepted as a legacy spelling).",
     path: ['target'],
-  }).superRefine(refuseUnopenableUrlTarget(
+  }).refine(
+    // ActionSchema's `confirmText` + non-empty `params` refusal, the same
+    // predicate and the same message (#29383, ruling record 6595808462 letter
+    // A): the `element:button` renderer runs an inline action through the
+    // registered action's runner, so the pair opens the same two dialogs.
+    (data) => !declaresConfirmBesideParams(data),
+    CONFIRM_BESIDE_PARAMS_REFUSAL,
+  ).superRefine(refuseUnopenableUrlTarget(
     "An inline `type: 'url'` action's `target` (or its legacy spelling `to`)",
   )),
 ));

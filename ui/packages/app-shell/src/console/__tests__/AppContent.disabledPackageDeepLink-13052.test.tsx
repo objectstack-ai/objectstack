@@ -18,6 +18,12 @@
  *   (d) a 404 carrying a code this build does not know draws the failed state;
  *   CONTROL: a served object renders, and every open asks its object once.
  *
+ * objectstack#29728 (its own describe below, over a REAL `ObjectStackAdapter`
+ * driven by a fake `fetch`): a failed read the server ANSWERED (a 5xx, a 404
+ * with a code this build does not know) draws the server's sentence and code
+ * in that failed state; the network sentence is only for a read that got no
+ * answer, and a refused read (403) keeps it, as before.
+ *
  * The harness is `AppContent.objectScope-12811.test.tsx`'s: the REAL
  * `MetadataProvider` under the real `AppContent`, with a client double that
  * records each call by URL. The double throws what the real adapter throws for
@@ -35,7 +41,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter, Routes, Route, useParams } from 'react-router-dom';
 import { AuthProvider, ActiveOrganizationStorage } from '@object-ui/auth';
 import type { AuthClient, AuthOrganization } from '@object-ui/auth';
-import { MetadataNotFoundError } from '@object-ui/data-objectstack';
+import { MetadataNotFoundError, ObjectStackAdapter } from '@object-ui/data-objectstack';
 
 vi.mock('@object-ui/plugin-designer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-designer')>()),
@@ -305,5 +311,171 @@ describe('a deep link to an object read by name always leaves the splash (object
     expect(probeReads()).toBe(1);
     expect(screen.queryByTestId('route-object-read-failed')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+// ── objectstack#29728 — the failed state says what the server said ─────────
+
+type Answered = 'served' | 'wrapped-503' | 'flat-500' | 'unknown-404' | 'network' | 'forbidden-403' | 'absent' | 'disabled';
+
+const wire = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+function answerWire(answer: Answered): Response {
+  switch (answer) {
+    case 'served':
+      return wire(200, { success: true, data: { type: 'object', name: PROBE, item: structuredClone(PROBE_DEF) } });
+    case 'wrapped-503':
+      return wire(503, { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The metadata store is down for maintenance.' } });
+    case 'flat-500':
+      return wire(500, { error: 'Database connection refused.', code: 'INTERNAL_ERROR' });
+    case 'unknown-404':
+      return wire(404, { success: false, error: { code: 'SOME_FUTURE_REFUSAL', message: 'This object is quarantined.' } });
+    case 'forbidden-403':
+      return wire(403, { success: false, error: { code: 'PERMISSION_DENIED', message: `You may not read ${PROBE}.` } });
+    case 'absent':
+      return wire(404, { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'not found' } });
+    case 'disabled':
+      return wire(404, { success: false, error: { code: 'OBJECT_PACKAGE_DISABLED', message: 'disabled package' } });
+    case 'network':
+      throw new TypeError('Failed to fetch');
+  }
+}
+
+const PROBE_PAGE = { name: 'probe_page', label: 'Probe page', type: 'app', object: PROBE, _packageId: PKG, regions: [] };
+const wireServer = { calls: [] as string[], next: 'served' as Answered };
+let wireSeq = 0;
+
+/** The REAL adapter (its error rewrap included), over a fake `fetch`. */
+function makeRealAdapter() {
+  return new ObjectStackAdapter({
+    baseUrl: `http://route-answer-29728-${(wireSeq += 1)}.test`,
+    autoReconnect: false,
+    fetch: (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/discovery')) return wire(200, { success: true, data: {} });
+      wireServer.calls.push(url.pathname);
+      if (url.pathname === `/api/v1/meta/object/${PROBE}`) return answerWire(wireServer.next);
+      if (url.pathname === `/api/v1/meta/page/${PROBE_PAGE.name}`) {
+        return wire(200, { success: true, data: { type: 'page', name: PROBE_PAGE.name, item: structuredClone(PROBE_PAGE) } });
+      }
+      const list = /^\/api\/v1\/meta\/([a-z_]+)$/.exec(url.pathname);
+      if (list) {
+        const pkg = url.searchParams.get('packageId');
+        const all: any[] = list[1] === 'object' ? OBJECTS : list[1] === 'app' ? APPS : list[1] === 'page' ? [PROBE_PAGE] : [];
+        const items = pkg ? all.filter((o) => o._packageId === pkg) : all;
+        return wire(200, { success: true, data: { type: list[1], items: structuredClone(items) } });
+      }
+      return wire(404, { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `no route ${url.pathname}` } });
+    }) as typeof fetch,
+  });
+}
+
+function bootReal(url: string) {
+  render(
+    <AuthProvider authUrl="/api/auth" client={authClient()}>
+      <MetadataProvider adapter={makeRealAdapter()}>
+        <MemoryRouter initialEntries={[url]}>
+          <Routes>
+            <Route path="/apps/:appName/*" element={<AppContent />} />
+          </Routes>
+        </MemoryRouter>
+      </MetadataProvider>
+    </AuthProvider>,
+  );
+}
+
+const NETWORK_SENTENCE = 'Check your connection and try again.';
+const wireProbeReads = () => wireServer.calls.filter((c) => c === `/api/v1/meta/object/${PROBE}`).length;
+
+describe('a route whose object read the server answered says what the server said (objectstack#29728)', () => {
+  beforeEach(() => {
+    wireServer.calls = [];
+    wireServer.next = 'served';
+  });
+
+  const answeredCases = [
+    { answer: 'wrapped-503', code: 'SERVICE_UNAVAILABLE', sentence: 'The metadata store is down for maintenance.' },
+    { answer: 'flat-500', code: 'INTERNAL_ERROR', sentence: 'Database connection refused.' },
+    { answer: 'unknown-404', code: 'SOME_FUTURE_REFUSAL', sentence: 'This object is quarantined.' },
+  ] as const;
+
+  for (const { answer, code, sentence } of answeredCases) {
+    it(`an answered ${answer} draws the server's code and sentence, not the network sentence`, async () => {
+      wireServer.next = answer;
+      bootReal(DEEP_LINK);
+      await waitFor(() => expect(screen.getByTestId('route-object-read-failed')).toBeInTheDocument());
+      const failed = screen.getByTestId('route-object-read-failed');
+      expect(failed).toHaveTextContent(sentence);
+      expect(failed).not.toHaveTextContent(NETWORK_SENTENCE);
+      expect(screen.getByTestId('route-object-read-failed-code')).toHaveTextContent(code);
+      expect(failed).toContainElement(screen.getByTestId('route-object-read-failed-code'));
+      expect(splashUp()).toBe(false);
+    });
+  }
+
+  it('an answered 503 on a PAGE route (the objects its page binds) draws the server code and sentence', async () => {
+    wireServer.next = 'wrapped-503';
+    bootReal(`/apps/showcase_app/page/${PROBE_PAGE.name}`);
+    await waitFor(() => expect(screen.getByTestId('route-object-read-failed')).toBeInTheDocument());
+    expect(screen.getByTestId('route-object-read-failed')).toHaveTextContent('The metadata store is down for maintenance.');
+    expect(screen.getByTestId('route-object-read-failed-code')).toHaveTextContent('SERVICE_UNAVAILABLE');
+  });
+
+  it('CONTROL: a request that got no answer keeps the network sentence, with no code', async () => {
+    wireServer.next = 'network';
+    bootReal(DEEP_LINK);
+    await waitFor(() => expect(screen.getByTestId('route-object-read-failed')).toBeInTheDocument());
+    expect(screen.getByTestId('route-object-read-failed')).toHaveTextContent(NETWORK_SENTENCE);
+    expect(screen.getByTestId('route-object-read-failed')).not.toHaveTextContent('Failed to fetch');
+    expect(screen.queryByTestId('route-object-read-failed-code')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL: a refused read (403) keeps the failed state it drew before, with no server text', async () => {
+    wireServer.next = 'forbidden-403';
+    bootReal(DEEP_LINK);
+    await waitFor(() => expect(screen.getByTestId('route-object-read-failed')).toBeInTheDocument());
+    expect(screen.getByTestId('route-object-read-failed')).toHaveTextContent(NETWORK_SENTENCE);
+    expect(screen.getByTestId('route-object-read-failed')).not.toHaveTextContent(`You may not read ${PROBE}.`);
+    expect(screen.queryByTestId('route-object-read-failed-code')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL: RESOURCE_NOT_FOUND and OBJECT_PACKAGE_DISABLED keep their own states', async () => {
+    wireServer.next = 'absent';
+    bootReal(DEEP_LINK);
+    await waitFor(() => expect(screen.getByTestId('object-not-found')).toBeInTheDocument());
+    expect(screen.queryByTestId('route-object-read-failed')).not.toBeInTheDocument();
+    cleanup();
+
+    wireServer.next = 'disabled';
+    bootReal(DEEP_LINK);
+    await waitFor(() => expect(screen.getByTestId('object-package-disabled')).toBeInTheDocument());
+    expect(screen.queryByTestId('route-object-read-failed')).not.toBeInTheDocument();
+  });
+
+  it('Retry is unchanged: one more read, and a served answer renders the object with no failed state left', async () => {
+    wireServer.next = 'wrapped-503';
+    bootReal(DEEP_LINK);
+    await waitFor(() => expect(screen.getByTestId('route-object-read-failed-code')).toBeInTheDocument());
+    await settle();
+    expect(wireProbeReads()).toBe(1);
+
+    wireServer.next = 'served';
+    fireEvent.click(screen.getByTestId('route-object-read-failed-retry'));
+    await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent(PROBE));
+    await settle();
+    expect(wireProbeReads()).toBe(2);
+    expect(screen.queryByTestId('route-object-read-failed-code')).not.toBeInTheDocument();
+  });
+
+  it('Retry that the server answers differently draws the new answer', async () => {
+    wireServer.next = 'wrapped-503';
+    bootReal(DEEP_LINK);
+    await waitFor(() => expect(screen.getByTestId('route-object-read-failed-code')).toHaveTextContent('SERVICE_UNAVAILABLE'));
+    wireServer.next = 'network';
+    fireEvent.click(screen.getByTestId('route-object-read-failed-retry'));
+    await waitFor(() => expect(wireProbeReads()).toBe(2));
+    await waitFor(() => expect(screen.queryByTestId('route-object-read-failed-code')).not.toBeInTheDocument());
+    expect(screen.getByTestId('route-object-read-failed')).toHaveTextContent(NETWORK_SENTENCE);
   });
 });

@@ -93,7 +93,7 @@ options: [
 | `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `lookupAutofill` |
 | `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `lookupAutofill` |
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
-| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'` |
+| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default — declared, deleting the user acts as on `lookup`: `cascade` deletes the holders, `set_null` clears the field or drops that member, `restrict` refuses with `409 DELETE_RESTRICTED`; undeclared, the field keeps the deleted user's id) |
 
 **`lookupAutofill: [{ target, source, overwrite? }]`** (single-value `lookup` /
 `master_detail`): a pick copies the picked record's `source` into this object's
@@ -201,20 +201,6 @@ const total = {
   expression: F`record.amount * record.tax_rate`,
   returnType: 'number',   // see the Calculated table
 };
-```
-
-### Summary (Roll-up)
-
-```typescript
-{
-  type: 'summary',
-  summaryOperations: {
-    object: 'invoice_line_item',   // child object to aggregate
-    field: 'amount',               // child field
-    function: 'sum',               // 'count' | 'sum' | 'min' | 'max' | 'avg'
-    // relationshipField / filter — optional (see rules/relationships.md)
-  },
-}
 ```
 
 ### Autonumber

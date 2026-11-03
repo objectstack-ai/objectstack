@@ -25,18 +25,24 @@
  * base asks the ensure door for the pair first (`StudioBaseCustomization`).
  *
  * Items another package contributes to the base (fields extending its
- * objects, flows on its objects, ADR-0029 D7 navigation entries) are not
- * drawn: no served read names the contributing package (objectstack#28722),
- * and the rail derives none.
+ * objects, flows on its objects, ADR-0029 D7 navigation entries) are drawn
+ * greyed and read-only, each with the contributing package
+ * ({@link ContributionMark}, {@link ContributedRailRow}), from the same read's
+ * `contributions` (objectstack#29786; the placement rules are
+ * `contributionRows.ts`'s). A click opens the contributing package.
  */
 
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@object-ui/components';
 import { Boxes } from 'lucide-react';
 import { customizationBasePackageId } from '@objectstack/spec/kernel';
 import { tFormat } from '../metadata-admin/i18n.js';
+import { confirmUnsavedLeave } from '../../chrome/unsavedEdits.js';
 import { CustomizationMark, type PackageCustomizationsState } from './CustomizationMark.js';
 import { customizationMarkOf, type CustomizationMarkKind } from './customizationMarks.js';
+import { StudioRailRow } from './StudioRail.js';
+import type { ContributedNav, ContributedOnObject } from './contributionRows.js';
 
 /** A rail row as the one-surface helpers read it. */
 export interface PairRailRow {
@@ -100,7 +106,11 @@ export function railCustomizationsOf(
   };
 }
 
-/** A row's mark in the rail's trailing slot, or nothing. */
+/**
+ * A row's mark in the rail's trailing slot, or nothing. objectstack#29693 —
+ * compact (its glyph, the text in its name and tooltip), so it never takes the
+ * row's label.
+ */
 export function RailCustomizationMark({
   row,
   marks,
@@ -119,6 +129,7 @@ export function RailCustomizationMark({
       pairId={marks.pairId}
       locale={locale}
       className="ml-1"
+      compact
     />
   );
 }
@@ -258,4 +269,105 @@ export function foldCustomizationPairs<T extends { id: string }>(
  */
 export function customizationPairBaseOf(packageId: string | null): string | null {
   return packageId === null ? null : customizationBasePackageId(packageId);
+}
+
+/**
+ * objectstack#29786 — the chip that names the package an item was contributed
+ * by ("from HotCRM Service"). Muted, as the contributed row it sits on.
+ */
+export function ContributionMark({
+  packageName,
+  packageId,
+  locale,
+  className,
+}: {
+  packageName: string;
+  packageId: string;
+  locale: string;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <span
+      data-testid="contribution-mark"
+      data-package={packageId}
+      title={tFormat('engine.studio.contributed.from', locale, { package: packageName })}
+      className={cn(
+        // Gives way to the item's name first.
+        'inline-flex h-[18px] min-w-0 max-w-[55%] shrink-[4] items-center rounded-[5px] bg-muted px-1.5 text-[11px] font-medium text-muted-foreground',
+        className,
+      )}
+    >
+      <span className="truncate">{tFormat('engine.studio.contributed.from', locale, { package: packageName })}</span>
+    </span>
+  );
+}
+
+/**
+ * The tooltip of a contributed item: what it is, who added it, and that it is
+ * changed there. A `nav` entry whose group the app does not declare says it
+ * is drawn at the top level, as the served navigation draws it.
+ */
+export function contributedItemTitle(
+  item: ContributedNav | ContributedOnObject,
+  locale: string,
+  undeclaredGroup: string | null = null,
+): string {
+  const vars = { name: item.name, package: item.packageName };
+  const said = tFormat(`engine.studio.contributed.${item.kind}Title`, locale, vars);
+  return undeclaredGroup === null
+    ? said
+    : `${said} ${tFormat('engine.studio.contributed.undeclaredGroup', locale, { group: undeclaredGroup })}`;
+}
+
+/**
+ * Open the contributing package's Studio at `path`: the one way a contributed
+ * row is acted on, since the base's surface cannot change it. Leaves through
+ * the shell's unsaved-edits seam, so a pillar holding unsaved work asks first.
+ */
+export function useOpenContributor(): (path: string) => void {
+  const navigate = useNavigate();
+  return React.useCallback((path: string) => confirmUnsavedLeave(() => navigate(path)), [navigate]);
+}
+
+/**
+ * One contributed item as a rail row: greyed, labelled with its package, and
+ * never a drag source or an editor's target. `onOpen` goes to the contributing
+ * package.
+ */
+export function ContributedRailRow({
+  item,
+  icon,
+  indent = false,
+  title,
+  onOpen,
+  locale,
+  testId,
+}: {
+  item: ContributedNav | ContributedOnObject;
+  icon?: React.ReactNode;
+  indent?: boolean;
+  title: string;
+  onOpen: () => void;
+  locale: string;
+  testId?: string;
+}): React.ReactElement {
+  return (
+    <StudioRailRow
+      data-testid={testId ?? `contributed-${item.kind}-${item.name}`}
+      data-contributed={item.kind}
+      data-package={item.packageId}
+      indent={indent}
+      title={title}
+      onClick={onOpen}
+      icon={icon}
+      className="text-muted-foreground opacity-70"
+      // Two lines, so a narrow rail keeps both the id and the package legible.
+      wrap
+    >
+      <span className="flex min-w-0 flex-col items-start gap-0.5">
+        <span className="max-w-full truncate">{item.name}</span>
+        <ContributionMark packageName={item.packageName} packageId={item.packageId} locale={locale} className="max-w-full" />
+      </span>
+    </StudioRailRow>
+  );
 }

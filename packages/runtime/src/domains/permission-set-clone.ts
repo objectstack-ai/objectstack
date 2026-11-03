@@ -86,7 +86,8 @@
  *    not a package for every set.
  *
  * The response names the package (`package`, `null` for environment-wide) and
- * the notice says where the copy went ({@link permissionSetCloneNotice}).
+ * the notice says where the copy went ({@link permissionSetCloneNotice}), named
+ * by a stable code beside it ({@link permissionSetCloneNoticeCode}).
  *
  * ## Authority
  *
@@ -160,18 +161,50 @@ export interface PermissionSetCloneLanding {
 }
 
 /**
+ * [#29727] The stable code for each notice variant, served beside the notice
+ * as `data.noticeCode`. One code per landing, so a console can show the
+ * sentence in its own language without a parameter key: the one value the
+ * sentence carries, the package, is already on the answer as `data.package`.
+ * A console maps a code it knows to its own sentence and falls back to
+ * `notice` verbatim for a code it does not know; `notice` stays the English
+ * fallback. Keyed by {@link PermissionSetCloneLandingKind}, the same key
+ * {@link permissionSetCloneNotice} composes its sentence from, so code and
+ * sentence cannot drift.
+ */
+export const PERMISSION_SET_CLONE_NOTICE_CODES = Object.freeze({
+    environmentWide: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE',
+    inPackage: 'PERMISSION_SET_CLONE_IN_PACKAGE',
+    inCreatedPackage: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE',
+} as const);
+
+/** Which of the three notices a landing is told with. */
+export type PermissionSetCloneLandingKind = keyof typeof PERMISSION_SET_CLONE_NOTICE_CODES;
+
+/** The one place a landing is sorted into its notice variant. */
+export function permissionSetCloneLandingKind(landing: PermissionSetCloneLanding): PermissionSetCloneLandingKind {
+    if (landing.packageId === null) return 'environmentWide';
+    return landing.created ? 'inCreatedPackage' : 'inPackage';
+}
+
+/**
  * The notice for one landing: where the copy went, in the server's words,
  * ahead of {@link PERMISSION_SET_CLONE_NOTICE}.
  */
 export function permissionSetCloneNotice(landing: PermissionSetCloneLanding): string {
-    if (landing.packageId === null) {
+    const kind = permissionSetCloneLandingKind(landing);
+    if (kind === 'environmentWide') {
         return 'The copy was saved environment-wide, in no package, as the set it was copied from is. '
             + PERMISSION_SET_CLONE_NOTICE;
     }
     return `The copy was saved in package '${landing.packageId}'`
-        + (landing.created ? ', created for it to hold your changes to the package the set came from' : '')
+        + (kind === 'inCreatedPackage' ? ', created for it to hold your changes to the package the set came from' : '')
         + ', beside the original rather than in place of it, and travels with that package. '
         + PERMISSION_SET_CLONE_NOTICE;
+}
+
+/** The code naming {@link permissionSetCloneNotice}'s sentence for the same landing. */
+export function permissionSetCloneNoticeCode(landing: PermissionSetCloneLanding): string {
+    return PERMISSION_SET_CLONE_NOTICE_CODES[permissionSetCloneLandingKind(landing)];
 }
 
 /** ADR-0112 status for a target name the catalog already holds. */
@@ -529,6 +562,8 @@ export async function handlePermissionSetCloneWrite(
                 permissionSet: clone,
                 package: landing.packageId,
                 notice: permissionSetCloneNotice(landing),
+                // [#29727] The notice's code, for a console that translates it.
+                noticeCode: permissionSetCloneNoticeCode(landing),
             }),
         };
     } catch (err: unknown) {

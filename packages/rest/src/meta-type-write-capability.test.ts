@@ -167,7 +167,7 @@ describe('[#21124] metaTypeWriteRefusal — the type-level write admission', () 
         }
     });
 
-    it('external_catalog has a read row but no write row — its own write door asks only the authoring capability', () => {
+    it('external_catalog has a read row but no write row — its own write door asks only the authoring capability for the write', () => {
         expect(META_TYPE_READ_CAPABILITIES.external_catalog).toBe('manage_platform_settings');
         expect(FEDERATION_WRITE_CAPABILITY).toBe('manage_metadata');
         expect(Object.prototype.hasOwnProperty.call(META_TYPE_WRITE_CAPABILITIES, 'external_catalog')).toBe(false);

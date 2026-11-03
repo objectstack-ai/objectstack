@@ -887,7 +887,8 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
   name: z.string().describe('Item name'),
   packageId: z.string().optional().describe(
     'Optional package ID — scopes the `code` layer so a same-name collision '
-    + 'resolves to the requested package\'s artifact (ADR-0048).',
+    + 'resolves to the requested package\'s artifact (ADR-0048), and the `draft` '
+    + 'layer to that package\'s pending draft row.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
 }));
@@ -895,10 +896,20 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
 /**
  * Get Metadata Item — LAYERED Response
  *
- * The body of `GET /api/v1/meta/:type/:name/layers`: a three-layer diagnostic
+ * The body of `GET /api/v1/meta/:type/:name/layers`: a layered diagnostic
  * projection that shows the packaged baseline, the tenant's customization row
  * and the merged result SIDE BY SIDE, which is what drives Studio's
  * "code default vs override vs effective" comparison tabs.
+ *
+ * **The pending draft is a layer too** (`draft`, #29855). The ordinary
+ * `?state=draft` read answers the draft as served: translated for the caller's
+ * locale, governed, with the platform's injected columns. An editor that builds
+ * its edit buffer from that body and saves it back writes the translations and
+ * the injected columns into the author's draft. `/layers` is already the
+ * untranslated, author-owned read of the published layers, so the draft as
+ * stored joins them here rather than as a query switch on the ordinary read —
+ * the switch is the "two shapes, chosen by query flag" pattern the ruling below
+ * retired. An edit buffer reads `draft ?? overlay ?? code`.
  *
  * **Why this is a separate schema on a separate path** (#5882, ruled B by the
  * maintainer 2026-08-06). This projection used to be reached by putting
@@ -944,6 +955,14 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
     'LAYER 3 — the merged result, i.e. the value an ordinary '
     + '`GET /meta/:type/:name` would return under `item`. `null` when the item '
     + 'resolves to nothing at all.',
+  ),
+  draft: z.unknown().optional().describe(
+    'LAYER — the pending draft row exactly as stored: untranslated, ungoverned, with no '
+    + 'injected columns (unlike the `?state=draft` item read, which serves the draft '
+    + 'translated and governed). For the requested `packageId` when one is given. `null` '
+    + 'when no draft is pending. A client building an edit buffer reads '
+    + '`draft ?? overlay ?? code`. ABSENT from a server that does not serve this layer: '
+    + 'absence means "not served", never "no draft".',
   ),
   _diagnostics: MetadataValidationResultSchema.optional().describe(
     'Load-time spec-validation verdict for `effective`, so the Studio edit page '
@@ -1270,7 +1289,8 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + 'author did not write, on a draft save too: one `warning` with rule '
     + '`withheld-key-dropped` for each stored position it dropped because the '
     + 'type\'s read redactor withholds it and marks it not carried forward '
-    + '(a connector\'s undeclared `auth` keys, which no door accepts and nothing '
+    + '(a connector\'s undeclared `auth` keys and the undeclared keys of its '
+    + '`retryConfig`, which no door accepts and nothing '
     + 'reads). Its `path` names where the value sat at rest, in the same '
     + 'spelling (`connectors[0].auth.token`).',
   ),

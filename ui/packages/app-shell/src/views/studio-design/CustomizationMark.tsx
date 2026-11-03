@@ -15,6 +15,7 @@
  */
 
 import * as React from 'react';
+import { Layers3, PencilRuler, Plus } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { t, tFormat } from '../metadata-admin/i18n.js';
@@ -35,12 +36,26 @@ const KIND_CLASS: Record<CustomizationMarkChipKind, string> = {
   customizationOf: 'bg-muted text-muted-foreground',
 };
 
+/** objectstack#29693 — the glyph the compact mark draws in place of its text. */
+const KIND_ICON: Record<CustomizationMarkChipKind, React.ElementType> = {
+  customized: PencilRuler,
+  added: Plus,
+  customizationOf: Layers3,
+};
+
+/**
+ * objectstack#29693 — `compact` (the pillar rails): the mark is its glyph
+ * alone, so it never takes a row's name ("已定制（ObjectStack Showcase）" left a
+ * selected flow row no room for its label). Its text is its accessible name
+ * and leads its tooltip, before the sentence naming the pair.
+ */
 export function CustomizationMark({
   kind,
   baseName,
   pairId,
   locale,
   className,
+  compact = false,
 }: {
   kind: CustomizationMarkChipKind;
   /** The base's display name ("customized (HotCRM)"); needed by `customized` and `customizationOf`. */
@@ -49,6 +64,8 @@ export function CustomizationMark({
   pairId?: string;
   locale: string;
   className?: string;
+  /** Draw the glyph alone, the text in its accessible name and tooltip. */
+  compact?: boolean;
 }): React.ReactElement {
   const base = baseName ?? '';
   const label =
@@ -58,6 +75,22 @@ export function CustomizationMark({
   const title = pairId
     ? tFormat(`engine.customizationMark.${kind}Title`, locale, { baseName: base, pair: pairId })
     : undefined;
+  if (compact) {
+    const Icon = KIND_ICON[kind];
+    return (
+      <span
+        data-testid="customization-mark"
+        data-kind={kind}
+        data-compact=""
+        role="img"
+        aria-label={label}
+        title={title ? `${label}\n${title}` : label}
+        className={cn('inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px]', KIND_CLASS[kind], className)}
+      >
+        <Icon className="h-3 w-3" aria-hidden="true" />
+      </span>
+    );
+  }
   return (
     <span
       data-testid="customization-mark"
@@ -85,6 +118,12 @@ export type PackageCustomizationsState =
       index: CustomizationMarkIndex;
       /** The base's listed name, else its id. */
       baseName: string;
+      /**
+       * objectstack#29786 — each contributing package's listed name, by the id
+       * a `contributions` entry names; a package the list cannot name is absent
+       * and its id stands in.
+       */
+      contributorNames: ReadonlyMap<string, string>;
     };
 
 /**
@@ -92,8 +131,9 @@ export type PackageCustomizationsState =
  * derives no pair: a customization package itself has none to read, and the
  * route refuses its id.
  *
- * The base's name comes from the package list the area already reads (one
- * request, `packages-io.ts`); when that list cannot name it, the id stands in.
+ * The base's name, and each contributing package's (objectstack#29786), come
+ * from the package list the area already reads (one request, `packages-io.ts`);
+ * when that list cannot name one, its id stands in.
  *
  * `refresh` (objectstack#28572): read again whenever it moves (Studio's
  * publish, which is what changes the served overrides). A re-read keeps the
@@ -105,15 +145,23 @@ export function usePackageCustomizations(baseId: string | null, refresh: unknown
   React.useEffect(() => {
     if (!readable || baseId === null) return;
     let cancelled = false;
-    const name = fetchListedPackageManifests().then(
-      (manifests) => manifests.get(baseId)?.name ?? baseId,
-      () => baseId,
-    );
-    Promise.all([fetchPackageCustomizations(baseId), name]).then(
-      ([read, baseName]) => {
+    const listed = fetchListedPackageManifests().catch(() => null);
+    Promise.all([fetchPackageCustomizations(baseId), listed]).then(
+      ([read, manifests]) => {
         if (cancelled) return;
         const index = indexCustomizations(baseId, read);
-        setAnswer({ id: baseId, state: index ? { status: 'read', read, index, baseName } : { status: 'off' } });
+        const baseName = manifests?.get(baseId)?.name ?? baseId;
+        // objectstack#29786 — the contributing packages are named as the base
+        // is: by the id, from the same package list.
+        const contributorNames = new Map<string, string>();
+        for (const c of read.contributions) {
+          const name = manifests?.get(c.packageId)?.name;
+          if (name) contributorNames.set(c.packageId, name);
+        }
+        setAnswer({
+          id: baseId,
+          state: index ? { status: 'read', read, index, baseName, contributorNames } : { status: 'off' },
+        });
       },
       (err: unknown) => {
         if (cancelled) return;

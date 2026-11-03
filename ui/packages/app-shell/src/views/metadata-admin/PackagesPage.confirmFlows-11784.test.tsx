@@ -43,6 +43,8 @@ const PKG: InstalledPackageRow = {
   // refuses a row without either, each by its own name (objectui#12790).
   source: 'authored',
   writable: true,
+  // The disable door's verdict (objectstack#28318), `true` for a writable base.
+  disableable: true,
 };
 const DRAFTS = [
   { type: 'object', name: 'acme_lead' },

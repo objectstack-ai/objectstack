@@ -54,6 +54,8 @@
  * the capture loop is reached the way a real publish reaches it.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // cannot accept a call ObjectQL refuses. From `@objectstack/metadata-core`, not

@@ -124,7 +124,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ flow: object; packageId: string; notice: string }` | ✅ |  |
+| **data** | `{ flow: object; packageId: string; notice: string; noticeCode?: string }` | ✅ |  |
 
 ### Nested Shape: `CloneFlowResponse.error`
 
@@ -156,6 +156,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **flow** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | The copy as stored: switched off, in `packageId`, with no lineage. |
 | **packageId** | `string` | ✅ | The package the copy landed in: the one the request named, else the source's paired customization package `<base>.custom`. |
 | **notice** | `string` | ✅ | One line for the administrator, in the server's words: the copy is switched off until someone switches it on, and its references are not re-pointed. |
+| **noticeCode** | `string` | optional | A stable code naming the `notice` sentence beside it, so a client can show that sentence in its own language: a client maps a code it knows to its own translated sentence, and falls back to `notice` verbatim for a code it does not know or when this key is absent (an older server sends none). The values are the server's; `notice` stays the English fallback. |
 
 
 ---
@@ -416,7 +417,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +356 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +357 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
 | **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
 
 ### Allowed Values: `FlowInnerRefusal.code`
@@ -692,6 +693,7 @@ const result = AutomationApiErrorCode.parse(data);
 * `PROJECT_PROVISIONING`
 * `PROJECT_PROVISIONING_FAILED`
 * `QUERY_OBJECT_MISMATCH`
+* `QUERY_ROW_BUDGET_EXCEEDED`
 * `QUEUE_NOT_FOUND`
 * `RAW_SQL_UNSUPPORTED`
 * `READ_BACK_FAILED`

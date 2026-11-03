@@ -96,6 +96,25 @@
           "name: 'crm_account'"
         ]
       }
+    },
+    {
+      "id": 6,
+      "prompt": "On `ticket`, `owner` is the agent who holds it and must always be set; deleting that agent's user account must be blocked while they still hold tickets. `watchers` is several users, and a deleted user should just drop out of the list.",
+      "expected_output": "Both are `type: 'user'` fields, each with an authored `deleteBehavior` — a `user` field joins the referential delete walk only when it declares one. `owner`: `required: true` with `deleteBehavior: 'restrict'` (deleting a held user is refused with `409 DELETE_RESTRICTED`; `set_null` on a required field would refuse too). `watchers`: `multiple: true` with `deleteBehavior: 'set_null'` (only the deleted member is removed; an emptied set is `[]`). Neither is a `lookup` to a `user` object, which does not exist, and a `user` field with no `deleteBehavior` keeps the deleted user's id.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "type: 'user'",
+          "deleteBehavior: 'restrict'",
+          "deleteBehavior: 'set_null'",
+          "multiple: true",
+          "required: true"
+        ],
+        "must_not_contain": [
+          "reference: 'user'",
+          "deleteBehavior: 'cascade'"
+        ]
+      }
     }
   ]
 }

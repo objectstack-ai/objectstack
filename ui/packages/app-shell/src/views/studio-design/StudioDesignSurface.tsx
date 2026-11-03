@@ -56,6 +56,7 @@ import {
 } from '../../layout/chatDockState.js';
 import { AppMark, type AppMarkApp } from '../../layout/AppMark.js';
 import {
+  STUDIO_FOLD_LABEL,
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
@@ -68,6 +69,7 @@ import { StudioInspector } from './StudioInspector.js';
 import { agentDraftMarkOf, DraftChip, DraftSourceLine } from './StudioDraftMark.js';
 import {
   StudioItemHeader,
+  StudioItemHeaderFoldedItems,
   StudioStatusChip,
   StudioTab,
   useStudioTabRowFold,
@@ -79,7 +81,7 @@ import {
   useStudioItemDraftStatus,
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
-import { FlowItemMoreMenu, type FlowCopied } from './FlowItemMoreMenu.js';
+import { FlowItemMoreMenu, flowCloneNoticeText, type FlowCopied } from './FlowItemMoreMenu.js';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
 import { activationReading } from '../setup/packagedFlows.js';
@@ -286,7 +288,7 @@ import {
 } from './studioScope.js';
 import { STUDIO_METADATA_AREA, studioMetadataAreaPath, studioPillarItemPath } from './metadataArea.js';
 import { PermissionSetCloneDialog } from '../metadata-admin/PermissionSetCloneDialog.js';
-import type { PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
+import { permissionSetCloneNoticeText, type PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
 import { useWalledCatalogReadOnly } from '../metadata-admin/catalog-scope.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
@@ -400,22 +402,34 @@ import {
 } from './packages-io.js';
 import { usePackageCustomizations, type PackageCustomizationsState } from './CustomizationMark.js';
 import {
+  ContributedRailRow,
   RailCustomizationFilter,
   RailCustomizationMark,
   StudioPairItemChip,
+  contributedItemTitle,
   customizationPairBaseOf,
   foldCustomizationPairs,
   railCustomizationsOf,
   useDeepLinkFallback,
+  useOpenContributor,
   useRailCustomizationsOnly,
   withPairItems,
   type RailCustomizations,
 } from './StudioRailCustomizations.js';
 import {
+  baseContributionsOf,
+  contributedFieldsOf,
+  placeNavContributions,
+  placesAnyNav,
+  withContributedFlowGroups,
+  type ContributedOnObject,
+  type NavContributionPlacement,
+  type TopLevelContributedNav,
+} from './contributionRows.js';
+import {
   StudioCustomizeButton,
   StudioOverrideChip,
   StudioRestoreOriginalDialog,
-  StudioRestoreOriginalItem,
   isStudioCustomizeType,
   overrideDraftBody,
   useCustomizeDoorWalled,
@@ -439,6 +453,7 @@ import {
   type DraftChangesPosture,
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
+import { SavedToCustomizationNote } from '../../preview/savedToCustomization.js';
 import { toast } from 'sonner';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
@@ -3001,6 +3016,11 @@ function NavTreeGroup({
   const locale = useMetadataLocale();
   const targetLabel = useNavTargetLabel();
   const children = node.children ?? [];
+  // objectstack#29786 — a declared group (`type: 'group'`) also holds the
+  // entries other packages contribute to it; a group with only those is no
+  // longer empty.
+  const placement = React.useContext(InterfacesNavContributionsContext);
+  const contributed = node.type === 'group' && typeof node.id === 'string' ? (placement.byGroup.get(node.id) ?? []) : [];
   const holdsActive = navTreeHoldsActive(children, active, locale, targetLabel);
   const [open, setOpen] = React.useState(() => {
     if (holdsActive) return true;
@@ -3017,12 +3037,19 @@ function NavTreeGroup({
   }
   return (
     <StudioRailGroup label={labelText} collapsed={!open} onToggle={() => setOpen((v) => !v)}>
-      {children.length === 0 ? (
+      {children.length === 0 && contributed.length === 0 ? (
         <p className="flex h-7 items-center pl-[22px] text-xs text-muted-foreground">
           {t('engine.studio.if.emptyGroup', locale)}
         </p>
       ) : (
-        <NavTree nodes={children} active={active} onPick={onPick} objectIcons={objectIcons} depth={depth + 1} />
+        <>
+          {children.length > 0 && (
+            <NavTree nodes={children} active={active} onPick={onPick} objectIcons={objectIcons} depth={depth + 1} />
+          )}
+          {/* objectstack#29786 — what other packages add to this group, after
+              the group's own entries, as the served navigation appends them. */}
+          <ContributedNavRows rows={contributed.map((entry) => ({ entry, undeclaredGroup: null }))} indent />
+        </>
       )}
     </StudioRailGroup>
   );
@@ -3054,6 +3081,46 @@ function NavTreeGroup({
  * package with nothing to mark.
  */
 const InterfacesRailMarksContext = React.createContext<RailCustomizations | null>(null);
+
+/**
+ * objectstack#29786 — where the open app's contributed nav entries go
+ * (`placeNavContributions`), read by the tree's groups and its top level.
+ * Empty on a package with none.
+ */
+const InterfacesNavContributionsContext = React.createContext<NavContributionPlacement>({ byGroup: new Map(), top: [] });
+
+/**
+ * objectstack#29786 — contributed nav entries as rail rows: greyed, with the
+ * contributing package, and opening that package's Interfaces pillar. Not
+ * nav entries of this app: never in its edit buffer, never dragged, renamed
+ * or deleted here.
+ */
+function ContributedNavRows({
+  rows,
+  indent = false,
+}: {
+  rows: readonly TopLevelContributedNav[];
+  indent?: boolean;
+}): React.ReactElement | null {
+  const locale = useMetadataLocale();
+  const openContributor = useOpenContributor();
+  if (rows.length === 0) return null;
+  return (
+    <>
+      {rows.map(({ entry, undeclaredGroup }) => (
+        <ContributedRailRow
+          key={`${entry.packageId}:${entry.name}`}
+          item={entry}
+          indent={indent}
+          icon={<Puzzle className="h-4 w-4 shrink-0" />}
+          title={contributedItemTitle(entry, locale, undeclaredGroup)}
+          onOpen={() => openContributor(`/studio/${encodeURIComponent(entry.packageId)}/interfaces`)}
+          locale={locale}
+        />
+      ))}
+    </>
+  );
+}
 
 function NavTree({
   nodes,
@@ -4419,6 +4486,15 @@ export function InterfacesPillar({
   const [servedNav, setServedNav] = React.useState<ServedNavText | null>(null);
   const railTree = React.useMemo(() => displayNavTree(navTree, servedNav), [navTree, servedNav]);
   const railAppLabel = displayAppLabel(appLabel, servedNav);
+  // objectstack#29786 — what other packages add to this app's navigation,
+  // from the base's one customization read (`customization.marks`), placed
+  // in the tree the rail draws.
+  const customizationMarks = customization?.marks;
+  const contributions = React.useMemo(() => baseContributionsOf(customizationMarks), [customizationMarks]);
+  const navPlacement = React.useMemo(
+    () => placeNavContributions(contributions, appName, railTree),
+    [contributions, appName, railTree],
+  );
   // nav editing — drag-drop reorder / rename / add / remove via AppNavCanvas
   const [editNav, setEditNav] = React.useState(false);
   const [navSel, setNavSel] = React.useState<{ kind: string; id: string } | null>(null);
@@ -6002,7 +6078,10 @@ export function InterfacesPillar({
         }
       >
         <Pencil className="h-3 w-3" aria-hidden="true" />
-        {t('engine.studio.if.modeDesign', locale)}
+        {/* objectstack#29693 — on a narrow header the modes keep their glyphs; the words stay their names. */}
+        <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+          {t('engine.studio.if.modeDesign', locale)}
+        </span>
       </button>
       <button
         type="button"
@@ -6016,7 +6095,9 @@ export function InterfacesPillar({
         }
       >
         <Play className="h-3 w-3" aria-hidden="true" />
-        {t('engine.studio.if.modeRun', locale)}
+        <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+          {t('engine.studio.if.modeRun', locale)}
+        </span>
       </button>
     </div>
   );
@@ -6216,8 +6297,8 @@ export function InterfacesPillar({
   );
   // objectui#12725 — the item's ⋯ menu: its definition, and its document as
   // JSON. Rename and delete are not offered here: this header has neither
-  // today (a nav entry is renamed and removed in nav editing).
-  // objectstack#28562 — and, for an item customized into the pair, Restore.
+  // today (a nav entry is renamed and removed in nav editing). Restore is
+  // the override mark's (objectstack#29692), not this menu's.
   const itemMoreEl =
     current && draftLoaded ? (
       <DropdownMenu>
@@ -6232,7 +6313,9 @@ export function InterfacesPillar({
             <MoreHorizontal className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuContent align="end" className="w-52">
+          {/* objectstack#29693 — what the title row folded away, on a narrow row. */}
+          <StudioItemHeaderFoldedItems />
           <DropdownMenuItem data-testid="if-item-view-definition" onSelect={() => setDefinitionOpen(true)}>
             <Code2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
             {t('engine.studio.if.viewDefinition', locale)}
@@ -6241,13 +6324,6 @@ export function InterfacesPillar({
             <Copy className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
             {t('engine.studio.if.copyJson', locale)}
           </DropdownMenuItem>
-          {headerCustomize?.inPair && (
-            <StudioRestoreOriginalItem
-              disabled={restoring || headerCustomize.busy || (customizePair === null && !pairsByItemRef.current.has(headerCustomize.key))}
-              locale={locale}
-              onSelect={() => setRestoreFor(headerCustomize)}
-            />
-          )}
         </DropdownMenuContent>
       </DropdownMenu>
     ) : null;
@@ -6291,9 +6367,18 @@ export function InterfacesPillar({
       )}
     </div>
   ) : null;
+  // objectstack#29691 (ADR-0146 D3) — an item the pair adds, overrides or is
+  // unlocked to customize saves to the base's pair: the header says where,
+  // in the pending-changes sheet's own words.
+  const ifSavedTo =
+    customization !== null && (currentAddedIn !== null || headerCustomize?.inPair === true || headerUnlocked);
   const ifHeaderEl = (
     <StudioItemHeader
       testId="if-item-header"
+      // objectstack#29693 — on a narrow row the chips and the item tools fold
+      // into the ⋯ menu before the title drops below its readable width.
+      foldMenu={itemMoreEl ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'if-item-header-more' }}
+      note={ifSavedTo ? <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="if-item-saved-to" /> : undefined}
       leading={
         <button
           type="button"
@@ -6333,6 +6418,13 @@ export function InterfacesPillar({
                 baseLabel={customizeBaseLabel}
                 basedOn={headerCustomize.declaration.basedOn}
                 locale={locale}
+                // objectstack#29692 — Restore lives on the mark that names the customization.
+                onRestore={headerCustomize.inPair ? () => setRestoreFor(headerCustomize) : undefined}
+                restoreDisabled={
+                  restoring ||
+                  headerCustomize.busy ||
+                  (customizePair === null && !pairsByItemRef.current.has(headerCustomize.key))
+                }
               />
             )}
             {/* objectstack#28572 — an item the pair adds names the pair it lives in. */}
@@ -7060,6 +7152,7 @@ export function InterfacesPillar({
           open={railOpen}
         >
           <InterfacesRailMarksContext.Provider value={railMarks}>
+          <InterfacesNavContributionsContext.Provider value={navPlacement}>
           {editNav && (
               <div className="mt-1.5 flex items-center gap-1.5">
                 {navHasDraft && (
@@ -7100,7 +7193,7 @@ export function InterfacesPillar({
                 onSelectionChange={(s) => setNavSel(s ? { kind: s.kind, id: s.id } : null)}
                 onRenamePendingChange={setNavRenamePending}
               />
-            ) : navTree.length === 0 ? (
+            ) : navTree.length === 0 && !(appStatus === 'ready' && placesAnyNav(navPlacement)) ? (
               <p className="px-2 py-3 text-[11px] text-muted-foreground">
                 {error
                   ? t('engine.studio.loadFailed', locale)
@@ -7109,7 +7202,13 @@ export function InterfacesPillar({
                     : t('engine.studio.if.noNavItems', locale)}
               </p>
             ) : (
-              <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
+              <>
+                <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
+                {/* objectstack#29786 — contributed entries the app's top level
+                    holds: those naming no group, and those naming a group the
+                    app does not declare (the served navigation appends both). */}
+                <ContributedNavRows rows={navPlacement.top} />
+              </>
             )}
             {/* objectstack#26889 — under the tree (or the no-app notice), the
                 items no entry opens. Not while nav editing: the rail is the
@@ -7122,6 +7221,7 @@ export function InterfacesPillar({
                 onlyCustomized={listOnlyCustomized}
               />
             )}
+          </InterfacesNavContributionsContext.Provider>
           </InterfacesRailMarksContext.Provider>
         </StudioRail>
 
@@ -8687,9 +8787,24 @@ export function DataPillar({
   // the inspector's display-property mode. The rail's read-only reason wrapper
   // is then not drawn: the inspector describes each control it locks there
   // (objectstack#28986).
-  const fieldRailReadOnly = readOnly && !(extWritable && fieldSel?.kind === 'field');
+  // objectstack#29786 — the open base object's fields another package
+  // contributes (the base's one customization read): greyed in the Form
+  // layout, and read-only in this rail whatever the pair could write, since
+  // neither the base nor its pair owns them.
+  const customizationMarks = customization?.marks;
+  const contributedFields = React.useMemo(
+    () => contributedFieldsOf(baseContributionsOf(customizationMarks), current?.name),
+    [customizationMarks, current?.name],
+  );
+  const selectedContributedField =
+    fieldSel?.kind === 'field' ? (contributedFields.get(String(fieldSel.id)) ?? null) : null;
+  const fieldRailReadOnly = (readOnly && !(extWritable && fieldSel?.kind === 'field')) || selectedContributedField !== null;
   const selectedBaseField =
-    extWritable && fieldSel?.kind === 'field' && baseOwnedFields !== null && baseOwnedFields.has(String(fieldSel.id));
+    extWritable &&
+    fieldSel?.kind === 'field' &&
+    selectedContributedField === null &&
+    baseOwnedFields !== null &&
+    baseOwnedFields.has(String(fieldSel.id));
   const addFieldWalledId = React.useId();
 
   // objectui#12725 — the field rail is up exactly when the render below draws
@@ -8938,6 +9053,22 @@ export function DataPillar({
               over the thing it names, instead of spanning the rail. */}
           <StudioItemHeader
             testId="data-object-header"
+            // objectstack#29693 — the header has no ⋯ of its own (objectui#12511),
+            // so on a narrow row it draws one for the chips and the item tools.
+            foldMenu={{ label: t('engine.studio.if.more', locale), testId: 'data-object-header-more' }}
+            // objectstack#29691 (ADR-0146 D3) — an object the pair adds, or a
+            // base object the pair extends, saves to the base's pair. Named
+            // by the base's label: `packageId` names the pair for a pair's object.
+            note={
+              customization !== null &&
+              (!!current?.addedIn ||
+                (extOpen !== null && (extOpen.published.size > 0 || extHasDraft || extDirty))) ? (
+                <SavedToCustomizationNote
+                  baseLabel={customization.baseLabel}
+                  testId="data-object-saved-to"
+                />
+              ) : undefined
+            }
             leading={
               <button
                 type="button"
@@ -9279,6 +9410,7 @@ export function DataPillar({
                   onAddField={canAddFields ? addField : undefined}
                   readOnly={readOnly}
                   modeControl={formToolbarLeading}
+                  contributedFields={contributedFields}
                 />
               ) : (
               <>
@@ -9494,7 +9626,9 @@ export function DataPillar({
                 // focus, and Tab skipped the whole rail). One trigger for the
                 // rail rather than one per control: the reason is the same for
                 // all of them, and the controls are the shared inspector's.
-                const reason = t('engine.studio.pkg.readonlyHint', locale);
+                const reason = selectedContributedField
+                  ? contributedItemTitle(selectedContributedField, locale)
+                  : t('engine.studio.pkg.readonlyHint', locale);
                 return (
                   <TooltipProvider delayDuration={200}>
                     <Tooltip>
@@ -9905,11 +10039,12 @@ const NO_OBJECT_ORDER: readonly string[] = [];
  * objectstack#28567 — what the Automations pillar's "New similar" strip says:
  * the copy the clone door saved, shown on that copy in the package the answer
  * named, or an answer that named no package (nothing opened). `notice` is the
- * door's sentence, shown as sent.
+ * door's sentence, and `noticeCode` the code it names it by (objectstack#29727):
+ * shown in the console's language for a known code, as sent otherwise.
  */
 type FlowCopiedStrip =
-  | { kind: 'landed'; name: string; packageId: string; notice: string }
-  | { kind: 'noPackage'; name: string; notice: string };
+  | { kind: 'landed'; name: string; packageId: string; notice: string; noticeCode?: string }
+  | { kind: 'noPackage'; name: string; notice: string; noticeCode?: string };
 
 /** The navigation-state key the copy's landing rides to the copy's pillar on. */
 const FLOW_COPIED_ARRIVAL_STATE = 'flowNewSimilar';
@@ -9930,7 +10065,13 @@ function readFlowCopiedArrival(state: unknown, packageId: string | null): FlowCo
     | undefined;
   if (!arrival || arrival.kind !== 'landed' || packageId === null || arrival.packageId !== packageId) return null;
   if (typeof arrival.name !== 'string' || arrival.name === '') return null;
-  return { kind: 'landed', name: arrival.name, packageId, notice: typeof arrival.notice === 'string' ? arrival.notice : '' };
+  return {
+    kind: 'landed',
+    name: arrival.name,
+    packageId,
+    notice: typeof arrival.notice === 'string' ? arrival.notice : '',
+    ...(typeof arrival.noticeCode === 'string' ? { noticeCode: arrival.noticeCode } : {}),
+  };
 }
 
 export function AutomationsPillar({
@@ -10729,10 +10870,16 @@ export function AutomationsPillar({
     (copy: FlowCopied) => {
       setError(null);
       if (copy.packageId === null) {
-        setFlowCopied({ kind: 'noPackage', name: copy.name, notice: copy.notice });
+        setFlowCopied({ kind: 'noPackage', name: copy.name, notice: copy.notice, noticeCode: copy.noticeCode });
         return;
       }
-      const landed: FlowCopiedStrip = { kind: 'landed', name: copy.name, packageId: copy.packageId, notice: copy.notice };
+      const landed: FlowCopiedStrip = {
+        kind: 'landed',
+        name: copy.name,
+        packageId: copy.packageId,
+        notice: copy.notice,
+        noticeCode: copy.noticeCode,
+      };
       onDraftSaved?.({ type: 'flow', name: copy.name });
       // objectstack#28572 — the pair's flows are this surface's too.
       if (copy.packageId === railPackageId || (railPairId !== null && copy.packageId === railPairId)) {
@@ -10950,7 +11097,10 @@ export function AutomationsPillar({
                 <span className={'inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ' + (flowEnabled ? 'translate-x-[18px]' : 'translate-x-0.5')} />
               </span>
               {readOnly && <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />}
-              {flowEnabled ? t('engine.studio.auto.enabled', locale) : t('engine.studio.auto.disabled', locale)}
+              {/* objectstack#29693 — on a narrow header the switch keeps its track; the word stays its name. */}
+              <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+                {flowEnabled ? t('engine.studio.auto.enabled', locale) : t('engine.studio.auto.disabled', locale)}
+              </span>
             </button>
           );
           const defaultOffLine = <span className="sr-only">{defaultOff}</span>;
@@ -11002,6 +11152,24 @@ export function AutomationsPillar({
       }),
     [flows, liveFlowDefinitions, objectLabels, objectOrder, locale],
   );
+  // objectstack#29786 — the flows other packages ship on the base's objects,
+  // from the base's one customization read, each in its object's group.
+  const customizationMarks = customization?.marks;
+  const contributedFlows = React.useMemo(() => baseContributionsOf(customizationMarks), [customizationMarks]);
+  const railGroupsShown = React.useMemo(
+    () =>
+      withContributedFlowGroups(railGroups, contributedFlows, (object) => ({
+        key: object,
+        objectName: object,
+        label: objectLabels.get(object) || object,
+        items: [] as Surface[],
+      })),
+    [railGroups, contributedFlows, objectLabels],
+  );
+  const openContributor = useOpenContributor();
+  const contributedFlowShown = (f: ContributedOnObject) =>
+    !onlyCustomized &&
+    (!railNeedle || f.name.toLowerCase().includes(railNeedle) || f.packageName.toLowerCase().includes(railNeedle));
 
   // The legend under the rail: the four trigger glyphs and the dots. Off and
   // Refused are named only while some flow in the rail reads so.
@@ -11073,6 +11241,8 @@ export function AutomationsPillar({
     editLocked && packageId !== null ? (
       <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
     ) : null;
+  /** The flow's ⋯ menu is drawn (objectstack#28567): the header folds into it (objectstack#29693). */
+  const flowMoreShown = !!current && flowLoaded && packageId !== null;
   const flowTabsEl =
     flowOpen ? (
       <>
@@ -11160,16 +11330,17 @@ export function AutomationsPillar({
               line (the row's title holds it whole, with its trigger kind and
               status words — the redesign trades objectui#11794's wrap for the
               32 px row), and its status dot. */}
-          {railGroups.map((group) => {
+          {railGroupsShown.map(({ group, contributed: contributedAll }) => {
             const items = railNeedle || onlyCustomized ? group.items.filter(flowShown) : group.items;
-            if (items.length === 0) return null;
+            const contributed = contributedAll.filter(contributedFlowShown);
+            if (items.length === 0 && contributed.length === 0) return null;
             const groupKey = group.key || NO_OBJECT_GROUP_KEY;
             return (
               <StudioRailGroup
                 key={groupKey}
                 testId={`auto-rail-group-${group.key || 'none'}`}
                 label={group.label}
-                count={items.length}
+                count={items.length + contributed.length}
                 collapsed={!railNeedle && !onlyCustomized && foldedGroups.has(groupKey)}
                 onToggle={() =>
                   setFoldedGroups((folded) => {
@@ -11211,10 +11382,25 @@ export function AutomationsPillar({
                     </StudioRailRow>
                   );
                 })}
+                {/* objectstack#29786 — the flows another package ships on this
+                    object: greyed, with the package, opening it there. */}
+                {contributed.map((f) => (
+                  <ContributedRailRow
+                    key={`${f.packageId}:${f.name}`}
+                    item={f}
+                    indent
+                    icon={<Workflow aria-hidden className="h-3.5 w-3.5 shrink-0" />}
+                    title={contributedItemTitle(f, locale)}
+                    onOpen={() =>
+                      openContributor(studioPillarItemPath(f.packageId, 'automations', { type: 'flow', name: f.name }))
+                    }
+                    locale={locale}
+                  />
+                ))}
               </StudioRailGroup>
             );
           })}
-          {flows.length === 0 && !creating && (error || !listed || openCreateFlow) && (
+          {flows.length === 0 && (contributedFlows?.flows.length ?? 0) === 0 && !creating && (error || !listed || openCreateFlow) && (
             <p className="px-2 py-3 text-[11px] text-muted-foreground">
               {error
                 ? t('engine.studio.loadFailed', locale)
@@ -11235,6 +11421,18 @@ export function AutomationsPillar({
               label that resolves to nothing falls back to the name. */}
           <StudioItemHeader
             testId="auto-flow-header"
+            // objectstack#29693 — the chips and the item tools fold into the
+            // flow's ⋯ menu (or the header's own, where the flow has none).
+            foldMenu={
+              flowMoreShown ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'auto-flow-header-more' }
+            }
+            // objectstack#29691 (ADR-0146 D3) — a flow the pair adds, overrides
+            // or is unlocked to customize saves to the base's pair.
+            note={
+              customization !== null && (!!current?.addedIn || flowInPair || flowUnlocked) ? (
+                <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="auto-flow-saved-to" />
+              ) : undefined
+            }
             leading={
               <button
                 type="button"
@@ -11283,6 +11481,9 @@ export function AutomationsPillar({
                   baseLabel={customizeBaseLabel}
                   basedOn={flowServed.declaration.basedOn}
                   locale={locale}
+                  // objectstack#29692 — Restore lives on the mark that names the customization.
+                  onRestore={flowInPair ? () => setRestoreOpen(true) : undefined}
+                  restoreDisabled={restoring || !!saving}
                 />
               ) : undefined
             }
@@ -11334,22 +11535,13 @@ export function AutomationsPillar({
                     a read-only base; a writable package is the target);
                     Delete on a writable package's flow only. The
                     package-less scope has no pair and no package to name. */}
-                {current && flowLoaded && packageId !== null && (
+                {flowMoreShown && current && (
                   <FlowItemMoreMenu
                     name={current.name}
                     label={current.label}
                     locale={locale}
                     disabled={!!saving}
                     onDelete={readOnly ? undefined : () => void deleteOpenFlow()}
-                    // objectstack#28570 — for a flow the pair overrides, read from the served declaration.
-                    restore={
-                      flowInPair
-                        ? {
-                            disabled: restoring,
-                            onSelect: () => setRestoreOpen(true),
-                          }
-                        : undefined
-                    }
                     newSimilar={{
                       target: readOnly ? undefined : packageId,
                       blocked: canAuthorFlows ? null : t('engine.edit.capabilityReadOnly', locale),
@@ -11384,8 +11576,11 @@ export function AutomationsPillar({
                           })
                         : tFormat('engine.studio.auto.newSimilar.noPackage', locale, { name: flowCopiedShown.name })}
                     </p>
-                    {/* The door's sentence that the copy is switched off, VERBATIM. */}
-                    {flowCopiedShown.notice && <p data-testid="auto-new-similar-notice">{flowCopiedShown.notice}</p>}
+                    {/* The door's sentence that the copy is switched off: in the console's
+                        language for its known code (objectstack#29727), else VERBATIM. */}
+                    {flowCopiedShown.notice && (
+                      <p data-testid="auto-new-similar-notice">{flowCloneNoticeText(flowCopiedShown, locale)}</p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -11735,12 +11930,14 @@ export function AutomationsPillar({
  * objectstack#28573 — what the Access pillar's "New similar" strip says: the
  * copy the clone door saved (shown on that copy, in the package the answer
  * named), or an answer the pillar could not open (no copy named, or no
- * package). `notice` is the server's sentence, shown as sent.
+ * package). `notice` is the server's sentence, and `noticeCode` the code it
+ * names it by (objectstack#29727): shown in the console's language for a known
+ * code, as sent otherwise.
  */
 type NewSimilarStrip =
-  | { kind: 'landed'; name: string; package: string; notice: string }
-  | { kind: 'noPackage'; name: string; notice: string }
-  | { kind: 'noName'; notice: string };
+  | { kind: 'landed'; name: string; package: string; notice: string; noticeCode?: string }
+  | { kind: 'noPackage'; name: string; notice: string; noticeCode?: string }
+  | { kind: 'noName'; notice: string; noticeCode?: string };
 
 /** The navigation-state key the copy's landing rides to the copy's pillar on. */
 const NEW_SIMILAR_ARRIVAL_STATE = 'accessNewSimilar';
@@ -11757,7 +11954,13 @@ function readNewSimilarArrival(state: unknown, packageId: string): NewSimilarStr
   if (!arrival || arrival.kind !== 'landed' || arrival.package !== packageId || typeof arrival.name !== 'string') {
     return null;
   }
-  return { kind: 'landed', name: arrival.name, package: packageId, notice: typeof arrival.notice === 'string' ? arrival.notice : '' };
+  return {
+    kind: 'landed',
+    name: arrival.name,
+    package: packageId,
+    notice: typeof arrival.notice === 'string' ? arrival.notice : '',
+    ...(typeof arrival.noticeCode === 'string' ? { noticeCode: arrival.noticeCode } : {}),
+  };
 }
 
 /**
@@ -12116,14 +12319,20 @@ export function AccessPillar({
     (copy: PermissionSetCloned) => {
       setNewSimilarOpen(false);
       if (!copy.name) {
-        setNewSimilarStrip({ kind: 'noName', notice: copy.notice });
+        setNewSimilarStrip({ kind: 'noName', notice: copy.notice, noticeCode: copy.noticeCode });
         return;
       }
       if (typeof copy.package !== 'string') {
-        setNewSimilarStrip({ kind: 'noPackage', name: copy.name, notice: copy.notice });
+        setNewSimilarStrip({ kind: 'noPackage', name: copy.name, notice: copy.notice, noticeCode: copy.noticeCode });
         return;
       }
-      const landed: NewSimilarStrip = { kind: 'landed', name: copy.name, package: copy.package, notice: copy.notice };
+      const landed: NewSimilarStrip = {
+        kind: 'landed',
+        name: copy.name,
+        package: copy.package,
+        notice: copy.notice,
+        noticeCode: copy.noticeCode,
+      };
       // objectstack#28572 — the pair's sets are this surface's too.
       if (copy.package === railPackageId || (railPairId !== null && copy.package === railPairId)) {
         setNewSimilarStrip(landed);
@@ -12330,7 +12539,19 @@ export function AccessPillar({
                 ? tFormat('engine.studio.access.newSimilar.noPackage', locale, { name: newSimilarStrip.name })
                 : t('perm.clone.noName', locale)}
           </p>
-          {newSimilarStrip.notice && <p>{newSimilarStrip.notice}</p>}
+          {/* objectstack#29727 — in the console's language for its known code, else as sent. */}
+          {newSimilarStrip.notice && (
+            <p>
+              {permissionSetCloneNoticeText(
+                {
+                  notice: newSimilarStrip.notice,
+                  noticeCode: newSimilarStrip.noticeCode,
+                  package: newSimilarStrip.kind === 'landed' ? newSimilarStrip.package : null,
+                },
+                locale,
+              )}
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -12547,6 +12768,9 @@ export function AccessPillar({
               readOnly={readOnly}
               onDirtyChange={setMatrixDirty}
               embedded
+              // objectstack#29809 — the header's provenance chip reads the
+              // mark this set's rail row draws, so the two tell one story.
+              customizationMark={railMarks?.markOf({ type: 'permission', name: current, addedIn: currentAddedIn }) ?? null}
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,

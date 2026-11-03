@@ -17,7 +17,8 @@ export const entry: SemanticMigration = {
     + '1-8 letter-or-digit subtags (`en`, `zh-CN`, `zh-Hans-CN`, `es-419`). Write `zh-CN` for '
     + '`zh_CN` and drop surrounding whitespace; the conversion does both for stored rows and built '
     + 'artifacts. A language name or any other text has no single tag it can have meant, so rewrite '
-    + 'it by hand. Case is not judged: `zh-cn` is accepted, because the resolvers fold case',
+    + 'it by hand. Case is not refused: the parse corrects it (`zh-cn` → `zh-CN`, see '
+    + '`translation-locale-case-canonicalized`)',
   reason:
     'LocaleSchema was a bare string, so a translator or AI author who wrote `zh_CN`, a padded '
     + 'value or a language name got a green save, and the strings were stored under a locale no '

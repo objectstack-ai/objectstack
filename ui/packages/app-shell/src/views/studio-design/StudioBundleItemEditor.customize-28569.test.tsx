@@ -253,9 +253,12 @@ async function customize(): Promise<void> {
   await waitFor(() => expect(screen.queryByTestId('studio-customize')).toBeNull());
 }
 
+/** objectstack#29692 — Restore is asked from the override mark's popover. */
 async function restore(): Promise<void> {
-  fireEvent.pointerDown(await screen.findByTestId('studio-bundle-editor-more'), { button: 0, ctrlKey: false });
-  fireEvent.click(await screen.findByTestId('studio-restore-original'));
+  fireEvent.click(await screen.findByTestId('studio-override-chip', undefined, { timeout: 8000 }));
+  const popover = await screen.findByTestId('studio-override-popover');
+  await waitFor(() => expect(within(popover).getByTestId('studio-override-restore')).toBeEnabled(), { timeout: 8000 });
+  fireEvent.click(within(popover).getByTestId('studio-override-restore'));
   const dialog = await screen.findByTestId('studio-restore-original-dialog');
   fireEvent.click(within(dialog).getByTestId('studio-restore-original-confirm'));
 }
@@ -371,6 +374,12 @@ describe('Customize a read-only base’s email template, one locale (objectstack
     mount({ type: 'email_template', name: 'welcome', member: 'zh-CN', listedPair: PAIR });
     expect(await field('Subject')).toHaveValue('欢迎回来');
     expect(await screen.findByTestId('studio-override-chip')).toBeInTheDocument();
+    // objectstack#29692 — one door: the editor's ⋯ menu offers no Restore.
+    fireEvent.pointerDown(screen.getByTestId('studio-bundle-editor-more'), { button: 0, ctrlKey: false });
+    await screen.findByTestId('studio-bundle-editor-history');
+    expect(screen.queryByTestId('studio-restore-original')).toBeNull();
+    fireEvent.keyDown(screen.getByTestId('studio-bundle-editor-history'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('studio-bundle-editor-history')).toBeNull());
 
     await restore();
     await waitFor(() => expect(srv.resets).toHaveLength(2));

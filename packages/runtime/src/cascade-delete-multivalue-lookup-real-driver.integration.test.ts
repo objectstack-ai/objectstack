@@ -524,7 +524,8 @@ function declareCascadeDeleteCell(cell: DialectCell): void {
     // ── [#9438] Member removal on the real stack. The residual-shape
     //    sentence these tests consume is `FieldSchema`'s, not theirs:
     //    `packages/spec/src/data/field.zod.ts`, the `multiple` and `required`
-    //    doc blocks (#9447, maintainer ruling 2026-08-18). Under the #9437
+    //    doc blocks (ruling A on #29343, record 6591577985, amending #9447
+    //    for optional columns). Under the #9437
     //    holding position each of these deletes was a 409, so the 200s below
     //    also pin the interim escalation's removal.
 
@@ -547,7 +548,7 @@ function declareCascadeDeleteCell(cell: DialectCell): void {
         expect(await real.count('zz_account')).toBe(1);
     });
 
-    it('removing the LAST member stores `[]`, never `null` — the ruled representation, in the database', async () => {
+    it('removing the LAST member stores `null` on an optional field — the ruled representation, in the database', async () => {
         const { protocol, real } = await rig([ACCOUNT, FIELD_ZOO]);
         const a: any = await engine!.insert('zz_account', { id: 'acc_a', name: 'A' });
         await engine!.insert('zz_field_zoo', { id: 'z1', name: 'z', f_lookups: ['acc_a'] });
@@ -556,12 +557,12 @@ function declareCascadeDeleteCell(cell: DialectCell): void {
         expect(res).toMatchObject({ id: 'acc_a', success: true });
 
         const [row]: any[] = await real.find('zz_field_zoo', { where: { id: 'z1' } });
-        // The literal shape, asserted both ways: `[]`, not `null` — this is
-        // the observable half of the #9447 ruling, proved against what the
-        // real driver actually stored and read back.
-        expect(row.f_lookups).toEqual([]);
-        expect(row.f_lookups).not.toBeNull();
-        expect(Array.isArray(row.f_lookups)).toBe(true);
+        // The literal shape: `null`, not `[]` — the observable half of ruling
+        // A on #29343 (record 6591577985, amending #9447 for optional
+        // columns), proved against what the real driver actually stored and
+        // read back: the emptied set is stored as one never set.
+        expect(row).toHaveProperty('f_lookups');
+        expect(row.f_lookups).toBeNull();
     });
 
     it('a multi-value CASCADE still deletes end to end — the P0 closes for that path', async () => {

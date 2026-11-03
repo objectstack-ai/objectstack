@@ -10,7 +10,7 @@ import { expandViewContainer } from '@objectstack/spec/ui';
 import { ActiveOrganizationStorage, TokenStorage, useAuth } from '@object-ui/auth';
 import {
   isMetaItemAbsentError,
-  MetadataNotFoundError,
+  ObjectStackError,
   type AppBundleEntry,
   type AppBundleItems,
   type AppBundlePeek,
@@ -19,7 +19,16 @@ import {
 import { isActionSwitchedOff, markSwitchedOffActions, markSwitchedOffActionsByObject, normalizeSchemaReferenceKeys } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
 import { resolveInlineMode } from '@object-ui/plugin-form';
-import { MetadataCtx, useMetadata, type MetadataContextValue, type MetadataCacheState, type MetadataTypeStatus } from '@object-ui/react';
+import {
+  MetadataCtx,
+  answeredLoadFailure,
+  classifyLoadError,
+  useMetadata,
+  type AnsweredLoadFailure,
+  type MetadataContextValue,
+  type MetadataCacheState,
+  type MetadataTypeStatus,
+} from '@object-ui/react';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { createConsoleMetadataClient } from '../views/metadata-admin/metadataClientFactory.js';
 import { subscribeCanvasInvalidate, subscribeMetadataRefresh } from '../assistant/assistantBus.js';
@@ -60,6 +69,9 @@ interface TypeCacheEntry {
  * `true` when no answer was obtained at all (a 5xx, a network drop, a 404
  * carrying no declared code or a code this build does not know).
  * `refusal` names the refusal code when the answer was one (objectui#13052).
+ * `answer` (objectstack#29728) is a failed read's server code and sentence
+ * when a server did answer it — a 5xx, a 404 with a code this build does not
+ * know — and absent when none did ({@link failedReadAnswer}).
  * `getItem` hands its callers `item` alone, as it always has; the object scope
  * needs the difference, because only an answer may record a name as missing.
  */
@@ -67,6 +79,21 @@ interface ItemRead {
   item: any | null;
   failed: boolean;
   refusal?: string;
+  answer?: AnsweredLoadFailure;
+}
+
+/**
+ * objectstack#29728 — the server's code and sentence for a failed by-name
+ * read, through the one rule the list, record, app page and related list
+ * share (`answeredLoadFailure`), so a route can say what the server said
+ * instead of "check your connection". `undefined` when no server answered (the
+ * route keeps its network sentence), and for a refused read (`forbidden`,
+ * `unauthorized`), whose state keeps its fixed copy as `PageView`'s does.
+ */
+function failedReadAnswer(err: unknown): AnsweredLoadFailure | undefined {
+  const kind = classifyLoadError(err);
+  if (kind === 'forbidden' || kind === 'unauthorized') return undefined;
+  return answeredLoadFailure(err) ?? undefined;
 }
 
 /**
@@ -112,13 +139,20 @@ interface ObjectScopeEntry {
    * (objectui#13052). Replaced on change.
    */
   refused: Readonly<Record<string, string>>;
+  /**
+   * objectstack#29728 — the names whose last read FAILED although a server
+   * answered it, with the server's code and sentence ({@link failedReadAnswer}).
+   * A failed name absent here got no answer. Replaced on change.
+   */
+  answers: Readonly<Record<string, AnsweredLoadFailure>>;
 }
 
 const NO_REFUSALS: Readonly<Record<string, string>> = Object.freeze({});
+const NO_ANSWERS: Readonly<Record<string, AnsweredLoadFailure>> = Object.freeze({});
 
-/** `refused` without `name`: a new record, the stored one is never mutated. */
-function withoutRefusal(refused: Readonly<Record<string, string>>, name: string): Readonly<Record<string, string>> {
-  const next = { ...refused };
+/** `record` without `name`: a new record, the stored one is never mutated. */
+function withoutName<T>(record: Readonly<Record<string, T>>, name: string): Readonly<Record<string, T>> {
+  const next = { ...record };
   delete next[name];
   return next;
 }
@@ -754,6 +788,60 @@ function bundledViews(items: AppBundleItems): BundledRead<unknown[]> {
   return hit;
 }
 
+/**
+ * objectstack#29552 — whether an app document's navigation reaches
+ * `objectName`: an `object` entry naming it in the trees the server's bundle
+ * walks (`appNavigationReach` in `@objectstack/rest`): top-level `navigation`,
+ * each area's `navigation`, and `children` at any depth.
+ */
+function navigationReachesObject(app: unknown, objectName: string): boolean {
+  const walk = (entries: unknown): boolean =>
+    Array.isArray(entries) &&
+    entries.some((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const e = entry as Record<string, unknown>;
+      return (e.type === 'object' && e.objectName === objectName) || walk(e.children);
+    });
+  if (!app || typeof app !== 'object') return false;
+  const a = app as Record<string, unknown>;
+  return (
+    walk(a.navigation) ||
+    (Array.isArray(a.areas) && a.areas.some((area) => walk((area as Record<string, unknown> | null)?.navigation)))
+  );
+}
+
+/**
+ * objectstack#29552 — the names of the bundled objects with a `lookup` /
+ * `master_detail` field whose `reference` names `objectName`, the reading of
+ * "points at" the server's `inboundRelationObjects` and the record page's
+ * `deriveRelatedLists` both make. One array per (bundle answer, object), so a
+ * reader's memo on it holds.
+ */
+const BUNDLED_REFERENCING = new WeakMap<AppBundleItems, Map<string, BundledRead<readonly string[]>>>();
+function bundledReferencing(items: AppBundleItems, objectName: string): BundledRead<readonly string[]> {
+  let byObject = BUNDLED_REFERENCING.get(items);
+  if (!byObject) BUNDLED_REFERENCING.set(items, (byObject = new Map()));
+  let hit = byObject.get(objectName);
+  if (!hit) {
+    const names: string[] = [];
+    for (const [name, entry] of items.get('object') ?? []) {
+      if (name === objectName) continue;
+      const fields = (entry.item as { fields?: unknown } | null)?.fields;
+      const defs: Array<{ type?: unknown; reference?: unknown } | null> = Array.isArray(fields)
+        ? fields
+        : fields && typeof fields === 'object'
+          ? Object.values(fields)
+          : [];
+      if (defs.some((f) => (f?.type === 'lookup' || f?.type === 'master_detail') && f.reference === objectName)) {
+        names.push(name);
+      }
+    }
+    hit = Object.freeze({ state: 'hit' as const, value: Object.freeze(names) });
+    byObject.set(objectName, hit);
+  }
+  return hit;
+}
+
 /** What a reader that has no views to compose with yet holds. */
 const NO_VIEWS: unknown[] = [];
 
@@ -904,13 +992,19 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   // asks this context to read objects again also drops the adapter's entry for
   // each: otherwise the next read would be answered from that entry instead of
   // the server. The preview client's reads never touch the adapter.
+  //
+  // objectstack#29728 — any other failure reaches the catch as the transport's
+  // own error too, which `getObjectSchema` keeps as the cause of the wrapper it
+  // throws: the wrapper swaps the server's code for its own and stamps a status
+  // on a request that got no answer, so only the cause can say whether, and
+  // what, the server answered.
   const adapterObjectNamesRef = useRef<Set<string>>(new Set());
   const readObjectThroughAdapter = useCallback((name: string): Promise<unknown> => {
     adapterObjectNamesRef.current.add(name);
     return adapterRef.current.getObjectSchema(name).then(
       (schema: unknown) => ({ item: schema == null ? schema : cloneServedObject(schema) }),
       (err: unknown) => {
-        throw err instanceof MetadataNotFoundError ? (err.details?.originalError ?? err) : err;
+        throw err instanceof ObjectStackError ? (err.details?.originalError ?? err) : err;
       },
     );
   }, []);
@@ -1015,6 +1109,48 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       const bundledObjects = peek.items.get('object');
       for (const name of objectNames) if (!bundledObjects?.has(name)) return BUNDLE_MISS;
       return bundledViews(peek.items);
+    },
+    [peekBundle],
+  );
+  // objectstack#29552 — `objectsReferencing` asked for an app whose bundle is
+  // not the one held, and the apps a held bundle answered without.
+  const bundleAppAskedRef = useRef<string | null>(null);
+  const bundleAppMissRef = useRef(new Set<string>());
+  useEffect(() => {
+    const asked = bundleAppAskedRef.current;
+    if (!asked) return;
+    bundleAppAskedRef.current = null;
+    const peek = peekBundle();
+    // No bundle at all: the readers' next read misses on its own.
+    if (!peek) {
+      bump();
+      return;
+    }
+    // Not entered yet (the effect above settles that), or a load on the wire,
+    // which re-renders the readers when it lands.
+    if (peek.status !== 'ready' || peek.settled) return;
+    if (!peek.items.get('app')?.has(asked)) bundleAppMissRef.current.add(asked);
+    bump();
+  });
+  const readBundledReferencing = useCallback(
+    (appName: string, objectName: string): BundledRead<readonly string[]> => {
+      const peek = peekBundle();
+      if (!peek) return BUNDLE_MISS;
+      if (peek.status !== 'ready') return BUNDLE_PENDING;
+      const app = peek.items.get('app')?.get(appName);
+      if (!app) {
+        // The bundle held is not `appName`'s: it is entered from an effect of
+        // this same commit, so the read stays pending, and this provider's
+        // effect below looks again once it is. Only a bundle that has answered
+        // without the app, with nothing on the wire, is the answer: none.
+        if (bundleAppMissRef.current.has(appName)) return BUNDLE_MISS;
+        bundleAppAskedRef.current = appName;
+        return BUNDLE_PENDING;
+      }
+      if (!navigationReachesObject(app.item, objectName) || !peek.items.get('object')?.has(objectName)) {
+        return BUNDLE_MISS;
+      }
+      return bundledReferencing(peek.items, objectName);
     },
     [peekBundle],
   );
@@ -1220,7 +1356,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           // objectui#13052 — and so is a definite refusal, named.
           const refusal = ANSWERED_REFUSAL_CODES.find((code) => errorCodeIs(err, code));
           if (refusal) return { item: null, failed: false, refusal };
-          return { item: null, failed: true };
+          return { item: null, failed: true, answer: failedReadAnswer(err) };
         });
 
       pending.set(name, promise);
@@ -1278,7 +1414,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   const fetchScopeName = useCallback(
     (packageId: string, entry: ObjectScopeEntry, name: string): Promise<void> => {
       entry.names.set(name, 'pending');
-      return readItem('object', name).then(({ item, failed, refusal }) => {
+      return readItem('object', name).then(({ item, failed, refusal, answer }) => {
         if (scopesRef.current.get(packageId) !== entry) return;
         // objectui#13009 — a read that obtained no answer records no answer:
         // the name is not missing (so the scope stays unsettled and
@@ -1291,10 +1427,14 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         // themselves; `invalidate`, `refresh` and a scope refetch ask it again.
         if (failed) {
           entry.names.set(name, 'failed');
+          // objectstack#29728 — and what the server said, when one answered.
+          if (answer) entry.answers = { ...entry.answers, [name]: answer };
+          else if (name in entry.answers) entry.answers = withoutName(entry.answers, name);
           bump();
           return;
         }
         entry.names.set(name, 'answered');
+        if (name in entry.answers) entry.answers = withoutName(entry.answers, name);
         const rest = entry.items.filter((it: any) => it?.name !== name);
         if (item) {
           entry.items = [...rest, item];
@@ -1304,7 +1444,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           if (!entry.missing.includes(name)) entry.missing = [...entry.missing, name];
         }
         if (refusal ? entry.refused[name] !== refusal : name in entry.refused) {
-          entry.refused = refusal ? { ...entry.refused, [name]: refusal } : withoutRefusal(entry.refused, name);
+          entry.refused = refusal ? { ...entry.refused, [name]: refusal } : withoutName(entry.refused, name);
         }
         bump();
       });
@@ -1370,7 +1510,8 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
             }
             scope.names.delete(name);
             if (scope.missing.includes(name)) scope.missing = scope.missing.filter(n => n !== name);
-            if (name in scope.refused) scope.refused = withoutRefusal(scope.refused, name);
+            if (name in scope.refused) scope.refused = withoutName(scope.refused, name);
+            if (name in scope.answers) scope.answers = withoutName(scope.answers, name);
           }
         }
         debug(`invalidated type=${type} name=${name}`);
@@ -1658,7 +1799,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       }
       let entry = scopesRef.current.get(packageId);
       if (!entry) {
-        entry = { status: 'idle', items: [], answered: false, names: new Map(), missing: [], refused: NO_REFUSALS };
+        entry = { status: 'idle', items: [], answered: false, names: new Map(), missing: [], refused: NO_REFUSALS, answers: NO_ANSWERS };
         scopesRef.current.set(packageId, entry);
       }
       const whole = getEntry('object');
@@ -1714,8 +1855,10 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       // failed (a failure is not an answer, objectui#13009); `failed` names
       // those reads once nothing else is still in flight, so a reader can stop
       // waiting on them. `refused` maps each refused name in `missing` to its
-      // code. Both ride beside the published shape: this package's own
-      // readers read them (`appObjectScope.ts`), other readers never see them.
+      // code; `answers` (objectstack#29728) each failed name a server answered
+      // to its code and sentence. They ride beside the published shape: this
+      // package's own readers read them (`appObjectScope.ts`), other readers
+      // never see them.
       const atRest = entry.answered && namesSettled;
       // objectstack#28645 — the scope's views (see `viewsForObjects`). The
       // scope is not settled until they are in hand, so a route never draws its
@@ -1732,6 +1875,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           settled: atRest && failedNames.length === 0,
           failed: atRest && failedNames.length > 0 ? (failedNames as readonly string[]) : NO_NAMES,
           refused: entry.refused,
+          answers: entry.answers,
           views: NO_VIEWS,
         };
       }
@@ -1749,6 +1893,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         settled: atRest && failedNames.length === 0 && scopeViews.settled,
         failed: atRest && failedNames.length > 0 ? (failedNames as readonly string[]) : NO_NAMES,
         refused: entry.refused,
+        answers: entry.answers,
         views: scopeViews.views,
       };
     },
@@ -1802,8 +1947,8 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   // A new identity per version, so a reader re-renders when the bundle lands.
   const bundledReads = useMemo<BundledReads>(() => {
     void version;
-    return { item: readBundledItem, viewsFor: readBundledViews };
-  }, [version, readBundledItem, readBundledViews]);
+    return { item: readBundledItem, viewsFor: readBundledViews, objectsReferencing: readBundledReferencing };
+  }, [version, readBundledItem, readBundledViews, readBundledReferencing]);
 
   return (
     <MetadataCtx.Provider value={value}>

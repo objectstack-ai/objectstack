@@ -7,7 +7,9 @@
  * through. The handler retires the permission-set memo on a write, refuses a
  * flow run's identity-assignment writes, lets every other system operation
  * through, and serves the ADR-0056 public-form grant. It then runs the
- * engine-owned write guard and the ADR-0090 D12 delegated-administration gate,
+ * engine-owned write guard and the ADR-0090 D12 delegated-administration gate
+ * (whose refusal of a by-id write answers a caller the read door refuses with
+ * that read refusal, `readDoorAnswerForGateRefusal`),
  * resolves the operation's principals and the object's posture, and runs the
  * numbered steps in the order they stand: the `requiredPermissions` AND-gate
  * (1.5), the CRUD check (2), the access depth and an external principal's
@@ -97,6 +99,7 @@ import { renderOperationMessage } from '@objectstack/spec/system';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import type { II18nService, IMetadataService, IObjectQLEngine, SharingWriteVerdict } from '@objectstack/spec/contracts';
 import { crossFieldClassRefusalCarriedBy, findCrossFieldClassRefusal } from '@objectstack/formula';
+import { declaredHttpStatus } from '@objectstack/types';
 import type { SecurityPlugin } from './security-plugin.js';
 import { isGuestEnvelope, requiredCapsForOperation } from './security-plugin.js';
 import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
@@ -226,6 +229,58 @@ function userFacingDenialMessage(
     // locale without it.
   }
   return renderOperationMessage({ messageKey }, { locale, translate });
+}
+
+/**
+ * [ADR-0090 D12; ruling of record 5985885287] What a by-id write the
+ * delegated-administration gate refused answers a caller the read door
+ * refuses: that door's refusal.
+ *
+ * The gate judges the caller and the object before any grant is read and
+ * before any row is, and words its refusal for the write. The by-id write
+ * doors answer a caller who cannot read a row what they answer for an id
+ * naming no row (ruling of record 5985885287), and where a write is answered
+ * from the caller's own read of its row — the by-id version comparison answers
+ * a mismatched token with that read's refusal (`assertVersionOf`,
+ * `@objectstack/metadata-protocol`) — a caller the read door refuses is
+ * answered that refusal. So the gate answers that caller the same way: the
+ * read door's own question is asked of the id the caller addressed
+ * ({@link SecurityPlugin.getCallerPreImage}: the caller's by-id read through
+ * the engine, never a second evaluator), and
+ *
+ *  - the read is REFUSED (a declared 4xx): that refusal is the answer. It is
+ *    the read door's answer to this caller for any id, so the row and an id
+ *    naming none answer alike, with a version token and without;
+ *  - the read ANSWERS (a row, or none): the caller reads the object, and the
+ *    gate's own refusal stands, its guidance intact;
+ *  - the read FAULTS: the fault propagates as raised (#7505) — an outage is
+ *    neither an answer nor a refusal.
+ *
+ * Asked only of a refusal (a declared 4xx; anything else the gate throws stays
+ * what it is), only for the by-id update or delete the caller addressed (an
+ * insert, a predicate write and a nested write name no row of the caller's —
+ * {@link SecurityPlugin.addressedByIdWriteId}), and never for a row-write
+ * probe, whose verdict is admitted or refused and nothing more.
+ */
+async function readDoorAnswerForGateRefusal(
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'getCallerPreImage'>,
+  opCtx: any,
+  refusal: unknown,
+  nestedInOperation: boolean,
+): Promise<unknown> {
+  const status = declaredHttpStatus(refusal);
+  if (status === undefined || status >= 500 || isRowWriteProbe(opCtx)) return refusal;
+  const referentialFieldClear = opCtx.operation === 'update' && opCtx.context?.__referentialFieldClear === true;
+  const addressedId = this.addressedByIdWriteId(opCtx, nestedInOperation, referentialFieldClear);
+  if (addressedId === undefined) return refusal;
+  try {
+    await this.getCallerPreImage(opCtx, addressedId);
+  } catch (readRefusal) {
+    const readStatus = declaredHttpStatus(readRefusal);
+    if (readStatus !== undefined && readStatus < 500) return readRefusal;
+    throw readRefusal;
+  }
+  return refusal;
 }
 
 /**
@@ -485,8 +540,16 @@ export function registerAuthzMiddleware(
     // else — including holders of plain CRUD grants on these tables — is
     // denied. Runs BEFORE the principal-less refusal below so RBAC
     // tables fail CLOSED for principal-less non-system contexts.
+    //
+    // It judges before any grant is read, in its own words; on the by-id
+    // update or delete the caller addressed, a caller the read door refuses
+    // is answered that read refusal instead — {@link readDoorAnswerForGateRefusal}.
     if (this.delegatedAdminGate) {
-      await this.delegatedAdminGate.assert(opCtx);
+      try {
+        await this.delegatedAdminGate.assert(opCtx);
+      } catch (refusal) {
+        throw await readDoorAnswerForGateRefusal.call(this, opCtx, refusal, nestedInOperation);
+      }
     }
 
     const positions = opCtx.context?.positions ?? [];

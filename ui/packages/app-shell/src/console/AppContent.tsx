@@ -14,13 +14,13 @@ import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
-import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type AnsweredLoadFailure, type RecordSaveFeedback } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
 import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordSaveMessage } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { useBundledReads } from '../providers/bundledReads.js';
+import { BUNDLE_MISS, useBundledReads } from '../providers/bundledReads.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
@@ -475,6 +475,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     scope: objectScope,
     ready: objectScopeReady,
     failedNames: routeObjectReadsFailed,
+    failedAnswer: routeObjectReadAnswer,
     routeObjectRefusal,
   } = readAppObjectScope(
     readObjectScope,
@@ -520,6 +521,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         dashboard: preferLocal(metadata.dashboards as any[], dashboardName, (activeApp as any)?._packageId),
         settled: status === undefined || status === 'ready' || status === 'error',
       };
+    },
+    // objectstack#29552 — a record route with no declared record page, in an
+    // app with no package: the objects that point at the record's object,
+    // from the app bundle, when it can say.
+    (objectName) => {
+      const appName = typeof activeApp?.name === 'string' ? activeApp.name : undefined;
+      return bundledReads && appName ? bundledReads.objectsReferencing(appName, objectName) : BUNDLE_MISS;
     },
   );
   // Until the app list has loaded, a scope candidate does not know its package
@@ -1546,7 +1554,9 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   // objectui#13052 — the route's object read failed (a 5xx, a
                   // network drop, a code this build does not know): say so in
                   // the shell, and let Retry ask those names once more.
+                  // objectstack#29728 — in the server's words when it answered.
                   <RouteObjectReadFailed
+                    answer={routeObjectReadAnswer}
                     onRetry={() => {
                       for (const name of routeObjectReadsFailed) metadata.invalidate('object', name);
                     }}
@@ -1818,6 +1828,9 @@ function buildItemRoute(item: any, ctx?: NavTemplateContext): string {
  * walks groups and lands on an `object`, `page`, `dashboard`, `report` or
  * `component` entry (objectui#12113 added `component`). It skips the item
  * types that address nothing inside the app (`url`, `separator`, `action`).
+ * The walk covers every tree the member is shown: the top-level `navigation`
+ * first, then each `areas[].navigation` in order, so an app whose entries live
+ * only under `areas` lands too (objectstack-ai/objectstack#29771).
  * A `doc` entry is passed over there: a working entry outranks reading
  * material, so an app whose first entry is its manual still opens on its first
  * working entry. Only when no entry lands does the root open the FIRST `doc`
@@ -1843,8 +1856,28 @@ function resolveLandingRoute(
   const declared = resolveDeclaredLandingRoute(app?.landing, shownTrees, evaluateVisibility, (item) =>
     buildItemRoute(item, ctx),
   );
-  const tree = shownTrees[0] ?? [];
-  return declared || findFirstRoute(tree, ctx) || findFirstRoute(tree, ctx, DOC_LANDING_TYPES);
+  return declared || firstRouteAcross(shownTrees, ctx) || firstRouteAcross(shownTrees, ctx, DOC_LANDING_TYPES);
+}
+
+/**
+ * objectstack-ai/objectstack#29771 — the first route of `types` across every
+ * tree the member is shown, in order: the top-level `navigation`, then each
+ * `areas[].navigation` as authored. The preference holds across the trees, not
+ * per tree: a working entry in any area outranks a `doc` entry in the
+ * top-level navigation, as it does inside one tree (#29678). The sidebar elects
+ * the area that holds the landed entry (`electSidebarArea`), so a landing in a
+ * later area opens with that area active.
+ */
+function firstRouteAcross(
+  shownTrees: readonly NavigationItem[][],
+  ctx?: NavTemplateContext,
+  types: ReadonlySet<string> = WORKING_LANDING_TYPES,
+): string {
+  for (const tree of shownTrees) {
+    const route = findFirstRoute(tree ?? [], ctx, types);
+    if (route) return route;
+  }
+  return '';
 }
 
 /**
@@ -1974,13 +2007,14 @@ function AppRootLanding({
   if (appServesNoNavigation(shownApp)) {
     return <AppNoAccessEmptyState app={app} setupPath={setupPath} />;
   }
-  // A navigation with no landing: every entry the sidebar draws is a `url` or
-  // `action` link, or the items live only under `areas`, which the resolver
-  // does not walk (a `doc` entry lands, objectstack-ai/objectstack#29678). The
-  // root renders no page of its own and the sidebar offers the entries. It used
-  // to render the Studio app's overview, `StudioHomePage`, which objectui#12113
-  // retired.
-  return null;
+  // objectstack-ai/objectstack#29771 — a navigation with no in-app landing:
+  // every entry the member is shown, in `navigation` and in every area, is a
+  // `url` or `action` link (a working or `doc` entry anywhere would have
+  // landed). The root has no page of its own to open, so it says the app opens
+  // from its menu, instead of the empty `main` it used to render. The member
+  // does have access here, so the screen offers no Setup link. Before
+  // objectui#12113 this fell through to the Studio app's overview.
+  return <AppNoAccessEmptyState app={app} setupPath={setupPath} reason="menu-only" />;
 }
 
 /**
@@ -2106,8 +2140,15 @@ function RouteNotFound() {
  * Retry that asks again once (`invalidate` drops the failed read; the next
  * render asks it). The list's own load-failure copy: this is the same
  * question, a list that could not be loaded.
+ *
+ * objectstack#29728 — when a server answered the read (a 5xx, a 404 with a
+ * code this build does not know), `answer` carries its code and sentence
+ * (`answeredLoadFailure`, the rule the list, record and app page share): the
+ * sentence replaces the network one, and the code is drawn beneath it, as the
+ * app page's failed-read state draws it. The network sentence is only for a
+ * read no server answered.
  */
-function RouteObjectReadFailed({ onRetry }: { onRetry: () => void }) {
+function RouteObjectReadFailed({ answer, onRetry }: { answer: AnsweredLoadFailure | null; onRetry: () => void }) {
   const { t } = useObjectTranslation();
   // #25915 — drawn by the shared `DataErrorState`, so the failure is
   // `role="alert"` by construction. Retry is passed as `children` (not
@@ -2117,10 +2158,18 @@ function RouteObjectReadFailed({ onRetry }: { onRetry: () => void }) {
       <DataErrorState
         data-testid="route-object-read-failed"
         title={t('list.loadErrorTitle', { defaultValue: 'Couldn\u2019t load records' })}
-        message={t('list.loadErrorMessage', {
+        message={answer?.message ?? t('list.loadErrorMessage', {
           defaultValue: 'Something went wrong while loading this data. Check your connection and try again.',
         })}
       >
+        {answer?.code ? (
+          <code
+            data-testid="route-object-read-failed-code"
+            className="mb-3 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+          >
+            {answer.code}
+          </code>
+        ) : null}
         <Button onClick={onRetry} data-testid="route-object-read-failed-retry">
           {t('common.retry', { defaultValue: 'Retry' })}
         </Button>

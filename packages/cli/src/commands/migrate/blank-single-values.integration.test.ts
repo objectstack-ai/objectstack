@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { blankAsNullColumns } from '@objectstack/core';
 import { blankSingleValueColumns, cleanBlankSingleValues } from './blank-single-values.js';
 
 const OPTS = [{ value: 'gold', label: 'Gold' }, { value: 'silver', label: 'Silver' }];
@@ -99,6 +100,11 @@ describe('os migrate blank-single-values: the column set', () => {
     expect(blankSingleValueColumns(OBJ).map((c) => c.type).sort()).toEqual(
       ['audio', 'avatar', 'file', 'image', 'lookup', 'master_detail', 'radio', 'select', 'tree', 'user', 'video'],
     );
+  });
+
+  it('[#29343] a multi_value-row column is in the door\'s map on its own reach, and out of this walk', () => {
+    expect(blankAsNullColumns(OBJ as any).get('m_select')).toBe('emptyList');
+    expect(blankSingleValueColumns(OBJ).map((c) => c.name)).not.toContain('m_select');
   });
 });
 

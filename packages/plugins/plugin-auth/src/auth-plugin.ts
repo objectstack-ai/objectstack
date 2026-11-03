@@ -81,6 +81,7 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
+import { runOneTimeTokenHandoff } from './one-time-token-handoff.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
   seedCreatedOrganizationCurrency,
@@ -4010,6 +4011,50 @@ export class AuthPlugin implements Plugin {
         ctx.logger.error('[AuthPlugin] organization/invitation-preview failed', err);
         // A signed-out caller is told the read failed, never why.
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The invitation preview is unavailable.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // The mobile sign-in hand-off: a session signed in in the SYSTEM browser
+    // is handed to a REGISTERED app scheme as a single-use, one-minute token
+    // the app redeems at better-auth's own `/one-time-token/verify`, bound to
+    // the shell's PKCE challenge so an intercepted callback cannot be
+    // redeemed. Mounted unconditionally: with no registered scheme every
+    // target is refused with a 400 that says how to register one. A session
+    // signed in within the last five minutes is required, and a cross-site
+    // navigation is refused (ruling A); the reasons for every refusal live in
+    // `one-time-token-handoff.ts`. Ledgered in auth-route-ledger.ts.
+    rawApp.get(`${basePath}/one-time-token/handoff`, async (c: any) => {
+      try {
+        const manager = this.authManager!;
+        const answer = await runOneTimeTokenHandoff(
+          {
+            registeredSchemes: manager.getRegisteredAppSchemes(),
+            sessionCreatedAt: async (headers) => {
+              const api: any = await manager.getApi();
+              const live = await api.getSession({ headers });
+              const createdAt = live?.session?.createdAt;
+              return createdAt ? new Date(createdAt) : null;
+            },
+            generate: async (headers) => {
+              const api: any = await manager.getApi();
+              return api.generateOneTimeToken({ headers });
+            },
+          },
+          { queries: (c.req.queries() ?? {}) as Record<string, string[]>, headers: c.req.raw.headers },
+        );
+        if (answer.status === 302) {
+          return new Response(null, { status: 302, headers: answer.headers });
+        }
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] one-time-token/handoff failed', err);
+        return c.json(
+          { success: false, error: { code: 'INTERNAL_ERROR', message: 'The sign-in hand-off is unavailable.' } },
+          500,
+          { 'Cache-Control': 'no-store' },
+        );
       }
     });
 
