@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { runWithEndpointContext } from '@better-auth/core/context';
+import { emailOTP } from 'better-auth/plugins/email-otp';
 import { AuthManager } from './auth-manager';
 import { BETTER_AUTH_MOUNTED_SURFACE } from './auth-route-ledger';
 import {
@@ -553,7 +554,6 @@ describe('#7732 — the path ledger', () => {
     // fails here the way a mounted route's would fail above. The second half
     // is a tripwire: once the platform mounts it, it joins the mounted check
     // and gets a door test of its own.
-    const { emailOTP } = await import('better-auth/plugins/email-otp');
     const declared = Object.values(emailOTP({ sendVerificationOTP: async () => {} }).endpoints).map(
       (endpoint) => (endpoint as { path?: unknown }).path,
     );
