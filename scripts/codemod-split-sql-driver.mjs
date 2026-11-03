@@ -13,6 +13,7 @@
  *   node scripts/codemod-split-sql-driver.mjs --dts <beforeDist> <afterDist>
  *                                                             # the declaration-file bar on two built dists
  *   node scripts/codemod-split-sql-driver.mjs --self-test
+ *   node scripts/codemod-split-sql-driver.mjs --help          # this usage, on any tree (split or not)
  *
  * ## Why a script, and what it repeats
  *
@@ -1438,7 +1439,37 @@ function injectVisibilityChange(text) {
   return at < 0 ? null : text.slice(0, at) + '    ' + text.slice(at + '    private '.length);
 }
 
-/** The bar on one declaration file pair. Returns `{ failures, reading }`. */
+/**
+ * The number of lines deleted plus lines inserted between two line arrays —
+ * what `diff` prints as `<` and `>` lines (Myers' O((N+M)D) edit distance, so
+ * a handful of changed lines in a 9,000-line file costs nothing).
+ */
+function lineEditDistance(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const max = n + m;
+  const off = max + 1;
+  const v = new Int32Array(2 * max + 3);
+  for (let d = 0; d <= max; d += 1) {
+    for (let k = -d; k <= d; k += 2) {
+      let x = (k === -d || (k !== d && v[off + k - 1] < v[off + k + 1])) ? v[off + k + 1] : v[off + k - 1] + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) { x += 1; y += 1; }
+      v[off + k] = x;
+      if (x >= n && y >= m) return d;
+    }
+  }
+  return max;
+}
+
+/**
+ * The bar on one declaration file pair. Returns `{ failures, reading }`.
+ *
+ * `rawDiffLines` counts the lines that differ IN PLACE when both files have the
+ * same line count (one per swapped union, as the ruling reads it), and the
+ * lines `diff` would print (deleted plus inserted) when the counts differ;
+ * `rawDiffMethod` names which. Before, a differing line count read as 0.
+ */
 function dtsBarFor(file, before, after) {
   const failures = [];
   const nb = normaliseUnionOrder(before);
@@ -1446,7 +1477,9 @@ function dtsBarFor(file, before, after) {
   const bl = before.split('\n');
   const al = after.split('\n');
   let rawDiffLines = 0;
+  const rawDiffMethod = bl.length === al.length ? 'in-place' : 'diff';
   if (bl.length !== al.length) {
+    rawDiffLines = lineEditDistance(bl, al);
     failures.push(`${file}: ${bl.length} lines at base, ${al.length} at head — a line added or removed is a declaration change, outside the ruling`);
   } else {
     for (let i = 0; i < bl.length; i += 1) {
@@ -1469,7 +1502,7 @@ function dtsBarFor(file, before, after) {
     failures,
     reading: {
       file,
-      rawBase: sha256(before), rawHead: sha256(after), rawDiffLines,
+      rawBase: sha256(before), rawHead: sha256(after), rawDiffLines, rawDiffMethod,
       normalisedBase: sha256(nb), normalisedHead: sha256(na),
       exportsBase: eb.length, exportsHead: ea.length,
       positiveControl: controlSha,
@@ -1585,7 +1618,21 @@ function generatedModulesOnDisk() {
 
 // ── Entry ────────────────────────────────────────────────────────────────────
 
+const USAGE = [
+  'usage: node scripts/codemod-split-sql-driver.mjs [--write]   plan (or apply) the split of an UNSPLIT sql-driver.ts',
+  '       node scripts/codemod-split-sql-driver.mjs --verify --base REF   re-prove a split on disk against sql-driver.ts at REF',
+  '       node scripts/codemod-split-sql-driver.mjs --dts BEFORE_DIST AFTER_DIST   the declaration-file bar on two built dists',
+  '       node scripts/codemod-split-sql-driver.mjs --self-test',
+  '       node scripts/codemod-split-sql-driver.mjs --help',
+].join('\n');
+
 async function main(argv) {
+  // Answered before any guard: `--help` reads no tree, so the "already split"
+  // refusal below must never be what a reader asking for usage gets.
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(USAGE);
+    return 0;
+  }
   if (argv.includes('--self-test')) {
     await selfTest();
     if (process.exitCode === 1) return 1;
@@ -1656,11 +1703,11 @@ async function main(argv) {
 let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'declaration bar': 6,
+  'declaration bar': 7,
   'stay rules': 12,
   'top-level moves': 11,
   'byte-identity proof': 10,
-  'refusals': 4,
+  'refusals': 5,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -1825,6 +1872,9 @@ async function selfTest() {
     check('a private member made public fails (the positive control the bar runs)',
       dtsBarFor('f', base, base.replace('    private x;', '    x;')).failures.length > 0);
     check('an added line fails', dtsBarFor('f', base, base.replace('}\n', '    y: number;\n}\n')).failures.length > 0);
+    check('a line-count change is counted as diff counts it, never as 0',
+      (() => { const r = dtsBarFor('f', base, base.replace('}\n', '    y: number;\n}\n')).reading; return r.rawDiffLines === 1 && r.rawDiffMethod === 'diff'; })()
+      && lineEditDistance(['a', 'b', 'c'], ['a', 'x', 'c', 'd']) === 3);
     check('a changed export list fails', dtsBarFor('f', base, base.replace('export { A };', 'export { A as B };')).failures.length > 0);
   }
 
@@ -1917,6 +1967,9 @@ async function selfTest() {
     check('a class-scoped needle the file no longer carries refuses',
       refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: {}, needles: {}, classNeedles: { 'gone text': 'x' } })));
     check('a needle the file no longer carries refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: {}, needles: { 'gone text': 'x' }, classNeedles: {} })));
+    // `--help` reads no tree: it answers before the "already split" guard, so
+    // it exits 0 whether sql-driver.ts on disk is split (as on a branch) or not.
+    check('--help is answered, never refused, whatever sql-driver.ts holds', (await main(['--help']).catch(() => 2)) === 0);
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
