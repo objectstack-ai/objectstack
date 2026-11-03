@@ -34,7 +34,7 @@ interface DriverAst {
   limit?: number;
 }
 
-function makeSparseDriver(name: string) {
+function makeSparseDriver(name: string, unechoed: readonly string[] = []) {
   const tables = new Map<string, Map<string, Row>>();
   const tableFor = (o: string): Map<string, Row> => {
     let t = tables.get(o);
@@ -64,6 +64,8 @@ function makeSparseDriver(name: string) {
   // A key given `undefined` is not stored, as driver-mongodb's insert doors
   // drop it; the echo is the stored row and nothing else.
   const stored = (data: Row): Row => Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+  // A driver that stores a column but does not echo it (#1872's shape).
+  const echo = (row: Row): Row => Object.fromEntries(Object.entries(row).filter(([k]) => !unechoed.includes(k)));
   const driver = {
     name, version: '0.0.0', supports: {},
     async connect(): Promise<void> {},
@@ -76,14 +78,14 @@ function makeSparseDriver(name: string) {
       seq += 1;
       const row: Row = { ...stored(data), id: (data.id as string | undefined) ?? `new_${seq}` };
       tableFor(object).set(String(row.id), row);
-      return { ...row };
+      return echo(row);
     },
     async update(object: string, id: string, data: Row): Promise<Row | null> {
       const prior = tableFor(object).get(id);
       if (!prior) return null;
       const next: Row = { ...prior, ...stored(data), id };
       tableFor(object).set(id, next);
-      return { ...next };
+      return echo(next);
     },
     async updateMany(object: string, ast: DriverAst, data: Row): Promise<number> {
       const hits = Array.from(tableFor(object).values()).filter((r) => matches(r, ast?.where));
@@ -112,9 +114,9 @@ const ITEM_FIELDS = {
   doubled: { type: 'formula', expression: { dialect: 'cel', source: 'record.qty != null ? record.qty * 2 : -1' } },
 };
 
-async function boot() {
+async function boot(unechoed: readonly string[] = []) {
   const engine = new ObjectQL();
-  const local = makeSparseDriver('memory');
+  const local = makeSparseDriver('memory', unechoed);
   engine.registerDriver(local.driver as never, true);
   await engine.init();
   engine.registry.registerObject({ name: ITEM, label: 'Item', fields: ITEM_FIELDS } as never, PACKAGE_ID);
@@ -190,5 +192,42 @@ describe('[#29538] a write answers the record the next read answers', () => {
   it('a predicate update still answers its affected-row count, not a record body', async () => {
     const count = await h.engine.update(ITEM, { title: 'many' }, { where: { title: 'seed' }, multi: true } as never);
     expect(count).toBe(1);
+  });
+});
+
+describe('[#29538] a column the write carried a value for is never answered null', () => {
+  // The driver stores `note` but leaves it out of its echo. The answer must not
+  // claim a `null` the row does not hold; a reader layering the payload under
+  // the answer (trigger-record-change's flow record) keeps the written value.
+  let h: Booted;
+  beforeEach(async () => { h = await boot(['note']); });
+
+  it('insert: a written, unechoed column stays absent; an unwritten one is null', async () => {
+    const answer = await h.engine.insert(ITEM, { title: 'w', note: 'written' }) as Row;
+    expect(h.local.stored(ITEM, String(answer.id))!.note).toBe('written');
+    expect(own(answer, 'note')).toBe(false);
+    expect(answer.qty).toBeNull();
+  });
+
+  it('insert (batch): each row is judged by its own payload', async () => {
+    const [carried, bare] = await h.engine.insert(ITEM, [{ title: 'x', note: 'n1' }, { title: 'y' }]) as Row[];
+    expect(own(carried, 'note')).toBe(false);
+    expect(own(bare, 'note')).toBe(true);
+    expect(bare!.note).toBeNull();
+  });
+
+  it('update by id: a value the prior row stored and the echo dropped stays absent', async () => {
+    const seeded = await h.engine.insert(ITEM, { title: 's', note: 'kept' }) as Row;
+    const answer = await h.engine.update(ITEM, { id: seeded.id, title: 's2' }) as Row;
+    expect(h.local.stored(ITEM, String(seeded.id))!.note).toBe('kept');
+    expect(own(answer, 'note')).toBe(false);
+    expect(answer.qty).toBeNull();
+  });
+
+  it('update by id: a PATCH that clears the prior value is answered null', async () => {
+    const seeded = await h.engine.insert(ITEM, { title: 's', note: 'kept' }) as Row;
+    const answer = await h.engine.update(ITEM, { id: seeded.id, note: null }) as Row;
+    expect(own(answer, 'note')).toBe(true);
+    expect(answer.note).toBeNull();
   });
 });
