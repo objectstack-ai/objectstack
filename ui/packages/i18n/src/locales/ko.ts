@@ -3309,6 +3309,8 @@ const ko = {
     appNothingAvailableGrantDescription: "이 앱에는 계정으로 열 수 있는 페이지가 없습니다. 설정에서 접근 권한을 부여할 수 있습니다.",
     appNoReadableObjectDescription: "계정으로 아직 이 앱의 레코드를 읽을 수 없습니다. 관리자에게 권한 세트 할당을 요청하세요.",
     appNoReadableObjectGrantDescription: "계정으로 아직 이 앱의 레코드를 읽을 수 없습니다. 설정에서 접근 권한을 부여할 수 있습니다.",
+    appOpensFromMenu: "{{app}}은(는) 메뉴에서 사용합니다",
+    appOpensFromMenuDescription: "이 앱에는 자체 페이지가 없습니다. 메뉴에서 항목을 선택해 링크를 열거나 작업을 실행하세요.",
     openSetup: "설정 열기",
     createFirstApp: "첫 번째 앱 만들기",
     systemSettings: "시스템 설정",

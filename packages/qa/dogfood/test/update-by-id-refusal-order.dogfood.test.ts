@@ -25,10 +25,10 @@
 //      row and without a token: the version comparison hands a row absent
 //      from the caller's read to the write door. On the two objects the member
 //      may neither read nor write, its read is REFUSED, and a refused read is
-//      not handed over: the row, no row and no token answer the same status
-//      and code. Their sentences are not compared — the read door's refusal
-//      and the write door's may word it differently, a residue aligned by its
-//      own item.
+//      not handed over — and the write door answers a caller the read door
+//      refuses that same refusal, the administration gate on the platform
+//      grant object included: there too the row, no row and no token answer the
+//      same status, code and sentence.
 //
 // Controls, so a green run is not "everything refuses":
 //
@@ -45,6 +45,9 @@
 //   - with a stale token the edit-grant holder gets `409 CONCURRENT_UPDATE`
 //     carrying the row, and with the current token it updates (200); the plain
 //     member gets the same `409` on a row it reads but may not write;
+//   - an organization administrator, who reads the platform grant object, keeps
+//     the administration gate's own sentence for an edit in place, for a row
+//     and for no row;
 //   - a refused write leaves the row untouched.
 //
 // The organization wall's half of item 4 — a row in another organization — is
@@ -67,11 +70,18 @@ const SYS = { isSystem: true } as const;
 const MISSING = 'zz_no_such_row_0001';
 const MEMBER = 'upd-order-member@verify.test';
 const EDITOR = 'upd-order-editor@verify.test';
+const ORG_ADMIN = 'upd-order-org-admin@verify.test';
 
 interface Answer { status: number; body: unknown }
 
 /** The `code` of a flat (`{ code }`) or nested (`{ error: { code } }`) envelope. */
 const codeOf = (a: Answer): unknown => (a.body as any)?.code ?? (a.body as any)?.error?.code;
+
+/** The sentence of a flat (`{ error: '…' }`) or nested (`{ error: { message } }`) envelope. */
+const sentenceOf = (a: Answer): string => {
+  const error = (a.body as any)?.error;
+  return String(typeof error === 'string' ? error : error?.message);
+};
 
 /** The answer with the caller-supplied id written out, so the answers for two ids compare. */
 const withoutId = (a: Answer, id: string): Answer =>
@@ -103,6 +113,7 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
   let adminTok: string;
   let memberTok: string;
   let editorTok: string;
+  let orgAdminTok: string;
   const existing = new Map<string, string>();
   let foreignNoteId = '';
   let ownNoteId = '';
@@ -166,6 +177,12 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
     const editorId = (await ql.findOne('sys_user', { where: { email: EDITOR }, context: SYS }))?.id;
     expect(editorId, 'editor provisioned').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: editorId, permission_set: ops.name }, { context: SYS });
+    orgAdminTok = await stack.signUp(ORG_ADMIN);
+    const orgAdmin = await catalogPermissionSet(ql, 'organization_admin');
+    expect(orgAdmin, 'organization_admin served by the security catalog').toBeTruthy();
+    const orgAdminId = (await ql.findOne('sys_user', { where: { email: ORG_ADMIN }, context: SYS }))?.id;
+    expect(orgAdminId, 'organization administrator provisioned').toBeTruthy();
+    await ql.insert('sys_user_permission_set', { user_id: orgAdminId, permission_set: orgAdmin.name }, { context: SYS });
 
     for (const object of Object.keys(PATCHES)) {
       const id = String((await ql.find(object, { limit: 1, context: SYS }))?.[0]?.id ?? '');
@@ -243,39 +260,50 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
   });
 
   it('with a stale version token, PATCH and DELETE answer one answer for a row and for no row — the answer without a token', async () => {
-    /**
-     * `whole`: status, code and sentence (the row is absent from the member's
-     * read, so the write door answers). `status+code`: the member may not read
-     * the object, its refused read is the answer, and the sentence is
-     * deliberately not compared.
-     */
-    type Compare = 'whole' | 'status+code';
-    const families: Array<{ object: string; id: string; patch: Record<string, unknown>; status: { PATCH: number; DELETE: number }; compare: Compare }> = [
+    // Status, code and sentence, every family: where the row is absent from
+    // the member's read the write door answers, and where the member may not
+    // read the object at all the read door's refusal is the answer for the
+    // row, for no row and without a token alike.
+    const families: Array<{ object: string; id: string; patch: Record<string, unknown>; status: { PATCH: number; DELETE: number } }> = [
       // Objects the member may neither read nor write.
-      { object: 'showcase_project_membership', id: existing.get('showcase_project_membership')!, patch: PATCHES.showcase_project_membership, status: { PATCH: 403, DELETE: 403 }, compare: 'status+code' },
-      { object: 'sys_user_permission_set', id: existing.get('sys_user_permission_set')!, patch: PATCHES.sys_user_permission_set, status: { PATCH: 403, DELETE: 403 }, compare: 'status+code' },
+      { object: 'showcase_project_membership', id: existing.get('showcase_project_membership')!, patch: PATCHES.showcase_project_membership, status: { PATCH: 403, DELETE: 403 } },
+      { object: 'sys_user_permission_set', id: existing.get('sys_user_permission_set')!, patch: PATCHES.sys_user_permission_set, status: { PATCH: 403, DELETE: 403 } },
       // Rows the member's row scope hides, on objects it reads: no update grant on
       // the inquiry, and update without delete on the note.
-      { object: 'showcase_inquiry', id: foreignInquiryId, patch: { message: 'x' }, status: { PATCH: 403, DELETE: 403 }, compare: 'whole' },
-      { object: 'showcase_private_note', id: foreignNoteId, patch: { title: 'x' }, status: { PATCH: 404, DELETE: 403 }, compare: 'whole' },
+      { object: 'showcase_inquiry', id: foreignInquiryId, patch: { message: 'x' }, status: { PATCH: 403, DELETE: 403 } },
+      { object: 'showcase_private_note', id: foreignNoteId, patch: { title: 'x' }, status: { PATCH: 404, DELETE: 403 } },
     ];
-    const shown = (a: Answer, id: string, compare: Compare): unknown =>
-      compare === 'whole' ? withoutId(a, id) : { status: a.status, code: codeOf(a) };
-    for (const { object, id, patch, status, compare } of families) {
+    for (const { object, id, patch, status } of families) {
       const before = await stored(object, id);
       for (const method of ['PATCH', 'DELETE'] as const) {
         const noToken = await versioned(memberTok, method, object, id, patch, 'none');
         expect(noToken.status, `${method} ${object} without a token — ${JSON.stringify(noToken.body)}`).toBe(status[method]);
         for (const carrier of ['If-Match', 'expectedVersion'] as const) {
-          const where = `${method} ${object} (${carrier}, ${compare})`;
+          const where = `${method} ${object} (${carrier})`;
           const hit = await versioned(memberTok, method, object, id, patch, carrier);
           const miss = await versioned(memberTok, method, object, MISSING, patch, carrier);
-          expect(shown(hit, id, compare), `${where}: the answer without a token`).toEqual(shown(noToken, id, compare));
-          expect(shown(miss, MISSING, compare), `${where}: the answer for no row`).toEqual(shown(hit, id, compare));
+          expect(withoutId(hit, id), `${where}: the answer without a token`).toEqual(withoutId(noToken, id));
+          expect(withoutId(miss, MISSING), `${where}: the answer for no row`).toEqual(withoutId(hit, id));
         }
       }
       expect(await stored(object, id), `${object}: refused writes leave the row as it was`).toEqual(before);
     }
+  });
+
+  it('control: an organization administrator, who reads the platform grant object, keeps the administration gate\'s sentence for a row and for no row', async () => {
+    const object = 'sys_user_permission_set';
+    const id = existing.get(object)!;
+    const before = await stored(object, id);
+    const read = await call(orgAdminTok, 'GET', `/data/${object}/${id}`);
+    expect(read.status, `the organization administrator reads the row — ${JSON.stringify(read.body)}`).toBe(200);
+
+    const hit = await call(orgAdminTok, 'PATCH', `/data/${object}/${id}`, PATCHES[object]);
+    const miss = await call(orgAdminTok, 'PATCH', `/data/${object}/${MISSING}`, PATCHES[object]);
+
+    expect({ status: hit.status, code: codeOf(hit) }, JSON.stringify(hit.body)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+    expect(sentenceOf(hit), 'the gate\'s own sentence').toContain('never edited in place');
+    expect(withoutId(miss, MISSING), 'the answer for no row').toEqual(withoutId(hit, id));
+    expect(await stored(object, id), 'a refused edit leaves the row as it was').toEqual(before);
   });
 
   it('control: a stale token on a row the caller reads still answers 409 carrying the row; the current token updates', async () => {

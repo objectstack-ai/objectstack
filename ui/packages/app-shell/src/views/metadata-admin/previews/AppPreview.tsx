@@ -274,6 +274,20 @@ function findFirstLanding(items: NavItem[], docs = false): NavItem | undefined {
   return undefined;
 }
 
+/**
+ * `findFirstLanding` across every tree, in order: the top-level navigation,
+ * then each area's, as `firstRouteAcross` walks them in `console/AppContent.tsx`
+ * (objectstack-ai/objectstack#29771). The pass holds across the trees: a
+ * working entry in any area outranks a `doc` entry anywhere.
+ */
+function findFirstLandingAcross(trees: NavItem[][], docs = false): NavItem | undefined {
+  for (const tree of trees) {
+    const hit = findFirstLanding(tree, docs);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 export function AppPreview({ name, draft, editing, selection, onSelectionChange, onPatch, locale }: MetadataPreviewProps) {
   const appName = String((draft as any).name ?? name ?? '');
   // `label` is `I18nLabel` too: resolved in the designer locale, the app's own
@@ -310,11 +324,27 @@ export function AppPreview({ name, draft, editing, selection, onSelectionChange,
   // console shell, so the author sees WHICH entry the app will open on:
   // depth-first, first item that yields a route (`group` recurses; `url`,
   // `separator` and `action` address nothing inside the app; a `doc` entry
-  // only when nothing else lands).
-  const homeItem = React.useMemo(
-    () => findFirstLanding(navItems) ?? findFirstLanding(navItems, true),
-    [navItems],
+  // only when nothing else lands). The areas' trees follow the top-level one
+  // (objectstack-ai/objectstack#29771), so an areas-only app names its landing.
+  const areaNavItems = React.useMemo<NavItem[][]>(
+    () =>
+      Array.isArray(draft.areas)
+        ? draft.areas.map((area: unknown) =>
+            normalizeNav(
+              area && typeof area === 'object' ? (area as Record<string, unknown>).navigation : undefined,
+              appName,
+              unnamed,
+              locale,
+              targetLabel,
+            ),
+          )
+        : [],
+    [draft.areas, appName, unnamed, locale, targetLabel],
   );
+  const homeItem = React.useMemo(() => {
+    const trees = [navItems, ...areaNavItems];
+    return findFirstLandingAcross(trees) ?? findFirstLandingAcross(trees, true);
+  }, [navItems, areaNavItems]);
 
   const areas = readAreas(draft.areas, locale);
 
