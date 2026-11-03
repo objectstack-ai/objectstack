@@ -425,15 +425,20 @@ test.describe('an expanded object’s field boxes stay reachable while the matri
     }
   }
 
-  test('CONTROL: where the pane holds the whole floor, nothing scrolls and every box answers, as before', async ({ page }, testInfo) => {
+  test('CONTROL: where the pane holds the whole floor, nothing scrolls and every box answers at scrollLeft 0, as on main', async ({
+    page,
+  }, testInfo) => {
     const readings = await sweep(page, { name: 'studio-1600', host: 'studio', width: 1600 }, testInfo);
     expect(readings).toHaveLength(1);
     expect(readings[0].scrollLeft).toBe(0);
     expect(readings[0].pane.scrollWidth).toBeLessThanOrEqual(readings[0].pane.clientWidth);
     expectAllReachable(readings);
-    // The panel spans the cell as the table did: the pin binds only when the
-    // pane is narrower than the matrix (the Studio cell's right inset is 24 px
-    // less than the panel reserves).
-    expect(readings[0].cellContentWidth - readings[0].panel.width).toBeLessThanOrEqual(24);
+  });
+
+  test('where the pane holds the whole floor the pin does not bind: the panel spans the cell as the table did', async ({ page }, testInfo) => {
+    const [r] = await sweep(page, { name: 'environment-1600', host: 'environment', width: 1600 }, testInfo);
+    expect(r.panel.width, 'no field panel on the page').toBeGreaterThan(0);
+    // The metadata-admin cell's insets are both 48 px, the ones the panel reserves.
+    expect(Math.abs(r.cellContentWidth - r.panel.width)).toBeLessThanOrEqual(1);
   });
 });

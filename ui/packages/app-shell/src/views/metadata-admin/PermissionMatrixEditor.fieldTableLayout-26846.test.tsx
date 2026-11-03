@@ -62,11 +62,16 @@ function makeClient(): FakeClient {
   };
 }
 
-async function renderExpanded() {
+async function renderExpanded(studio = false) {
   clientImpl = makeClient();
   render(
     <MemoryRouter>
-      <PermissionMatrixEditPage type="permission" name="project_editor" packageId="app.a" />
+      <PermissionMatrixEditPage
+        type="permission"
+        name="project_editor"
+        packageId="app.a"
+        studio={studio ? { tab: 'objects', onTabChange: () => {} } : undefined}
+      />
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByRole('button', { name: /a_project/ }));
@@ -83,26 +88,30 @@ describe('the field sub-table when the matrix scrolls sideways (objectstack#2684
     expect(count).toHaveClass('shrink-0', 'whitespace-nowrap');
   });
 
-  it('the whole field panel is pinned at the cell inset, so the name column needs no pin of its own (objectstack#29677)', async () => {
-    await renderExpanded();
-    const panel = screen.getByTestId('perm-field-panel-a_project');
-    // Pinned at the expanded cell's own left inset (pl-12 / px-12), as wide as
-    // the pane shows less both insets: the pane is the size container.
-    expect(panel).toHaveClass('sticky', 'left-12', 'max-w-[calc(100cqi-6rem)]');
-    expect(panel.closest('td')?.className).toMatch(/(^|\s)(px|pl)-12(\s|$)/);
-    expect(screen.getByTestId('perm-matrix-pane').parentElement).toHaveClass('@container');
-    // The toolbar, the header and every row with its boxes sit inside it.
-    expect(panel).toContainElement(screen.getByTestId('perm-field-count-a_project'));
-    expect(panel).toContainElement(screen.getByRole('columnheader', { name: t('perm.field.col.name', 'en') }));
-    for (const f of FIELDS) {
-      const name = screen.getByTestId(`perm-field-name-a_project-${f}`);
-      expect(panel).toContainElement(name);
-      // The name cell is no longer a pinned column of its own: pinned, it was
-      // the table's flexible column and covered the boxes once scrolled.
-      expect(name).not.toHaveClass('sticky');
-      expect(panel).toContainElement(screen.getByLabelText(`a_project.${f} readable`));
-      expect(panel).toContainElement(screen.getByLabelText(`a_project.${f} editable`));
-    }
-    expect(screen.getByRole('columnheader', { name: t('perm.field.col.name', 'en') })).not.toHaveClass('left-0');
-  });
+  // objectstack#29677 — both renderings: the metadata admin's table and Studio Access's.
+  for (const studio of [false, true]) {
+    it(`the whole field panel is pinned at the cell inset, so the name column needs no pin of its own (objectstack#29677, ${studio ? 'Studio' : 'metadata admin'})`, async () => {
+      await renderExpanded(studio);
+      if (studio) expect(screen.getByTestId('perm-studio-matrix')).toBeInTheDocument();
+      const panel = screen.getByTestId('perm-field-panel-a_project');
+      // Pinned at the expanded cell's own left inset (pl-12 / px-12), as wide as
+      // the pane shows less both insets: the pane is the size container.
+      expect(panel).toHaveClass('sticky', 'left-12', 'max-w-[calc(100cqi-6rem)]');
+      expect(panel.closest('td')?.className).toMatch(/(^|\s)(px|pl)-12(\s|$)/);
+      expect(screen.getByTestId('perm-matrix-pane').parentElement).toHaveClass('@container');
+      // The toolbar, the header and every row with its boxes sit inside it.
+      expect(panel).toContainElement(screen.getByTestId('perm-field-count-a_project'));
+      expect(panel).toContainElement(screen.getByRole('columnheader', { name: t('perm.field.col.name', 'en') }));
+      for (const f of FIELDS) {
+        const name = screen.getByTestId(`perm-field-name-a_project-${f}`);
+        expect(panel).toContainElement(name);
+        // The name cell is no longer a pinned column of its own: pinned, it was
+        // the table's flexible column and covered the boxes once scrolled.
+        expect(name).not.toHaveClass('sticky');
+        expect(panel).toContainElement(screen.getByLabelText(`a_project.${f} readable`));
+        expect(panel).toContainElement(screen.getByLabelText(`a_project.${f} editable`));
+      }
+      expect(screen.getByRole('columnheader', { name: t('perm.field.col.name', 'en') })).not.toHaveClass('left-0');
+    });
+  }
 });
