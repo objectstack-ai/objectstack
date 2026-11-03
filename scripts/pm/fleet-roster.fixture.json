@@ -8,6 +8,7 @@
         { "number": 7623, "title": "[PM seat] domain:skills — ⏳ vacant", "body": "", "labels": [{ "name": "pm:seat" }], "assignees": [], "updated_at": "2026-10-22T16:23:45Z" },
         { "number": 19287, "title": "[PM seat] domain:skills · seat 2 — 🟢 os-elon-musk", "body": "由 os-elon-musk 账户的项目负责", "labels": [{ "name": "pm:seat" }], "assignees": [{ "login": "os-elon-musk" }], "updated_at": "2026-10-23T12:00:00Z" },
         { "number": 6015, "title": "[PM seat] triage (objectstack-wide) — 🟢 Routine · session_01AavokzJ5DndAwitDXvKy4U · trig_01NcnCtMS2tH46nUg1a5TaMJ (hourly)", "body": "", "labels": [{ "name": "pm:seat" }], "assignees": [], "updated_at": "2026-10-23T12:59:06Z" },
+        { "number": 25500, "title": "[PM seat] review · seat 1 — 🟢 os-zhuang", "body": "", "labels": [{ "name": "pm:seat" }], "assignees": [{ "login": "os-zhuang" }], "updated_at": "2026-10-23T09:00:00Z" },
         { "number": 999, "title": "Fleet seat registry", "body": "", "labels": [{ "name": "pm:seat" }], "assignees": [], "updated_at": "2026-10-01T00:00:00Z" }
       ],
       "epics": [
@@ -29,7 +30,7 @@
         { "number": 25401, "labels": [{ "name": "needs-user-decision" }, { "name": "domain:devx" }], "assignees": [], "pull_request": { "url": "x" }, "updated_at": "2026-10-23T02:37:00Z" }
       ],
       "pulls": [
-        { "number": 25427, "state": "open", "head": { "ref": "claude/project-thread-aaaa" }, "body": "Fixes #25412", "labels": [] },
+        { "number": 25427, "state": "open", "head": { "ref": "claude/project-thread-aaaa", "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, "body": "Fixes #25412", "labels": [] },
         { "number": 25392, "state": "open", "head": { "ref": "claude/project-thread-bbbb" }, "body": "Mailbox-of: domain:devx#1 · os-elon-musk\n\nFixes #25416", "labels": [{ "name": "pm:mailbox" }, { "name": "skip-changeset" }] },
         { "number": 25393, "state": "open", "head": { "ref": "mailbox/os-elon-musk/skills-2" }, "body": "Mailbox-of: domain:skills#2 · os-elon-musk\n\nThe mailbox of the seat `domain:skills#2`", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }] },
         { "number": 25394, "state": "open", "head": { "ref": "mailbox/os-sales/devx-2" }, "body": "", "labels": [{ "name": "pm:mailbox" }] },
@@ -39,12 +40,18 @@
         { "number": 25399, "state": "open", "head": { "ref": "mailbox/os-tesla/epic-28800-2" }, "body": "Mailbox-of: epic:#28800#2 · os-tesla", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }] },
         { "number": 25400, "state": "open", "head": { "ref": "mailbox/os-bill/epic-27293-2" }, "body": "", "labels": [{ "name": "pm:mailbox" }] },
         { "number": 25398, "state": "open", "head": { "ref": "mailbox/os-zhuang/epic-28130-1" }, "body": "Mailbox-of: epic:#28130#1 · os-zhuang", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }] },
-        { "number": 25433, "state": "open", "head": { "ref": "claude/project-thread-cccc" }, "body": "Fixes #25417", "labels": [] }
+        { "number": 25433, "state": "open", "head": { "ref": "claude/project-thread-cccc", "sha": "cccccccccccccccccccccccccccccccccccccccc" }, "body": "Fixes #25417", "labels": [], "updated_at": "2026-10-23T12:30:00Z" },
+        { "number": 25434, "state": "open", "head": { "ref": "mailbox/os-zhuang/review-1" }, "body": "Mailbox-of: review#1 · os-zhuang", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }], "updated_at": "2026-10-23T09:30:00Z" }
       ],
       "comments": {
         "25427": [{ "body": "## 席位核对\n\nACCEPT · `domain:skills#2` · `os-elon-musk` · head `abc`" }],
         "25392": [{ "body": "## 席位核对\n\n**ACCEPT** · this must never count" }]
-      }
+      },
+      "recentComments": [
+        { "id": 1, "issue_url": "https://api.github.com/repos/objectstack-ai/objectstack/issues/25433", "created_at": "2026-10-23T13:30:00Z", "updated_at": "2026-10-23T13:30:00Z", "body": "review#1 · os-zhuang · session_01ReviewSeatFixture\n\nContract-review-claim: session_01ReviewSeatFixture · head cccccccccccccccccccccccccccccccccccccccc · 2026-10-23T13:30:00Z\n\nReading the diff." },
+        { "id": 2, "issue_url": "https://api.github.com/repos/objectstack-ai/objectstack/issues/25427", "created_at": "2026-10-23T11:30:00Z", "updated_at": "2026-10-23T11:30:00Z", "body": "review#1 · os-zhuang · session_01ReviewSeatFixture\n\nContract-review-claim: session_01ReviewSeatFixture · head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa · 2026-10-23T11:30:00Z" },
+        { "id": 3, "issue_url": "https://api.github.com/repos/objectstack-ai/objectstack/issues/25433", "created_at": "2026-10-23T12:00:00Z", "updated_at": "2026-10-23T12:00:00Z", "body": "review#1 · os-zhuang · session_01ReviewSeatFixture\n\nContract-review-claim: session_01ReviewSeatFixture · head dddddddddddddddddddddddddddddddddddddddd · 2026-10-23T12:00:00Z" }
+      ]
     },
     "objectstack-ai/objectui": {
       "seats": [

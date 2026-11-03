@@ -1028,15 +1028,18 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  * Who holds this pull request's current head, read off its comment thread:
  *
  *   live        a live claim names the current head -- `holder` is the claim to respect: the earliest
- *               posted, except that a legacy `triage#N` claim yields to any other live claim (`tie` true)
+ *               posted, a review seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
+ *               keeps two review seats off one head), except that a legacy `triage#N` claim yields to
+ *               any other live claim (`tie` true)
  *   lapsed      claims named the current head, and every one has expired
  *   none        no claim names the current head (claims on earlier heads lapsed when it moved)
  *   unreadable  the thread, the head or the clock could not be read
  *
  * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): a claim signed
  * `triage#N · …` -- posted before triage stopped taking contract reviews -- is the `triage` side,
- * and every other claim -- a lane seat's, a review seat's, a sibling lane seat's, an unsigned one
- * -- is the `lane` side, among which the earliest posted holds. Unreadable claim lines are
+ * one signed `review#N · …` is the `review` side (`lanes/review.md`), and every other claim -- a
+ * lane seat's, a sibling lane seat's, an unsigned one -- is the `lane` side. Between the review
+ * and lane sides there is no precedence: the earliest posted holds. Unreadable claim lines are
  * returned by comment id and hold nothing.
  *
  * @param {{ id?: number, body?: string, created_at?: string }[]} rows  the PR's comment rows
@@ -1061,13 +1064,14 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
     }
     const stamped = Date.parse(row?.created_at ?? '');
     const postedAt = Number.isFinite(stamped) ? stamped : line.at;
-    const side = readSignatureLine(row?.body)?.lane === 'triage' ? 'triage' : 'lane';
+    const signedLane = readSignatureLine(row?.body)?.lane ?? null;
+    const side = signedLane === 'triage' ? 'triage' : signedLane === 'review' ? 'review' : 'lane';
     const lapse = contractReviewClaimLapse(line, { headSha: head, now, postedAt });
     claims.push({ id: row?.id ?? null, session: line.session, head: line.head, time: line.time, postedAt, side, lapse });
   }
   const live = claims.filter((c) => c.lapse === 'live').sort((a, b) => a.postedAt - b.postedAt);
-  const tie = live.some((c) => c.side === 'lane') && live.some((c) => c.side === 'triage');
-  const holder = live.find((c) => c.side === 'lane') ?? live[0] ?? null;
+  const tie = live.some((c) => c.side !== 'triage') && live.some((c) => c.side === 'triage');
+  const holder = live.find((c) => c.side !== 'triage') ?? live[0] ?? null;
   const state = holder !== null ? 'live' : claims.some((c) => c.lapse === 'expired') ? 'lapsed' : 'none';
   return { state, holder, tie, claims, unreadable };
 }
@@ -2262,7 +2266,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 41 → 42 with the `Notify: main-green` reading (the knock that resumes a PR held for a main red).
   '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 42,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
-  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 21,
+  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 24,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
 });
 
@@ -2746,6 +2750,13 @@ export async function selfTest() {
   t('⭐ a legacy `triage#N` claim YIELDS: a triage claim posted FIRST and a lane claim posted later, both live ⇒ the later claim holds, tie named', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.tie === true && r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION; })());
   t('two claims on one side: the EARLIEST posted holds, and no tie is declared', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 2, '2026-10-28T12:30:00Z'), CL_ROW(CL_BODY(null, CL_LINE(CL_SESSION)), 1, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.tie === false; })());
   t('an UNSIGNED claim is the lane side — only a `triage#N` signature makes a claim triage\'s', contractReviewClaims([CL_ROW(CL_BODY(null))], CL_HEAD, { now: CL_NOW }).holder.side === 'lane');
+  const CL_REVIEW_SESSION = 'session_01ReviewSeatFixture7Qx';
+  const CL_REVIEW2_SESSION = 'session_01ReviewSeatTwoFixt9Zz';
+  const CL_REVIEW_SIG = `review#1 · os-zhuang · ${CL_REVIEW_SESSION}`;
+  const CL_REVIEW2_SIG = `review#2 · os-tesla · ${CL_REVIEW2_SESSION}`;
+  t('⭐ a `review#N`-signed claim is the review side, and between a review seat and a lane seat the EARLIEST posted holds with no tie — the review seat first ⇒ the review seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('…and the lane seat first ⇒ the lane seat holds: a review seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
+  t('⭐ two review seats on one head: the EARLIEST posted holds, the later withdraws — the rule the review seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
   t('⭐ the head MOVED past every claim ⇒ none; every claim on this head expired ⇒ lapsed; nothing holds either way', (() => { const moved = contractReviewClaims([CL_ROW(CL_BODY())], 'a'.repeat(40), { now: CL_NOW }); const old = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: Date.parse('2026-10-28T14:19:00Z') }); return moved.state === 'none' && moved.holder === null && old.state === 'lapsed' && old.holder === null && old.claims[0].lapse === 'expired'; })());
   t('an unreadable claim line holds nothing and is returned by comment id', (() => { const r = contractReviewClaims([CL_ROW(`${CL_TRIAGE_SIG}\n${CL_LINE(CL_SESSION, CL_HEAD.slice(0, 8))}`, 77)], CL_HEAD, { now: CL_NOW }); return r.state === 'none' && r.unreadable.length === 1 && r.unreadable[0].id === 77; })());
   t('a thread that is not an array, an abbreviated head, or no clock is a read that could not be made', contractReviewClaims(null, CL_HEAD, { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD.slice(0, 12), { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD, {}).state === 'unreadable' && contractReviewClaims([], CL_HEAD, { now: CL_NOW }).state === 'none');

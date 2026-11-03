@@ -66,6 +66,12 @@ import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns } from '
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
+// [#29898] The one walk of which picklists an object body's fields name — the
+// boot audit's. (The `os validate` door reads the parsed artifact with its own
+// walk and agrees with this door by pin, not by sharing it.) ⛔ Never a second
+// walk here.
+import { collectPicklistReferences } from '@objectstack/metadata/picklist-references';
+import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 
 /** The lock family `body` carries: each member with a value, and nothing else. */
 function lockFamilyOf(body: unknown): Record<string, unknown> {
@@ -629,6 +635,65 @@ export async function unknownGrantObjectSaveRefusal(
         message: `Permission '${name}' grants on object '${key}' which is not defined in objects: ${looked}, `
             + 'so the grant applies to nothing. Correct the name to the '
             + `object's full name (e.g. 'crm_lead', not 'lead'), create the object first, or remove the grant.`,
+        code: 'custom',
+    }));
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
+}
+
+/**
+ * The body of `ObjectStackProtocolImplementation#unknownPicklistBindingSaveRefusal`;
+ * the method's docblock there is its contract. Written here beside
+ * {@link unknownGrantObjectSaveRefusal}, whose shape it follows: the engine's
+ * registry, then the definition the object already holds.
+ */
+export async function unknownPicklistBindingSaveRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'readMetaItem'>,
+    singularType: string,
+    item: unknown,
+    name: string,
+    writeFace?: MetadataWriteFace,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (singularType !== 'object' && singularType !== OBJECT_EXTENSION_TYPE) return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    // An extension's fields join the object it extends; its row is stored
+    // under that object's name.
+    const extend = (item as { extend?: unknown }).extend;
+    const object = singularType === OBJECT_EXTENSION_TYPE && typeof extend === 'string' && extend !== '' ? extend : name;
+    let unknown = collectPicklistReferences(object, item, undefined);
+    if (unknown.length === 0) return undefined;
+    // The registry is the authority that SERVES a bound field's options
+    // (`resolvePicklistOptions`): a list it resolves is one a loaded package
+    // declares — the package's own, a dependency's, the base package's of a
+    // `.custom` pair, or any other package installed here. A registry that
+    // cannot resolve a list cannot say a name is unknown, so nothing is
+    // refused on it.
+    const registry = this.engine?.registry as { resolvePicklistOptions?: unknown } | undefined;
+    const resolvePicklistOptions = registry?.resolvePicklistOptions;
+    if (typeof resolvePicklistOptions !== 'function') return undefined;
+    unknown = unknown.filter((ref) => resolvePicklistOptions.call(registry, ref.picklist) === undefined);
+    if (unknown.length === 0) return undefined;
+    // A binding the object already holds is not this save's: a re-save, a
+    // stored-row migration or a restore that keeps it is judged at the save
+    // that introduced it, and a list that has gone since is not the
+    // re-saving author's to answer for.
+    const current = (await this.readMetaItem({ type: 'object', name: object }))?.item;
+    const bindingOf = (ref: { field: string; picklist: string }) => JSON.stringify([ref.field, ref.picklist]);
+    const held = new Set(collectPicklistReferences(object, current, undefined).map(bindingOf));
+    unknown = unknown.filter((ref) => !held.has(bindingOf(ref)));
+    if (unknown.length === 0) return undefined;
+    const issues: MetadataIssueEntry[] = unknown.map((ref) => ({
+        path: `fields.${ref.field}.picklist`,
+        message: `Field '${ref.object}.${ref.field}' is bound to picklist '${ref.picklist}', which no loaded package `
+            + 'declares, so the field would be served with no options and every write that sets it would be refused. '
+            + 'A field bound to a picklist takes its options from that list and has none of its own. Correct the name '
+            + 'to a picklist a package installed here declares, declare the picklist (a `*.picklist.ts` file, or '
+            + '`defineStack({ picklists })`) in a package installed here, or give the field its own `options` instead.',
         code: 'custom',
     }));
     const err = new Error(
