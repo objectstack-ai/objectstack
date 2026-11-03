@@ -1121,6 +1121,10 @@ const ko = {
       pin: "고정: 이 보기를 기본으로 열기",
       unpin: "고정 해제: 목록이 기본 보기를 다시 엽니다",
       inMenu: "이미 메뉴에 있음",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "내 뷰",
+      saveAsMyView: "내 뷰로 저장",
+      myViewName: "뷰 이름",
     },
     dragToReorder: "드래그하여 순서 변경",
     defaultView: "기본 보기",
@@ -4485,6 +4489,7 @@ const ko = {
     changes: {
       title: '대기 중인 변경 사항',
       description: '게시 시 변경되는 내용입니다. 새 항목은 추가되고 업데이트는 게시된 버전을 덮어씁니다.',
+      savedToCustomization: '{{package}}의 사용자 지정에 저장됨',
       loading: '대기 중인 변경 사항 불러오는 중…',
       loadFailed: '대기 중인 변경 사항을 불러오지 못했습니다:',
       empty: '대기 중인 항목 없음 — 모든 드래프트가 게시되었습니다.',

@@ -1393,6 +1393,10 @@ const en = {
       pin: 'Pin: open this view by default',
       unpin: 'Unpin: the list opens its default view again',
       inMenu: 'Already in the menu',
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: 'My views',
+      saveAsMyView: 'Save as my view',
+      myViewName: 'View name',
     },
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
@@ -3949,6 +3953,8 @@ const en = {
     changes: {
       title: 'Pending changes',
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
+      // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
+      savedToCustomization: 'Saved to {{package}}’s customizations',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',

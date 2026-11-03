@@ -1121,6 +1121,10 @@ const de = {
       pin: "Anheften: diese Ansicht standardmäßig öffnen",
       unpin: "Lösen: die Liste öffnet wieder ihre Standardansicht",
       inMenu: "Bereits im Menü",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Meine Ansichten",
+      saveAsMyView: "Als meine Ansicht speichern",
+      myViewName: "Name der Ansicht",
     },
     dragToReorder: "Zum Neuanordnen ziehen",
     defaultView: "Standardansicht",
@@ -4486,6 +4490,7 @@ const de = {
     changes: {
       title: 'Ausstehende Änderungen',
       description: 'Was die Veröffentlichung ändert. Neue Elemente werden hinzugefügt; Aktualisierungen überschreiben die Live-Version.',
+      savedToCustomization: 'Gespeichert in den Anpassungen von {{package}}',
       loading: 'Ausstehende Änderungen werden geladen…',
       loadFailed: 'Ausstehende Änderungen konnten nicht geladen werden:',
       empty: 'Nichts ausstehend — alle Entwürfe wurden veröffentlicht.',

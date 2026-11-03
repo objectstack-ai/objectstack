@@ -1121,6 +1121,10 @@ const ja = {
       pin: "固定：このビューを既定で開く",
       unpin: "固定を解除：リストは既定のビューを再び開きます",
       inMenu: "すでにメニューにあります",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "マイビュー",
+      saveAsMyView: "マイビューとして保存",
+      myViewName: "ビュー名",
     },
     dragToReorder: "ドラッグして並べ替え",
     defaultView: "デフォルトビュー",
@@ -4488,6 +4492,7 @@ const ja = {
     changes: {
       title: '保留中の変更',
       description: '公開で何が変わるか。新規項目は追加され、更新は公開中のバージョンを上書きします。',
+      savedToCustomization: '{{package}} のカスタマイズに保存',
       loading: '保留中の変更を読み込み中…',
       loadFailed: '保留中の変更を読み込めませんでした:',
       empty: '保留中の変更はありません — すべてのドラフトが公開済みです。',

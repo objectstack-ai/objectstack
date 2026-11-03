@@ -1149,6 +1149,10 @@ const pt = {
       pin: "Fixar: abrir esta exibição por padrão",
       unpin: "Desafixar: a lista volta a abrir a exibição padrão",
       inMenu: "Já está no menu",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Minhas visualizações",
+      saveAsMyView: "Salvar como minha visualização",
+      myViewName: "Nome da visualização",
     },
     dragToReorder: "Arrastar para reordenar",
     defaultView: "Exibição padrão",
@@ -4581,6 +4585,7 @@ const pt = {
     changes: {
       title: 'Alterações pendentes',
       description: 'O que a publicação vai mudar. Itens novos são adicionados; atualizações sobrescrevem a versão publicada.',
+      savedToCustomization: 'Salvo nas personalizações de {{package}}',
       loading: 'Carregando alterações pendentes…',
       loadFailed: 'Não foi possível carregar as alterações pendentes:',
       empty: 'Nada pendente — todos os rascunhos foram publicados.',
