@@ -2481,8 +2481,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.ledger.toggleFailedHttp': 'Could not change activation (HTTP {status}).',
   'engine.studio.auto.ledger.toggleFailed': 'Could not change activation.',
   'engine.studio.auto.on': 'On',
-  'engine.studio.auto.off': 'Off',
-  'engine.studio.auto.offTitle': 'Disabled — will not run',
+  // objectstack#29705 — the Studio state vocabulary's "switched off", the word
+  // the landing's count already uses.
+  'engine.studio.auto.off': 'Switched off',
+  'engine.studio.auto.offTitle': 'Switched off — will not run',
   'engine.studio.auto.onBound': 'Enabled · bound to its trigger',
   'engine.studio.auto.onUnbound': 'Enabled · no trigger (run manually)',
   // objectui#11779 — an enabled flow whose declared trigger is not armed on this
@@ -3230,6 +3232,14 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#28572 — one surface for a read-only base and its customization package.
   'engine.studio.customize.addedIn': 'In {pair}',
   'engine.studio.customize.addedInTitle': 'This item is added by {pair}, this deployment’s customization package, and is saved there.',
+  // objectstack#29705 — what a person can do with a type's items, in the words
+  // the pillars use for an item's state: an overlay type of a read-only package
+  // takes a customization; a create-only type of a writable package takes new
+  // items. Drawn by the All metadata tiles and the list and item headers.
+  'engine.studio.customize.available': 'Can be customized',
+  'engine.studio.customize.availableTitle': 'This package is read-only. A change to one of these items is saved in this deployment’s customization package, and the package itself stays as it was installed.',
+  'engine.studio.customize.addable': 'Can be added',
+  'engine.studio.customize.addableTitle': 'New items of this type can be added. Items a code package ships stay read-only.',
   'engine.studio.pkg.withPair': 'with {pair}',
   'engine.studio.if.addInPairTitle': 'New in the customization of {baseName}',
   'engine.studio.interfaces.create.descriptionInPair':
@@ -3553,10 +3563,11 @@ const STUDIO_EN: Record<string, string> = {
   // the doc and book previews, engine.studio.inspector and the remaining Studio
   // chrome (engine.translationPreview excepted) (#25922 slice S6).
   'engine.directory.title': 'All Metadata Types',
+  // objectstack#29705 — what a person can do here, in the state vocabulary.
   'engine.directory.description':
-    'The platform protocol exposes {count} metadata types ({writable} writable at runtime). Click any tile to browse, override, or create instances.',
+    'Open a type to see its items. Each type says what you can do with it here: read-only, can be customized, can be added or writable.',
   'engine.directory.search': 'Search metadata types…',
-  'engine.directory.writableOnly': 'Writable only',
+  'engine.directory.hideReadOnly': 'Hide read-only',
   'engine.directory.quickFind': 'Quick Find',
   'engine.directory.noMatches': 'No matches',
   'engine.directory.noMatchesHint': 'Adjust your search or filters to see more metadata types.',
@@ -4144,10 +4155,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.flowProblems.connectRefused.missingTarget': 'Cannot connect: this flow has no node "{target}".',
   'engine.flowProblems.connectRefused.self': 'Cannot connect "{source}" to itself.',
   'engine.flowProblems.connectRefused.repeat': '"{source}" already connects to "{target}". Select that connection to change it.',
-  'engine.badge.createOnly': 'create-only',
   'engine.repeater.empty': 'No items. Click + to add.',
-  'engine.badge.writable': 'writable',
-  'engine.badge.readOnly': 'read-only',
   'engine.cancel': 'Cancel',
   'engine.close': 'Close',
   'engine.validation.invalid': 'Invalid input',

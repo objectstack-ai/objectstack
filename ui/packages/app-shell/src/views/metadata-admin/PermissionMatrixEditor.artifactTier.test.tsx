@@ -202,18 +202,18 @@ describe('PermissionMatrixEditPage — the ARTIFACT tier locks an env-scope over
 
   /**
    * The header hero badge is NOT re-litigated here, and it is not a
-   * contradiction: `PageShell`'s `WritabilityBadge` renders "create-only" for
-   * this shape, whose tooltip already reads "Code-shipped items are locked; new
-   * items can be created at runtime". That is exactly what the artifact tier
+   * contradiction: `PageShell`'s `WritabilityBadge` renders "Can be added" for
+   * this shape ("create-only" until objectstack#29705), whose tooltip already
+   * reads that the items a code package ships stay read-only. That is exactly what the artifact tier
    * says, so the two renderings agree — unlike the #4036 divergence, where
    * "create-only" sat over dead checkboxes for a set that was NOT code-shipped.
    */
-  it('the header hero badge stays "create-only" and never claims "writable"', async () => {
+  it('the header hero badge stays "Can be added" and never claims "Writable"', async () => {
     codeLayer = { _packageId: 'com.example.showcase' };
     await renderMatrix();
 
-    expect(screen.getByText('create-only')).toBeInTheDocument();
-    expect(screen.queryByText('writable')).toBeNull();
+    expect(screen.getByText('Can be added')).toBeInTheDocument();
+    expect(screen.queryByText('Writable')).toBeNull();
   });
 
   it('an overlay-allowed type is still writable even when code-declared', async () => {
