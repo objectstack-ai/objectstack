@@ -173,8 +173,10 @@ type Harness = {
      * between the two reads `promoteDraft` makes (`get` for the parent version,
      * then `put`'s own read inside its transaction), which is exactly the
      * 409 `METADATA_CONFLICT` the repository raises. Scoped to package-scoped
-     * active reads so the pre-flight `commitItems` scan — which reads active
-     * rows WITHOUT a `package_id` — does not consume the one-shot.
+     * active reads, and armed on the SECOND one of the name: [#29414] the
+     * pre-flight `commitItems` scan reads the publishing package's active row
+     * too (it read any package's before), and it runs before the promotion,
+     * so it must not consume the one-shot.
      */
     faults: { failMetadataWriteFor?: string; advanceActiveOnRead?: string };
     /** Audit rows that LANDED and were not rolled back. */
@@ -189,6 +191,8 @@ type Harness = {
 
 function makeStubEngine(opts: { failAudit?: boolean } = {}): Harness {
     const faults: { failMetadataWriteFor?: string; advanceActiveOnRead?: string } = {};
+    /** [#29414] The names whose pre-flight plan read has passed (see `advanceActiveOnRead`). */
+    const planReadPassed = new Set<string>();
     const rows = new Map<string, Row>();
     const historyRows: HistoryRow[] = [];
     const commitRows: any[] = [];
@@ -242,6 +246,10 @@ function makeStubEngine(opts: { failAudit?: boolean } = {}): Harness {
             if (faults.advanceActiveOnRead === hit.row.name
                 && opts2.where?.state === 'active'
                 && 'package_id' in (opts2.where ?? {})) {
+                if (!planReadPassed.has(hit.row.name)) {
+                    planReadPassed.add(hit.row.name);
+                    return hit.row;
+                }
                 delete faults.advanceActiveOnRead;
                 const asItStood = { ...hit.row };
                 hit.row.checksum = 'sha256:advanced_by_a_rival';
