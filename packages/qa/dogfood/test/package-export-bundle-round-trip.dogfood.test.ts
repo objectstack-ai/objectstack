@@ -243,10 +243,16 @@ describe('dogfood: a disabled package exports its items, and a fresh runtime tha
   const dirs: string[] = [];
   const answers: Record<string, Answer> = {};
   let offEntry: any;
+  let previousHome: string | undefined;
 
   beforeAll(async () => {
+    // Each runtime gets its own home: a disable is persisted there
+    // (`package-state/`) and replayed at boot, so a shared home would carry
+    // the source's disable onto the target, which no fresh runtime has.
+    previousHome = process.env.OS_HOME;
     const sourceDir = mkdtempSync(join(tmpdir(), 'dogfood-export-disabled-source-'));
     dirs.push(sourceDir);
+    process.env.OS_HOME = join(sourceDir, 'home');
     const source = await bootShowcase({
       extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: sourceDir })],
     });
@@ -271,6 +277,7 @@ describe('dogfood: a disabled package exports its items, and a fresh runtime tha
 
     const targetDir = mkdtempSync(join(tmpdir(), 'dogfood-export-disabled-target-'));
     dirs.push(targetDir);
+    process.env.OS_HOME = join(targetDir, 'home');
     const target = await bootShowcase({
       extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: targetDir })],
     });
@@ -284,6 +291,8 @@ describe('dogfood: a disabled package exports its items, and a fresh runtime tha
   }, 900_000);
 
   afterAll(() => {
+    if (previousHome === undefined) delete process.env.OS_HOME;
+    else process.env.OS_HOME = previousHome;
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   });
 
