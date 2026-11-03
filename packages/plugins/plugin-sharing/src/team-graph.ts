@@ -176,8 +176,9 @@ const WALK_INCOMPLETE = 'the read by id could not continue past a page (a row wi
  *     and answers `null`, so each caller says what absence means for it
  *     (`isObjectAbsentError`, `@objectstack/types`).
  *
- * ⛔ Not exported from the package index — the one walk the team, role and
- * position reads share, not a public affordance.
+ * ⛔ Not exported from the package index — the one walk the team, role,
+ * position and business-unit member reads share (#29606), not a public
+ * affordance.
  */
 export async function readMembershipToCompletion(
   engine: SharingEngine,

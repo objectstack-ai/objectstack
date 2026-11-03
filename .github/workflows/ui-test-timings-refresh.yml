@@ -1,0 +1,377 @@
+# Regenerate ui/scripts/test-shard-timings.json on a timer, and open the PR.
+#
+# ══════════════════════════════════════════════════════════════════════════════
+# WHAT THIS IS (objectstack#29517, ruling 6583487846 on objectstack#29469)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# ui/scripts/test-shard-timings.json is the per-file duration dataset the
+# Test UI split is balanced on: vitest's `sequence.sequencer`
+# (ui/scripts/test-shard-sequencer.mjs) reads it to place every test file of
+# the `--shard=N/16` legs. It is GENERATED: the `test-ui` job of ci.yml passes
+# the per-file timings reporter on the whole suite and uploads one report per
+# shard (`test-file-timings-N`), and this workflow merges the reports of the
+# newest eligible runs into the dataset. objectui ran the same loop as its
+# `test-shard-timings-refresh.yml`; the import of ui/ into this repository did
+# not carry the reporter or the refresh, so the dataset stood still from
+# 2026-10-19 while the suite moved under it. This file is that refresh, ported
+# beside the Test Core one (shard-timings-refresh.yml), which it mirrors in
+# shape: select, regenerate, compare, and open a PR as the fleet App.
+#
+# ALL THREE PARTS LIVE IN ONE SCRIPT: ui/scripts/test-file-timings.mjs
+# ---------------------------------------------------------------------
+#   the writer   (the reporter ci.yml's `test-ui` job passes),
+#   `select`     the newest completed `push` / `schedule` runs of ci.yml on
+#                `main` whose sixteen `Test UI (N/16)` shards ALL concluded
+#                `success` and whose sixteen `test-file-timings-N` artifacts
+#                are all still there (a red or cancelled shard may have
+#                stopped part-way, and its report would weigh what it reached
+#                against a run that never reached the rest),
+#   `merge`      per run a file's durations summed, across runs the MEDIAN,
+#                keyed by `pathKey()` and never by path.
+# This file only drives them. Their header is the authority on the numbers.
+#
+# WHAT THIS WORKFLOW IS NOT ALLOWED TO DO
+# --------------------------------------
+#   ⛔ It never hand-edits the dataset. Every byte it commits came out of
+#      `merge`; a hand-touched number under a generated file's `generated_by`
+#      is worse than a stale one, whose staleness at least shows in
+#      `measured.at`.
+#   ⛔ It grades nothing. A reporter and a dataset only, by ruling: no
+#      threshold, no new failing check. Its red is only its own breakage (a
+#      generator that refuses, a push that fails), never a slow file.
+#   ⛔ It never touches the shard matrix, `timeout-minutes` or any bound.
+#   ⛔ It never opens a PR when the regenerated file is byte-identical.
+#
+# WHY IT RUNS HERE AND NOT IN A SEAT
+# ----------------------------------
+# An artifact download redirects to the Actions blob host, which agent
+# containers cannot reach (shard-timings-refresh.yml's header has the
+# measurements). A GitHub-hosted runner reaches it natively, so the
+# regeneration happens where the data already is.
+#
+# THE PULL REQUEST LEG
+# --------------------
+# A pull request that edits this file or a script it loads runs the selection,
+# the downloads and the regeneration for real and skips only the push, the PR
+# and the label write, so an edit that breaks the refresh is red before it
+# merges. With no eligible run on `main` (the state right after the reporter
+# first lands, until a full-battery run has uploaded sixteen reports) it reads
+# NOT MEASURED and stays green: nothing was regenerated and nothing failed.
+#
+# Its steps are a generator's select and merge, not a named local check: the
+# scripts it loads are pinned by ui/scripts/__tests__/test-file-timings.test.ts,
+# which Test UI runs on any change to them.
+# dispatch-gates: no-check-families -- a weekly regeneration (select, download, merge, open a PR), not a verification; the scripts it loads are pinned by Test UI's test-file-timings.test.ts
+
+name: UI Test Timings Refresh
+
+on:
+  # Mondays, after the Test Core refresh (05:30) and off the :00 minute
+  # everyone else's cron queues on.
+  schedule:
+    - cron: '47 5 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ui-test-timings-refresh.yml'
+      - 'ui/scripts/test-file-timings.mjs'
+      - 'ui/scripts/test-shard-partition.mjs'
+      - 'ui/scripts/invoked-as.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-test-timings-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    # The name objectui's lane carried, which ui/scripts/dependabot-merge-gate.mjs
+    # still lists among its optional contexts.
+    name: Regenerate the per-file test timings
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # the checkout
+      actions: read # list runs, read jobs, download the timing artifacts
+    env:
+      # The `test-ui` matrix width. test-file-timings.test.ts holds it equal to
+      # ci.yml's `shard:` list, so a resize that forgets this line reds there.
+      UI_TEST_SHARDS: '16'
+      RUN_LIMIT: '6'
+    steps:
+      # A dispatch from another branch would regenerate from that branch's
+      # scripts and open a PR against `main` from them; only `main` runs the
+      # write path. Refused before anything else runs.
+      - name: Refuse a dispatch on any ref but main
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "::error title=UI test timings refresh::workflow_dispatch runs only on refs/heads/main, not '$REF'. Nothing was regenerated or pushed."
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Choose the newest eligible full-battery runs
+        id: select
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          SELECT_EXIT=0
+          node ui/scripts/test-file-timings.mjs select --shards "$UI_TEST_SHARDS" --limit "$RUN_LIMIT" \
+            > "$RUNNER_TEMP/runs.json" 2> "$RUNNER_TEMP/select-stderr.txt" || SELECT_EXIT=$?
+          cat "$RUNNER_TEMP/select-stderr.txt"
+          if [ "$SELECT_EXIT" -eq 3 ]; then
+            echo "not_measured=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::UI test timings NOT MEASURED: no completed full-battery run of ci.yml on main has all $UI_TEST_SHARDS Test UI shards green and all $UI_TEST_SHARDS timing artifacts. The dataset was left untouched."
+            {
+              echo "### UI test timings: NOT MEASURED (exit 3), nothing was regenerated and nothing failed"
+              echo
+              echo "\`test-file-timings.mjs select\` found no eligible run, so"
+              echo "\`ui/scripts/test-shard-timings.json\` is untouched. Expected until a full-battery run"
+              echo "(a \`push\` that starts Test UI, or the 4-hourly \`schedule\`) has uploaded all"
+              echo "$UI_TEST_SHARDS \`test-file-timings-N\` reports after the reporter landed."
+              echo
+              echo "⛔ A NOT MEASURED that persists past a day of scheduled runs is a defect, not a"
+              echo "steady state: the reporter or its upload is not running in \`test-ui\`. File a card."
+              echo
+              echo "The selector's log, verbatim:"
+              echo
+              echo '```'
+              sed 's/</\&lt;/g' "$RUNNER_TEMP/select-stderr.txt"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$SELECT_EXIT" -ne 0 ]; then
+            echo "::error::test-file-timings.mjs select exited $SELECT_EXIT. Nothing was regenerated."
+            exit "$SELECT_EXIT"
+          fi
+          echo "Eligible runs, newest first:"
+          node -e '
+            const runs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/runs.json", "utf8"));
+            for (const r of runs) console.log(`  ${r.id}  ${r.event}  ${r.created_at}  ${String(r.head_sha).slice(0, 10)}`);
+          '
+
+      # One directory per run, named by the run id (the generator reads the
+      # id off the directory's name), one subdirectory per artifact. A run
+      # whose download fails or comes back short is dropped by name, and the
+      # runs file the generator reads is rewritten to the runs it keeps, so
+      # `measured.at` and `measured.runs` describe exactly what was merged.
+      - name: Download each run's timing reports
+        id: download
+        if: steps.select.outputs.not_measured != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/timings"
+          mkdir -p "$WORK"
+          KEPT=()
+          for RUN_ID in $(node -e '
+            for (const r of JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/runs.json", "utf8"))) console.log(r.id);
+          '); do
+            if ! gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" --pattern 'test-file-timings-*' --dir "$WORK/$RUN_ID"; then
+              echo "::warning::Could not download run $RUN_ID's timing reports; dropping that run."
+              rm -rf "${WORK:?}/$RUN_ID"
+              continue
+            fi
+            REPORTS=$(find "$WORK/$RUN_ID" -name '*.json' -type f | wc -l)
+            if [ "$REPORTS" -ne "$UI_TEST_SHARDS" ]; then
+              echo "::warning::Run $RUN_ID carried $REPORTS timing report(s), not $UI_TEST_SHARDS; dropping that run."
+              rm -rf "${WORK:?}/$RUN_ID"
+              continue
+            fi
+            echo "Run $RUN_ID: $REPORTS timing reports."
+            KEPT+=("$RUN_ID")
+          done
+          if [ "${#KEPT[@]}" -eq 0 ]; then
+            echo "::error::No selected run's timing reports could be read. Nothing was regenerated."
+            exit 1
+          fi
+          KEPT_IDS="${KEPT[*]}" node -e '
+            const fs = require("fs");
+            const keep = new Set(process.env.KEPT_IDS.split(" "));
+            const runs = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/runs.json", "utf8"));
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/kept-runs.json", JSON.stringify(runs.filter((r) => keep.has(String(r.id))), null, 2));
+          '
+          echo "runs=${KEPT[*]}" >> "$GITHUB_OUTPUT"
+          echo "newest=${KEPT[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Regenerate the dataset
+        id: generate
+        if: steps.select.outputs.not_measured != 'true'
+        env:
+          RUNS: ${{ steps.download.outputs.runs }}
+        run: |
+          set -euo pipefail
+          DIRS=()
+          for R in $RUNS; do DIRS+=("$RUNNER_TEMP/timings/$R"); done
+          node ui/scripts/test-file-timings.mjs merge \
+            --runs-file "$RUNNER_TEMP/kept-runs.json" \
+            --out ui/scripts/test-shard-timings.json \
+            --summary "$RUNNER_TEMP/summary.md" \
+            "${DIRS[@]}"
+          if git diff --quiet -- ui/scripts/test-shard-timings.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The regenerated dataset is BYTE-IDENTICAL to the committed one; no PR." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compose the pull request body
+        if: steps.generate.outputs.changed == 'true'
+        env:
+          RUNS: ${{ steps.download.outputs.runs }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Refreshes \`ui/scripts/test-shard-timings.json\`, the per-file dataset the Test UI"
+            echo "shard split is balanced on. Opened automatically by"
+            echo "\`.github/workflows/ui-test-timings-refresh.yml\`. Every byte came out of"
+            echo "\`ui/scripts/test-file-timings.mjs merge\`; nothing here was hand-edited, and no bound,"
+            echo "timeout or matrix entry was touched."
+            echo
+            cat "$RUNNER_TEMP/summary.md"
+            echo
+            echo "## Source"
+            echo
+            echo "Every run below had all $UI_TEST_SHARDS \`Test UI (N/$UI_TEST_SHARDS)\` shards conclude"
+            echo "\`success\` and all $UI_TEST_SHARDS \`test-file-timings-N\` reports retained; the log of"
+            echo "the run that opened this PR names every run it skipped and why."
+            echo
+            for R in $RUNS; do
+              echo "- https://github.com/$GITHUB_REPOSITORY/actions/runs/$R"
+            done
+            echo
+            echo "Pushed and opened as the fleet App (\`objectstack-fleet[bot]\`), so this PR's own"
+            echo "events start CI: no push or reopen is needed to get its checks."
+          } > "$RUNNER_TEMP/pr-body.md"
+          echo "Composed a $(wc -l < "$RUNNER_TEMP/pr-body.md")-line pull request body."
+
+      - name: Check the fleet App credential is visible to this repository
+        id: credential
+        if: steps.generate.outputs.changed == 'true' && github.event_name != 'pull_request'
+        env:
+          HAS_APP_ID: ${{ vars.OS_FLEET_APP_ID != '' }}
+          HAS_PRIVATE_KEY: ${{ secrets.OS_FLEET_PRIVATE_KEY != '' }}
+        run: |
+          if [ "$HAS_APP_ID" != 'true' ] || [ "$HAS_PRIVATE_KEY" != 'true' ]; then
+            echo "::error title=UI test timings refresh::The fleet App credential is not visible to this repository (OS_FLEET_APP_ID set: $HAS_APP_ID; OS_FLEET_PRIVATE_KEY set: $HAS_PRIVATE_KEY). Nothing was pushed."
+            exit 1
+          fi
+          echo "repository=${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint the fleet App token, narrowed to this repository
+        id: fleet
+        if: steps.generate.outputs.changed == 'true' && github.event_name != 'pull_request'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.OS_FLEET_APP_ID }}
+          private-key: ${{ secrets.OS_FLEET_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.credential.outputs.repository }}
+          permission-contents: write # push the bot branch
+          permission-pull-requests: write # open the PR and add its label
+
+      # On `pull_request` every outward act is printed, not run, and the local
+      # commit still happens, so the write step's own script is exercised up to
+      # the push. Same shape as shard-timings-refresh.yml's write step.
+      - name: Push the refresh branch and open the pull request (dry run on pull_request)
+        if: steps.generate.outputs.changed == 'true'
+        env:
+          DRY_RUN: ${{ github.event_name == 'pull_request' }}
+          GH_TOKEN: ${{ github.event_name == 'pull_request' && github.token || steps.fleet.outputs.token }}
+          RUNS: ${{ steps.download.outputs.runs }}
+          NEWEST: ${{ steps.download.outputs.newest }}
+        run: |
+          set -euo pipefail
+          case "$DRY_RUN" in
+            true) DRY_TAG='(dry run, not executed) ' ;;
+            false) DRY_TAG='' ;;
+            *)
+              echo "::error::DRY_RUN must be 'true' or 'false', got '$DRY_RUN'. Nothing was pushed."
+              exit 1
+              ;;
+          esac
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ] && [ "$DRY_RUN" != 'true' ]; then
+            echo "::error::DRY_RUN is '$DRY_RUN' on a pull_request run. A pull_request run of this lane never pushes a branch, opens a PR or writes a label. Nothing was pushed."
+            exit 1
+          fi
+          : "${GH_TOKEN:?is not set; gh would run unauthenticated. Nothing was pushed.}"
+          outward() {
+            local stand_in=''
+            if [ "$1" = '--stand-in' ]; then
+              stand_in="$2"
+              shift 2
+            fi
+            if [ "$DRY_RUN" = 'true' ]; then
+              { printf 'DRY RUN, not executed:'; printf ' %q' "$@"; printf '\n'; } >&2
+              if [ -n "$stand_in" ]; then printf '%s\n' "$stand_in"; fi
+              return 0
+            fi
+            "$@"
+          }
+          BRANCH="claude/ui-test-timings-refresh-$NEWEST"
+          outward gh auth setup-git
+          git config user.name 'objectstack-fleet[bot]'
+          git config user.email '332303061+objectstack-fleet[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add ui/scripts/test-shard-timings.json
+          git commit \
+            -m "chore(ci): refresh the Test UI per-file timings dataset" \
+            -m "Regenerated by .github/workflows/ui-test-timings-refresh.yml from the test-file-timings reports of run(s) $RUNS, newest $NEWEST. Generated, never hand-edited."
+          outward git push origin "$BRANCH"
+          PR_URL=$(outward --stand-in "https://github.com/$GITHUB_REPOSITORY/pull/0" \
+            gh pr create --base main --head "$BRANCH" \
+            --title "chore(ci): refresh the Test UI per-file timings dataset" \
+            --body-file "$RUNNER_TEMP/pr-body.md")
+          echo "${DRY_TAG}Opened $PR_URL" | tee -a "$GITHUB_STEP_SUMMARY"
+          PR_NUMBER=$(outward --stand-in 0 gh pr view "$PR_URL" --json number --jq .number)
+          outward gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
+            -f "labels[]=skip-changeset" > /dev/null
+          if outward --stand-in skip-changeset gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '.[].name' \
+             | grep -qxF 'skip-changeset'; then
+            echo "${DRY_TAG}skip-changeset confirmed on PR #$PR_NUMBER."
+          else
+            echo "::warning::skip-changeset did not survive the write on PR #$PR_NUMBER (a concurrent whole-set label PUT strips it). Re-applying once."
+            outward gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
+              -f "labels[]=skip-changeset" > /dev/null
+            outward gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '.[].name' \
+              | grep -qxF 'skip-changeset' \
+              || echo "::error::skip-changeset is still absent from PR #$PR_NUMBER; the changeset gate will demand a changeset this PR legitimately has none of. Apply the label by hand."
+          fi
+          if [ "$DRY_RUN" = 'true' ]; then
+            {
+              echo "### UI test timings: dry run (no branch pushed, no PR opened, no label written)"
+              echo
+              echo "This is a \`pull_request\` run of the refresh lane itself. The selection, the"
+              echo "downloads, the regeneration and the write step's own script, up to its local"
+              echo "commit, all ran for real; only the push, the PR and the label write were skipped."
+              echo "The body below is what a scheduled run would have posted."
+              echo
+              echo "---"
+              echo
+              cat "$RUNNER_TEMP/pr-body.md"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Say what happened when nothing changed
+        if: steps.generate.outputs.changed == 'false'
+        run: |
+          {
+            echo "### UI test timings: byte-identical, no PR"
+            echo
+            echo "The regenerated \`ui/scripts/test-shard-timings.json\` is byte-for-byte the committed"
+            echo "file, so there is nothing to open a pull request about."
+          } >> "$GITHUB_STEP_SUMMARY"

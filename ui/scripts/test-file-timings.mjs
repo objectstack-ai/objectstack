@@ -9,31 +9,34 @@
  *
  * ONE file, three parts, so the report format has exactly one spelling:
  *
- *   THE WRITER, this module's default export: a vitest reporter. `ci.yml`'s
- *   `test` job adds it beside the reporters vitest would have picked on its
- *   own, on the full battery's events, and uploads what it writes as the
- *   `test-file-timings-N` artifact of shard N:
+ *   THE WRITER, this module's default export: a vitest reporter. The
+ *   `test-ui` job of the monorepo root's `.github/workflows/ci.yml` adds it
+ *   beside the reporters vitest would have picked on its own whenever it runs
+ *   the whole suite, and on the full battery's events uploads what it writes
+ *   as the `test-file-timings-N` artifact of shard N:
  *
- *     pnpm test --shard=N/M --reporter=default --reporter=github-actions \
- *       --reporter=./scripts/test-file-timings.mjs
+ *     pnpm --dir ui run test --shard=N/M --reporter=default \
+ *       --reporter=github-actions \
+ *       --reporter="${GITHUB_WORKSPACE}/ui/scripts/test-file-timings.mjs"
  *     -> $OBJECTUI_TEST_TIMINGS_OUT   (no variable, no file: one stderr line)
  *
  *   THE SELECTOR, `select`: the newest completed full-battery `CI` runs on
- *   `main` whose M test shards ALL reported success and whose M timing
- *   artifacts are all still there.
+ *   `main` whose M `Test UI (N/M)` shards ALL reported success and whose M
+ *   timing artifacts are all still there.
  *
- *     node scripts/test-file-timings.mjs select --shards 16 --limit 6 > runs.json
+ *     node ui/scripts/test-file-timings.mjs select --shards 16 --limit 6 > runs.json
  *
  *   THE GENERATOR, `merge`: one directory per run (the run id is the
  *   directory's name), every report under it read; per run a file's
  *   durations are summed, across runs the MEDIAN is kept, and the dataset is
  *   keyed by `pathKey()` of each file, never by its path.
  *
- *     node scripts/test-file-timings.mjs merge --runs-file runs.json \
- *       --out scripts/test-shard-timings.json [--summary body.md] DIR...
+ *     node ui/scripts/test-file-timings.mjs merge --runs-file runs.json \
+ *       --out ui/scripts/test-shard-timings.json [--summary body.md] DIR...
  *
- * `.github/workflows/test-shard-timings-refresh.yml` drives the last two on a
- * timer and opens the pull request; ⛔ nothing writes the dataset by hand.
+ * The root's `.github/workflows/ui-test-timings-refresh.yml` drives the last
+ * two on a timer and opens the pull request; ⛔ nothing writes the dataset by
+ * hand.
  *
  * ## Why not vitest's built-in `json` reporter
  *
@@ -79,10 +82,10 @@ export const REPORT_SCHEMA = 'objectui.test-file-timings/1';
 export const OUT_ENV = 'OBJECTUI_TEST_TIMINGS_OUT';
 /** The dataset rounds every file's median to this many ms, so noise below it does not churn the file. */
 export const ROUND_MS = 10;
-/** The artifact name of shard N's report, as `ci.yml` uploads it. */
+/** The artifact name of shard N's report, as the root `ci.yml`'s `test-ui` job uploads it. */
 export const artifactName = (/** @type {number} */ n) => `test-file-timings-${n}`;
-/** The check-run name of shard N of M, as `ci.yml`'s `test` job spells it. */
-export const shardJobName = (/** @type {number} */ n, /** @type {number} */ m) => `Test (shard ${n}/${m})`;
+/** The check-run name of shard N of M, as the root `ci.yml`'s `test-ui` job spells it. */
+export const shardJobName = (/** @type {number} */ n, /** @type {number} */ m) => `Test UI (${n}/${m})`;
 
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
@@ -277,7 +280,7 @@ export function buildDataset({ runs, measuredAt }) {
     generated_by:
       'scripts/test-file-timings.mjs merge, from the per-file timing reports of the runs under measured.runs; ' +
       'each key is pathKey() of a test file (scripts/test-shard-partition.mjs says why it is not the path). ' +
-      'Never hand-edited: .github/workflows/test-shard-timings-refresh.yml regenerates it weekly from main (objectui#12208).',
+      'Never hand-edited: .github/workflows/ui-test-timings-refresh.yml at the monorepo root regenerates it weekly from main (objectui#12208).',
     // Sorted by run id, so the order the directories were named in cannot move a byte.
     measured: {
       at: measuredAt,
@@ -392,7 +395,7 @@ export async function selectRuns({
   let examined = 0;
   for (const run of listing?.workflow_runs ?? []) {
     if (chosen.length >= limit || examined >= limit * 5) break;
-    // The full battery: `push` and the hourly `schedule` (objectui#12214).
+    // The full battery: a `push` that starts Test UI, and the 4-hourly `schedule`.
     if (run.event !== 'push' && run.event !== 'schedule') continue;
     examined += 1;
     const jobs = (await apiGet(`/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100&filter=latest`, io))?.jobs ?? [];

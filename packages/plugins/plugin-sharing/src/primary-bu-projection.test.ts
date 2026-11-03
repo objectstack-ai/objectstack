@@ -31,9 +31,11 @@ function makeLogger() {
   return { info: vi.fn(), warn: vi.fn() };
 }
 
+// [#29606] Each row carries its `id`: the scan is a keyset walk, which seeks
+// past the last id it read and cannot vouch for a page without one.
 const MEMBERS: Row[] = [
-  { user_id: 'u1', business_unit_id: 'bu1' },
-  { user_id: 'u2', business_unit_id: 'bu2' },
+  { id: 'm1', user_id: 'u1', business_unit_id: 'bu1' },
+  { id: 'm2', user_id: 'u2', business_unit_id: 'bu2' },
 ];
 
 describe('backfillPrimaryBu — refused writes are counted and reported', () => {
@@ -114,5 +116,19 @@ describe('backfillPrimaryBu — refused writes are counted and reported', () => 
 
     expect(await backfillPrimaryBu(engine, logger)).toEqual({ updated: 0, refused: 0 });
     expect(engine.update).not.toHaveBeenCalled();
+    // [#29606] …and says so, with the error: a refused scan is not "nothing to do".
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][1]).toEqual({ error: 'scan refused' });
+  });
+
+  it('[#29606] a scan that cannot vouch for completion writes nothing and says so', async () => {
+    const logger = makeLogger();
+    // No `id` on the rows: the walk cannot seek past this page.
+    const engine = makeEngine(MEMBERS.map(({ id: _id, ...row }) => row), () => {});
+
+    expect(await backfillPrimaryBu(engine, logger)).toEqual({ updated: 0, refused: 0 });
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][0]).toMatch(/could not be read to completion/);
   });
 });
