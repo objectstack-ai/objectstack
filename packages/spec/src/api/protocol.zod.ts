@@ -238,10 +238,39 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
  * must carry it alongside a request do so in a typed transport envelope at
  * their own layer (see `TransportScopedMetaRequest` in `@objectstack/rest`),
  * never by widening these shapes.
+ *
+ * **`names` is the batch by-names read of one type** (ruling A on #29236,
+ * record 6580261740): a caller that wants a handful of items asks the list
+ * once instead of reading the whole type, or reading each item by name. This
+ * member is the protocol's post-parse shape — a LIST of item names; the wire
+ * spelling `?names=a,b,c` (one comma-separated value, the data routes'
+ * convention for `fields` and `searchFields`, which fits the list door's arity
+ * rule that refuses a repeated key) is split by the REST door, not here. The
+ * protocol pushes it down to the store read, so it filters before decorating
+ * and masking and translation run on the named items only.
+ *
+ * The list arm refuses only the EMPTY list, as `searchFieldsArray` does
+ * (`../data/search-fields-names-a-field.ts`): absent means "every item", so an
+ * empty filter read as absent is a widening — the class the list door's `?id=`
+ * / `?object=` refusal closes (`refuseEmptyListFilter` in `@objectstack/rest`).
+ * The schema judges no member: a name that matches no item is not refused,
+ * it is simply absent from the answer, as an unknown `?id=` narrows to the
+ * empty list. A minimum, not a refinement, so the published JSON Schema
+ * states it.
  */
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  names: z.array(z.string())
+    .min(1, 'Name at least one item, or leave `names` out to list every item')
+    .optional()
+    .describe(
+      'Item names to narrow the list to: only the named items of the type are answered, among those '
+      + 'the list would answer without it. Sent over HTTP as one comma-separated value '
+      + '(`?names=a,b,c`). A name that matches no item is simply absent from the answer (no 404). An '
+      + 'empty value is refused with 400 rather than read as every item; leave the key out to list '
+      + 'every item.',
+    ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
     + 'pending `state=\'draft\'` rows are overlaid on the active list — draft '
