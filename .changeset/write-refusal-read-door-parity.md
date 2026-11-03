@@ -2,7 +2,7 @@
 '@objectstack/plugin-security': patch
 ---
 
-fix(plugin-security): a write refused for a caller who cannot see the row answers the same for a hidden row and a missing one
+fix(plugin-security): a write refused for a caller who cannot read the object answers the same for a hidden row and a missing one
 
 Clause-②: no
 Metadata-protocol: none
