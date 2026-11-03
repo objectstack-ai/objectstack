@@ -28,8 +28,14 @@ import { MongoDBDriver } from './mongodb-driver.js';
 
 type Doc = Record<string, unknown>;
 
-/** A fake `Db`: one collection, stored documents kept as inserted. */
-function fakeDb() {
+/**
+ * A fake `Db`: one store of documents kept as inserted, served through a
+ * collection that declares ONLY the native `Collection` members the path under
+ * test calls. Two shapes, one per path: the single-row doors (`create`,
+ * `update`, `findOne`) reach `insertOne` / `updateOne` / `findOne`; the batch
+ * door (`bulkCreate`) reaches `insertMany`, and its next read is a `find`.
+ */
+function fakeStore() {
   const docs: Doc[] = [];
   const project = (doc: Doc, projection: Record<string, number> | undefined): Doc => {
     const keep = Object.keys(projection ?? {}).filter((k) => projection![k] === 1);
@@ -54,25 +60,43 @@ function fakeDb() {
       }
       return doc[k] === v;
     });
+  const push = (doc: Doc) => { docs.push({ _id: `oid_${docs.length}`, ...doc }); };
+  const pick = (filter: Doc) => docs.find((x) => matches(x, filter));
+  const pickAll = (filter: Doc, options?: { projection?: Record<string, number> }) =>
+    docs.filter((x) => matches(x, filter)).map((d) => project(d, options?.projection));
+  return { docs, push, pick, pickAll, project };
+}
+
+/** The single-row doors: `create`, `update` and `findOne`. */
+function singleRowDb() {
+  const store = fakeStore();
   const collection = {
-    insertOne: async (doc: Doc) => { docs.push({ _id: `oid_${docs.length}`, ...doc }); return {}; },
-    insertMany: async (many: Doc[]) => { for (const doc of many) docs.push({ _id: `oid_${docs.length}`, ...doc }); return {}; },
+    insertOne: async (doc: Doc) => { store.push(doc); return {}; },
     updateOne: async (filter: Doc, update: { $set?: Doc }) => {
       const updateOps = Object.keys(update);
       if (updateOps.length !== 1 || updateOps[0] !== '$set') throw new Error(`fake Db: update ${updateOps.join(',')} is not implemented`);
-      const d = docs.find((x) => matches(x, filter));
+      const d = store.pick(filter);
       if (d) Object.assign(d, update.$set);
       return { matchedCount: d ? 1 : 0 };
     },
     findOne: async (filter: Doc, options: { projection?: Record<string, number> }) => {
-      const d = docs.find((x) => matches(x, filter));
-      return d ? project(d, options?.projection) : null;
+      const d = store.pick(filter);
+      return d ? store.project(d, options?.projection) : null;
     },
+  };
+  return { db: { collection: () => collection }, docs: store.docs };
+}
+
+/** The batch door: `bulkCreate`, and `find` for the next read. */
+function batchDb() {
+  const store = fakeStore();
+  const collection = {
+    insertMany: async (many: Doc[]) => { for (const doc of many) store.push(doc); return {}; },
     find: (filter: Doc, options: { projection?: Record<string, number> }) => ({
-      toArray: async () => docs.filter((x) => matches(x, filter)).map((d) => project(d, options?.projection)),
+      toArray: async () => store.pickAll(filter, options),
     }),
   };
-  return { db: { collection: () => collection }, docs };
+  return { db: { collection: () => collection }, docs: store.docs };
 }
 
 const OBJECT = 'nk_mongo_write_item';
@@ -84,9 +108,8 @@ describe('[#29538] driver-mongodb: a write answers the record the next read answ
   let engine: ObjectQL;
   let docs: Doc[];
 
-  beforeEach(async () => {
+  const boot = async (fake: { db: unknown; docs: Doc[] }) => {
     const driver = new MongoDBDriver({ url: 'mongodb://127.0.0.1:1/unused' });
-    const fake = fakeDb();
     docs = fake.docs;
     (driver as any).db = fake.db;
     (driver as any).connect = async () => {};
@@ -104,10 +127,12 @@ describe('[#29538] driver-mongodb: a write answers the record the next read answ
         doubled: { type: 'formula', expression: { dialect: 'cel', source: 'record.qty != null ? record.qty * 2 : -1' } },
       },
     } as never);
-  });
+  };
 
-  const expectAnswerIsNextRead = async (answer: Doc) => {
-    expect(answer).toStrictEqual(await engine.findOne(OBJECT, { where: { id: answer.id } }));
+  beforeEach(async () => { await boot(singleRowDb()); });
+
+  const expectAnswerIsNextRead = async (answer: Doc, next?: Doc) => {
+    expect(answer).toStrictEqual(next ?? await engine.findOne(OBJECT, { where: { id: answer.id } }));
     expect(own(answer, 'note')).toBe(true);
     expect(answer.note).toBeNull();
     expect(own(answer, 'qty')).toBe(true);
@@ -122,10 +147,15 @@ describe('[#29538] driver-mongodb: a write answers the record the next read answ
     await expectAnswerIsNextRead(answer);
   });
 
-  it('batch insert (bulkCreate): every answered row deep-equals its next findOne', async () => {
+  it('batch insert (bulkCreate): every answered row deep-equals its next read', async () => {
+    await boot(batchDb());
     const answers = await engine.insert(OBJECT, [{ name: 'Ada' }, { name: 'Bo' }]) as Doc[];
     expect(answers).toHaveLength(2);
-    for (const answer of answers) await expectAnswerIsNextRead(answer);
+    expect(own(docs[0], 'note')).toBe(false);
+    for (const answer of answers) {
+      const [next] = await engine.find(OBJECT, { where: { id: answer.id } }) as Doc[];
+      await expectAnswerIsNextRead(answer, next);
+    }
   });
 
   it('update by id: the answer deep-equals the next findOne', async () => {

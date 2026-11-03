@@ -106,7 +106,7 @@ describe('[#4560] the `current_user` defaultValue token is engine-owned', () => 
     // [#29538] The answer is the next read's record: a column nothing was
     // stored in reads `null`. "Unset" is the STORED row's own: no key at all.
     expect(row.owner).toBeNull();
-    const stored = await engine.getDriverForObject('tok_doc')!.findOne('tok_doc', { where: { id: row.id } } as any);
+    const stored = await engine.getDriverForObject('tok_doc')!.findOne('tok_doc', { object: 'tok_doc', where: { id: row.id } });
     expect(stored).not.toHaveProperty('owner');
   });
 

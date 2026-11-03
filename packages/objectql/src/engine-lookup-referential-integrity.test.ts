@@ -373,7 +373,7 @@ describe('[#4441] a lookup id that resolves to nothing is refused', () => {
     // [#29538] The answer reads the unstored column `null`, as the next read
     // does; the strip is the STORED row's own: no key at all.
     expect(row.recorded_by, 'stripped before the reference check, not refused by it').toBeNull();
-    const stored = await engine.getDriverForObject('ref_audit_note')!.findOne('ref_audit_note', { where: { id: row.id } } as any);
+    const stored = await engine.getDriverForObject('ref_audit_note')!.findOne('ref_audit_note', { object: 'ref_audit_note', where: { id: row.id } });
     expect(stored, 'stripped before the reference check, not refused by it').not.toHaveProperty('recorded_by');
   });
 
