@@ -38,16 +38,6 @@ const onObject = (name: string, objectName: string) => ({
   edges: [],
 });
 
-
-const onObject = (name: string, objectName: string) => ({
-  name,
-  label: name,
-  type: 'autolaunched',
-  status: 'active',
-  nodes: [{ id: 'start', type: 'start', config: { triggerType: 'record-after-create', objectName } }],
-  edges: [],
-});
-
 const FLOWS = [onObject('account_flow', 'crm_account'), onObject('ticket_flow', 'repairs_repair_ticket')];
 
 const mockClient = {
