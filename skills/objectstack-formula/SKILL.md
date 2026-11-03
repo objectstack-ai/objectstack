@@ -140,12 +140,6 @@ has(record.amount) && record.amount != null && record.amount > 1000
 has(record.viewer) && has(record.viewer.can_approve) && record.viewer.can_approve == true
 ```
 
-### Null + string throws
-
-CEL has no implicit `null` coercion. `null + 'foo'` throws
-`no such overload: dyn<null> + string`. Wrap every nullable string operand
-in `coalesce(..., '')`.
-
 ---
 
 ## ObjectStack CEL standard library
@@ -342,9 +336,7 @@ a typo'd key (`record.stauts`), a retired field, or a comparison CEL has no
 overload for — does **not** degrade to "the hook did not fire": it **fails the
 write**, with an error naming the hook and the key — `before*` and `after*`
 alike, with no `onError` escape (`onError` governs a handler that throws, and
-the condition is evaluated before any handler runs). A condition that does not
-even **compile** aborts the same way. So on an insert event read `previous`
-only against `null`, and put a column read off it behind `previous != null &&`.
+the condition is evaluated before any handler runs).
 
 **A transition condition needs no special handling for bulk writes.**
 Write it once, on a `before*` or an `after*` event, and it means the same thing
@@ -407,14 +399,12 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 > ⚠️ **Flow conditions are the exception to row 1.** The engine spreads the
 > trigger record's fields, nulls included, to top level wherever no flow variable
 > or node id holds the name, so in a start, edge or `decision` condition a bare
-> `budget` IS `record.budget`: `os validate` judges either spelling (bare
-> names only while every node's bindings are declared), a guard on one spelling
-> guards both, and what the start condition proves non-null is presumed at every
-> edge and branch. Spell that start guard `record.budget != null`: the runtime
-> publish gate judges the written flow alone, proves nothing from a bare
-> `budget != null`, and refuses the edge `os validate` passed. An unguarded null
-> fails the **run** at that condition; the write that fired it still lands.
-> `record.x` is the only spelling valid on every other surface — prefer it.
+> `budget` IS `record.budget`: `os validate` judges either spelling (bare names
+> only while every node's bindings are declared) and a guard on one guards both.
+> What the start condition proves non-null is presumed at every edge and branch;
+> spell that guard `record.budget != null` — the runtime publish gate judges the
+> written flow alone and resolves no bare name. An unguarded null fails the
+> **run** at that condition; the write that fired it still lands.
 
 ---
 
