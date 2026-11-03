@@ -123,7 +123,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } f
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IFieldFileService, IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
-import { applyConversionsToFlow, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
 import { type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -393,7 +393,7 @@ import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, store
 // [#25467 cut 17] The object-owner verdicts: which contributor kind a stored object row registers as, and handing an adopted object's name to its rebound row.
 import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protocol-object-owner.js';
 // [#25467 cut 18] The flow save's retired-spelling replay verdict (#23903 ruling B′): does a save newly introduce a retired spelling no stored row carries.
-import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
+import { flowSaveReplaysRetired, flowVerdictBody, storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 // [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
 // [#28574, ADR-0146 D10] An object extension as an authorable item: the doors' gate, its shape schema, and the body every sync registers.
@@ -579,7 +579,7 @@ export {
     MalformedVersionTokenError,
     canonicalVersionInstant,
 } from './protocol-version-tokens.js';
-import { CLONE_STRIP_FIELDS, FLOW_FALLBACK_VERDICT_NOT_REPLAYED } from './protocol-write-constants.js';
+import { CLONE_STRIP_FIELDS } from './protocol-write-constants.js';
 export { FLOW_FALLBACK_VERDICT_NOT_REPLAYED } from './protocol-write-constants.js';
 import {
     carryCatalogedErrorCode,
@@ -1762,6 +1762,9 @@ export class ObjectStackProtocolImplementation implements
      * ({@link objectNamespacePrefixViolation}, `NAMESPACE_PREFIX`), the one
      * rule outside the gate that the promotion doors refuse a draft on — the
      * same judge, on the draft row's package, never a copy of it.
+     *
+     * [#29557] …and on the body the promotion judges: a flow draft in its
+     * D2-converted spelling (`storedFlowVerdictBody`, the save door's seam).
      */
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
@@ -14423,10 +14426,8 @@ export class ObjectStackProtocolImplementation implements
                 }
             }
             if (!canonicalized) {
-                flowGateVerdictBody = applyConversionsToFlow(request.item, {
-                    includeRetired,
-                    excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
-                });
+                // [#29557] The seam both publish doors judge a stored draft through.
+                flowGateVerdictBody = flowVerdictBody(request.item, { includeRetired });
             }
         }
 
@@ -16589,7 +16590,11 @@ export class ObjectStackProtocolImplementation implements
                 type: singularType,
                 name: request.name,
                 state: 'active',
-                body: draftForGate.body,
+                // [#29557] The save door's verdict body: a flow draft is judged
+                // in its D2-converted spelling (the save door stored it raw after
+                // judging it so, #21982), and promoted, stored and served as
+                // stored; the credential read below reads the stored draft.
+                body: storedFlowVerdictBody(singularType, draftForGate.body),
                 // [#9612] The package binding the CALLER stated for this
                 // promotion — the same value threaded into `repo.promoteDraft`
                 // below, so the gate and the write resolve the draft under one
