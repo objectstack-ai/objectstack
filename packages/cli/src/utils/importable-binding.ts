@@ -85,13 +85,13 @@
  *
  * ## Why `ts` arrives through a lazy import
  *
- * The same call, for the same reason, as `emitted-source-parses.ts`: `ts-morph`
- * is already a CLI runtime dependency and re-exports the compiler namespace,
- * and the parser is a heavy load that only a command which reaches this check
+ * The same call, for the same reason, as `emitted-source-parses.ts`: the
+ * compiler namespace comes from the CLI's direct `typescript` dependency, and
+ * the parser is a heavy load that only a command which reaches this check
  * should pay for.
  */
 
-import type { ts as TS } from 'ts-morph';
+import type TS from 'typescript';
 
 const BARREL = '/barrel.ts';
 const CONSUMER = '/consumer.ts';
@@ -157,7 +157,7 @@ export function namedImportDiagnostics(ts: typeof TS, alias: string): string[] {
  * the same string the command interpolates into the barrel it writes.
  */
 export async function findBarrelAliasRefusal(alias: string): Promise<string[] | null> {
-  const { ts } = await import('ts-morph');
+  const { default: ts } = await import('typescript');
   const diagnostics = namedImportDiagnostics(ts, alias);
   return diagnostics.length > 0 ? diagnostics : null;
 }

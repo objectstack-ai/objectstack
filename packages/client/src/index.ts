@@ -46,6 +46,9 @@ import {
   ListNotificationsResponse,
   MarkNotificationsReadResponse,
   MarkAllNotificationsReadResponse,
+  RegisterDeviceRequest,
+  RegisterDeviceResponse,
+  UnregisterDeviceResponse,
   // The AI wire types (#3718). `Ai{Nlq,Suggest,Insights}{Request,Response}`
   // used to be here; they typed three endpoints nothing has ever mounted and
   // went with the methods that called them. These type the routes that exist.
@@ -6806,10 +6809,11 @@ export class ObjectStackClient {
   /**
    * Notification Services
    *
-   * Device registration and preference methods were removed in #3612 — the
-   * /notifications/devices and /notifications/preferences server routes that
-   * ADR-0012 describes were never built. They return together with the server
-   * (and a route-ledger row keeps them honest).
+   * The device methods (`registerDevice` / `unregisterDevice`) returned with
+   * the server's device registry (ADR-0012 §6), and their route-ledger rows
+   * (`runtime/src/route-ledger.ts`) keep them honest. The preference methods
+   * removed in #3612 stay gone: no server route serves
+   * `/notifications/preferences`.
    */
   notifications = {
     /**
@@ -6854,6 +6858,37 @@ export class ObjectStackClient {
         method: 'POST'
       });
       return this.unwrapResponse<MarkAllNotificationsReadResponse>(res);
+    },
+
+    /**
+     * Register or refresh this user's push device (`POST /notifications/devices`).
+     *
+     * Send the `deviceId` the server answered on every later registration:
+     * re-registering it refreshes that device (token, vendor, app, locale)
+     * instead of adding another. Without one the server mints an id and
+     * answers it. `vendor` may be omitted for `ios` (apns) and `android`
+     * (fcm); a `web` registration names it.
+     */
+    registerDevice: async (request: RegisterDeviceRequest): Promise<RegisterDeviceResponse> => {
+      const route = this.getRoute('notifications');
+      const res = await this.fetch(`${this.baseUrl}${route}/devices`, {
+        method: 'POST',
+        body: JSON.stringify(request)
+      });
+      return this.unwrapResponse<RegisterDeviceResponse>(res);
+    },
+
+    /**
+     * Unregister one of this user's push devices
+     * (`DELETE /notifications/devices/:deviceId`), on sign-out or account
+     * switch. A device id this user does not hold answers 404 `NOT_FOUND`.
+     */
+    unregisterDevice: async (deviceId: string): Promise<UnregisterDeviceResponse> => {
+      const route = this.getRoute('notifications');
+      const res = await this.fetch(`${this.baseUrl}${route}/devices/${encodeURIComponent(deviceId)}`, {
+        method: 'DELETE'
+      });
+      return this.unwrapResponse<UnregisterDeviceResponse>(res);
     }
   };
 

@@ -46,7 +46,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '../shared/metadata-colle
  * Stored row types whose conversions walk a stack collection the
  * MANIFEST-COLLECTION maps deliberately do not carry (#19620).
  *
- * `translation` is the one: `PLURAL_TO_SINGULAR` has no `translations`
+ * `translation` is the first: `PLURAL_TO_SINGULAR` has no `translations`
  * spelling because a stack's `translations` entries are locale-keyed BUNDLES,
  * not named metadata items (`manifest-collection-spelling.ts` says why, and
  * `check:stack-collection-maps` holds that map to the stack schema). But the
@@ -59,12 +59,27 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '../shared/metadata-colle
  * reaching the runtime from rows stored before. Kept HERE rather than added to
  * the shared maps, which would advertise `translations` as a named-item stack
  * collection to every other reader of them.
+ *
+ * `object_extension` is the second (ADR-0146 D10), for the same reason. A
+ * stored extension row is exactly one `objectExtensions` entry (a body that
+ * carries `extend` and no `name`), and every conversion that reaches an
+ * extension walks that collection. But a stack's `objectExtensions` are not
+ * named items either: the registry merges each one into its target, and
+ * `check:stack-collection-maps` records the manifest map's omission of the key
+ * as deliberate. Without this entry the stored pass returned every stored
+ * extension row untouched, so no conversion and no refused-shape detector ever
+ * ran over one, and `os migrate meta --stored` read each such row as already
+ * on protocol. There is no plural row spelling to add: the protocol's
+ * singular/plural read fallback finds none for `object_extension`, and the
+ * stored-metadata pass reports a row stored under any other spelling of it as
+ * `skipped` before its body is read.
  */
 const STORED_ONLY_COLLECTIONS: Readonly<Record<string, string>> = {
   translation: 'translations',
   // The legacy plural row spelling, as the protocol's singular/plural read
   // fallback still finds it.
   translations: 'translations',
+  object_extension: 'objectExtensions',
 };
 
 /**

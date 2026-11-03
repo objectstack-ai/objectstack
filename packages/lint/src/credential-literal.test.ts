@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { isCredentialShapedLiteral } from './credential-literal.js';
+import { isCredentialShapedLiteral, isCredentialShapedName } from './credential-literal.js';
 import * as barrel from './index.js';
 
 const SRC = dirname(fileURLToPath(import.meta.url));
@@ -83,6 +83,48 @@ describe('isCredentialShapedLiteral — what is NOT a literal credential', () =>
   it('a blank value and a non-string value draw nothing, whatever the name', () => {
     for (const value of ['', '   ', undefined, null, 0, 3600, true, false, ['x'], { v: 'x' }]) {
       expect(isCredentialShapedLiteral('Authorization', value), JSON.stringify(value)).toBe(false);
+    }
+  });
+});
+
+describe('isCredentialShapedName — a credential where a variable NAME belongs', () => {
+  it('cannot be answered by isCredentialShapedLiteral: its R1 judges the key, and the key reads as a credential', () => {
+    // Why the sibling exists: under `credentialEnv` every value draws, the
+    // correct name included.
+    expect(isCredentialShapedLiteral('credentialEnv', 'REPO_MCP_TOKEN')).toBe(true);
+    expect(isCredentialShapedLiteral('REPO_MCP_TOKEN', 'x')).toBe(true);
+  });
+
+  it.each([
+    'REPO_MCP_TOKEN',
+    'GITHUB_TOKEN',
+    'OS_TEST_MCP_STDIO_CREDENTIAL_REF',
+    // Long capital names: no digits, underscores, one or two digits.
+    'ABCDEFGHIJKLMNOPQRSTUVWXY',
+    'GITHUBPERSONALACCESSTOKENFORTHEREPOSERVER',
+    'SERVICE_ACCOUNT_ACCESS_TOKEN_FOR_PRODUCTION_USE',
+    'SERVICEACCOUNTTOKEN2',
+    'PROD2024REPOSITORYTOKEN',
+    'REPO_MCP_TOKEN_V2_2024_EU_WEST_1',
+    'repoMcpTokenForProduction',
+    'S3_BUCKET_K8S_OAUTH2_TOKEN',
+  ])('a correct name %s never draws', (name) => {
+    expect(isCredentialShapedName(name)).toBe(false);
+  });
+
+  it.each([
+    'probe7sentinel3value9token5x',
+    'PROBE7SENTINEL3VALUE9TOKEN5X',
+    'probe_7a8b9c0d1e2f3a4b5c6d_sentinel',
+    'Bearer probe-sentinel',
+    'token probe-sentinel',
+  ])('a value %j that reads as a credential draws', (value) => {
+    expect(isCredentialShapedName(value)).toBe(true);
+  });
+
+  it('a template, a blank value and a non-string value draw nothing', () => {
+    for (const value of ['{{ probe7sentinel3value9token5x }}', '{probe7sentinel3value9token5x}', '', '   ', undefined, null, 42, true, ['x'], { v: 'x' }]) {
+      expect(isCredentialShapedName(value), JSON.stringify(value)).toBe(false);
     }
   });
 });

@@ -32,6 +32,7 @@ import {
     NotificationPreference,
     NotificationTemplate,
     HttpDelivery,
+    UserDevice,
 } from './objects/index.js';
 // The L2 event this service writes on every `emit()`. It is OWNED by
 // platform-objects (it is in `PLATFORM_OBJECTS_BY_PACKAGE`), and — like
@@ -84,7 +85,7 @@ function lostWithoutStorage(objectName: string): string {
  * durability degradation: ① the consequence, and that the deployment keeps
  * looking healthy; ② the fix. Both remedies are measured: this provisioning
  * runs on every boot that runs DDL, and `os migrate apply` creates all eight
- * of these tables.
+ * of these tables (measured before `sys_user_device` joined them as the ninth).
  */
 function provisionFailureLine(objectName: string): string {
     return (
@@ -352,6 +353,9 @@ export class MessagingServicePlugin implements Plugin {
                 NotificationPreference,
                 NotificationTemplate,
                 HttpDelivery,
+                // The push device registry (ADR-0012 §6): the
+                // `notification` slot's device members write it.
+                UserDevice,
             ],
             navigationContributions: [
                 {
@@ -609,7 +613,7 @@ export class MessagingServicePlugin implements Plugin {
      * cold-start budget) and says once, at `info`, what it did not provision and
      * why. Not `warn`: nothing is degraded, because the operator declared this.
      * `os migrate apply`, the documented path, was measured to create all eight
-     * tables. `syncObjectSchema` itself stays ungated, because it is also how a
+     * tables (before `sys_user_device` joined them as the ninth). `syncObjectSchema` itself stays ungated, because it is also how a
      * runtime publish gives a new object its table.
      */
     private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
@@ -626,6 +630,7 @@ export class MessagingServicePlugin implements Plugin {
             NotificationPreference,
             NotificationTemplate,
             HttpDelivery,
+            UserDevice,
         ];
         // [#22984] FIRST: see the docblock. One line, naming every skipped object.
         if (bootSchemaSyncSkipped(engine)) {

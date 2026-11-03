@@ -1733,19 +1733,28 @@ export const FieldSchema = lazySchema(() => {
    * Declared per referencing field by the application author, never on the
    * target object: the application decides whose names its own pages reveal.
    * `true` declares that a principal who can read the record carrying this
-   * field MAY see, for the record this field points at, its display name (the
-   * target object's `nameField` value, ADR-0079) and its id, even when that
-   * principal cannot read the target record. Nothing else of the target:
+   * field MAY see, for the record this field points at, its display name and
+   * its id, even when that principal cannot read the target record. The name
+   * is the ADR-0079 D4 display name `resolveRecordDisplayName` answers: the
+   * target object's `nameField`, else its `displayNameField`, else the derived
+   * title field. The served value is `ReferenceNameOnlyValueSchema`
+   * (`field-value.zod.ts`). Nothing else of the target:
    * `$expand` on this field MUST return the same name and id only, the field's
    * own `displayField` MUST NOT widen what is shown, and the renderer shows the
    * name as text with no link to the target record. A principal who can read
    * the target is served exactly what it is served without the key.
    *
    * The key lifts the RECORD-level refusal only. A field-level rule on the
-   * name field itself still holds: when the reader's field-level security
-   * keeps that field from it, the field declares a `maskingRule`, or it is a
-   * formula reading through another reference, the name served is the
-   * ADR-0079 floor (`Record #` and the id).
+   * name field itself still holds, and the engine reads that field only where
+   * it computes nothing the security layer owns. The name served is the
+   * ADR-0079 floor (`Record #` and the id) in five cases (objectql's
+   * `servableNameField`): the reader's field-level security keeps
+   * that field from it; the field declares a `maskingRule`; it is a formula
+   * reading through another reference; an explicit `nameField` (or
+   * `displayNameField`) points at a column that is neither title-typed nor
+   * `autonumber`; or no field-level answer can be had for the reader. A
+   * target with no resolvable or no non-empty name reads as the same floor,
+   * as it does for every reader.
    *
    * Absent or `false` keeps the restricted-reference posture: a lookup whose
    * target the reader cannot read shows no name. Valid on `lookup` and on
@@ -1755,14 +1764,19 @@ export const FieldSchema = lazySchema(() => {
   referenceNameVisible: z.boolean().optional().describe(
     'Declared name exposure (`lookup` and `user` fields only). TRUE declares that a principal who can '
     + 'read the record carrying this field may see the referenced record\'s display name (the target '
-    + 'object\'s `nameField` value) and id even when that principal cannot read the referenced record. '
-    + 'Served on `$expand`: a target the reader is refused (the object\'s read gate or its row scope) '
-    + 'answers `{ id, name, readRefused: true }`, per element on a multi-value field; an unexpanded read '
+    + 'object\'s `nameField`, else its `displayNameField`, else the derived title field) and id even when '
+    + 'that principal cannot read the referenced record. Served on `$expand`: a target the reader is refused '
+    + '(the object\'s read gate or its row scope) answers `{ id, name, readRefused: true }` '
+    + '(`ReferenceNameOnlyValueSchema`), per element on a multi-value field; an unexpanded read '
     + 'answers the stored id, as for every reader. Nothing else of the target: `$expand` on this field '
     + 'returns the same name and id only, the field\'s `displayField` does not widen it, and the name '
-    + 'renders as text with no link to the target. A field-level rule on the name field still holds: '
-    + 'when the reader may not read that field, it is masked, or it is a formula reading through another '
-    + 'reference, the name is the `Record #` floor with the id. A principal who can read the target is '
+    + 'renders as text with no link to the target. A field-level rule on the name field still holds, and '
+    + 'the name field is read only where nothing the security layer owns must be computed: the name is the '
+    + '`Record #` floor with the id when the reader may not read that field, it declares a `maskingRule`, '
+    + 'it is a formula reading through another reference, an explicit `nameField` (or its `displayNameField` '
+    + 'alias) points at a column that is neither title-typed nor autonumber, or no field-level answer can be '
+    + 'had for the reader. A target '
+    + 'with no resolvable or no non-empty name reads as the same floor. A principal who can read the target is '
     + 'served exactly what it is served without the key. Absent or false keeps the restricted-reference '
     + 'posture for a target the reader cannot read. Declared on the referencing field only; there is no '
     + 'target-object switch. Refused on any other type.'

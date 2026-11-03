@@ -3,6 +3,10 @@
 /**
  * `flow-region-shape-invalid` — a flow the automation engine refuses to
  * register for its ADR-0031 region shape, refused at every authoring command.
+ * The runtime authoring gate reads it too, at the save of an active flow and
+ * at both publish doors (the per-item publish and the package publish), and
+ * judges the body the engine registers: the flow in its ADR-0087 D2-converted
+ * spelling (#21982, #29557).
  *
  * ## What it reports
  *
