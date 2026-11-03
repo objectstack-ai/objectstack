@@ -131,6 +131,7 @@ import {
   RevertPackageCommitResponse,
   RollbackToPackageCommitResponse,
   PackageExportManifest,
+  PackageExportBundle,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
   EnsureCustomizationPackageResponse,
@@ -3114,6 +3115,23 @@ export class ObjectStackClient {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/export`);
         return this.unwrapResponse<PackageExportManifest>(res);
+    },
+
+    /**
+     * [#28914] The deployment's whole ontology as installable packages, in one
+     * read (`GET /packages/export`, `PackageExportBundleSchema`): every
+     * installed package the deployment's own code does not register (registry
+     * `source` other than `code`), enabled or not, each exactly as
+     * {@link export} answers it, dependencies first, so a `.custom` pair
+     * follows its base. Install the entries in the order listed; never
+     * re-sort them. No credential value travels: a `credentialRef` stays the
+     * reference it is. A package whose export cannot be assembled fails the
+     * whole read, naming it.
+     */
+    exportAll: async (): Promise<PackageExportBundle> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/export`);
+        return this.unwrapResponse<PackageExportBundle>(res);
     },
 
     /**

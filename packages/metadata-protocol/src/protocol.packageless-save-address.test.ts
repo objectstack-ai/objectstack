@@ -63,6 +63,8 @@
  * read doors run against it, and its write verbs route through the producer's
  * own dispatch predicates.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { applyProtection } from '@objectstack/spec/shared';

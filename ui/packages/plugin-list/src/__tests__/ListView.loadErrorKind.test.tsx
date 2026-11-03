@@ -226,3 +226,58 @@ describe('ListView – load-error classification', () => {
     }
   });
 });
+
+/**
+ * objectstack#29704 — a read the server ANSWERED with a code and a sentence
+ * reached this panel as kind `network` (no special verdict for a 404
+ * `OBJECT_NOT_FOUND` or an explained 500) and told the person to check their
+ * connection. The panel now quotes the server and names its code; the network
+ * sentence stays for a request that got no answer. The rule is the shared
+ * `answeredLoadFailure` (`@object-ui/react`), which the record page reads too.
+ */
+describe('ListView – a load error the server answered shows its code and sentence (objectstack#29704)', () => {
+  it("shows a 404 OBJECT_NOT_FOUND's sentence and code, not the network sentence", async () => {
+    // The adapter's raw read path: the envelope's message, its status and code.
+    const err = Object.assign(new Error("Object 'qazh_q_zh' is not registered"), {
+      status: 404,
+      code: 'OBJECT_NOT_FOUND',
+    });
+    const { container } = renderFailing(err);
+    const panel = await errorState(container);
+    expect(panel.getAttribute('data-error-kind')).toBe('network');
+    expect(panel.textContent).toContain("Object 'qazh_q_zh' is not registered");
+    expect(panel.querySelector('[data-testid="list-error-code"]')?.textContent).toBe('OBJECT_NOT_FOUND');
+    expect(panel.textContent).not.toMatch(/connection/i);
+    // A failure a retry can change: Retry stays.
+    expect(panel.querySelector('[data-testid="list-error-retry"]')).not.toBeNull();
+  });
+
+  it('quotes the JSON body a transport embedded in an answered 500, with no code when it named none', async () => {
+    const { container } = renderFailing(
+      new Error('ApiDataSource: HTTP 500 Internal Server Error — {"error":"The database is restarting"}'),
+    );
+    const panel = await errorState(container);
+    expect(panel.textContent).toContain('The database is restarting');
+    expect(panel.querySelector('[data-testid="list-error-code"]')).toBeNull();
+    expect(panel.textContent).not.toMatch(/connection/i);
+  });
+
+  it('CONTROL: a request that got no answer keeps the network sentence and shows no code', async () => {
+    const { container } = renderFailing(new TypeError('Failed to fetch'));
+    const panel = await errorState(container);
+    expect(panel.textContent).toMatch(/Check your connection and try again/);
+    expect(panel.textContent).not.toContain('Failed to fetch');
+    expect(panel.querySelector('[data-testid="list-error-code"]')).toBeNull();
+  });
+
+  it('CONTROL: a refused read keeps its fixed sentence and shows no server text', async () => {
+    const err = Object.assign(new Error('Row-level policy sales_only denied read on account'), {
+      httpStatus: 403,
+      code: 'PERMISSION_DENIED',
+    });
+    const { container } = renderFailing(err);
+    const panel = await errorState(container);
+    expect(panel.textContent).not.toContain('sales_only');
+    expect(panel.querySelector('[data-testid="list-error-code"]')).toBeNull();
+  });
+});

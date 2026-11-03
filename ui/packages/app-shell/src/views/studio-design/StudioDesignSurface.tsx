@@ -56,6 +56,7 @@ import {
 } from '../../layout/chatDockState.js';
 import { AppMark, type AppMarkApp } from '../../layout/AppMark.js';
 import {
+  STUDIO_FOLD_LABEL,
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
@@ -68,6 +69,7 @@ import { StudioInspector } from './StudioInspector.js';
 import { agentDraftMarkOf, DraftChip, DraftSourceLine } from './StudioDraftMark.js';
 import {
   StudioItemHeader,
+  StudioItemHeaderFoldedItems,
   StudioStatusChip,
   StudioTab,
   useStudioTabRowFold,
@@ -359,6 +361,7 @@ import {
   newField,
   toFieldNameLoose,
 } from '../metadata-admin/previews/object-fields-io.js';
+import { romanizeHan } from '../metadata-admin/romanizeHan.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import {
   ExternalObjectNotice,
@@ -6001,7 +6004,10 @@ export function InterfacesPillar({
         }
       >
         <Pencil className="h-3 w-3" aria-hidden="true" />
-        {t('engine.studio.if.modeDesign', locale)}
+        {/* objectstack#29693 — on a narrow header the modes keep their glyphs; the words stay their names. */}
+        <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+          {t('engine.studio.if.modeDesign', locale)}
+        </span>
       </button>
       <button
         type="button"
@@ -6015,7 +6021,9 @@ export function InterfacesPillar({
         }
       >
         <Play className="h-3 w-3" aria-hidden="true" />
-        {t('engine.studio.if.modeRun', locale)}
+        <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+          {t('engine.studio.if.modeRun', locale)}
+        </span>
       </button>
     </div>
   );
@@ -6231,7 +6239,9 @@ export function InterfacesPillar({
             <MoreHorizontal className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuContent align="end" className="w-52">
+          {/* objectstack#29693 — what the title row folded away, on a narrow row. */}
+          <StudioItemHeaderFoldedItems />
           <DropdownMenuItem data-testid="if-item-view-definition" onSelect={() => setDefinitionOpen(true)}>
             <Code2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
             {t('engine.studio.if.viewDefinition', locale)}
@@ -6293,6 +6303,9 @@ export function InterfacesPillar({
   const ifHeaderEl = (
     <StudioItemHeader
       testId="if-item-header"
+      // objectstack#29693 — on a narrow row the chips and the item tools fold
+      // into the ⋯ menu before the title drops below its readable width.
+      foldMenu={itemMoreEl ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'if-item-header-more' }}
       leading={
         <button
           type="button"
@@ -7156,14 +7169,15 @@ function nextFieldName(existing: string[]): string {
 
 /**
  * The api name of a field added with `label` (objectui#12516): the name the
- * field inspector's Label derives from it (`toFieldNameLoose`), or, as the
+ * field inspector's Label derives from it (`toFieldNameLoose`, a Chinese label
+ * through its pinyin as the popover previewed it — `romanizeHan`), or, as the
  * inspector keeps the default when that derivation is empty (a label with no
  * Latin letters) or names another field, the next free `field_<N>`. The Add
  * field popover asks for the name in those two cases (objectui#13389), so the
  * `field_<N>` fallback is left for a caller that hands no name.
  */
 function addedFieldName(label: string, existing: string[]): string {
-  const derived = toFieldNameLoose(label);
+  const derived = toFieldNameLoose(romanizeHan(label));
   return derived && !existing.includes(derived) ? derived : nextFieldName(existing);
 }
 
@@ -7173,7 +7187,7 @@ function addedFieldName(label: string, existing: string[]): string {
  * free `field_<N>__c`.
  */
 function addedExtensionFieldName(label: string, existing: string[]): string {
-  const derived = extensionFieldName(toFieldNameLoose(label).replace(/_+$/, ''));
+  const derived = extensionFieldName(toFieldNameLoose(romanizeHan(label)).replace(/_+$/, ''));
   if (derived && !existing.includes(derived)) return derived;
   let i = existing.length + 1;
   let name = extensionFieldName(`field_${i}`);
@@ -8936,6 +8950,9 @@ export function DataPillar({
               over the thing it names, instead of spanning the rail. */}
           <StudioItemHeader
             testId="data-object-header"
+            // objectstack#29693 — the header has no ⋯ of its own (objectui#12511),
+            // so on a narrow row it draws one for the chips and the item tools.
+            foldMenu={{ label: t('engine.studio.if.more', locale), testId: 'data-object-header-more' }}
             leading={
               <button
                 type="button"
@@ -9820,11 +9837,26 @@ async function readFlowDefinitions(client: MetadataClient, packageId: string | n
 async function readObjectLabels(client: MetadataClient, packageId: string | null, locale: string): Promise<Map<string, string>> {
   const labels = new Map<string, string>();
   try {
-    const objects = await client.list<Record<string, unknown>>('object', packageId === null ? {} : { packageId });
+    // The package's pending object drafts too, as the Data rail lists them: a
+    // flow on an object not published yet is grouped under it, and the header
+    // reads its label (the `_drafts` row carries one), not its name. A
+    // published object keeps its published label; a failed draft read adds
+    // none and leaves the published index whole (an async function, so even
+    // a throw before the read is sent rejects into the catch).
+    const readDrafts = async (): Promise<Array<{ name?: string | null; label?: I18nLabel | null }>> =>
+      (await client.listDrafts(packageId === null ? { type: 'object' } : { packageId, type: 'object' })) ?? [];
+    const [objects, drafts] = await Promise.all([
+      client.list<Record<string, unknown>>('object', packageId === null ? {} : { packageId }),
+      readDrafts().catch(() => []),
+    ]);
     for (const object of objects ?? []) {
       if (!object || typeof object.name !== 'string' || !object.name) continue;
       const label = resolveI18nLabel(object.label as I18nLabel | undefined, locale)?.trim();
       labels.set(object.name, label || object.name);
+    }
+    for (const draft of drafts) {
+      if (!draft || typeof draft.name !== 'string' || !draft.name || labels.has(draft.name)) continue;
+      labels.set(draft.name, resolveI18nLabel(draft.label ?? undefined, locale)?.trim() || draft.name);
     }
   } catch {
     /* an empty index */
@@ -10933,7 +10965,10 @@ export function AutomationsPillar({
                 <span className={'inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ' + (flowEnabled ? 'translate-x-[18px]' : 'translate-x-0.5')} />
               </span>
               {readOnly && <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />}
-              {flowEnabled ? t('engine.studio.auto.enabled', locale) : t('engine.studio.auto.disabled', locale)}
+              {/* objectstack#29693 — on a narrow header the switch keeps its track; the word stays its name. */}
+              <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+                {flowEnabled ? t('engine.studio.auto.enabled', locale) : t('engine.studio.auto.disabled', locale)}
+              </span>
             </button>
           );
           const defaultOffLine = <span className="sr-only">{defaultOff}</span>;
@@ -11056,6 +11091,8 @@ export function AutomationsPillar({
     editLocked && packageId !== null ? (
       <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
     ) : null;
+  /** The flow's ⋯ menu is drawn (objectstack#28567): the header folds into it (objectstack#29693). */
+  const flowMoreShown = !!current && flowLoaded && packageId !== null;
   const flowTabsEl =
     flowOpen ? (
       <>
@@ -11218,6 +11255,11 @@ export function AutomationsPillar({
               label that resolves to nothing falls back to the name. */}
           <StudioItemHeader
             testId="auto-flow-header"
+            // objectstack#29693 — the chips and the item tools fold into the
+            // flow's ⋯ menu (or the header's own, where the flow has none).
+            foldMenu={
+              flowMoreShown ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'auto-flow-header-more' }
+            }
             leading={
               <button
                 type="button"
@@ -11317,7 +11359,7 @@ export function AutomationsPillar({
                     a read-only base; a writable package is the target);
                     Delete on a writable package's flow only. The
                     package-less scope has no pair and no package to name. */}
-                {current && flowLoaded && packageId !== null && (
+                {flowMoreShown && current && (
                   <FlowItemMoreMenu
                     name={current.name}
                     label={current.label}
@@ -12203,9 +12245,18 @@ export function AccessPillar({
   // The note speaks for what the main panel shows: the open set, or the
   // package-wide OWD overview and empty header, which are the base's.
   const noteReadOnly = owdOpen || current === null ? packageReadOnly : readOnly;
+  // objectstack#29674 — an open set the pair adds lists its base's objects
+  // too (`permissionObjectScopePackages`), so its note names the base instead
+  // of claiming "this package's objects" only.
+  const notePairBase = !owdOpen && current !== null && currentAddedIn ? (customization?.baseLabel ?? railPackageId) : null;
   const accessStatus: StudioItemStatus | undefined = noteReadOnly
     ? undefined
-    : { label: t('engine.studio.access.banner', locale), title: t('engine.studio.access.bannerTitle', locale) };
+    : notePairBase !== null
+      ? {
+          label: tFormat('engine.studio.access.bannerPair', locale, { package: notePairBase }),
+          title: tFormat('engine.studio.access.bannerTitlePair', locale, { package: notePairBase }),
+        }
+      : { label: t('engine.studio.access.banner', locale), title: t('engine.studio.access.bannerTitle', locale) };
   const accessNoteEl = accessStatus ? (
     <StudioStatusChip {...accessStatus} />
   ) : (

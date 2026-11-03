@@ -41,6 +41,7 @@ import {
 } from './_shared.js';
 import { AddFieldPopover, FieldListRow } from '../previews/ViewColumnPanes.js';
 import { toFieldNameLoose, toFieldNameOrEmpty } from '../previews/object-fields-io.js';
+import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
 import type { ObjectFieldInfo } from '../previews/useObjectFields.js';
@@ -360,8 +361,17 @@ export function ReportDefaultInspector({
   // objectui#12789 — the comparison uses the same derivation as the Label
   // handler below, so a Name left empty by a non-Latin Label still follows a
   // later Latin one, and a Name the author typed is never mistaken for the
-  // `field` placeholder.
-  const nameFollowsLabel = createMode && (nameValue === '' || nameValue === toFieldNameOrEmpty(labelValue));
+  // `field` placeholder. A Chinese Label derives through its pinyin
+  // (`romanizeHan`), on both sides of that comparison.
+  const nameFollowsLabel =
+    createMode && (nameValue === '' || nameValue === toFieldNameOrEmpty(romanizeHan(labelValue)));
+  // A Chinese Label typed before the pinyin dictionary landed left the Name
+  // empty; when it lands, an empty Name takes the derived one.
+  useWhenRomanizerLands(() => {
+    if (!createMode || readOnly || nameValue !== '' || !labelValue) return;
+    const derived = toFieldNameOrEmpty(romanizeHan(labelValue));
+    if (derived) onPatch({ name: derived });
+  }, labelValue);
   const datasetName =
     typeof draft.dataset === 'string' ? (draft.dataset as string) : '';
   const values = React.useMemo(() => readNames(draft.values), [draft.values]);
@@ -536,7 +546,7 @@ export function ReportDefaultInspector({
           // script, or a cleared Label) leaves the Name empty, as the object
           // designer does, so the save path asks the author for one; it never
           // writes the `field` placeholder.
-          if (nameFollowsLabel) patch.name = toFieldNameOrEmpty(v);
+          if (nameFollowsLabel) patch.name = toFieldNameOrEmpty(romanizeHan(v));
           onPatch(patch);
         }}
         placeholder={tr('engine.inspector.report.labelPlaceholder')}

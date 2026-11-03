@@ -154,8 +154,10 @@ describe('the generic item page under the area (objectstack#28561)', () => {
   it('the header badge reads the package gate under a read-only package', async () => {
     await openTranslation(READ_ONLY_HOST);
     await screen.findByTestId('package-readonly-banner');
-    const badge = screen.getByText('read-only');
-    expect(badge).toHaveAttribute('title', t('engine.studio.pkg.readonlyHint', 'en-US'));
+    // objectstack#29705 — a read-only package's overlay type takes a
+    // customization: the header says so, in the tile's word.
+    const badge = screen.getByText(t('engine.studio.customize.available', 'en-US'));
+    expect(badge).toHaveAttribute('title', t('engine.studio.customize.availableTitle', 'en-US'));
   });
 });
 

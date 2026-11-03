@@ -118,7 +118,7 @@
  * handler with a pattern parameter. See {@link peelToBlockBody}. Both faces.
  */
 
-import { ts } from 'ts-morph';
+import ts from 'typescript';
 import { detectFreeIdentifiers, parseFunction } from './detect-free-identifiers.js';
 
 /**

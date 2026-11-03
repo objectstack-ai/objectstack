@@ -58,6 +58,7 @@ import {
 import { Layers, Pencil, RotateCcw } from 'lucide-react';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
+import { STUDIO_FOLD_LABEL } from './studio-tokens.js';
 import { readFields, writeFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
 
 /**
@@ -241,7 +242,10 @@ export function StudioCustomizeButton({
       )}
     >
       <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-      {t('engine.studio.customize.action', locale)}
+      {/* objectstack#29693 — on a narrow item header the button keeps its glyph; the word stays its name. */}
+      <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+        {t('engine.studio.customize.action', locale)}
+      </span>
     </button>
   );
   if (reason === null) return button;

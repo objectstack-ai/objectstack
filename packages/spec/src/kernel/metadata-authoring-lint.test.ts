@@ -261,14 +261,18 @@ describe('the object/field unknown-key warnings survive the generalization', () 
     //
     // The open-collection fixture was `views` until #10039 established that the
     // parse had been REFUSING those keys all along, then `connectors` until its
-    // root closed too. No open ROOT is left, so the open half is now a nested
-    // strip site under a closed root — `connectors[].retryConfig`, which the
-    // walk still visits per node — carried alongside two closed collections so
-    // the "must not contaminate" property still has something to be true about.
+    // root closed too. No open ROOT is left, so the open half is a nested strip
+    // site under a closed root, which the walk still visits per node. It was
+    // `connectors[].retryConfig` until the authored connector entry closed its
+    // nested shapes as well; it is now `apis[].objectParams`, and the connector
+    // fixture stays as a third closed collection (its hand-off is asserted
+    // below), so the "must not contaminate" property still has something to be
+    // true about.
     const findings = lintAuthoring({
       objects: [{ name: 'a', label: 'A', indexes: [{ fields: ['a'], zzz: 1 }] }],
       views: [{ name: 'v', object: 'a', zzz: 1 }],
       connectors: [{ name: 'c', retryConfig: { zzz: 1 } }],
+      apis: [{ name: 'e', objectParams: { zzz: 1 } }],
     });
     // NOT deduped. This assertion used to run through a `new Set(...)` because
     // the walk emitted every union-root finding twice (#10039) — a mask over a
@@ -276,7 +280,7 @@ describe('the object/field unknown-key warnings survive the generalization', () 
     // is asserted now, so a re-introduced duplicate fails here rather than
     // being absorbed on the way to the assertion.
     expect(findings.map((f) => `${f.surface}:${f.path}`).sort()).toEqual([
-      'connector:connectors.c.retryConfig.zzz',
+      'api:apis.e.objectParams.zzz',
     ]);
     // The hand-off half for the view fixture: not unreported — rejected, by the
     // strict container that made the old warning a contradiction.
@@ -289,6 +293,14 @@ describe('the object/field unknown-key warnings survive the generalization', () 
       name: 'a', label: 'A', fields: { x: { type: 'text', label: 'X' } },
       indexes: [{ fields: ['a'], zzz: 1 }],
     }).success).toBe(false);
+    // The hand-off half for the connector fixture: refused at `retryConfig`.
+    const connector = ObjectStackDefinitionSchema.safeParse({
+      manifest: { id: 'com.example.t', version: '1.0.0', type: 'app', name: 'T' },
+      connectors: [{ name: 'c', label: 'C', type: 'api', retryConfig: { zzz: 1 } }],
+    });
+    expect(connector.success).toBe(false);
+    expect(connector.success ? [] : connector.error.issues.map((i) => [i.code, i.path.join('.')]))
+      .toContainEqual(['unrecognized_keys', 'connectors.0.retryConfig']);
   });
 
   it('hands off to the parse for the roots that closed', () => {
@@ -605,15 +617,16 @@ describe('one voice, and a single report per record', () => {
     // The key is unique to this test: `warnedUnknownAuthoringKeys` is a
     // MODULE-level set, so a path any other test already warned on would make
     // this one read zero warnings and pass vacuously.
-    // A nested strip site (`retryConfig`) since the connector root closed —
-    // see 'reports across collections in one walk' above.
-    const connectorStack = {
-      manifest: { ...MANIFEST, id: 'com.example.connectors' },
-      connectors: [{ name: 'c1', retryConfig: { zzz_once_probe_key: 1 } }],
+    // A nested strip site (`apis[].objectParams`) since the connector root and
+    // then its nested shapes closed — see 'reports across collections in one
+    // walk' above.
+    const apiStack = {
+      manifest: { ...MANIFEST, id: 'com.example.apis' },
+      apis: [{ name: 'e1', objectParams: { zzz_once_probe_key: 1 } }],
     };
-    const findings = lintAuthoring(connectorStack);
+    const findings = lintAuthoring(apiStack);
     expect(findings.map((f) => `${f.surface}:${f.path}`)).toEqual([
-      'connector:connectors.c1.retryConfig.zzz_once_probe_key',
+      'api:apis.e1.objectParams.zzz_once_probe_key',
     ]);
 
     const warned: string[] = [];
@@ -622,7 +635,7 @@ describe('one voice, and a single report per record', () => {
     try {
       // `strict: false` skips the parse; the pre-parse warning pass runs either
       // way, which is the door under test here.
-      defineStack({ ...viewStack, ...connectorStack } as never, { strict: false });
+      defineStack({ ...viewStack, ...apiStack } as never, { strict: false });
     } finally {
       console.warn = realWarn;
     }

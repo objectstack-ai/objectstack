@@ -437,7 +437,7 @@ export class AuditPlugin implements Plugin {
           return undefined;
         }
       };
-      installAuditWriters(engine as any, this.name, {
+      const auditWriters = installAuditWriters(engine as any, this.name, {
         getMessaging,
         getI18n,
         getLocale,
@@ -515,6 +515,12 @@ export class AuditPlugin implements Plugin {
               return null;
             }
           },
+          // A comment's display identity (author name and avatar) is the
+          // session user's own, read by the same resolution the record
+          // history's actor columns are written with.
+          auditWriters
+            ? (hookCtx, userId) => auditWriters.resolveActorSnapshot(hookCtx?.api, userId)
+            : undefined,
         );
         if (typeof (engine as any).registerMiddleware === 'function') {
           // [ADR-0139 E7] The thread gate writes one ReadableIds leaf per parent
