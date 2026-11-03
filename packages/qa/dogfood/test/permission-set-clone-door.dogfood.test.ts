@@ -104,7 +104,9 @@ describe('the permission-set clone door, on a booted showcase', () => {
         const res = await clone(token, DELEGATE_SET, { name: DELEGATE_COPY, label: 'My Field Ops Delegate' });
         const text = await res.clone().text();
         expect(res.status, text).toBe(200);
-        const data = JSON.parse(text).data as { permissionSet: Record<string, unknown>; package: string | null; notice: string };
+        const data = JSON.parse(text).data as {
+            permissionSet: Record<string, unknown>; package: string | null; notice: string; noticeCode?: string;
+        };
         expect(data.permissionSet.name).toBe(DELEGATE_COPY);
         expect(data.permissionSet).not.toHaveProperty('adminScope');
         expect(data.permissionSet).not.toHaveProperty('packageId');
@@ -113,6 +115,8 @@ describe('the permission-set clone door, on a booted showcase', () => {
         // ensure door created for it.
         expect(data.package).toBe(SHOWCASE_PAIR);
         expect(data.notice).toContain(`'${SHOWCASE_PAIR}'`);
+        // [#29727] The notice is named by its variant's code: a pair created for this copy.
+        expect(data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_CREATED_PACKAGE');
         const pair = await stack.apiAs(token, 'GET', `/packages/${SHOWCASE_PAIR}`);
         expect(pair.status, await pair.clone().text()).toBe(200);
 
@@ -139,7 +143,10 @@ describe('the permission-set clone door, on a booted showcase', () => {
         const res = await clone(token, DEFAULT_SET, { name: DEFAULT_COPY, label: 'My Member Default' });
         expect(res.status, await res.clone().text()).toBe(200);
         // The second copy REUSES the pair the first created: one pair, the same id.
-        expect(((await res.json()) as any).data.package).toBe(SHOWCASE_PAIR);
+        const reused = ((await res.json()) as any).data;
+        expect(reused.package).toBe(SHOWCASE_PAIR);
+        // [#29727] Reused, not created: the in-package code.
+        expect(reused.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
         const listed = ((await (await stack.apiAs(token, 'GET', '/packages')).json()) as any).data;
         const pairs = (Array.isArray(listed) ? listed : listed?.packages ?? [])
             .filter((p: any) => (p?.manifest?.id ?? p?.id) === SHOWCASE_PAIR);
