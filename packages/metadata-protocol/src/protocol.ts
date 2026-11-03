@@ -466,6 +466,8 @@ import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-crede
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 // [#28665] The null-master rows a `controlled_by_parent` detail stops serving, counted into the finding that makes its master required.
 import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
+// [#29510] `getMetaTypes()`'s named return type and the equality its pin reads.
+import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
 // [#25467 E0] The module preamble that stood here moved, verbatim, into the themed
 // `protocol-*.ts` modules below. What this file exported from it, it still exports;
 // the module order below is the order the rolled-up `.d.ts` keeps their declarations in.
@@ -3136,7 +3138,8 @@ export class ObjectStackProtocolImplementation implements
         return listLiveMetadataTypes.call(host);
     }
 
-    async getMetaTypes() {
+    // [#29510] Named return type; the `exact` pin below holds it EQUAL to what this body infers.
+    async getMetaTypes(): Promise<MetaTypesListing> {
         const allTypes = await this.listLiveMetadataTypes();
 
         // Phase 3a-1: enrich response with per-type registry metadata so admin
@@ -3289,7 +3292,11 @@ export class ObjectStackProtocolImplementation implements
             return a.type.localeCompare(b.type);
         });
 
-        return { types: allTypes, entries };
+        const listing = { types: allTypes, entries };
+        // [#29510] Compile-time pin: `false` (a type error) the moment the body and the name drift apart.
+        const exact: Equal<typeof listing, MetaTypesListing> = true;
+        void exact;
+        return listing;
     }
 
     /**
