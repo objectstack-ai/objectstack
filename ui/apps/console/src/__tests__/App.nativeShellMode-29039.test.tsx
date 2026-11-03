@@ -33,10 +33,19 @@ import {
 } from '../../../../packages/mobile/src/nativeHost';
 import { resetNativeHostWatchForTests } from '../../../../packages/mobile/src/useNativeHost';
 
-const { passthrough, stub } = vi.hoisted(() => {
+const { passthrough, stub, shellState } = vi.hoisted(() => {
   const passthrough = ({ children }: { children?: ReactNode }) => <>{children}</>;
   const stub = (testid: string) => () => <div data-testid={testid} />;
-  return { passthrough, stub };
+  // objectstack#29750: what the shell's navigation context and the metadata
+  // provider answer. The defaults are what this file's other cases read
+  // without either provider: no current app, an empty app list, not loading.
+  const shellState = {
+    currentAppName: undefined as string | undefined,
+    apps: [] as Array<Record<string, unknown>>,
+    loading: false,
+    appStatus: undefined as 'idle' | 'loading' | 'ready' | 'error' | undefined,
+  };
+  return { passthrough, stub, shellState };
 });
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
@@ -44,7 +53,22 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ConsoleShell: passthrough,
   ConsoleToaster: () => null,
   LoadingScreen: stub('loading-screen'),
-  RedirectWithSplash: stub('redirect-with-splash'),
+  // Records where it would go, so the catch-all's answer is readable.
+  RedirectWithSplash: ({ to }: { to: string }) => <div data-testid="redirect-with-splash" data-to={to} />,
+  LoadingFallback: stub('loading-fallback'),
+  useNavigationContext: () => ({
+    context: 'app',
+    setContext: () => {},
+    currentAppName: shellState.currentAppName,
+    setCurrentAppName: () => {},
+    recordTitle: undefined,
+    setRecordTitle: () => {},
+  }),
+  useMetadata: () => ({
+    apps: shellState.apps,
+    loading: shellState.loading,
+    getTypeStatus: (type: string) => (type === 'app' ? shellState.appStatus : undefined),
+  }),
   RequireAiSurface: passthrough,
   SystemRedirect: () => null,
   DefaultHomeLayout: passthrough,
@@ -134,6 +158,10 @@ function dispatchNavigate(route: unknown): CustomEvent {
 beforeEach(() => {
   resetNativeHostEventsForTests();
   resetNativeHostWatchForTests();
+  shellState.currentAppName = undefined;
+  shellState.apps = [];
+  shellState.loading = false;
+  shellState.appStatus = undefined;
   window.history.pushState({}, '', '/login');
 });
 
@@ -186,5 +214,125 @@ describe('control: the Console in a browser behaves as today', () => {
     const event = dispatchNavigate('/register');
     expect(event.defaultPrevented).toBe(false);
     expect(window.location.pathname).toBe('/login');
+  });
+});
+
+/**
+ * objectstack#29750 — the shell's route is a push route, the notification's
+ * `actionUrl`, and the push contract (`packages/spec/src/api/push-delivery.zod.ts`)
+ * says it is resolved "as the inbox does, never verbatim": app-relative paths
+ * are hosted under `/apps/APP/`, an `/apps/…` route passes through. Navigated
+ * verbatim, `/opportunity/123` matched no route and the catch-all sent the
+ * person to Home.
+ */
+describe('a push route from the shell is hosted the way the inbox hosts it', () => {
+  it('an app-relative route is hosted under the app in the URL', async () => {
+    installBridge();
+    window.history.pushState({}, '', '/apps/crm/opportunity');
+    render(<App />);
+    await screen.findByTestId('app-content');
+    const event = dispatchNavigate('/opportunity/123?tab=activity#notes');
+    expect(event.defaultPrevented).toBe(true);
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`)
+      .toBe('/apps/crm/opportunity/123?tab=activity#notes');
+  });
+
+  it('the app the shell last published wins over the URL, as for the inbox bell', async () => {
+    installBridge();
+    shellState.currentAppName = 'sales';
+    window.history.pushState({}, '', '/home');
+    render(<App />);
+    await screen.findByTestId('home-page');
+    dispatchNavigate('/opportunity/123');
+    expect(window.location.pathname).toBe('/apps/sales/opportunity/123');
+  });
+
+  it('a Console route under /apps passes through unchanged', async () => {
+    installBridge();
+    window.history.pushState({}, '', '/apps/crm/opportunity');
+    render(<App />);
+    await screen.findByTestId('app-content');
+    const event = dispatchNavigate('/apps/x/y/1');
+    expect(event.defaultPrevented).toBe(true);
+    expect(window.location.pathname).toBe('/apps/x/y/1');
+  });
+
+  it('with no app open, the catch-all hosts the handed-over route under the default app', async () => {
+    installBridge();
+    shellState.apps = [{ name: 'crm', active: true }];
+    shellState.appStatus = 'ready';
+    render(<App />);
+    await screen.findByTestId('login-page');
+    const event = dispatchNavigate('/opportunity/123');
+    expect(event.defaultPrevented).toBe(true);
+    expect(window.location.pathname).toBe('/opportunity/123');
+    expect((await screen.findByTestId('redirect-with-splash')).getAttribute('data-to'))
+      .toBe('/apps/crm/opportunity/123');
+  });
+});
+
+/**
+ * objectstack#29750 — the same push route can arrive as the page's FIRST URL:
+ * the mobile shell starts a re-created WebView at a held route, and falls back
+ * to `location.assign` of it when no navigate listener answered. The
+ * catch-all hosts an app-relative path like the inbox; a stale Console link
+ * keeps the old redirect to `/`.
+ */
+describe('the catch-all hosts an app-relative first URL under an app', () => {
+  function catchAllTarget(): Promise<string | null> {
+    return screen.findByTestId('redirect-with-splash').then((el) => el.getAttribute('data-to'));
+  }
+
+  it('hosts it under the first active app, query and hash kept', async () => {
+    shellState.apps = [{ name: 'gone', active: false }, { name: 'crm', active: true }];
+    shellState.appStatus = 'ready';
+    window.history.pushState({}, '', '/opportunity/123?tab=activity#notes');
+    render(<App />);
+    expect(await catchAllTarget()).toBe('/apps/crm/opportunity/123?tab=activity#notes');
+  });
+
+  it('hosts it under the app the person last had open while that app is still active', async () => {
+    shellState.apps = [{ name: 'crm', active: true }, { name: 'sales', active: true }];
+    shellState.appStatus = 'ready';
+    shellState.currentAppName = 'sales';
+    window.history.pushState({}, '', '/opportunity/123');
+    render(<App />);
+    expect(await catchAllTarget()).toBe('/apps/sales/opportunity/123');
+  });
+
+  it('waits for the app list before it answers', async () => {
+    shellState.loading = true;
+    window.history.pushState({}, '', '/opportunity/123');
+    render(<App />);
+    expect(await screen.findByTestId('loading-fallback')).toBeInTheDocument();
+    expect(screen.queryByTestId('redirect-with-splash')).toBeNull();
+  });
+
+  it('an app list that failed to load is no answer: the old redirect to / runs', async () => {
+    shellState.appStatus = 'error';
+    window.history.pushState({}, '', '/opportunity/123');
+    render(<App />);
+    expect(await catchAllTarget()).toBe('/');
+  });
+
+  it('control: a stale Console link still redirects to /', async () => {
+    shellState.apps = [{ name: 'crm', active: true }];
+    shellState.appStatus = 'ready';
+    for (const path of ['/dev/nope', '/home/nope', '/apps']) {
+      window.history.pushState({}, '', path);
+      render(<App />);
+      expect(await catchAllTarget()).toBe('/');
+      cleanup();
+    }
+  });
+
+  it('control: a real top-level Console route is never rewritten', async () => {
+    shellState.apps = [{ name: 'crm', active: true }];
+    shellState.appStatus = 'ready';
+    window.history.pushState({}, '', '/home');
+    render(<App />);
+    expect(await screen.findByTestId('home-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('redirect-with-splash')).toBeNull();
+    expect(window.location.pathname).toBe('/home');
   });
 });
