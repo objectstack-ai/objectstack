@@ -3466,6 +3466,17 @@ context: HttpProtocolContext,
     if (pkg?.manifest?.label ?? pkg?.label) {
         manifest.label = pkg?.manifest?.label ?? pkg?.label;
     }
+    // [#29617, ADR-0141 D5 / ADR-0146 D2] The two install-manifest keys an
+    // install of this export decides by, read off the registry row's manifest
+    // as it declares them (`PackageExportManifestSchema.namespace` /
+    // `.dependencies`): without `namespace` the install door derives one from
+    // the id (a `.custom` pair lands under `custom`), and without
+    // `dependencies` a pair loses the edge to its base that orders its install
+    // and admits its overrides. Absent on the row ⇒ absent here.
+    const namespace = pkg?.manifest?.namespace;
+    if (namespace !== undefined && namespace !== null) manifest.namespace = namespace;
+    const dependencies = pkg?.manifest?.dependencies;
+    if (dependencies !== undefined && dependencies !== null) manifest.dependencies = { ...dependencies };
     return manifest;
 }
 
