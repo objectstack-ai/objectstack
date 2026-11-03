@@ -236,7 +236,7 @@ function atRest(store: Store) {
 async function created(store: Store) {
   const first = await boot(store);
   const res = await first.send('POST', '/datasources', { ...CREATE, secret: REAL_PASSWORD });
-  expect({ status: res.status, dsStatus: res.body.data?.status }).toEqual({ status: 201, dsStatus: 'ok' });
+  expect({ status: res.status, dsStatus: res.body.data?.datasource?.status }).toEqual({ status: 201, dsStatus: 'ok' });
   return first;
 }
 
@@ -253,8 +253,8 @@ describe('PATCH /api/v1/datasources/:name — a new secret that fails to connect
       label: 'Renamed in the same patch',
     });
     expect(res.status).toBe(200);
-    expect(res.body.data.status).toBe('error');
-    expect(res.body.data.statusReason).toContain('the new configuration is NOT in force');
+    expect(res.body.data.datasource.status).toBe('error');
+    expect(res.body.data.datasource.statusReason).toContain('the new configuration is NOT in force');
 
     // Nothing of the patch is at rest: not the new binding, not the other key,
     // and the secret sealed for it is gone again.
@@ -275,7 +275,7 @@ describe('PATCH /api/v1/datasources/:name — a new secret that fails to connect
     const res = await first.send('PATCH', `/datasources/${CREATE.name}`, {
       config: { ...CREATE.config, database: 'qa_other' },
     });
-    expect(res.body.data.statusReason).toContain('the new configuration is NOT in force');
+    expect(res.body.data.datasource.statusReason).toContain('the new configuration is NOT in force');
     expect(atRest(store)).toEqual(before);
     expect((await boot(store)).factory.built).toEqual([REAL_PASSWORD]);
   });
@@ -287,7 +287,7 @@ describe('PATCH /api/v1/datasources/:name — a new secret that fails to connect
 
     const res = await first.send('PATCH', `/datasources/${CREATE.name}`, { secret: REAL_PASSWORD });
     expect(res.status).toBe(200);
-    expect(res.body.data.status).toBe('ok');
+    expect(res.body.data.datasource.status).toBe('ok');
 
     const after = atRest(store);
     expect(after.record.external.credentialsRef).not.toBe(before.record.external.credentialsRef);
@@ -306,7 +306,7 @@ describe('PATCH /api/v1/datasources/:name — a new secret that fails to connect
     const before = atRest(store);
     for (const secret of [WRONG_PASSWORD, NEW_PASSWORD]) {
       const res = await first.send('PATCH', `/datasources/${CREATE.name}`, { secret });
-      expect(res.body.data.statusReason).toContain('the new configuration is NOT in force');
+      expect(res.body.data.datasource.statusReason).toContain('the new configuration is NOT in force');
     }
     expect(atRest(store)).toEqual(before);
     expect((await boot(store)).factory.built).toEqual([REAL_PASSWORD]);
