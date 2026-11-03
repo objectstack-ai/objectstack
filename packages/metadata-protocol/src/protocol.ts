@@ -6346,7 +6346,7 @@ export class ObjectStackProtocolImplementation implements
 
     async getData(request: { object: string, id: string, expand?: string | string[], select?: string | string[], context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
-        const queryOptions: EngineQueryOptions = {
+        const queryOptions: any = {
             where: { id: request.id }
         };
         if (request.context !== undefined) {
@@ -6392,7 +6392,18 @@ export class ObjectStackProtocolImplementation implements
             if (Object.keys(served).length > 0) queryOptions.expand = served;
         }
 
-        const result = await this.engine.findOne(request.object, queryOptions);
+        // [#29764] The bag `engine.findOne` receives is typed as the engine
+        // declares it. `queryOptions` stays the working bag: the projection
+        // helpers above answer `unknown` (they serve the raw list query too), so
+        // its `fields` has no declared type until it is handed on here. Keys are
+        // copied only when present, so the engine sees the same bag as before.
+        const findOneQuery: EngineQueryOptions = {
+            where: queryOptions.where,
+            ...(queryOptions.context !== undefined ? { context: queryOptions.context } : {}),
+            ...(queryOptions.fields !== undefined ? { fields: queryOptions.fields } : {}),
+            ...(queryOptions.expand !== undefined ? { expand: queryOptions.expand } : {}),
+        };
+        const result = await this.engine.findOne(request.object, findOneQuery);
         if (result) {
             return {
                 object: request.object,
