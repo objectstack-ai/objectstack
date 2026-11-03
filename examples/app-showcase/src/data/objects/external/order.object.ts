@@ -13,6 +13,11 @@ export const ExternalOrder = ObjectSchema.create({
   // object is RLS-owned / intentionally public; without this the new secure
   // default (unset OWD => private) would owner-filter it.
   sharingModel: 'public_read_write',
+  // [ADR-0015 §10] Under a walled tenancy posture every external object states
+  // its organization scope. The remote `orders` table carries no organization
+  // column — the deployment's shared analytics catalogue — so this object
+  // declares itself shared, as `showcase_ext_customer` does.
+  tenancy: { enabled: false },
   label: 'External Order',
   pluralLabel: 'External Orders',
   icon: 'shopping-cart',

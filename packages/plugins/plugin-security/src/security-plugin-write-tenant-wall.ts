@@ -77,6 +77,7 @@ import type { PermissionSet, TenancyPosture } from '@objectstack/spec/security';
 import { postureUsesUnionScope } from '@objectstack/spec/security';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { PermissionDeniedError } from './errors.js';
+import { undeclaredExternalScopeWriteRefusal } from './external-organization-scope.js';
 
 /**
  * Step 3.7's composed wall, as the class declares it: the `WriteTenantWall`
@@ -158,13 +159,14 @@ export interface WriteTenantWallHost {
   composeWriteTenantWall: SecurityPlugin['composeWriteTenantWall'];
   computeWriteTenantCheckFilter: SecurityPlugin['computeWriteTenantCheckFilter'];
   computeWriteTenantWall: SecurityPlugin['computeWriteTenantWall'];
+  getObjectSecurityMeta: SecurityPlugin['getObjectSecurityMeta'];
   organizationWallRefusal: SecurityPlugin['organizationWallRefusal'];
   resolveOperationPrincipals: SecurityPlugin['resolveOperationPrincipals'];
 }
 
 /** The body of `SecurityPlugin#composeWriteTenantWall`; the method's docblock there is its contract. */
 export async function composeWriteTenantWall(
-  this: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'>,
+  this: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'getObjectSecurityMeta' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'>,
   object: string,
   operation: 'insert' | 'update',
   context: any,
@@ -175,6 +177,49 @@ export async function composeWriteTenantWall(
 ): Promise<WriteTenantWall> {
   const { permissionSets, delegatorSets, delegatorContext } = principals;
   const { positions, permissionSets: explicitPermissionSets } = refusal;
+
+  // ── [ADR-0015 §10] AN EXTERNAL OBJECT THAT STATES NO ORGANIZATION SCOPE → refuse the write ──
+  //
+  // Under a walled posture every external object states its organization
+  // scope; one registered after the boot that states none is denied by the
+  // Layer 0 verdict (the boot refuses one by name). The read side projects
+  // that `deny` as the sentinel, which selects no row; a write is refused
+  // HERE, whole, ahead of the scope pre-test below — because the two halves
+  // underneath judge only rows that NAME an organization, and the engine
+  // stamps none on a federated object, so an insert naming no organization
+  // would otherwise reach the remote. The verdict is the wall's own
+  // (`isTenantWallDenial` over the caller's Layer 0, and the delegator's);
+  // the object's declaration is read through `getObjectSecurityMeta` so the
+  // sentence names the undeclared scope and the three ways out, never the
+  // missing active organization: a caller WITH one is not told to join one.
+  if (this.orgScopingEnabled) {
+    const meta = await this.getObjectSecurityMeta(object);
+    if (meta.externalOrganizationScopeUndeclared) {
+      const callerDenied = isTenantWallDenial(
+        (await this.computeWriteTenantWall(permissionSets, object, operation, context)).layer0,
+      );
+      const delegatorDenied =
+        !callerDenied && delegatorSets
+          ? isTenantWallDenial(
+              await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext),
+            )
+          : false;
+      if (callerDenied || delegatorDenied) {
+        const { message, developerMessage } = undeclaredExternalScopeWriteRefusal(object, operation, this.tenancyPosture);
+        return {
+          preTest: {
+            field: '_record',
+            warning:
+              `[Security] Layer 0 tenant wall REFUSED ${operation} '${object}' — the external object states no ` +
+              'organization scope the wall can enforce (ADR-0015 §10, fail-closed)',
+            error: new PermissionDeniedError(message, { operation, object, positions, permissionSets: explicitPermissionSets }, developerMessage),
+          },
+          judgePayload: () => null,
+          storedImage: null,
+        };
+      }
+    }
+  }
 
   // ── [ADR-0123 D2] NO ACTIVE ORGANIZATION → refuse the write, loudly ──
   //
