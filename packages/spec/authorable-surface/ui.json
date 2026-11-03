@@ -1052,6 +1052,7 @@
     "ui/Page:_packageId",
     "ui/Page:_packageVersion",
     "ui/Page:_provenance",
+    "ui/Page:apps",
     "ui/Page:aria",
     "ui/Page:assignedProfiles [RETIRED]",
     "ui/Page:description",

@@ -304,6 +304,8 @@ export function planMove(source, member, moduleFile, className = CLASS_NAME) {
     if (!cls) return { refusals: [{ line: 0, reason: `no class ${className}` }] };
     const method = methodOf(cls, member);
     if (!method) return { refusals: [{ line: 0, reason: `no instance method ${member} with a body` }] };
+    const already = stubKindOf(method);
+    if (already) return { refusals: [{ line: 0, reason: `already a stub ('${already}'): its body moved before` }] };
     const table = memberTable(cls);
     const { sites, refusals, used } = rewriteSites(sf, method, table, className);
     const sig = signatureParts(sf, method);
@@ -526,6 +528,41 @@ export function checkMove({ baseSource, headSource, moduleSource, moduleFile, me
 
 // ── Survey ──────────────────────────────────────────────────────────────────
 
+/**
+ * The function a per-member stub calls: `fn` in `fn.call(host, …)`, and in the
+ * generic spelling `(fn<R>).call(host, …)` (an instantiation expression in
+ * parentheses), which the per-member series wrote for a generic method.
+ */
+function calleeOf(node) {
+    let n = node;
+    while (ts.isParenthesizedExpression(n) || ts.isExpressionWithTypeArguments(n)) n = n.expression;
+    return n;
+}
+
+/**
+ * Is this method already a stub — its body moved before? One of three shapes,
+ * its last statement returning (awaited or not):
+ *   'call'  — `fn.call(host, …)` or `(fn<R>).call(host, …)` (the per-member series);
+ *   'host'  — `fn(protocolHost(this), …)` (this tool);
+ *   'plain' — `fn(<its own parameters, in order>)`, `fn` named as the method:
+ *             a body that read no member moved as a plain function.
+ */
+export function stubKindOf(m) {
+    const last = m.body?.statements[m.body.statements.length - 1];
+    let call = last && ts.isReturnStatement(last) ? last.expression : undefined;
+    if (call && ts.isAwaitExpression(call)) call = call.expression;
+    if (!call || !ts.isCallExpression(call)) return undefined;
+    if (ts.isPropertyAccessExpression(call.expression) && call.expression.name.text === 'call'
+        && ts.isIdentifier(calleeOf(call.expression.expression)) && !!call.arguments[0] && ts.isIdentifier(call.arguments[0])) return 'call';
+    if (call.arguments[0] && ts.isCallExpression(call.arguments[0]) && ts.isIdentifier(call.arguments[0].expression)
+        && call.arguments[0].expression.text === HOST_OF) return 'host';
+    const name = nameOf(m);
+    const params = m.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : undefined));
+    if (ts.isIdentifier(call.expression) && call.expression.text === name && call.arguments.length === params.length
+        && call.arguments.every((x, i) => ts.isIdentifier(x) && x.text === params[i])) return 'plain';
+    return undefined;
+}
+
 /** Every instance method with a body: its line count, sites and refusals under the set. */
 export function survey(source, className = CLASS_NAME) {
     const sf = parse('protocol.ts', source);
@@ -536,14 +573,7 @@ export function survey(source, className = CLASS_NAME) {
         if (!ts.isMethodDeclaration(m) || !m.body || hasModifier(m, ts.SyntaxKind.StaticKeyword)) continue;
         const name = nameOf(m);
         const { sites, refusals } = rewriteSites(sf, m, table, className);
-        const last = m.body.statements[m.body.statements.length - 1];
-        let call = last && ts.isReturnStatement(last) ? last.expression : undefined;
-        if (call && ts.isAwaitExpression(call)) call = call.expression;
-        const stub = !!call && ts.isCallExpression(call) && ts.isPropertyAccessExpression(call.expression)
-            && call.expression.name.text === 'call' && ts.isIdentifier(call.expression.expression)
-            && !!call.arguments[0] && ts.isIdentifier(call.arguments[0]) ? 'call'
-            : !!call && ts.isCallExpression(call) && call.arguments[0] && ts.isCallExpression(call.arguments[0])
-                && ts.isIdentifier(call.arguments[0].expression) && call.arguments[0].expression.text === HOST_OF ? 'host' : undefined;
+        const stub = stubKindOf(m);
         const lines = sf.getLineAndCharacterOfPosition(m.getEnd()).line - sf.getLineAndCharacterOfPosition(m.getStart(sf)).line + 1;
         rows.push({ name, lines, sites: sites.length, refusals, stub });
     }
@@ -593,7 +623,7 @@ function main(argv) {
         const all = survey(readFileSync(PROTOCOL, 'utf8'));
         const { clashes } = all;
         const stubs = all.rows.filter((r) => r.stub);
-        console.log(`already stubs: ${stubs.length} (${stubs.filter((r) => r.stub === 'call').length} by \`fn.call(host, …)\` from the per-member series, ${stubs.filter((r) => r.stub === 'host').length} by \`fn(${HOST_OF}(this), …)\`)`);
+        console.log(`already stubs: ${stubs.length} (${stubs.filter((r) => r.stub === 'call').length} by \`fn.call(host, …)\` from the per-member series, ${stubs.filter((r) => r.stub === 'host').length} by \`fn(${HOST_OF}(this), …)\`, ${stubs.filter((r) => r.stub === 'plain').length} by a plain \`fn(<params>)\`)`);
         const rows = all.rows.filter((r) => !r.stub);
         const movable = rows.filter((r) => !r.refusals.length);
         const reasons = new Map();

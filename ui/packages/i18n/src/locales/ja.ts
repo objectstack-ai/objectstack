@@ -129,7 +129,6 @@ const ja = {
   actions: {
     decisionOutput: {
       help: '決定の出力としてフローに渡されます。',
-      helpMultiValue: '決定の出力としてフローに渡されます。複数の値はカンマで区切ってください。',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -1136,7 +1135,6 @@ const ja = {
     undo: "元に戻す",
     redo: "やり直す",
     canvasMinimap: "キャンバスのミニマップ",
-    versionHistory: "バージョン履歴",
   },
   detail: {
     editInlineHint: "ダブルクリックで編集",

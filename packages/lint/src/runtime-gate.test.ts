@@ -21,28 +21,35 @@ import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 
 /** The issue's measured example: an approval flow whose expression approver is broken CEL. */
+// [#29233] Spelled as a body the flow schema accepts (a `type`, node labels,
+// an edge list, no top-level `trigger`), since the publish gate now runs the
+// region-shape rule, which refuses a flow the schema refuses. Each case below
+// still isolates the one thing it pins: the approver expression.
 const brokenApprovalFlow = {
   name: 'leave_approval',
   label: 'Leave approval',
-  trigger: { type: 'record_change', object: 'leave_request', events: ['create'] },
+  type: 'autolaunched',
   nodes: [
-    { id: 'start', type: 'start' },
+    { id: 'start', type: 'start', label: 'Start' },
     {
       id: 'approve',
       type: 'approval',
+      label: 'Approve',
       config: { approvers: [{ type: 'expression', value: 'record.owner ==' }] },
     },
   ],
+  edges: [{ id: 'e1', source: 'start', target: 'approve' }],
 };
 
 /** The same flow with an approver expression that parses and uses a legal root. */
 const cleanApprovalFlow = {
   ...brokenApprovalFlow,
   nodes: [
-    { id: 'start', type: 'start' },
+    { id: 'start', type: 'start', label: 'Start' },
     {
       id: 'approve',
       type: 'approval',
+      label: 'Approve',
       config: {
         approvers: [{ type: 'expression', value: 'current.owner' }],
       },

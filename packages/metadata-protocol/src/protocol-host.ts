@@ -54,10 +54,58 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
  * the class's static block.
  */
 export interface ProtocolHost {
+    readonly artifactLockLayerAt: ObjectStackProtocolImplementation['artifactLockLayerAt'];
+    readonly baseServesBundleMember: ObjectStackProtocolImplementation['baseServesBundleMember'];
+    readonly convertStoredItem: ObjectStackProtocolImplementation['convertStoredItem'];
+    readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
+    readonly disabledActionsOf: ObjectStackProtocolImplementation['disabledActionsOf'];
+    readonly draftPublishVerdict: ObjectStackProtocolImplementation['draftPublishVerdict'];
+    readonly engine: ObjectStackProtocolImplementation['engine'];
+    readonly environmentId: ObjectStackProtocolImplementation['environmentId'];
+    readonly expandStoredViewContainers: ObjectStackProtocolImplementation['expandStoredViewContainers'];
+    readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
+    readonly findPairAddedMemberRow: ObjectStackProtocolImplementation['findPairAddedMemberRow'];
+    readonly findServedOverlayRow: ObjectStackProtocolImplementation['findServedOverlayRow'];
+    readonly flowRegistrationsOf: ObjectStackProtocolImplementation['flowRegistrationsOf'];
+    readonly foldObjectExtendersFromRegistry: ObjectStackProtocolImplementation['foldObjectExtendersFromRegistry'];
+    readonly getServicesRegistry: ObjectStackProtocolImplementation['getServicesRegistry'];
+    readonly governServedObject: ObjectStackProtocolImplementation['governServedObject'];
+    readonly hydrateOverlayIntoRegistry: ObjectStackProtocolImplementation['hydrateOverlayIntoRegistry'];
+    readonly isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
+    readonly isStoredEntryOfDeclinedName: ObjectStackProtocolImplementation['isStoredEntryOfDeclinedName'];
+    readonly isStoredFlowEntryOfShippedName: ObjectStackProtocolImplementation['isStoredFlowEntryOfShippedName'];
+    readonly isUnservedSealedOverlay: ObjectStackProtocolImplementation['isUnservedSealedOverlay'];
+    readonly isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
+    readonly lookupArtifactItem: ObjectStackProtocolImplementation['lookupArtifactItem'];
+    readonly namesWithOwnStoredRow: ObjectStackProtocolImplementation['namesWithOwnStoredRow'];
+    readonly overlayLockLayerAt: ObjectStackProtocolImplementation['overlayLockLayerAt'];
     readonly overrideWriteVerdict: ObjectStackProtocolImplementation['overrideWriteVerdict'];
     readonly packagedArtifactOwner: ObjectStackProtocolImplementation['packagedArtifactOwner'];
     readonly packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
+    readonly packagelessAddress: ObjectStackProtocolImplementation['packagelessAddress'];
+    readonly packagelessReadAddress: ObjectStackProtocolImplementation['packagelessReadAddress'];
+    readonly readActiveOverlayRows: ObjectStackProtocolImplementation['readActiveOverlayRows'];
+    readonly readFlattenedMetaItems: ObjectStackProtocolImplementation['readFlattenedMetaItems'];
+    readonly readItemActiveRows: ObjectStackProtocolImplementation['readItemActiveRows'];
+    readonly readItemFromMetadataService: ObjectStackProtocolImplementation['readItemFromMetadataService'];
+    readonly readMetaItemFace: ObjectStackProtocolImplementation['readMetaItemFace'];
+    readonly readVersionToken: ObjectStackProtocolImplementation['readVersionToken'];
+    readonly registryMemberServedAt: ObjectStackProtocolImplementation['registryMemberServedAt'];
+    readonly resolveAppPackageIdKey: ObjectStackProtocolImplementation['resolveAppPackageIdKey'];
+    readonly resolveCascadeDeleteObjects: ObjectStackProtocolImplementation['resolveCascadeDeleteObjects'];
+    readonly resolveDisabledActionsReader: ObjectStackProtocolImplementation['resolveDisabledActionsReader'];
+    readonly resolveFlowRegistrationReader: ObjectStackProtocolImplementation['resolveFlowRegistrationReader'];
+    readonly resolveRowlessExpandedView: ObjectStackProtocolImplementation['resolveRowlessExpandedView'];
+    readonly resolveWritePackageScope: ObjectStackProtocolImplementation['resolveWritePackageScope'];
+    readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
+    readonly servedLockState: ObjectStackProtocolImplementation['servedLockState'];
+    readonly shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
+    readonly shippingPackagesOf: ObjectStackProtocolImplementation['shippingPackagesOf'];
+    readonly shipsBundleName: ObjectStackProtocolImplementation['shipsBundleName'];
     readonly storedFlowBindingAgrees: ObjectStackProtocolImplementation['storedFlowBindingAgrees'];
+    readonly storedOverlayEntries: ObjectStackProtocolImplementation['storedOverlayEntries'];
+    readonly strictDraftReadAddress: ObjectStackProtocolImplementation['strictDraftReadAddress'];
+    readonly throwMetadataServiceUnavailable: ObjectStackProtocolImplementation['throwMetadataServiceUnavailable'];
     readonly uninstalledNamedBaseRefusal: ObjectStackProtocolImplementation['uninstalledNamedBaseRefusal'];
 }
 

@@ -42,7 +42,6 @@ export const SysJobRun = ObjectSchema.create({
   description: 'Background job execution history',
   displayNameField: 'job_name',
   nameField: 'job_name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{job_name} @ {started_at}',
   highlightFields: ['job_name', 'status', 'started_at', 'duration_ms', 'attempt'],
 
   fields: {

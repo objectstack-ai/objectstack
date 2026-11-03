@@ -1414,6 +1414,38 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_personal_view: {
+    label: "個人ビュー",
+    pluralLabel: "個人ビュー",
+    description: "閲覧者自身が名前を付けたリストビュー（マイビュー）。所有者だけに表示されます。",
+    fields: {
+      id: {
+        label: "個人ビュー ID"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      },
+      user_id: {
+        label: "所有者",
+        help: "このビューが属するユーザー。このユーザーだけが参照・変更できます。"
+      },
+      object_name: {
+        label: "オブジェクト",
+        help: "このビューが一覧表示するオブジェクト（マシン名）。"
+      },
+      label: {
+        label: "名前",
+        help: "所有者がこのビューに付けた名前。"
+      },
+      config: {
+        label: "ビュー設定",
+        help: "spec の ListView 形式のリスト設定。保存のたびに検証されます。"
+      }
+    }
+  },
   sys_oauth_application: {
     label: "OAuth アプリケーション",
     pluralLabel: "OAuth アプリケーション",

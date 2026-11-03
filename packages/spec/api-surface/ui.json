@@ -526,6 +526,7 @@
     "chartAggregateResultKeys (function)",
     "chartAggregateValueKey (function)",
     "checkAppLandingItems (function)",
+    "checkDashboardReservedDateRangeGlobalFilters (function)",
     "checkDashboardWidgetChartMeasureArity (function)",
     "checkDashboardWidgetMetricMeasureArity (function)",
     "checkDashboardWidgetStageOrder (function)",

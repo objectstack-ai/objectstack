@@ -70,6 +70,9 @@
  * gap between two writes and the back-off marker a platform refusal writes
  * apply on the runner too (the runner's own home holds the log; nothing is
  * shared with a seat container, and the twenty-action cap bounds the run).
+ * No egress proxy stands in front of the runner, so the throttle reads none
+ * of its answers as the proxy's (`proxyAnswered`, `write-pace.mjs`): a 403
+ * here is GitHub's and takes the platform back-off path.
  *
  * ## Rule ⑤ on the runner — the executor announces the batch
  *
@@ -189,8 +192,9 @@
  *
  * ## The four advisory rows — fenced on the ADVISORY, printing none of its text
  *
- * `ops.mjs`'s header section "The three rows that touch a security advisory"
- * is the authority; this is where its fences and landings are measured.
+ * `ops.mjs`'s header section "The four rows that touch a security advisory"
+ * is the authority, and its "The one row that READS an advisory" for the read
+ * below; this is where their fences and landings are measured.
  *
  *   - `advisory_report` is ONE POST of the row's body to the private-report
  *     endpoint, and nothing is read first. It LANDS on a 2xx whose answer
@@ -223,23 +227,62 @@
  *     them, then the missing ones — or exactly `{ state }`, the one asked for.
  *     The action LANDS only on its own answer (`confirmAdvisory`): every login
  *     sent listed (`advisoryReadBack`), or the state asked for shown
- *     (`advisoryStateReadBack`). A non-2xx is a FAILED action carrying
- *     `ADVISORY_ACCESS_REMEDY`; a 2xx that does not show the result is a FAILED
- *     action naming what it shows.
+ *     (`advisoryStateReadBack`). A non-2xx is a FAILED action carrying its
+ *     cause and then `ADVISORY_ACCESS_REMEDY`; a 2xx that does not show the
+ *     result is a FAILED action naming what it shows.
  *
  * ⛔ The payload reaches this file through the event file (`readEventPayload`,
  * `validate.mjs`), never through `env:`, and the text this path prints — row,
  * log line, step summary, annotation — is built from the advisory's id, its
  * state and its collaborators' logins ALONE (`advisoryReportLandedText`, `advisoryCreateLandedText`,
  * `advisoryLandedText`, `advisoryStateLandedText`, `advisoryFenceText`, each
- * value in its own shape through `advisoryPrintable`), plus a platform
- * `message` only when it is one `ADVISORY_PLATFORM_MESSAGES` names. `resultOf`,
+ * value in its own shape through `advisoryPrintable`), plus, on a refusal,
+ * its CAUSE (`advisoryRefusalCause`): the platform's `message` and
+ * `documentation_url` from the refusal's own answer — each capped
+ * (`ADVISORY_REFUSAL_MESSAGE_CAP`, `ADVISORY_REFUSAL_URL_CAP`) and flattened to
+ * one table-safe line, never its `errors` or the rest of its body — so the
+ * reading a seat puts to the maintainer carries the reason, whatever message
+ * the platform chose. A message or a URL that reproduces any prose of the
+ * payload or of the advisory the preflight read (`advisoryProseOf`, a
+ * 16-character window) is WITHHELD and the row says so. `resultOf`,
  * which reads an answer's `html_url`, never sees an advisory's answer. The
  * self-test files a report and a draft and serves advisories carrying a marker in
  * their summary, description and vulnerabilities and in every other field, and finds
  * it in no line this file emits; its ablation is recorded in the PR that
  * landed this. The GET is an unpaced read; the POST and the PATCH are paced
  * like every write verb.
+ *
+ * ## The read — `advisory_read`, sealed before anything leaves (`advisoryReadAction`)
+ *
+ * ONE `GET /repos/{repo}/security-advisories/{ghsa_id}`, nothing written. A
+ * GET that never reached the platform (the call threw: `rest`'s status 0) is a
+ * FAILED action with `ADVISORY_READ_UNREACHED` and the row status
+ * `not reached` — no HTTP status, no grant remedy, ⛔ never the exception's
+ * message. On an answer, the executor judges `ADVISORY_READ_FENCES` on it — a 200 advisory, the
+ * one the action names, and a sender the row's `senderGate` admits (the
+ * default, `collaborator`: the sender on the advisory's own
+ * `collaborating_users`; `ops.mjs` records the ruling the maintainer owes) —
+ * and on any failure seals nothing and emits nothing: a FAILED action, exit 5,
+ * whose row names the fences and the status alone. Otherwise it seals
+ * `ADVISORY_READ_FIELDS` of the answer to the action's `public_key`
+ * (`advisoryReadPlaintext`, `sealAdvisoryRead`, bound to the request id, the
+ * action's index and the id) and emits the sealed answer as notice parts
+ * (`advisoryReadParts`, `relayAdvisoryReadAnnotationMessage`) — the ONE
+ * channel back, the one a seat container can read. A seal that throws is a
+ * FAILED action with `ADVISORY_READ_SEAL_FAILED`, ⛔ never the exception's
+ * message, and no part; one too large for the run's ten notices is a FAILED
+ * action naming its counts, and no part. It LANDS only on a 200 whose fences
+ * hold and whose seal succeeded and fit.
+ *
+ * ⛔ What this path prints — the row, the log line, the step summary — is the
+ * HTTP status, the counts and `advisoryReadCall`, the call with the id left
+ * out. Never the id, the state, the platform's message unless
+ * `ADVISORY_PLATFORM_MESSAGES` names it, or any field of the answer; the
+ * notices carry the ciphertext alone. The self-test serves the marker in the
+ * summary, the description and the vulnerabilities and finds it in no line,
+ * row, summary or annotation, nor in the sealed answer's bytes, and opens the
+ * parts back to the GET's fields byte for byte; the ablation is recorded in
+ * the pull request that landed this.
  *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
@@ -338,7 +381,8 @@
  *   5   an action FAILED; the summary names it and which earlier ones landed —
  *       a `run_rerun_failed` refused at a fence among them, its POST not sent,
  *       and an `advisory_collaborators_add` or `advisory_state` refused at a
- *       fence, its PATCH not sent.
+ *       fence, its PATCH not sent, and an `advisory_read` refused at a fence,
+ *       whose seal failed or did not fit — nothing of it emitted.
  *  10   the write throttle refused (its prescription was printed), or a stroke's
  *       rule ⑤ batch could not be recorded; zero writes in that second case.
  */
@@ -356,11 +400,14 @@ import { classifyHttp } from '../label-write.mjs';
 import { announceBatch, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease, unrecordableText } from '../write-pace.mjs';
 import {
   ADVISORY_ANNOTATED_OPS,
+  ADVISORY_READ_OPS,
   ANNOTATED_OPS,
   parseRelayAdvisoryAnnotation,
+  parseRelayAdvisoryReadAnnotation,
   parseRelayAnnotation,
   RELAY_ANNOTATION_PREFIX,
   relayAdvisoryAnnotationMessage,
+  relayAdvisoryReadAnnotationMessage,
   relayAnnotationMessage,
   strokeBudgetRefusal,
   strokePacing,
@@ -368,6 +415,22 @@ import {
 import {
   ADVISORY_ACCESS_REMEDY,
   ADVISORY_OPEN_STATES,
+  ADVISORY_READ_ACCESS_REMEDY,
+  ADVISORY_READ_FIELDS,
+  ADVISORY_READ_SEAL_FAILED,
+  ADVISORY_READ_UNREACHED,
+  ADVISORY_READ_UNREACHED_STATUS,
+  advisoryReadAad,
+  advisoryReadCall,
+  advisoryReadFenceFailures,
+  advisoryReadFenceText,
+  advisoryReadLandedText,
+  advisoryReadOverCapText,
+  advisoryReadParts,
+  advisoryReadPlaintext,
+  openAdvisoryRead,
+  sealAdvisoryRead,
+  ADVISORY_STATE_SHAPE,
   ADVISORY_TRANSITIONS,
   GHSA_ID_SHAPE,
   advisoryCollaboratorLogins,
@@ -386,6 +449,7 @@ import {
   GOVERNED_REVIEW_FILES_PAGE_CAP,
   GOVERNED_REVIEW_FILES_PAGE_SIZE,
   GOVERNED_REVIEW_OPS,
+  LOGIN_SHAPE,
   OPS,
   PERMISSIONS,
   PR_LANDED_STATE,
@@ -816,9 +880,10 @@ export async function confirmSubIssue(req, answer, pre, payload, api, t, { sleep
  * The advisory's fences, AUTHORITATIVE (header: "The four advisory rows"): its own GET, judged against
  * `ADVISORY_FENCES` — for `advisory_collaborators_add` an open advisory (`ADVISORY_OPEN_STATES`), for
  * `advisory_state` a transition `ADVISORY_TRANSITIONS` allows — then, for the collaborators, the merge. Returns
- * `{ plan, state }` (`plan` null for a state change; `plan.missing` empty is the no-op) to proceed, or `{ fail }`,
- * the sentence the row prints, the PATCH NOT SENT. ⛔ That sentence carries nothing of the answer but what
- * `advisoryFenceText` prints, and a platform `message` only when `advisoryPlatformText` names it. Never throws.
+ * `{ plan, state, known }` (`plan` null for a state change; `plan.missing` empty is the no-op; `known` the
+ * advisory's own text, which a later refusal's cause may never quote) to proceed, or `{ fail }`, the sentence the
+ * row prints, the PATCH NOT SENT. ⛔ That sentence carries nothing of the answer but what `advisoryFenceText`
+ * prints and, on a refused read, its cause (`advisoryRefusalCause`). Never throws.
  */
 export async function advisoryPreflight(req, payload, api, t) {
   const spec = req.advisoryCollaborators ?? req.advisoryState;
@@ -829,10 +894,96 @@ export async function advisoryPreflight(req, payload, api, t) {
   const failures = advisoryFenceFailures({ ghsaId, answer: read, from, to });
   if (failures.length) {
     const refused = !(read.status >= 200 && read.status < 300);
-    return { fail: `REFUSED at the relay's fence on ${ghsaId}, nothing sent — ${advisoryFenceText(failures)}${refused ? `${advisoryPlatformText(read.detail)}; ${ADVISORY_ACCESS_REMEDY}` : ''}` };
+    return { fail: `REFUSED at the relay's fence on ${ghsaId}, nothing sent — ${advisoryFenceText(failures)}${refused ? `; ${advisoryRefusalCause(read, advisoryProseOf(spec))}; ${ADVISORY_ACCESS_REMEDY}` : ''}` };
   }
-  if (to) return { plan: null, state: read.json.state };
-  return { plan: advisoryCollaboratorPlan({ existing: advisoryCollaboratorLogins(read.json), requested: spec.add }), state: read.json.state };
+  const known = advisoryProseOf(read.json);
+  if (to) return { plan: null, state: read.json.state, known };
+  return { plan: advisoryCollaboratorPlan({ existing: advisoryCollaboratorLogins(read.json), requested: spec.add }), state: read.json.state, known };
+}
+
+// ---------------------------------------------------------------------------
+// An advisory refusal's CAUSE — the platform's own `message` and `documentation_url`, capped, ⛔ never the payload.
+// ---------------------------------------------------------------------------
+
+/** The longest platform `message` an advisory refusal prints, in characters; a longer one is cut and says so. */
+export const ADVISORY_REFUSAL_MESSAGE_CAP = 200;
+/** The longest `documentation_url` an advisory refusal prints; a longer one is not printed at all (a cut URL misleads). */
+export const ADVISORY_REFUSAL_URL_CAP = 200;
+/** A `documentation_url` the row may print: https, a host, a path, and nothing that could break a row or a table. */
+const REFUSAL_URL_SHAPE = /^https:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?\/[^\s"'`<>|\\]*$/;
+/** How much of a known text has to reappear in the platform's answer before the answer is read as quoting it. */
+const QUOTE_WINDOW = 16;
+/** Known text shorter than this is not looked for — and nothing that short carries a finding. */
+const QUOTE_MIN = 8;
+
+/**
+ * Every string the payload or an advisory's answer carries that a refusal's cause may never quote — the prose.
+ * An id, a state or a login is left out: each is printable in its own shape anyway (`advisoryPrintable`). So is
+ * every URL-shaped word: an advisory's own `url` shares its path with GitHub's documentation (both name
+ * `security-advisories`), and a link carries no finding — the prose around it stays in. Pure.
+ */
+export function advisoryProseOf(value, out = []) {
+  if (typeof value === 'string') {
+    const prose = value.split(/\s+/).filter((w) => !/^[a-z][a-z0-9+.-]*:\/\//i.test(w)).join(' ');
+    if (prose.length >= QUOTE_MIN && !GHSA_ID_SHAPE.test(prose) && !LOGIN_SHAPE.test(prose) && !ADVISORY_STATE_SHAPE.test(prose)) out.push(prose);
+  } else if (Array.isArray(value)) {
+    for (const v of value) advisoryProseOf(v, out);
+  } else if (value && typeof value === 'object') {
+    for (const v of Object.values(value)) advisoryProseOf(v, out);
+  }
+  return out;
+}
+
+/** Does `text` reproduce any `QUOTE_WINDOW`-long run of a known string (case-insensitively)? Pure. */
+function quotesKnown(text, known) {
+  const hay = String(text).toLowerCase();
+  for (const k of known) {
+    const s = String(k).toLowerCase();
+    const w = Math.min(QUOTE_WINDOW, s.length);
+    for (let i = 0; i + w <= s.length; i++) if (hay.includes(s.slice(i, i + w))) return true;
+  }
+  return false;
+}
+
+/** One table-safe line: control characters and whitespace runs to one space, a pipe to a slash, a backtick or a double quote to a single quote. Pure. */
+function flattenRefusalText(text) {
+  return String(text).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\|/g, '/').replace(/[`"]/g, "'");
+}
+
+function decodedOrSelf(url) {
+  try {
+    return decodeURIComponent(url);
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * The cause of a refused advisory request, as the row prints it: the platform's `message` and
+ * `documentation_url` from the refusal's own answer, each capped and on one line — never the answer's `errors`,
+ * never its body — so the reading a seat puts to the maintainer carries the platform's reason. `known` is the
+ * prose the row must never print (`advisoryProseOf` of the payload and of any advisory read this run): a
+ * message or a URL that reproduces any of it is WITHHELD and the row says so, so a refusal that echoes a summary
+ * or a description cannot carry it into a log. Pure.
+ */
+export function advisoryRefusalCause(answer, known = []) {
+  const raw = typeof answer?.detail === 'string' ? answer.detail : typeof answer?.json?.message === 'string' ? answer.json.message : '';
+  const oneLine = flattenRefusalText(raw);
+  // Status 0 is `rest()`'s fetch that threw: the text is the transport's error, never the platform's answer.
+  if (answer?.status === 0) {
+    const said = oneLine === '' || quotesKnown(raw, known) ? '' : `: "${oneLine.length > ADVISORY_REFUSAL_MESSAGE_CAP ? `${oneLine.slice(0, ADVISORY_REFUSAL_MESSAGE_CAP)}…` : oneLine}"`;
+    return `cause: the request did not reach the platform — the transport failed${said}, so the platform gave no reason`;
+  }
+  const doc = typeof answer?.json?.documentation_url === 'string' ? answer.json.documentation_url.trim() : '';
+  const docQuotes = doc !== '' && (quotesKnown(doc, known) || quotesKnown(decodedOrSelf(doc), known));
+  const docText =
+    doc === '' ? '' : docQuotes ? ' (its documentation_url quotes the payload or the advisory and is not printed)' : doc.length <= ADVISORY_REFUSAL_URL_CAP && REFUSAL_URL_SHAPE.test(doc) ? ` (documentation: ${doc})` : ' (its documentation_url is not printable)';
+  if (oneLine === '') return `cause unread: the platform answered with no message${docText}`;
+  // Judged on the raw message AND the flattened one, against the known prose as given AND flattened the same way, so a
+  // quoted run that straddles a pipe, a backtick, a quote or a line break is caught whichever side was rewritten.
+  if (quotesKnown(raw, known) || quotesKnown(oneLine, [...known, ...known.map(flattenRefusalText)])) return `cause not printed: the platform's message quotes the payload or the advisory, and no row prints either${docText}`;
+  const capped = oneLine.length > ADVISORY_REFUSAL_MESSAGE_CAP ? `${oneLine.slice(0, ADVISORY_REFUSAL_MESSAGE_CAP)}… (cut at ${ADVISORY_REFUSAL_MESSAGE_CAP} characters)` : oneLine;
+  return `cause, as the platform gives it: "${capped}"${docText}`;
 }
 
 /**
@@ -840,11 +991,13 @@ export async function advisoryPreflight(req, payload, api, t) {
  * `advisoryCreateReadBack` (a 2xx carrying an id that reads state `draft`),
  * `advisoryReadBack` (every login sent listed) or `advisoryStateReadBack` (the state asked for shown) — and spelled
  * by the row texts of `ops.mjs` alone. Returns `{ ok, why, result, ghsaId }`. ⛔ Never `resultOf`, never the
- * answer's body; a platform `message` only when `advisoryPlatformText` names it. Never throws.
+ * answer's body; a refusal names its cause (`advisoryRefusalCause`), which never quotes the body this request
+ * sent or the advisory the preflight read. Never throws.
  */
 export function confirmAdvisory(req, answer, pre) {
   const refused = !(answer?.status >= 200 && answer?.status < 300);
-  const failed = (why) => ({ ok: false, why: refused ? `${why}${advisoryPlatformText(answer?.detail)}; ${ADVISORY_ACCESS_REMEDY}` : `${why} — read the advisory before anything else, ⛔ do not re-send` });
+  const known = () => [...advisoryProseOf(req?.body), ...(pre?.known ?? [])];
+  const failed = (why) => ({ ok: false, why: refused ? `${why}; ${advisoryRefusalCause(answer, known())}; ${ADVISORY_ACCESS_REMEDY}` : `${why} — read the advisory before anything else, ⛔ do not re-send` });
   if (req.advisoryReport) {
     const v = advisoryReportReadBack(answer);
     if (!v.ok) return refused ? failed(v.why) : { ok: false, why: v.why };
@@ -865,6 +1018,42 @@ export function confirmAdvisory(req, answer, pre) {
   const v = advisoryReadBack({ existing: pre.plan.existing, missing: pre.plan.missing, answer });
   if (!v.ok) return failed(v.why);
   return { ok: true, why: '', result: advisoryLandedText({ ghsaId, state: answer.json.state ?? pre.state, logins: v.listed, added: pre.plan.missing }) };
+}
+
+/**
+ * The read (header: "The read"): its GET, its fences, the seal and the parts. Returns `{ ok, status, result, why,
+ * notes }` — `notes` the notice parts to emit, `{ action, op, part, of, sealed }` each, on a landing alone; `result`
+ * the row's text; `why` the failure's. ⛔ No string it returns carries the id, the state or any field of the answer:
+ * the fences speak through `advisoryReadFenceText`, a refusal's message through `advisoryPlatformText`, a failed seal
+ * through `ADVISORY_READ_SEAL_FAILED` — never the exception. `seal` and `senderGate` are the self-test's doors (a seal
+ * that throws, the other gate); the CLI passes neither. Never throws.
+ */
+export async function advisoryReadAction(req, { payload, index, sender, api, t, seal = sealAdvisoryRead, senderGate = OPS.advisory_read.senderGate }) {
+  const { ghsaId, publicKey } = req.advisoryRead;
+  const r = await rest(api, req.path, { method: 'GET' }, t);
+  // Status 0 is `rest`'s word for a call that threw before any answer: the platform judged nothing, so the row names no
+  // HTTP status and no grant remedy — and ⛔ never the exception's message, which can carry the path and so the id.
+  if (r.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, why: ADVISORY_READ_UNREACHED, notes: [] };
+  const failures = advisoryReadFenceFailures({ ghsaId, answer: r, sender, gate: senderGate });
+  if (failures.length) {
+    const refused = !(r.status >= 200 && r.status < 300);
+    const why = `REFUSED at the relay's fence on the advisory the action names, nothing sealed or emitted — ${advisoryReadFenceText(failures)}${refused ? `${advisoryPlatformText(r.detail)}; ${ADVISORY_READ_ACCESS_REMEDY}` : ''}`;
+    return { ok: false, status: r.status, why, notes: [] };
+  }
+  const plaintext = advisoryReadPlaintext(r.json);
+  let sealed;
+  try {
+    sealed = seal({ plaintext, publicKey, aad: advisoryReadAad({ requestId: payload.request_id, action: index, ghsaId }) });
+  } catch {
+    return { ok: false, status: r.status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  }
+  const plaintextBytes = Buffer.byteLength(plaintext, 'utf8');
+  const sealedChars = typeof sealed === 'string' ? sealed.length : 0;
+  if (typeof sealed !== 'string' || !/^[A-Za-z0-9_-]+$/.test(sealed)) return { ok: false, status: r.status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  const parts = advisoryReadParts(sealed);
+  if (!parts) return { ok: false, status: r.status, why: advisoryReadOverCapText({ plaintextBytes, sealedChars }), notes: [] };
+  const notes = parts.map((chunk, k) => ({ action: index, op: 'advisory_read', part: k + 1, of: parts.length, sealed: chunk }));
+  return { ok: true, status: r.status, result: advisoryReadLandedText({ plaintextBytes, sealedChars, parts: parts.length }), notes };
 }
 
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
@@ -943,7 +1132,8 @@ export function annotationFor({ action, op, req, json, payload, landed = null })
 
 /** The workflow command that turns a note into a `notice` annotation on this job's check run. Pure. */
 export function annotationCommand(note) {
-  const message = typeof note.ghsaId === 'string' ? relayAdvisoryAnnotationMessage(note) : relayAnnotationMessage(note);
+  // A read's part carries its sealed chunk and nothing else (header: "The read"); a filed advisory its id; a card its number.
+  const message = typeof note.sealed === 'string' ? relayAdvisoryReadAnnotationMessage(note) : typeof note.ghsaId === 'string' ? relayAdvisoryAnnotationMessage(note) : relayAnnotationMessage(note);
   return `::notice title=${escapeCommandProperty(`${RELAY_ANNOTATION_PREFIX} ${note.op}`)}::${escapeCommandData(message)}`;
 }
 
@@ -1234,6 +1424,24 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         log(`  ✓ action ${i + 1} ${action.op}: ${call} -> not sent · ${rows[rows.length - 1].result}`);
         continue;
       }
+      // The read (header): its GET fenced, its answer sealed to the seat's key and emitted as notice parts — nothing else
+      // of it printed, the id included: its row's call is the path with the id left out.
+      if (req.advisoryRead) {
+        const call = advisoryReadCall(payload.repo);
+        const read = await advisoryReadAction(req, { payload, index: i + 1, sender, api, t, ...(deps.advisoryRead ?? {}) });
+        rows.push({ action: i + 1, op: action.op, call, status: read.status, result: read.ok ? scrub(read.result, [token]) : `FAILED: ${scrub(read.why, [token])}` });
+        if (!read.ok) {
+          stoppedAt = { action: i + 1, op: action.op, why: scrub(read.why, [token]) };
+          log(`  ✗ action ${i + 1} ${action.op}: ${call} -> ${stoppedAt.why}`);
+          break;
+        }
+        log(`  ✓ action ${i + 1} ${action.op}: ${call} -> HTTP ${read.status} · ${rows[rows.length - 1].result}`);
+        for (const note of read.notes) {
+          annotations.push(note);
+          log(annotationCommand(note));
+        }
+        continue;
+      }
       // The advisory PATCHes (header): the advisory's fences, judged HERE on its own GET before the PATCH — refused, NOT SENT.
       const adv = req.advisoryCollaborators || req.advisoryState ? await advisoryPreflight(req, payload, api, t) : null;
       if (adv?.fail) {
@@ -1353,11 +1561,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
-  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 27,
+  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 32,
+  "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — collaborator by default, target-write by switch, an unknown gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 17,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
-// hierarchy link battery, 20 → 21 with the advisory rows' battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 21;
+// hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 22;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2244,7 +2453,13 @@ export async function selfTest() {
           ...extra,
         },
       });
-      const refusal = (status, message) => ({ status, json: { message, errors: [{ message: MARKER, value: MARKER }], documentation_url: `https://docs.github.test/${MARKER}` } });
+      // A refusal: GitHub's message and documentation_url — the two a row prints, its cause — beside an errors array
+      // carrying the marker, which no row prints. `doc` defaults to a clean URL; the cases below also serve one that
+      // quotes the marker.
+      const DOC = 'https://docs.github.test/rest/security-advisories';
+      const refusal = (status, message, doc = DOC) => ({ status, json: { ...(message === undefined ? {} : { message }), errors: [{ message: MARKER, value: MARKER }], documentation_url: doc } });
+      const cause = (message) => `cause, as the platform gives it: "${message}" (documentation: ${DOC})`;
+      const WITHHELD = `cause not printed: the platform's message quotes the payload or the advisory, and no row prints either (documentation: ${DOC})`;
       const report = (extra = {}) => ({ op: 'advisory_report', summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, ...extra });
       // A package NAME cannot carry the marker (its shape refuses spaces), so the draft's marker rides its prose alone.
       const draft = (extra = {}) => ({ op: 'advisory_create', summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, packages: ['@objectstack/rest'], ...extra });
@@ -2272,7 +2487,25 @@ export async function selfTest() {
       t('⛔ a 2xx carrying no id in its shape is UNCONFIRMED, never landed: exit 5, ONE write, no annotation, and the sentence says do not re-send', [noId.exit, writes(noId.seen).length, noId.annotations, /UNCONFIRMED: a report may have been filed; ⛔ do not re-send/.test(noId.rows[0]?.result ?? '')], [EXIT_ACTION_FAILED, 1, [], true], noId.rows[0]?.result);
       const reportRefused = await advRun([report()], { ...allowed, [REPORTS]: refusal(422, 'Validation Failed') });
       const reportForbidden = await advRun([report()], { ...allowed, [REPORTS]: refusal(403, MARKER) });
-      t('⛔ a refused report is a FAILED action: its status, a platform message only when the relay names it, and the remedy — never a wider token', [reportRefused.exit, reportRefused.rows[0]?.result, reportForbidden.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 422 (the platform: Validation Failed); ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 403; ${ADVISORY_ACCESS_REMEDY}`]);
+      t('⛔ a refused report is a FAILED action: its status, its cause — the platform\'s message and documentation_url, withheld when the message quotes the payload — and the remedy, never a wider token', [reportRefused.exit, reportRefused.rows[0]?.result, reportForbidden.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 422; ${cause('Validation Failed')}; ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 403; ${WITHHELD}; ${ADVISORY_ACCESS_REMEDY}`]);
+      // ⭐ The relay's measured defect: a 403 on a report whose message is none of the six strings the row used to
+      // know printed NO cause. A made-up message and short link stand in for the platform's; the row now carries both.
+      const UNLISTED = 'New private vulnerability reports from this account are limited for today';
+      const SHORT_LINK = 'https://gh.test/pvr-limit';
+      const limited = await advRun([report()], { ...allowed, [REPORTS]: refusal(403, UNLISTED, SHORT_LINK) });
+      t('⭐ a refused report whose message the relay never listed names that message and its documentation_url as the cause, in the row, the summary and the log — the reading put to the maintainer carries the reason', [limited.exit, limited.rows[0]?.result, limited.summary.includes(`cause, as the platform gives it: "${UNLISTED}" (documentation: ${SHORT_LINK})`), limited.logs.some((l) => l.includes(UNLISTED) && l.includes(SHORT_LINK))], [EXIT_ACTION_FAILED, `FAILED: HTTP 403; cause, as the platform gives it: "${UNLISTED}" (documentation: ${SHORT_LINK}); ${ADVISORY_ACCESS_REMEDY}`, true, true]);
+      const encodedDoc = `https://docs.github.test/${encodeURIComponent(MARKER)}`;
+      const quotingUrl = await advRun([report()], { ...allowed, [REPORTS]: refusal(403, 'Forbidden', encodedDoc) });
+      const bareRefusal = await advRun([report()], { ...allowed, [REPORTS]: refusal(403, undefined, '') });
+      t('⛔ a documentation_url that quotes the payload — percent-encoded included — is dropped and the message still printed; an answer with no message says the cause is unread', [quotingUrl.rows[0]?.result, bareRefusal.rows[0]?.result], [`FAILED: HTTP 403; cause, as the platform gives it: "Forbidden" (its documentation_url quotes the payload or the advisory and is not printed); ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 403; cause unread: the platform answered with no message; ${ADVISORY_ACCESS_REMEDY}`]);
+      const LONG = `${'a limit '.repeat(40)}`.trim();
+      const longRefusal = await advRun([report()], { ...allowed, [REPORTS]: refusal(403, `two\nlines | a pipe \`tick\` "quote"`, `${DOC}/${'x'.repeat(ADVISORY_REFUSAL_URL_CAP)}`) });
+      t('⛔ the cause is capped and kept to one table-safe line: a long message cut at the cap and saying so, a newline, a pipe, a backtick and a double quote flattened, an over-long or ill-shaped documentation_url not printed', [advisoryRefusalCause({ status: 403, detail: LONG, json: { message: LONG } }), longRefusal.rows[0]?.result, advisoryRefusalCause({ status: 403, json: { message: 'Forbidden', documentation_url: 'javascript:alert(1)' } })], [`cause, as the platform gives it: "${LONG.slice(0, ADVISORY_REFUSAL_MESSAGE_CAP)}… (cut at ${ADVISORY_REFUSAL_MESSAGE_CAP} characters)"`, `FAILED: HTTP 403; cause, as the platform gives it: "two lines / a pipe 'tick' 'quote'" (its documentation_url is not printable); ${ADVISORY_ACCESS_REMEDY}`, `cause, as the platform gives it: "Forbidden" (its documentation_url is not printable)`]);
+      // A quoted run that straddles a pipe: flattened alone, "|ADVISORY MARKER|" reads "/ADVISORY MARKER/", which no
+      // 16-character window of the known prose matches — only the raw message reproduces it.
+      const straddle = await advRun([report({ summary: `the |ADVISORY MARKER| summary` })], { ...allowed, [REPORTS]: refusal(403, 'Field |ADVISORY MARKER| refused') });
+      t('⛔ a message is judged raw as well as flattened: a run of the payload that straddles a pipe is withheld, not printed rewritten', straddle.rows[0]?.result, `FAILED: HTTP 403; ${WITHHELD}; ${ADVISORY_ACCESS_REMEDY}`);
+      t('⛔ status 0 — the fetch threw — never reads as the platform\'s reason: the row says the request did not reach it, and a transport text quoting the payload is dropped', [advisoryRefusalCause({ status: 0, json: null, detail: 'fetch failed' }), advisoryRefusalCause({ status: 0, json: null, detail: `failed on ${MARKER}` }, [MARKER]), advisoryRefusalCause({ status: 0, json: null, detail: '' })], ['cause: the request did not reach the platform — the transport failed: "fetch failed", so the platform gave no reason', 'cause: the request did not reach the platform — the transport failed, so the platform gave no reason', 'cause: the request did not reach the platform — the transport failed, so the platform gave no reason']);
 
       // ── advisory_create
       const drafted = await advRun([draft({ severity: 'high', cwe_ids: ['CWE-863'] })], { ...allowed, [CREATE]: advisory({}, 201) });
@@ -2285,7 +2518,7 @@ export async function selfTest() {
       t('⛔ a 2xx carrying no id in its shape is UNCONFIRMED, and one whose id reads another state than draft FAILED — never landed: exit 5, ONE write, no annotation, and each sentence says do not re-send', [draftNoId.exit, writes(draftNoId.seen).length, draftNoId.annotations, /UNCONFIRMED: a draft advisory may have been created; ⛔ do not re-send/.test(draftNoId.rows[0]?.result ?? ''), draftTriage.exit, writes(draftTriage.seen).length, draftTriage.annotations, draftTriage.rows[0]?.result], [EXIT_ACTION_FAILED, 1, [], true, EXIT_ACTION_FAILED, 1, [], `FAILED: HTTP 201, but ${GHSA} reads state triage, not draft — ⛔ do not re-send, put the id to the maintainer`], draftNoId.rows[0]?.result);
       const draftRefused = await advRun([draft()], { ...allowed, [CREATE]: refusal(403, 'Resource not accessible by integration') });
       const draftInvalid = await advRun([draft()], { ...allowed, [CREATE]: refusal(422, MARKER) });
-      t('⛔ a refused draft is a FAILED action: its status, a platform message only when the relay names it, and the remedy — never a wider token', [draftRefused.exit, draftRefused.rows[0]?.result, draftInvalid.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 403 (the platform: Resource not accessible by integration); ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 422; ${ADVISORY_ACCESS_REMEDY}`]);
+      t('⛔ a refused draft is a FAILED action: its status, its cause — withheld when the message quotes the payload — and the remedy, never a wider token', [draftRefused.exit, draftRefused.rows[0]?.result, draftInvalid.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 403; ${cause('Resource not accessible by integration')}; ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 422; ${WITHHELD}; ${ADVISORY_ACCESS_REMEDY}`]);
 
       // ── advisory_collaborators_add
       const added = await advRun([add(['OS-DEV-A', 'os-dev-b'])], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ collaborating_users: logins('os-dev-a', 'os-dev-b') }) });
@@ -2300,12 +2533,12 @@ export async function selfTest() {
       t('⛔ a published, closed or withdrawn advisory sends NO PATCH: each refused at the state fence, not sent, exit 5', shut, [0, 1, 2].map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true]));
       const other = await advRun([add()], { ...allowed, [A_GET]: advisory({ ghsa_id: OTHER }) });
       const unread = await advRun([add()], { ...allowed, [A_GET]: refusal(404, 'Not Found') });
-      t('⛔ an answer naming another advisory, or a read the platform refuses, sends NO PATCH — the refusal quoting a message the relay names, with the remedy', [notSent(other), notSent(unread), unread.rows[0]?.result.includes('(the platform: Not Found)') && unread.rows[0]?.result.includes(ADVISORY_ACCESS_REMEDY)], [[EXIT_ACTION_FAILED, 0, 'not sent', true], [EXIT_ACTION_FAILED, 0, 'not sent', true], true]);
+      t('⛔ an answer naming another advisory, or a read the platform refuses, sends NO PATCH — the refusal naming its cause, with the remedy', [notSent(other), notSent(unread), unread.rows[0]?.result.includes(`; ${cause('Not Found')}; ${ADVISORY_ACCESS_REMEDY}`)], [[EXIT_ACTION_FAILED, 0, 'not sent', true], [EXIT_ACTION_FAILED, 0, 'not sent', true], true]);
       const lacking = await advRun([add(['os-dev-b'])], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory() });
       const dropping = await advRun([add(['os-dev-b'])], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ collaborating_users: logins('os-dev-b') }) });
       t('⛔ a PATCH answer that does not list a login fails the action: a requested one not added, an existing one dropped — each named, ⛔ never re-sent', [lacking.exit, lacking.rows[0]?.result, dropping.exit, dropping.rows[0]?.result], [EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer lists os-dev-a — os-dev-b not added — read the advisory before anything else, ⛔ do not re-send', EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer lists os-dev-b — os-dev-a dropped — a collaborator before this PATCH and missing from its answer — read the advisory before anything else, ⛔ do not re-send']);
       const patchRefused = await advRun([add()], { ...allowed, [A_GET]: advisory(), [A_PATCH]: refusal(403, 'Resource not accessible by integration') });
-      t('⛔ a refused PATCH is a FAILED action with the remedy', [patchRefused.exit, writes(patchRefused.seen).length, patchRefused.rows[0]?.result], [EXIT_ACTION_FAILED, 1, `FAILED: HTTP 403 (the platform: Resource not accessible by integration); ${ADVISORY_ACCESS_REMEDY}`]);
+      t('⛔ a refused PATCH is a FAILED action naming its cause, with the remedy', [patchRefused.exit, writes(patchRefused.seen).length, patchRefused.rows[0]?.result], [EXIT_ACTION_FAILED, 1, `FAILED: HTTP 403; ${cause('Resource not accessible by integration')}; ${ADVISORY_ACCESS_REMEDY}`]);
 
       // ── advisory_state
       const accepted = await advRun([move('draft')], { ...allowed, [A_GET]: advisory({ state: 'triage' }), [A_PATCH]: advisory({ state: 'draft' }) });
@@ -2323,7 +2556,7 @@ export async function selfTest() {
       t('⛔ each illegal transition sends NO PATCH: draft from anything but triage, closed from closed, published or withdrawn — refused at the state fence, not sent, exit 5', illegal, illegal.map(([m]) => [m, EXIT_ACTION_FAILED, 0, 'not sent', true]));
       const wrongState = await advRun([move('draft')], { ...allowed, [A_GET]: advisory({ state: 'triage' }), [A_PATCH]: advisory({ state: 'triage' }) });
       const stateRefused = await advRun([move('closed')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: refusal(422, MARKER) });
-      t('⛔ a PATCH answer that does not show the state asked for fails the action, naming what it shows; a refused one carries the remedy', [wrongState.exit, wrongState.rows[0]?.result, stateRefused.exit, stateRefused.rows[0]?.result], [EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer reads state triage, not draft — read the advisory before anything else, ⛔ do not re-send', EXIT_ACTION_FAILED, `FAILED: HTTP 422; ${ADVISORY_ACCESS_REMEDY}`]);
+      t('⛔ a PATCH answer that does not show the state asked for fails the action, naming what it shows; a refused one whose message quotes the ADVISORY the preflight read is withheld, with the remedy', [wrongState.exit, wrongState.rows[0]?.result, stateRefused.exit, stateRefused.rows[0]?.result], [EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer reads state triage, not draft — read the advisory before anything else, ⛔ do not re-send', EXIT_ACTION_FAILED, `FAILED: HTTP 422; ${WITHHELD}; ${ADVISORY_ACCESS_REMEDY}`]);
 
       // ── the validator's gate, inside the executor: zero requests
       const gated = [];
@@ -2336,7 +2569,7 @@ export async function selfTest() {
       // ── ⛔ the marker sweep: every run above, every channel this file emits on
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), JSON.stringify(r.annotations ?? []), ...paceLines].join('\n'));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
-      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [41, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [46, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
       // Positive controls: the marker was there to leak, and the needle finds it where it is.
       t('…positive control: every answer served carried the marker, the report\'s and the draft\'s POST carried it to the platform — where it belongs — and the fenced runs made their GET', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') || Object.keys(answers).length === 1), JSON.stringify(writes(filed.seen)[0]?.body).includes('ADVISORY MARKER') && JSON.stringify(writes(drafted.seen)[0]?.body).includes('ADVISORY MARKER'), [other, unread, ...[added, kept, present]].every((r) => r.seen.some((s) => s.call === A_GET))], [true, true, true]);
       t('…positive control: the generic row printer, given the same answer, WOULD print it — the advisory rows never reach it', resultOf({}, advisory().json).includes('ADVISORY MARKER'), true);
@@ -2364,6 +2597,143 @@ export async function selfTest() {
         cli(SELF_PATH, [], { [EVENT_PATH_ENV]: REFUSED, [SENDER_ENV]: 'os-dev-a' }),
       ];
       t('⛔ …and the real processes, reading the payload from an event file as the runner does: the validator accepting and refusing a report and the executor stopping at its prerequisite and its refusal print the marker NOWHERE — stdout, stderr, GITHUB_OUTPUT or the step summary', cliRuns.map((r) => [r.status, r.text.includes('ADVISORY MARKER')]), [[EXIT_OK, false], [EXIT_REFUSED, false], [EXIT_PREREQUISITE, false], [EXIT_REFUSED, false]], cliRuns.map((r) => r.text.slice(0, 200)).join(' | '));
+    }
+
+    // ── advisory_read ───────────────────────────────────────────────────────
+    battery("advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — collaborator by default, target-write by switch, an unknown gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker");
+    {
+      const { generateKeyPairSync } = await import('node:crypto');
+      // Made-up ids: the fixture names no real advisory.
+      const GHSA = 'GHSA-abcd-2345-wxyz';
+      const OTHER = 'GHSA-wxyz-2345-abcd';
+      // Spaces and punctuation: prose, never an id's, a state's or a login's shape.
+      const MARKER = 'ADVISORY MARKER: how the flaw is reached, never to be logged';
+      const ADV = `/repos/${REPO}/security-advisories/${GHSA}`;
+      const A_GET = `GET ${ADV}`;
+      const CALL = `GET /repos/${REPO}/security-advisories/{ghsa_id}`;
+      const pair = () => {
+        const k = generateKeyPairSync('x25519');
+        return { privateKey: k.privateKey, spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+      };
+      const SEAT = pair();
+      const read = (extra = {}) => ({ op: 'advisory_read', ghsa_id: GHSA, public_key: SEAT.spki, ...extra });
+      // An advisory answer carrying the marker in its summary, description and vulnerabilities and in every other field
+      // but its id and its state — the sender on its collaborators, so the default gate admits the read.
+      const advisory = (extra = {}, status = 200) => ({
+        status,
+        json: {
+          ghsa_id: GHSA, cve_id: MARKER, url: `https://api.github.test${ADV}?q=${MARKER}`, html_url: `https://github.test/${REPO}/security/advisories/${GHSA}#${MARKER}`,
+          summary: `${MARKER} — the summary, 漢字 and 🎉`, description: `${MARKER} — the description\nline two, a quote " and a backslash \\`, severity: 'high', state: 'draft', message: MARKER,
+          author: { login: 'os-dev-z', name: MARKER }, identifiers: [{ type: 'GHSA', value: GHSA }, { type: 'CVE', value: MARKER }],
+          vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER }, vulnerable_version_range: MARKER, patched_versions: MARKER, vulnerable_functions: [MARKER] }],
+          cvss: { vector_string: MARKER, score: 9.8 }, cwes: [{ cwe_id: 'CWE-79', name: MARKER }], cwe_ids: ['CWE-79'], credits: [{ login: 'os-dev-z', type: MARKER }], credits_detailed: [{ user: { login: 'os-dev-z', name: MARKER }, type: MARKER }],
+          collaborating_users: [{ login: 'OS-Support-AI', name: MARKER, bio: MARKER }], collaborating_teams: [{ name: MARKER, slug: MARKER }], private_fork: { full_name: MARKER },
+          ...extra,
+        },
+      });
+      const sealedOf = (r) => (r.annotations ?? []).filter((n) => n.op === 'advisory_read').sort((a, b) => a.part - b.part).map((n) => n.sealed).join('');
+      const opens = (r, { key = SEAT.privateKey, action = 1, ghsaId = GHSA } = {}) => {
+        try {
+          return openAdvisoryRead({ sealed: sealedOf(r), privateKey: key, aad: advisoryReadAad({ requestId: 'fw-test-1', action, ghsaId }) });
+        } catch (e) {
+          return `refused: ${e.message}`;
+        }
+      };
+      const picked = (json) => JSON.stringify(Object.fromEntries(ADVISORY_READ_FIELDS.filter((f) => Object.hasOwn(json, f)).map((f) => [f, json[f]])));
+      const notices = (r) => r.logs.filter((l) => l.startsWith('::notice '));
+      // Every run of this battery feeds the sweep at its end, with its pace log captured.
+      const swept = [];
+      const readRun = async (actions, answers, { sender, ...extra } = {}) => {
+        const paceLines = [];
+        const file = join(dir, `pace-read-${paceCase++}.jsonl`);
+        const r = await run(base(actions), answers, { file, pace: { ...paceFor(file), log: (l) => paceLines.push(l) }, ...(sender ? { sender } : {}), ...extra });
+        swept.push({ r, paceLines, answers });
+        return r;
+      };
+      // ⭐ Landed.
+      const served = advisory();
+      const landed = await readRun([read()], { ...allowed, [A_GET]: served });
+      t('⭐ a read is ONE GET of the advisory under the App token after the sender gate, ZERO writes, exit 0 — and its row prints the call with the id LEFT OUT, the status and the counts', [landed.exit, landed.seen.map((s) => s.call), landed.seen.map((s) => s.auth), writes(landed.seen).length, landed.rows.map((x) => [x.op, x.call, x.status]), /^sealed \d+ byte\(s\) of the answer to the seat's one-time key — \d+ character\(s\) in 1 notice part\(s\), which only that seat's process opens$/.test(landed.rows[0]?.result ?? '')], [EXIT_OK, [PERM, A_GET], [`Bearer ${TOKEN}`, `Bearer ${TOKEN}`], 0, [['advisory_read', CALL, 200]], true]);
+      const opened = opens(landed);
+      const openedJson = (() => {
+        try {
+          return JSON.parse(opened);
+        } catch {
+          return null;
+        }
+      })();
+      t('⭐ the seat\'s key opens the parts to the GET answer BYTE FOR BYTE — the summary, the description and the vulnerabilities as the platform answered them, CJK, an emoji, a newline, a quote and a backslash among them', [opened === picked(served.json), Buffer.compare(Buffer.from(opened, 'utf8'), Buffer.from(picked(served.json), 'utf8')), ['summary', 'description', 'vulnerabilities'].map((f) => JSON.stringify(openedJson?.[f]) === JSON.stringify(served.json[f])), Object.keys(openedJson ?? {})], [true, 0, [true, true, true], [...ADVISORY_READ_FIELDS]]);
+      const parsedBack = notices(landed).map((l) => parseRelayAdvisoryReadAnnotation(l.slice(l.indexOf('::', 2) + 2)));
+      t("the parts are notice commands titled `fleet-write advisory_read`, the reader's own parser reads back exactly what was emitted, and each message is inside the runner's 4,096-character cut", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, notices(landed).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), ADVISORY_READ_OPS], [['::notice title=fleet-write advisory_read::'], landed.annotations, true, ['advisory_read']]);
+      const sealedText = sealedOf(landed);
+      t('⛔ the sealed answer ALONE carries none of the marker — not in its characters, not in its decoded bytes — though the text it opens to does (the positive control)', [sealedText.includes('ADVISORY'), Buffer.from(sealedText, 'base64url').includes(Buffer.from('ADVISORY MARKER')), opened.includes('ADVISORY MARKER')], [false, false, true]);
+      t("⛔ it opens for the seat's key and THIS read alone: another key pair, another action index and another advisory id are each refused", [opens(landed, { key: pair().privateKey }), opens(landed, { action: 2 }), opens(landed, { ghsaId: OTHER })].map((x) => x.startsWith('refused: ')), [true, true, true]);
+      // Many parts.
+      const long = advisory({ description: `${MARKER} ${'the long description, line by line.\n'.repeat(600)}` });
+      const many = await readRun([read()], { ...allowed, [A_GET]: long });
+      t('a long answer is cut into its parts, in order, each part numbered k/n with one n, every message inside the cut, and still opens byte for byte', [many.exit, many.annotations.length > 1, many.annotations.map((n) => `${n.part}/${n.of}`).join(' ') === many.annotations.map((_, k) => `${k + 1}/${many.annotations.length}`).join(' '), notices(many).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), opens(many) === picked(long.json)], [EXIT_OK, true, true, true, true]);
+      // ⛔ The sender gate.
+      const PERM_B = `GET /repos/${REPO}/collaborators/os-dev-b/permission`;
+      const writerB = { [PERM_B]: { status: 200, json: { permission: 'write', role_name: 'write', user: { login: 'os-dev-b' } } } };
+      const stranger = await readRun([read()], { ...writerB, [A_GET]: advisory() }, { sender: 'os-dev-b' });
+      t('⛔ the default gate is collaborator: a sender with write on the target who is NOT on the advisory\'s collaborating_users is refused after the ONE GET — nothing sealed, no part, exit 5, the row naming the sender fence', [stranger.exit, stranger.seen.map((s) => s.call), stranger.annotations.length, notices(stranger).length, stranger.rows[0]?.status, stranger.rows[0]?.result], [EXIT_ACTION_FAILED, [PERM_B, A_GET], 0, 0, 200, "FAILED: REFUSED at the relay's fence on the advisory the action names, nothing sealed or emitted — fence `sender`: os-dev-b is not a collaborator on it, and the relay seals only for a sender the advisory's own collaborating_users lists"]);
+      const switched = await readRun([read()], { ...writerB, [A_GET]: advisory() }, { sender: 'os-dev-b', advisoryRead: { senderGate: 'target-write' } });
+      const unknown = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { senderGate: 'anyone' } });
+      t('⚖ switched to target-write — the other setting the maintainer may rule for — the same sender is sealed for; an unknown setting fails CLOSED, refusing even a collaborator', [switched.exit, switched.annotations.length > 0, unknown.exit, unknown.annotations.length, unknown.rows[0]?.result.includes('fence `sender`: the row names no sender gate the table knows')], [EXIT_OK, true, EXIT_ACTION_FAILED, 0, true]);
+      // ⛔ The read and advisory fences.
+      const forbidden = await readRun([read()], { ...allowed, [A_GET]: { status: 403, json: { message: 'Resource not accessible by integration', documentation_url: MARKER } } });
+      const missing = await readRun([read()], { ...allowed, [A_GET]: { status: 404, json: { message: MARKER } } });
+      const elsewhere = await readRun([read()], { ...allowed, [A_GET]: advisory({ ghsa_id: OTHER }) });
+      t('⛔ fence read and advisory: a 403 quoting the one message the relay knows plus the read remedy, a 404 whose message is prose (not quoted), and an answer naming another advisory — each FAILED with nothing sealed, no part, and neither id in its row', [[forbidden, missing, elsewhere].map((r) => [r.exit, r.annotations.length, r.rows[0]?.status, [GHSA, OTHER].some((id) => JSON.stringify(r.rows).includes(id))]), forbidden.rows[0]?.result.includes('(the platform: Resource not accessible by integration); the relay token carries repository-advisories READ for this stroke alone'), missing.rows[0]?.result.includes('the platform'), elsewhere.rows[0]?.result.includes('fence `advisory`: the answer names another advisory')], [[[EXIT_ACTION_FAILED, 0, 403, false], [EXIT_ACTION_FAILED, 0, 404, false], [EXIT_ACTION_FAILED, 0, 200, false]], true, false, true]);
+      // ⛔ A GET that never reached the platform: the call threw, so `rest` answers status 0 — its message carrying the id and the marker.
+      const unreached = await readRun([read()], { ...allowed, [A_GET]: { throws: `fetch failed for ${ADV} holding ${MARKER}` } });
+      const unreachedText = [...unreached.logs, ...(unreached.lines ?? []), unreached.summary ?? '', JSON.stringify(unreached.rows)].join('\n');
+      t("⛔ a GET that never reached the platform (the call threw) is FAILED saying so: its row names no HTTP status and no grant remedy — no grant was judged — nothing sealed, no part, and the exception's message printed nowhere", [unreached.exit, unreached.seen.map((s) => s.call), unreached.annotations.length, notices(unreached).length, unreached.rows.map((x) => [x.status, x.result]), /HTTP 0\b/u.test(unreachedText), unreachedText.includes(ADVISORY_READ_ACCESS_REMEDY), unreachedText.includes('fetch failed')], [EXIT_ACTION_FAILED, [PERM, A_GET], 0, 0, [[ADVISORY_READ_UNREACHED_STATUS, `FAILED: ${ADVISORY_READ_UNREACHED}`]], false, false, false], unreachedText);
+      // ⛔ A failed seal, and one too large.
+      const thrown = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { seal: () => { throw new Error(`seal blew up holding ${MARKER}`); } } });
+      const unsealed = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { seal: ({ plaintext }) => plaintext } });
+      t("⛔ a failed encryption sends NOTHING back and fails: a seal that throws — its message carrying the marker — and one that hands back the plaintext unsealed are each FAILED with the one fixed sentence, no part and no notice, the exception's message printed nowhere", [thrown, unsealed].map((r) => [r.exit, r.annotations.length, notices(r).length, r.rows[0]?.result]), [thrown, unsealed].map(() => [EXIT_ACTION_FAILED, 0, 0, `FAILED: ${ADVISORY_READ_SEAL_FAILED}`]));
+      const huge = advisory({ description: `${MARKER} ${'x'.repeat(31_000)}` });
+      const over = await readRun([read()], { ...allowed, [A_GET]: huge });
+      t('⛔ an answer too large for the run\'s ten notices is FAILED naming its counts alone — nothing emitted', [over.exit, over.annotations.length, notices(over).length, /^FAILED: the sealed answer is \d+ character\(s\) \(\d+ byte\(s\) of the answer\), over the 40000 the run's notices carry \(10 of 4000\) — nothing was emitted/.test(over.rows[0]?.result ?? '')], [EXIT_ACTION_FAILED, 0, 0, true]);
+      // ⛔ Refused before any request.
+      const gated = [];
+      for (const actions of [[read({ public_key: MARKER })], [read({ public_key: `${SEAT.spki.slice(0, 59)}A` })], [read({ ghsa_id: `${GHSA}/cve` })], [read({ summary: MARKER })], [read(), { op: 'comment', issue: 1, body: 'x' }], [read(), read({ public_key: pair().spki })], [{ op: 'advisory_read', ghsa_id: GHSA }]]) {
+        const r = await readRun(actions, { ...allowed, [A_GET]: advisory() });
+        gated.push([r.exit, r.seen.length]);
+      }
+      t('⛔ refused before ANY request, the sender gate included: a key that is prose or one character off, a malformed id, a field it would read, a read beside a comment, two reads, and a read with no key — exit 2', gated, gated.map(() => [EXIT_REFUSED, 0]));
+      // ⛔ The sweep: every run above, every channel this file emits on — no marker, and no advisory id.
+      const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
+      const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
+      t('⛔ THE MARKER TEST: across every run of this battery — landed, long, refused at the sender, read and advisory fences, the switched and unknown gates, a GET that never reached the platform, a seal that throws, one that does not seal, one too large, refused payloads — the marker served in the summary, the description and the vulnerabilities (and every other field) reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [19, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      const named = emitted.map((text, i) => ([GHSA, OTHER].some((id) => text.includes(id)) ? i : null)).filter((i) => i !== null);
+      t("⛔ …and NO advisory id: neither the one asked for nor the one answered appears on any line, row, summary or annotation of any run — the call's placeholder stands where every other row prints its path", named, [], named.map((i) => emitted[i].split('\n').find((l) => l.includes(GHSA) || l.includes(OTHER))).join(' | '));
+      t('…positive control: every answer served carried the marker and the id, the request carried the id to the platform — where it belongs — and the generic row printer, given the same answer, WOULD print both', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') && JSON.stringify(answers).includes(GHSA)), landed.seen.some((s) => s.call === A_GET), resultOf({}, served.json).includes('ADVISORY MARKER') && resultOf({}, served.json).includes(GHSA)], [true, true, true]);
+      // The real processes, the payload from an event file as the runner reads it, every byte of their output read.
+      const readEvent = (name, payload) => {
+        const f = join(dir, name);
+        writeFileSync(f, JSON.stringify({ action: 'fleet-write', client_payload: payload }), 'utf8');
+        return f;
+      };
+      const VALID = readEvent('event-read.json', base([read()]));
+      const REFUSED = readEvent('event-read-refused.json', base([read({ summary: MARKER, public_key: MARKER })]));
+      const cli = (script, args, extra) => {
+        const out = join(dir, `cli-read-out-${paceCase++}.txt`);
+        const summary = join(dir, `cli-read-summary-${paceCase++}.md`);
+        writeFileSync(out, '', 'utf8');
+        writeFileSync(summary, '', 'utf8');
+        const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: { ...process.env, GITHUB_TOKEN: '', GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '', GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary, OS_PM_WRITE_PACE_FILE: join(dir, 'cli-read-pace.jsonl'), ...extra } });
+        return { status: r.status, output: readReal(out, 'utf8'), text: `${r.stdout}${r.stderr}${readReal(out, 'utf8')}${readReal(summary, 'utf8')}` };
+      };
+      const VALIDATE = fileURLToPath(new URL('./validate.mjs', import.meta.url));
+      const cliRuns = [
+        cli(VALIDATE, ['--from-event', '--github-output'], { [EVENT_PATH_ENV]: VALID }),
+        cli(VALIDATE, ['--from-event', '--github-output'], { [EVENT_PATH_ENV]: REFUSED }),
+        cli(SELF_PATH, [], { [EVENT_PATH_ENV]: VALID, [SENDER_ENV]: 'os-dev-a' }),
+        cli(SELF_PATH, [], { [EVENT_PATH_ENV]: REFUSED, [SENDER_ENV]: 'os-dev-a' }),
+      ];
+      t("⛔ …and the real processes: the validator accepting a read — its output minting repository-advisories READ, actions nothing — and refusing one, and the executor stopping at its prerequisite and its refusal, print neither the marker nor the id NOWHERE — stdout, stderr, GITHUB_OUTPUT or the step summary", [cliRuns.map((r) => [r.status, r.text.includes('ADVISORY MARKER'), r.text.includes(GHSA)]), cliRuns[0].output.includes('permission_repository_advisories=read\n'), cliRuns[0].output.includes('permission_actions=\n')], [[[EXIT_OK, false, false], [EXIT_REFUSED, false, false], [EXIT_PREREQUISITE, false, false], [EXIT_REFUSED, false, false]], true, true], cliRuns.map((r) => r.text.slice(0, 200)).join(' | '));
     }
 
     // ── the CLI ─────────────────────────────────────────────────────────────
@@ -2436,7 +2806,9 @@ export async function selfTest() {
       "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, " +
       "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, " +
       "the payload read from the event file, four advisory rows — a report landed on the id it was given, a draft on its id reading state draft, collaborators and a state fenced on the advisory's own read and landed on the PATCH answer — " +
-      'whose marker in a summary, a description and a vulnerability reached no log line, row, summary or annotation, one summary row per request, ' +
+      'whose marker in a summary, a description and a vulnerability reached no log line, row, summary or annotation, ' +
+      "an advisory read fenced on its GET — the sender a collaborator by default — and sealed to the seat's one-time key, its notice parts opening byte for byte " +
+      'for that key and read alone, no part on a failed seal, the marker and the id on no public surface and the marker not in the sealed answer, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +
       'token that came back out of NO summary, log or error.',

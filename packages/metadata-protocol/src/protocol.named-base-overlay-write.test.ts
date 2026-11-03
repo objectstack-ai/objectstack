@@ -35,7 +35,7 @@
  * Refusals are asserted as the envelope an HTTP boundary answers with
  * (`resolveThrownHttpError`).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -206,6 +206,7 @@ beforeEach(() => {
 afterEach(() => {
     ObjectStackProtocolImplementation.resetEnvWritableCache();
     resetEnvWritableMetadataTypes();
+    vi.useRealTimers();
 });
 
 describe('a write naming the read-only base itself is closed: its customization lands in the pair (ADR-0146 D1, D11)', () => {
@@ -360,5 +361,117 @@ describe('CONTROLS: the writes the close leaves open, as on main', () => {
         expect(String(e.message)).toContain(`only '${PAIR}' may declare an override of '${BASE}'`);
         expect(String(e.message)).not.toContain('ADR-0146 D1, D11');
         expect(rows(VIEW.type, VIEW.name)).toEqual([]);
+    });
+});
+
+/**
+ * [#29390] The commit doors. A commit the base recorded before the close (a
+ * draft naming the base, published by `publishPackageDrafts` with the close
+ * shadowed on this instance only, which is what a build before #28905 did)
+ * can carry an item that EDITED the row bound to the base. Its revert restores
+ * a stored version into that row, so it is refused per item, as the per-item
+ * rollback of the same row is: the restore limb asks the same close on the
+ * same key (the binding the restore writes) with the same sentence. An item
+ * the commit CREATED is reverted by removing the row, which writes nothing and
+ * stays open.
+ */
+describe('the commit doors: restoring a row bound to the base is closed, removing one stays open (#29390)', () => {
+    /** Each commit a second apart, so the package rollback's "strictly newer" reads an order. */
+    let clock = Date.parse('2026-11-02T00:00:00.000Z');
+    const tick = () => { clock += 1000; vi.setSystemTime(clock); };
+
+    /** Publish `item` into `packageId` as one commit; `beforeClose` shadows the close on this instance only. */
+    async function publishCommit(protocol: any, packageId: string, item: Record<string, unknown>, beforeClose = false): Promise<string> {
+        tick();
+        if (beforeClose) protocol.namedBaseOverlayWriteRefusal = () => null;
+        try {
+            const saved = await protocol.saveMetaItem({ type: VIEW.type, name: VIEW.name, item, packageId, mode: 'draft' });
+            expect(saved).toMatchObject({ success: true });
+            const published = await protocol.publishPackageDrafts({ packageId });
+            expect(published, JSON.stringify(published)).toMatchObject({ success: true });
+            expect(typeof published.commitId).toBe('string');
+            return published.commitId;
+        } finally {
+            if (beforeClose) delete protocol.namedBaseOverlayWriteRefusal;
+        }
+    }
+    const intoBaseBeforeClose = (protocol: any, label: string) => publishCommit(protocol, BASE, VIEW.body(label), true);
+    const declared = (label: string) => ({ ...VIEW.body(label), overrides: { package: BASE, basedOn: BASE_VERSION } });
+
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+    });
+
+    it('a revert of the base\'s commit that edited its row is refused per item naming the pair, and nothing is written', async () => {
+        const { protocol, rows } = makeProtocol();
+        await intoBaseBeforeClose(protocol, 'First');
+        const edit = await intoBaseBeforeClose(protocol, 'Second');
+        // The close is live again on this instance: the save naming the base is refused.
+        expectClosed(await thrown(() => protocol.saveMetaItem({ type: VIEW.type, name: VIEW.name, item: VIEW.body('After'), packageId: BASE })), VIEW.type, VIEW.name, 'save');
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: BASE, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: false, revertedCount: 0, failedCount: 1, reverted: [] });
+        expect(result.failed).toEqual([expect.objectContaining({ type: VIEW.type, name: VIEW.name, code: 'NOT_OVERRIDABLE' })]);
+        expectClosedSentence(result.failed[0].error, VIEW.type, VIEW.name, 'rollback');
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Second' }]);
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('Second');
+    });
+
+    it('a package rollback through those commits reports each refused item and continues; the row is unchanged', async () => {
+        const { protocol, rows } = makeProtocol();
+        const created = await intoBaseBeforeClose(protocol, 'First');
+        const second = await intoBaseBeforeClose(protocol, 'Second');
+        const third = await intoBaseBeforeClose(protocol, 'Third');
+
+        tick();
+        const result = await protocol.rollbackToPackageCommit({ commitId: created, packageId: BASE, actor: 'admin' });
+
+        expect(result.success).toBe(false);
+        expect(result.revertedCommits).toEqual([third, second]);
+        expect(result.failed.map((f: { commitId: string }) => f.commitId)).toEqual([third, second]);
+        for (const f of result.failed) {
+            expect(f.error).toContain(`Item '${VIEW.type}/${VIEW.name}' was not reverted: `);
+            expectClosedSentence(f.error.slice(f.error.indexOf(': ') + 2), VIEW.type, VIEW.name, 'rollback');
+        }
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: BASE, state: 'active', label: 'Third' }]);
+    });
+
+    it('CONTROL: a revert of the base\'s commit that created its row removes it (the delete stays open); the base is served again', async () => {
+        const { protocol, rows } = makeProtocol();
+        const created = await intoBaseBeforeClose(protocol, 'First');
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: created, packageId: BASE, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'removed' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([]);
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe(PACKAGED);
+    });
+
+    it('CONTROL: a writable package\'s commit of the same item reverts its row in place', async () => {
+        const { protocol, rows } = makeProtocol();
+        await publishCommit(protocol, WRITABLE, VIEW.body('First'));
+        const edit = await publishCommit(protocol, WRITABLE, VIEW.body('Second'));
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: WRITABLE, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'restored' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: WRITABLE, state: 'active', label: 'First' }]);
+    });
+
+    it('CONTROL: the pair\'s own commit (no row bound to the base) reverts its row in place', async () => {
+        const { protocol, rows } = makeProtocol();
+        await publishCommit(protocol, PAIR, declared('PairFirst'));
+        const edit = await publishCommit(protocol, PAIR, declared('PairSecond'));
+
+        tick();
+        const result = await protocol.revertCommit({ commitId: edit, packageId: PAIR, actor: 'admin' });
+
+        expect(result).toMatchObject({ success: true, revertedCount: 1, failed: [], reverted: [{ type: VIEW.type, name: VIEW.name, action: 'restored' }] });
+        expect(rows(VIEW.type, VIEW.name)).toEqual([{ package_id: PAIR, state: 'active', label: 'PairFirst' }]);
+        expect((await protocol.getMetaItem({ type: VIEW.type, name: VIEW.name })).item.label).toBe('PairFirst');
     });
 });

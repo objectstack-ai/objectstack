@@ -18,9 +18,12 @@
  * so every door that parses a dashboard refuses the pair: `defineStack`,
  * `os validate`, `os build` and the dashboard save door.
  *
- * Scope is ONE dashboard's own `globalFilters` array. The reserved name
- * `dateRange` (the built-in date range) is a different question and is not
- * judged here.
+ * Scope of {@link duplicateGlobalFilterNames} is ONE dashboard's own
+ * `globalFilters` array. The built-in date range is the other declaration a
+ * key can collide with: a dashboard that declares `dateRange` declares a
+ * filter under the reserved key `dateRange`, ahead of every `globalFilters`
+ * entry, and {@link reservedDateRangeGlobalFilters} answers which entries
+ * reuse that key.
  */
 
 /** One filter key that a dashboard's `globalFilters` array declares more than once. */
@@ -92,5 +95,64 @@ export function duplicateGlobalFilterNames(globalFilters: unknown): DuplicateGlo
         + 'the copy.',
     });
   }
+  return out;
+}
+
+/** The key the built-in date range (`dashboard.dateRange`) is declared under. */
+export const RESERVED_DATE_RANGE_FILTER_NAME = 'dateRange';
+
+/** A `globalFilters` entry keyed by the built-in date range's reserved name. */
+export interface ReservedDateRangeGlobalFilter {
+  /** The entry's index in `globalFilters`. */
+  readonly index: number;
+  /** `name` when the entry authors one, `field` when the key falls back to it. The refusal is located there. */
+  readonly key: 'name' | 'field';
+  /** The refusal's message, naming the reserved word, the built-in date range and the fix. */
+  readonly message: string;
+}
+
+/**
+ * Every `globalFilters` entry keyed `dateRange` (by its `name`, else its
+ * `field`) on a dashboard that declares the built-in `dateRange`, ascending.
+ *
+ * The built-in date range is a filter the board declares under the reserved
+ * key `dateRange`, so such an entry is a second definition behind that key:
+ * the console's `resolveDashboardFilterDefs` and lint's `dashboardFilterDefs`
+ * both build the built-in first and let the later definition win, so the
+ * filter bar draws the entry's control in place of the date range, and every
+ * widget's `filterBindings.dateRange` binds the entry. The declared
+ * `dateRange` is never drawn, while `@objectstack/verify`'s window proof still
+ * proves it.
+ *
+ * On a dashboard that does NOT declare `dateRange` the key is free and the
+ * entry is an ordinary filter (the board draws it, `filterBindings.dateRange`
+ * binds it), so nothing is reported. `dateRange` is read as declared when it is
+ * any non-null object, the shape both resolvers test. Read on a parsed
+ * dashboard or a stored body alike.
+ */
+export function reservedDateRangeGlobalFilters(
+  dateRange: unknown,
+  globalFilters: unknown,
+): ReservedDateRangeGlobalFilter[] {
+  if (dateRange === null || typeof dateRange !== 'object') return [];
+  if (!Array.isArray(globalFilters)) return [];
+  const out: ReservedDateRangeGlobalFilter[] = [];
+  globalFilters.forEach((filter, index) => {
+    const resolved = filterKeyOf(filter);
+    if (!resolved || resolved.name !== RESERVED_DATE_RANGE_FILTER_NAME) return;
+    out.push({
+      index,
+      key: resolved.key,
+      message:
+        `globalFilters[${index}] is keyed '${RESERVED_DATE_RANGE_FILTER_NAME}'`
+        + (resolved.key === 'field' ? ' (a filter with no `name` is keyed by its `field`)' : '')
+        + `, the reserved name of the built-in date range this dashboard declares in \`dateRange\`. `
+        + 'The filter bar draws one control under that name and widgets bind it as `filterBindings.dateRange`, so '
+        + 'this entry would replace the date range: the board would never draw the declared date range, and every '
+        + 'widget binding `dateRange` would be filtered by this entry instead. '
+        + 'Give this filter another `name` (and rename every widget `filterBindings.dateRange` key that means it), '
+        + 'or delete it and keep the built-in `dateRange`.',
+    });
+  });
   return out;
 }

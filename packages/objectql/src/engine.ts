@@ -148,6 +148,10 @@ import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredRef
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
+// [#29460] A `referenceNameVisible` reference's refused targets served by name
+// and id on the expanded read; the method of the same name below hands the body
+// the members it reads (`ReferenceNameVisibleHost`).
+import { serveReferenceNames } from './engine-reference-name-visible.js';
 // [#25522 cut 12] The driver options every driver call receives, and the tenancy
 // posture and Layer 0 verdict they are scoped by; the methods of the same names
 // below hand each body the members it reads (`DriverOptionsHost`).
@@ -201,7 +205,7 @@ import {
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
-import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rollbackFailedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -386,7 +390,10 @@ import {
   PLATFORM_PROVISIONED_COLUMNS,
   declaredColumnSet,
   rowsWithDeclaredColumnsOnly,
+  rowsWithSelectedColumnsAnswered,
+  selectedStoredColumns,
   withDeclaredColumnsOnly,
+  withSelectedColumnsAnswered,
 } from './declared-read-columns.js';
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
 // [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
@@ -6008,7 +6015,13 @@ export class ObjectQL implements IObjectQLEngine {
         this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
         continue;
       }
-      await entry.handler(context);
+      // [#29422] A stale-roll-up refusal a hook's own `ctx.api` write raised
+      // describes THAT write, not this one: `hookStoppedRefusal`.
+      try {
+        await entry.handler(context);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, context.object, entry.hookName);
+      }
     }
   }
 
@@ -6056,7 +6069,9 @@ export class ObjectQL implements IObjectQLEngine {
    * (`transaction()` covers that one alone and would refuse the write), or when
    * that driver has no transactions (ADR-0119 D1; asking would only warn).
    * `SummaryRecomputeError` means "the records WERE written": it is rethrown
-   * after the commit, never through the rollback.
+   * after the commit, never through the rollback. Only the write's OWN refusal
+   * arrives here: one a hook's `ctx.api` write raised was already converted
+   * where it left the handler (#29422, `hookStoppedRefusal`), so it rolls back.
    */
   private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
     const threaded = context?.transaction;
@@ -6322,7 +6337,12 @@ export class ObjectQL implements IObjectQLEngine {
     } as unknown as HookContext;
     for (const entry of flagged) {
       if (skipAutomations && entry.meta) continue;
-      await entry.handler(wholeOpCtx);
+      // [#29422] As in `triggerHooks`.
+      try {
+        await entry.handler(wholeOpCtx);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, object, entry.hookName);
+      }
     }
     // `input` is identity-shared with the batch context, so the observation
     // covers everything the handlers touched.
@@ -13815,9 +13835,69 @@ export class ObjectQL implements IObjectQLEngine {
           error: (e as Error).message,
         });
       }
+
+      // [#29460] `referenceNameVisible` (ruling 6574398310, letter B): the ids
+      // the caller's own expansion above left bare are asked whether the
+      // caller was REFUSED them, and a refused target is served by its name
+      // and id only. Every other value keeps the answer the loop gave it. See
+      // {@link serveReferenceNames}.
+      if ((fieldDef as { referenceNameVisible?: unknown }).referenceNameVisible === true) {
+        await this.serveReferenceNames(objectName, records, fieldName, referenceObject, execCtx);
+      }
     }
 
     return records;
+  }
+
+  /**
+   * [#29460] Serve `FieldSchema.referenceNameVisible` on an expanded read
+   * (director ruling 6574398310, letter B). Runs from
+   * {@link expandRelatedRecords} for a field declaring the key, after the
+   * caller's own expansion of it, and rewrites only the ids that expansion
+   * left bare.
+   *
+   * For each such id it asks, as the caller and with none of the caller's
+   * `$expand` nesting, whether the caller may read it (the security service's
+   * object-level admission, then an id-only read for the row scope). A refused
+   * id whose record exists in the caller's tenant becomes
+   * `{ id, name, readRefused: true }`: `name` is ADR-0079's display name,
+   * read by the engine under the tenant-kept elevation from exactly `id` and
+   * the resolved name field, with the floor `Record #<id>` when field-level
+   * security keeps that field from the caller. A readable target keeps its
+   * expansion, an id the caller's own nested filter left bare stays bare, an
+   * id no record has stays bare. `multiple: true` is judged per element.
+   *
+   * ⛔ Never served on an unexpanded read: ADR-0104 D1's stored form is the
+   * bare id for every caller. ⛔ The caller's projection, filter, order and
+   * nested expand never reach the elevated read, and the field's
+   * `displayField` does not choose its column.
+   */
+  private async serveReferenceNames(
+    objectName: string,
+    records: any[],
+    fieldName: string,
+    referenceObject: string,
+    execCtx?: ExecutionContext,
+  ): Promise<void> {
+    // The body lives in `engine-reference-name-visible.ts` (see `ReferenceNameVisibleHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof serveReferenceNames> = {
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+      find: (...a) => this.find(...a),
+      resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
+      formulaReadsReference: (name, def, fields) => {
+        try {
+          const entry = formulaPlanEntry(name, def, fields);
+          return entry.hops !== undefined || entry.hopConflict !== undefined;
+        } catch {
+          // An expression the planner cannot compile is not served by name.
+          return true;
+        }
+      },
+    };
+    return serveReferenceNames.call(host, objectName, records, fieldName, referenceObject, execCtx);
   }
 
   /**
@@ -14199,6 +14279,12 @@ export class ObjectQL implements IObjectQLEngine {
    * auto-default); the optional `searchFields` override is intersected with the
    * allowed set, never widened. All drivers already execute `$or`/`$icontains`,
    * so this needs no driver changes.
+   *
+   * [#29394] A resolved field whose declared type can never hold a string (the
+   * #15661 door's verdict) gets no clause — `expandSearchToFilter` skips it —
+   * because that door judges only the caller's `where`, above, and never this
+   * expansion. The set itself is not narrowed, so the refusals below judge it
+   * as before, and a set of only such fields answers no rows.
    *
    * The keys are deleted whether or not anything expanded — leaving them on
    * would hand the driver a key it does not read, which is the same silent drop
@@ -14619,6 +14705,13 @@ export class ObjectQL implements IObjectQLEngine {
           // declared record. See `declared-read-columns.ts`.
           if (Array.isArray(result)) {
             result = rowsWithDeclaredColumnsOnly(result, declaredColumnSet(_findSchema));
+            // [#29408] …and answered on every stored declared column the read
+            // SELECTED: one the driver returned no key for (a driver that
+            // stores only written columns) is `null`, as driver-sql's column
+            // answers — the row's persisted state is in hand. Unselected,
+            // formula and FLS-refused columns stay absent; see
+            // `selectedStoredColumns`.
+            result = rowsWithSelectedColumnsAnswered(result, selectedStoredColumns(_findSchema, driverAst?.fields));
           }
 
           // Post-process: evaluate formula virtual fields against the raw rows.
@@ -14919,6 +15012,8 @@ export class ObjectQL implements IObjectQLEngine {
       // [#21571] Same default projection as `find`, same position: the
       // declared field set, applied to the row as the driver returned it.
       result = withDeclaredColumnsOnly(result, declaredColumnSet(_findOneSchema));
+      // [#29408] Same answer on the selected stored columns as `find`.
+      result = withSelectedColumnsAnswered(result, selectedStoredColumns(_findOneSchema, driverAst?.fields));
 
       // Post-process: evaluate formula virtual fields against the raw row
       // ([#20082] with the caller's permission map when a formula calls `can`).
@@ -21914,18 +22009,22 @@ export class ObjectQL implements IObjectQLEngine {
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
     } catch (err) {
+      let rollbackFailed = false;
       try {
         if (drv.rollback) await drv.rollback(trx);
         else if (drv.rollbackTransaction) await drv.rollbackTransaction(trx);
       } catch {
         // swallow rollback failures so the original error surfaces
+        rollbackFailed = true;
       }
       // [#21274] A boundary outside the middleware seam: a commit failure, or
       // a callback that reached the driver through the transaction handle.
       // An error that already crossed an engine boundary inside the callback
       // comes back as the same reference. A stale-roll-up refusal ("stored")
       // is no longer true once this rollback has run: `rolledBackRefusal`.
-      throw redactPropagatedDriverFault(rolledBackRefusal(err));
+      // [#29421] Nor is "rolled back" once the rollback threw:
+      // `rollbackFailedRefusal`.
+      throw redactPropagatedDriverFault(rollbackFailed ? rollbackFailedRefusal(err) : rolledBackRefusal(err));
     }
   }
 

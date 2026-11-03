@@ -156,7 +156,7 @@ describe('#24665 — the approval request title is the flow label the approvals 
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
-  it('the declaration: the title pointer is a stored, declared column, and the template names no record id', async () => {
+  it('the declaration: the title pointer is a stored, declared column, and no title template is declared', async () => {
     expect(NAME_FIELD).toBe('process_label');
     expect(SysApprovalRequest.displayNameField).toBe(NAME_FIELD);
     expect((SysApprovalRequest.fields as Record<string, any>)[NAME_FIELD]).toMatchObject({ type: 'text' });
@@ -165,10 +165,9 @@ describe('#24665 — the approval request title is the flow label the approvals 
     const columns = Object.keys(await driver.getKnex()('sys_approval_request').columnInfo());
     expect(columns).toContain(NAME_FIELD);
     expect(columns).not.toContain('display_title');
-    const template = SysApprovalRequest.titleFormat as unknown;
-    const source = typeof template === 'string' ? template : (template as { source?: string })?.source;
-    expect(source).toBe('{process_name}');
-    expect(source).not.toContain('record_id');
+    // The retired `titleFormat` (`{process_name}`) is gone: an object
+    // definition that declares one is refused at save and by `os validate`.
+    expect((SysApprovalRequest as { titleFormat?: unknown }).titleFormat).toBeUndefined();
   });
 
   it('readable subject: the get serves the flow label under nameField, with no record id and no machine name', async () => {

@@ -412,9 +412,14 @@ globalFilters: [
 Each filter's `name` is its stable identity: the key its value is published
 under as a dashboard-level variable (readable in widget expressions as
 `page.<name>`) and the key widgets reference in `filterBindings`. It defaults
-to `field`; the name `dateRange` is reserved for the built-in date range. The
+to `field`. The
 filter above names itself `region` for exactly that reason — left to default it
 would be keyed `account.region`, dots and all, in every expression and binding.
+On a dashboard that declares `dateRange`, the name `dateRange` is reserved for
+that built-in date range: an entry keyed `dateRange` (by `name`, or by `field`
+when unnamed) is refused, because it would replace the date range's control and
+every widget's `filterBindings.dateRange` binding. On a dashboard that does not
+declare `dateRange`, the name is free and such an entry is an ordinary filter.
 
 ### Filter controls and options
 

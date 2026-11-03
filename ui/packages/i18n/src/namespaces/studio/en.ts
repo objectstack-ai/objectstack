@@ -3234,7 +3234,7 @@ const STUDIO_EN: Record<string, string> = {
     'Saved as a draft in this deployment’s customization of {baseName}, and opened on the canvas. The navigation of {baseName} stays as it was installed.',
   'engine.studio.app.scaffoldNav': "Add this package's objects as menu items",
   'engine.studio.landing.title': 'App Builder',
-  'engine.studio.landing.description': 'Design objects, forms, automations and interfaces inside a writable package; edits save as drafts and the whole package publishes in one release. Code and installed packages are read-only: browse them here, and customize them with an environment overlay.',
+  'engine.studio.landing.description': 'Design objects, forms, automations and interfaces inside a writable package; edits save as drafts and the whole package publishes in one release. Code and installed packages are read-only: browse them here, and change their items with Customize or New similar, which save into the package’s .custom customization package.',
   'engine.studio.landing.mineHeading': 'My packages (writable)',
   'engine.studio.landing.noneWritable': 'No writable packages yet — create one to start.',
   'engine.studio.landing.dup': 'Duplicate',
@@ -3245,9 +3245,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.dupGo': 'Duplicate and open the builder',
   'engine.studio.landing.dupCreated': 'Duplicated into writable package “{name}”',
   'engine.studio.landing.installedHeading': 'Installed (read-only · browsable)',
-  // objectui#11808 — the routes a read-only package does have (ADR-0070 D2,
-  // ADR-0005): an environment overlay, and the marketplace where the runtime has one.
-  'engine.studio.landing.readonlyHint': 'Code and installed packages are read-only, so they are not edited or duplicated here. Customize one with an environment overlay, for the metadata types that accept one.',
+  // The routes a read-only package does have (objectstack ADR-0146 D2, D3, D11):
+  // Customize or New similar into its paired `.custom` package, and the
+  // marketplace where the runtime has one. A package-less overlay is not one.
+  'engine.studio.landing.readonlyHint': 'Code and installed packages are read-only, so they are not edited or duplicated here. To change one, open an item and choose Customize or New similar: the change is saved in the package’s .custom customization package, and upgrades keep reaching the installed package.',
   'engine.studio.landing.marketplace': 'Or install a template app from the marketplace',
   // ADR-0146 D3 — a read-only base's card says what this deployment changed on
   // it, from the server's per-package customization read.
@@ -3619,6 +3620,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.list.col.label': 'Label',
   'engine.list.col.source': 'Source',
   'engine.list.col.object': 'Object',
+  // objectstack#29569 — an object_extension lists by the object it extends.
+  'engine.list.col.extend': 'Object',
   'engine.list.col.type': 'Type',
   'engine.list.col.description': 'Description',
   'engine.list.col.sharedWith': 'Shared with',

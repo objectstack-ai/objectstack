@@ -21,8 +21,11 @@
  * introspected directly — so this test runs the writer for real, against a
  * real engine, on a read shaped to make every conditionally-stamped key
  * present (a human principal that ALSO carries a service `actor` label, on a
- * record that carries an `organization_id`), and reads the keys back off the
- * row the writer actually persisted. If `buildRow` ever stops stamping a key
+ * record that carries an `organization_id`), and reads the keys off the row
+ * the writer actually persisted — the stub driver's STORED row, not an engine
+ * read of it: a read answers every declared column it selected, `null` where
+ * nothing was stored (#29408), so a read-back cannot tell a stamped key from
+ * an unwritten column. If `buildRow` ever stops stamping a key
  * this view lists, the observed key set shrinks and the assertion goes red —
  * no hand-kept list to fall out of sync with the writer it is supposed to
  * police.
@@ -110,6 +113,10 @@ function makeStubDriver() {
       return [];
     },
     async bulkDelete() {},
+    /** The rows as stored — what the writer persisted, before any read shapes them. */
+    storedRows(object: string): Record<string, unknown>[] {
+      return Array.from(storeFor(object).values()).map((r) => ({ ...r }));
+    },
     async updateMany() {
       return 0;
     },
@@ -139,7 +146,8 @@ let stampedKeys: Set<string>;
 
 beforeAll(async () => {
   const engine = new ObjectQL();
-  engine.registerDriver(makeStubDriver(), true);
+  const driver = makeStubDriver();
+  engine.registerDriver(driver, true);
   await engine.init();
   engine.registry.registerObject(contactObject as any, HARNESS_PACKAGE);
   // The REAL sys_audit_log object under test — not a hand-copied stand-in —
@@ -165,9 +173,14 @@ beforeAll(async () => {
   });
   await writer.flush();
 
+  // The read still sees exactly the one row the writer persisted…
   const rows = (await engine.find('sys_audit_log', {})) as Array<Record<string, unknown>>;
   expect(rows).toHaveLength(1);
-  stampedKeys = new Set(Object.keys(rows[0]));
+  // …and the stamped keys are the STORED row's own: a read answers an
+  // unwritten declared column as `null` (#29408), which is not a stamp.
+  const stored = driver.storedRows('sys_audit_log');
+  expect(stored).toHaveLength(1);
+  stampedKeys = new Set(Object.keys(stored[0]));
 });
 
 /** The columns the shipped `record_views` list view declares. */

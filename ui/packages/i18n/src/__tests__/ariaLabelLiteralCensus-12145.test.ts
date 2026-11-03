@@ -252,7 +252,7 @@ const BACKLOG: Declared[] = (
       'packages/plugin-designer/src/DataModelDesigner.tsx',
       [
         'Designer toolbar', 'Undo', 'Redo', 'Zoom Out', 'Zoom In', 'Reset Zoom', 'Copy', 'Paste', 'Auto Layout',
-        'Collaboration active', 'Add Entity', 'Add Relationship', 'Canvas',
+        'Add Entity', 'Add Relationship', 'Canvas',
       ],
     ],
     ['packages/plugin-designer/src/EditorModeToggle.tsx', ['Editor mode']],
@@ -267,7 +267,7 @@ const BACKLOG: Declared[] = (
     [
       'packages/plugin-designer/src/ProcessDesigner.tsx',
       [
-        'Process toolbar', 'Process name', 'Process version', 'Collaboration active', 'Undo', 'Redo', 'Copy',
+        'Process toolbar', 'Process name', 'Process version', 'Undo', 'Redo', 'Copy',
         'Paste', 'Connect nodes', 'Auto layout', 'Zoom in', 'Zoom level', 'Zoom out', 'Reset zoom',
         'Add Start Event', 'Add User Task', 'Add Gateway', 'Add End Event', 'Process canvas', 'Delete node',
         'Property panel',

@@ -795,6 +795,10 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   // Exchange rates (`@objectstack/platform-objects`, #27185): an organization's
   // administrators author its own rate table; no parent row anchors a rate.
   { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // A reader's own named list views (`@objectstack/platform-objects`, ruling
+  // 6570568131 on #28971): user data on the preference template, each row in
+  // its owner's organization; no parent row anchors a view.
+  { object: 'sys_personal_view', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_import_job', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_user_preference', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
 

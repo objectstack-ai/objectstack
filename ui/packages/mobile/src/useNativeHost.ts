@@ -6,13 +6,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import {
+  NATIVE_CONNECTION_REMOVED_EVENT,
   NATIVE_NAVIGATE_EVENT,
   getNativeHost,
   isInAppRoute,
   postNativeReady,
   postNativeRouteChanged,
+  type NativeConnectionRemovedEvent,
   type ObjectStackNative,
 } from './nativeHost.js';
 
@@ -93,11 +95,19 @@ export interface UseNativeHostRoutingOptions {
   route: string;
   /** Move the app's own router to an in-app route (no document reload). */
   navigate: (route: string) => void;
+  /**
+   * Run when the shell removes this Console's connection
+   * (`objectstack-native:connectionRemoved`): unregister this device's push
+   * token under the Console's own session. The shell is held until the
+   * returned promise settles, at most 10 s. Omitted, the shell is released at
+   * once: there is no registered token to unregister.
+   */
+  onConnectionRemoved?: () => Promise<unknown>;
 }
 
 /**
- * Wires the app's router to the native shell. Call it once, inside the router,
- * from a component that renders beside the routes. In the shell it:
+ * Wires the app to the native shell. Call it once, inside the router, from a
+ * component that renders beside the routes. In the shell it:
  *
  * - posts `ready()` once per page load, after the first commit of the router
  *   tree (or as soon as a late bridge appears). That commit is the Console's
@@ -110,13 +120,27 @@ export interface UseNativeHostRoutingOptions {
  * - listens for the shell's `objectstack-native:navigate` event, moves the
  *   router to `detail.route` when it is an in-app path, and cancels the event
  *   so the shell does not reload the page. Anything else is left alone, and
- *   the shell's own full-load fallback runs.
+ *   the shell's own full-load fallback runs;
+ * - answers the shell's `objectstack-native:connectionRemoved` event: calls
+ *   `event.waitUntil()` with the promise `onConnectionRemoved` returns, or with
+ *   one already resolved when it is omitted. An unregister that fails rejects
+ *   that promise, so the shell is never held past the step itself.
  *
  * Outside the shell it does nothing and installs no listener. Returns the
  * bridge, or `null`.
  */
-export function useNativeHostRouting({ route, navigate }: UseNativeHostRoutingOptions): ObjectStackNative | null {
+export function useNativeHostRouting({
+  route,
+  navigate,
+  onConnectionRemoved,
+}: UseNativeHostRoutingOptions): ObjectStackNative | null {
   const host = useNativeHost();
+  // The latest handler, read when the event fires, so the listener does not
+  // re-install on every render that passes a new function.
+  const onConnectionRemovedRef = useRef(onConnectionRemoved);
+  useEffect(() => {
+    onConnectionRemovedRef.current = onConnectionRemoved;
+  }, [onConnectionRemoved]);
 
   useEffect(() => {
     if (host) postNativeReady(host);
@@ -137,6 +161,18 @@ export function useNativeHostRouting({ route, navigate }: UseNativeHostRoutingOp
     window.addEventListener(NATIVE_NAVIGATE_EVENT, onNavigate);
     return () => window.removeEventListener(NATIVE_NAVIGATE_EVENT, onNavigate);
   }, [host, navigate]);
+
+  useEffect(() => {
+    if (!host) return undefined;
+    const onRemoved = (event: Event) => {
+      const { waitUntil } = event as Partial<NativeConnectionRemovedEvent>;
+      if (typeof waitUntil !== 'function') return;
+      const handler = onConnectionRemovedRef.current;
+      waitUntil.call(event, handler ? Promise.resolve().then(handler) : Promise.resolve());
+    };
+    window.addEventListener(NATIVE_CONNECTION_REMOVED_EVENT, onRemoved);
+    return () => window.removeEventListener(NATIVE_CONNECTION_REMOVED_EVENT, onRemoved);
+  }, [host]);
 
   return host;
 }

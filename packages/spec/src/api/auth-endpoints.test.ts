@@ -7,6 +7,7 @@ import {
   AuthEndpointSchema,
   AuthEndpointAliases,
   AuthFeaturesConfigSchema,
+  GetAuthConfigResponseSchema,
   EndpointMapping,
   getAuthEndpointUrl,
 } from './auth-endpoints.zod';
@@ -129,6 +130,49 @@ describe('AuthFeaturesConfig retired flags (ruled: stop advertising them)', () =
     const parsed = AuthFeaturesConfigSchema.parse(valid);
     expect(parsed).not.toHaveProperty('passkeys');
     expect(parsed).not.toHaveProperty('magicLink');
+  });
+});
+
+// `features.sso` is served (plugin-auth's `/config` route and the hono
+// adapter's, both refined to "usable") and read (the console LoginForm), so
+// the contract declares it: a parse keeps it instead of stripping it.
+describe('AuthFeaturesConfig.sso (served, now declared)', () => {
+  const valid = { twoFactor: false, organization: true };
+
+  it.each([true, false])('keeps a served `sso: %s` through a parse', (sso) => {
+    const parsed = AuthFeaturesConfigSchema.parse({ ...valid, sso });
+    expect(parsed.sso).toBe(sso);
+  });
+
+  it('keeps it through the whole GET /auth/config response parse', () => {
+    const parsed = GetAuthConfigResponseSchema.parse({
+      emailPassword: { enabled: true },
+      socialProviders: [],
+      features: { ...valid, sso: true, ssoEnforced: false },
+    });
+    expect(parsed.features.sso).toBe(true);
+    expect(parsed.features.ssoEnforced).toBe(false);
+  });
+
+  it('CONTROL: an absent `sso` stays absent (no default is invented)', () => {
+    const parsed = AuthFeaturesConfigSchema.parse(valid);
+    expect(parsed).not.toHaveProperty('sso');
+  });
+
+  it.each([['yes'], [1], [null]])('refuses a non-boolean `sso` (%j)', (sso) => {
+    const result = AuthFeaturesConfigSchema.safeParse({ ...valid, sso });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual([
+      expect.objectContaining({ code: 'invalid_type', expected: 'boolean', path: ['sso'] }),
+    ]);
+  });
+
+  it('says it is the usable answer and how it differs from ssoEnforced', () => {
+    const description = AuthFeaturesConfigSchema.shape.sso.description ?? '';
+    expect(description).toMatch(/isSsoUsable/);
+    expect(description).toMatch(/ssoEnforced/);
+    expect(description).not.toMatch(/#\d{3,}/);
   });
 });
 

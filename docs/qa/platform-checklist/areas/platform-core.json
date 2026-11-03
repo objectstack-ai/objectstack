@@ -3859,7 +3859,7 @@
       "title": "POST /packages/:id/ensure-customization is the one idempotent creation path of <base>.custom — explicit <base namespace>_custom, a ^major dependency, 201 then 200, walled 403 — and a base is not uninstalled while its pair is installed",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3926,7 +3926,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/domains/packages-ensure-customization.test.ts (the door over the real protocol and registry: acceptance[0]–[2], including the walled postures) + packages/runtime/src/domains/packages-uninstall-refuse-before-mutate.test.ts (the 409 naming the pair, nothing moved, and the booted base's 422 first: acceptance[3] and [4]) + packages/objectql/src/registry-assert-package-uninstallable.test.ts. These drive the HttpDispatcher in-process; the live leg is the run's"
+        "ref": "packages/runtime/src/domains/packages-ensure-customization.test.ts (the door over the real protocol and registry: acceptance[0]–[2], including the walled postures) + packages/runtime/src/domains/packages-uninstall-refuse-before-mutate.test.ts (the 409 naming the pair, nothing moved, and the booted base's 422 first: acceptance[3] and [4]) + packages/objectql/src/registry-assert-package-uninstallable.test.ts. These drive the HttpDispatcher in-process. ui/e2e/live/studio-customize-journey.spec.ts (live Playwright against a booted showcase, in the required Live E2E UI job's test:e2e:live:ci allowlist) drives acceptance[4] at HTTP: DELETE /api/v1/packages/com.example.showcase with its pair installed answers 422 WRITABLE_PACKAGE_REQUIRED, and GET of the base and of the pair still answer 200 — it reads the two packages, not the package list. Acceptance[0]–[3] remain the run's live leg"
       },
       "source": [
         "packages/metadata-protocol/src/protocol-customization-package.ts#ensureCustomizationPackage (the one creation path; idempotent, serialized per pair) + packages/metadata-protocol/src/protocol-customization-package.ts#customizationPairEnsureRefusal",
@@ -3941,6 +3941,12 @@
           "date": "2026-11-02",
           "change": "new item (ADR-0146 N-13 #28407 / PR #28512 and N-14 #28408 / PR #28506): the ensure door's create, idempotence and refusals on the showcase, and the pair's uninstall refusal. Measured from source at base eb123b7ccc: DELETE /packages/:id refuses a read-only base 422 WRITABLE_PACKAGE_REQUIRED before the pair is asked, so the 409 naming the pair is driven on a writable base with an exported pair (knownGaps[0], FOLLOW-UPS §14b)",
           "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "automated adds the slice 3 live spec (ui/e2e/live/studio-customize-journey.spec.ts) for acceptance[4]: the showcase's uninstall answers 422 WRITABLE_PACKAGE_REQUIRED live, as knownGaps[0] measured from source; the slice 3 run (base 128681f4) measured the same. No clause, step or fixture changed",
+          "ref": "#28579"
         }
       ]
     },
@@ -3949,7 +3955,7 @@
       "title": "Setup's metadata URLs open Studio's All metadata area in one hop, the query naming the leg, while every datasource URL stays in Setup; the retired Packaged automation bookmark opens Studio's Automations pillar",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3966,7 +3972,7 @@
         ]
       },
       "steps": [
-        "type each URL into the address bar and record the history chain (one hop or two) and the page that renders: /_console/apps/setup/metadata, …/metadata/object, …/metadata/object/showcase_task, …/metadata/object/showcase_task?package=com.example.showcase, …/metadata/position?scope=environment, …/metadata/object/showcase_task?review=1, …/metadata/object/showcase_task#fields, and the pre-refactor alias …/component/metadata/resource/showcase_task?type=object",
+        "type each URL into the address bar and record the history chain (one hop or two) and the page that renders: /_console/apps/setup/metadata, …/metadata/object, …/metadata/object/showcase_task, …/metadata/object/showcase_task?package=com.example.showcase, …/metadata/position?scope=environment, …/metadata/object/showcase_task?review=1, …/metadata/object/showcase_task#fields, and the pre-refactor alias …/component/metadata/resource/showcase_task?type=object. The console first rewrites an app segment to the app's canonical one (/apps/setup → /apps/com.objectstack.setup, /apps/showcase_app → /apps/com.example.showcase): record that hop on its own, or type the canonical segment",
         "the same metadata path under another app's segment (/_console/apps/showcase_app/metadata/object)",
         "Setup-kept: /_console/apps/setup/metadata/datasource, …/metadata/datasource/showcase_external and …/component/metadata/resource/showcase_external?type=datasource",
         "the retired Packaged automation bookmark: /_console/apps/setup/component/automation/packaged, then the same with ?package=com.example.showcase"
@@ -3975,19 +3981,19 @@
         {
           "clause": "every Setup metadata URL lands on Studio's All metadata area in one hop, on the same page below metadata, with its query and hash carried",
           "oracle": "dom",
-          "verify": "per URL of steps 1–2, the chain has two entries (the typed URL and its target) and the target is /_console/studio/~all/metadata/REST (setupMetadataStudioPath); the area's page renders, never Setup's list or edit page",
+          "verify": "per URL of steps 1–2, past the app segment's canonical rewrite, the chain has two entries (the Setup URL and its target) and the target is /_console/studio/~all/metadata/REST (setupMetadataStudioPath); the area's page renders there, never Setup's list or edit page",
           "evidence": "the per-URL chain + target table, with one screenshot per page kind"
         },
         {
           "clause": "the query names the leg: ?package=X opens X's leg keeping the parameter, ?scope=environment opens the cross-package leg and drops ?package, ?review=1 and the hash are kept",
           "oracle": "dom",
-          "verify": "…?package=com.example.showcase lands on /_console/studio/com.example.showcase/metadata/object/showcase_task?package=com.example.showcase; ?scope=environment on /_console/studio/~all/metadata/position?scope=environment; ?review=1 and #fields survive (areaLocationRedirect)",
+          "verify": "…?package=com.example.showcase lands on /_console/studio/com.example.showcase/metadata/object/showcase_task?package=com.example.showcase, whose object item then opens in its pillar, /_console/studio/com.example.showcase/data?surface=object%3Ashowcase_task (areaItemPillarPath; ADR-0146 D1, a pillar type opens its pillar); ?scope=environment on /_console/studio/~all/metadata/position?scope=environment; ?review=1 survives the redirect (the item page then opens the draft review and drops it) and #fields survives (areaLocationRedirect)",
           "evidence": "the three landing URLs"
         },
         {
           "clause": "the datasource stays in Setup: its list, item and legacy-alias URLs render Setup's pages and never redirect",
           "oracle": "dom",
-          "verify": "step 3's URLs settle on /_console/apps/setup/metadata/datasource[/showcase_external] and render metadata-resource-list-page / metadata-resource-edit-page (SETUP_KEPT_METADATA_TYPE is datasource; ADR-0146 D1 keeps it in Setup)",
+          "verify": "step 3's URLs settle on Setup's datasource pages under the app's canonical segment, /_console/apps/com.objectstack.setup/metadata/datasource[/showcase_external], with no /studio entry in the chain, and render Setup's Datasources list (listing showcase_external) and its edit page (metadata-edit-datasource) (SETUP_KEPT_METADATA_TYPE is datasource; ADR-0146 D1 keeps it in Setup)",
           "evidence": "the settled URLs + the page screenshots"
         },
         {
@@ -4022,6 +4028,12 @@
           "revision": 1,
           "date": "2026-11-02",
           "change": "new item (ADR-0146 N-28, #28578 / PR #28818 with PR #28785): Setup's metadata URLs open Studio's All metadata area in one hop on the leg their query names, the datasource stays in Setup, and the Packaged automation bookmark opens Studio. Read from source at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "steps[0], acceptance[0], [1] and [2] corrected, assertion defects measured in the slice 3 run (base 128681f4): the console first rewrites /apps/setup and /apps/showcase_app to their canonical app segments, a hop of its own that the routing pin's stubbed app list does not make (typed with the canonical segment, each metadata URL reaches Studio in one hop); a package leg's object item opens its Data pillar (areaItemPillarPath, ADR-0146 D1), so the ?package landing is followed by that pillar; ?review=1 is carried by the redirect and dropped by the item page once it opens the draft review; and acceptance[2] named the jsdom stub test ids, now Setup's real Datasources page and metadata-edit-datasource. The run scored acceptance[1] FAIL against revision 1 for the pillar hop. acceptance[0] and [3]'s cross-package landing (/studio/~all/metadata/TYPE) is unchanged: the run found the area's list rewriting it to one package's leg, a product finding in FOLLOW-UPS §15",
           "ref": "#28579"
         }
       ]

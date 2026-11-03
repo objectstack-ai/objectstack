@@ -370,9 +370,10 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // override declaration, on each overridable type. The excluded types
     // (`agent`, `field`, `hook`, `object`, `position`, `skill`, `tool`) do not
     // gain it, and their counts stay.
+    // [#28979] `page` 27 → 28: `apps`, the app scope of a record page.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 24, app: 24, dashboard: 21, dataset: 17, field: 82, flow: 23,
-        hook: 23, object: 49, page: 27, position: 13, report: 24, skill: 16, tool: 14,
+        hook: 23, object: 49, page: 28, position: 13, report: 24, skill: 16, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

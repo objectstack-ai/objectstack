@@ -932,8 +932,13 @@ const FIELD_PERMISSION_WHEN_ON_READABLE =
  * entry may carry a row condition, `when`, in the language the RLS `using`
  * predicate is written in. It narrows WHERE the entry votes: on a row the
  * condition matches, the entry votes as declared; on any other row the entry
- * is absent, so the most-permissive merge and the "declaring sets vote" rule
- * (`PermissionEvaluator.getFieldPermissions`) are unchanged. The write gate
+ * is absent, so the most-permissive merge
+ * (`PermissionEvaluator.getFieldPermissions`) is unchanged. Beside the
+ * declaring sets, a set holding the super-user bypass on the object votes on
+ * every field of it, on every row (ADR-0066 ⑧ note of 2026-11-02, ruling of
+ * record 6573563853): `viewAllRecords` votes `readable: true`,
+ * `modifyAllRecords` votes `readable: true` and `editable: true`; View All
+ * never grants an edit. Otherwise union without deny is unchanged. The write gate
  * judges it on the stored row before an update and on the incoming row of an
  * insert. It reaches the EDIT vote only: reads are row-blind (per-row masking
  * waits for a measured need), so `readable: false` beside a `when` is refused
@@ -981,9 +986,13 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
       + '(a field of this object compared with a literal or a `current_user.*` value using `==`, `!=`, `<`, `<=`, `>`, '
       + '`>=` or `in`, combined with `&&` / `||`; e.g. status in ["approved", "signing", "active"]). Absent, the entry '
       + 'votes on every row. Present, the entry votes as declared on the rows the condition matches and is ABSENT on '
-      + 'every other row, so the most-permissive merge across the caller\'s sets and the rule that only declaring '
-      + 'sets vote are unchanged: a set that locks a field only from a stage onward does not lock the rows before it, '
-      + 'and a co-held set that says nothing about the field still lifts nothing. The write gate judges the condition '
+      + 'every other row, so the most-permissive merge across the caller\'s sets is unchanged: a set that locks a '
+      + 'field only from a stage onward does not lock the rows before it, and a co-held set that says nothing about '
+      + 'the field still lifts nothing, unless it holds the super-user bypass on the object (its own entry for the '
+      + 'object, otherwise its `\'*\'` wildcard). Such a set votes on every field of the object, on every row, '
+      + 'whatever `when` says: `viewAllRecords` votes `readable: true`, and `modifyAllRecords` votes `readable: true` '
+      + 'and `editable: true`, so a row-conditioned lock never binds a Modify All holder. View All never grants an '
+      + 'edit. Otherwise union without deny is unchanged. The write gate judges the condition '
       + 'on the stored row BEFORE an update (so a lock on `status in [...]` holds on an approved row even when the '
       + 'write changes `status`) and on the incoming row of an insert, as the caller sent it. It reaches the EDIT vote '
       + 'only — reads are judged row-blind — so `readable: false` beside a `when` is refused at parse time: keep '

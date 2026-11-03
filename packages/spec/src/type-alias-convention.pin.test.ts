@@ -283,9 +283,13 @@ import type * as M193 from './data/seed-file.zod.js';
 // [ADR-0142] Ownership queues and assignment rules -- new modules, next free indices.
 import type * as M194 from './automation/assignment-rule.zod.js';
 import type * as M195 from './security/queue.zod.js';
+// The push channel's transport configuration and delivery data (ADR-0012 §6) -- new modules, next free indices.
+import type * as M196 from './system/push-config.zod.js';
+import type * as M197 from './api/push-delivery.zod.js';
+import type * as M198 from './system/push-device.zod.js';
 
 // ---------------------------------------------------------------------------
-// 811 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 818 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -651,6 +655,10 @@ export type Iso_api_protocol__UpdateDataResponseSchema = Assert<Eq< z.input< typ
 export type Iso_api_protocol__ValidateDataIssueSchema = Assert<Eq< z.input< typeof M28.ValidateDataIssueSchema >, z.infer< typeof M28.ValidateDataIssueSchema > >>;
 export type Iso_api_protocol__ValidateDataRequestSchema = Assert<Eq< z.input< typeof M28.ValidateDataRequestSchema >, z.infer< typeof M28.ValidateDataRequestSchema > >>;
 export type Iso_api_protocol__ValidateDataResponseSchema = Assert<Eq< z.input< typeof M28.ValidateDataResponseSchema >, z.infer< typeof M28.ValidateDataResponseSchema > >>;
+
+// api/push-delivery.zod.ts
+export type Iso_api_pushDelivery__PushDeliveryDataSchema = Assert<Eq< z.input< typeof M197.PushDeliveryDataSchema >, z.infer< typeof M197.PushDeliveryDataSchema > >>;
+export type Iso_api_pushDelivery__PushRouteSchema = Assert<Eq< z.input< typeof M197.PushRouteSchema >, z.infer< typeof M197.PushRouteSchema > >>;
 
 // api/query-adapter.zod.ts
 export type Iso_api_queryAdapter__OperatorMappingSchema = Assert<Eq< z.input< typeof M29.OperatorMappingSchema >, z.infer< typeof M29.OperatorMappingSchema > >>;
@@ -1408,6 +1416,15 @@ export type Iso_system_objectStorage__StorageClassSchema = Assert<Eq< z.input< t
 export type Iso_system_objectStorage__StorageProviderSchema = Assert<Eq< z.input< typeof M142.StorageProviderSchema >, z.infer< typeof M142.StorageProviderSchema > >>;
 export type Iso_system_objectStorage__StorageScopeSchema = Assert<Eq< z.input< typeof M142.StorageScopeSchema >, z.infer< typeof M142.StorageScopeSchema > >>;
 
+// system/push-config.zod.ts
+export type Iso_system_pushConfig__ApnsTransportConfigSchema = Assert<Eq< z.input< typeof M196.ApnsTransportConfigSchema >, z.infer< typeof M196.ApnsTransportConfigSchema > >>;
+export type Iso_system_pushConfig__FcmTransportConfigSchema = Assert<Eq< z.input< typeof M196.FcmTransportConfigSchema >, z.infer< typeof M196.FcmTransportConfigSchema > >>;
+export type Iso_system_pushConfig__PushServiceConfigSchema = Assert<Eq< z.input< typeof M196.PushServiceConfigSchema >, z.infer< typeof M196.PushServiceConfigSchema > >>;
+export type Iso_system_pushConfig__PushVendorSchema = Assert<Eq< z.input< typeof M196.PushVendorSchema >, z.infer< typeof M196.PushVendorSchema > >>;
+
+// system/push-device.zod.ts
+export type Iso_system_pushDevice__UserDeviceSchema = Assert<Eq< z.input< typeof M198.UserDeviceSchema >, z.infer< typeof M198.UserDeviceSchema > >>;
+
 // system/registry-config.zod.ts
 export type Iso_system_registryConfig__RegistrySyncPolicySchema = Assert<Eq< z.input< typeof M143.RegistrySyncPolicySchema >, z.infer< typeof M143.RegistrySyncPolicySchema > >>;
 
@@ -1745,7 +1762,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 811 isomorphic pins', () => {
+  it('still declares all 818 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2723,7 +2740,19 @@ describe('ADR-0122 type-alias convention', () => {
     // (`api/auth.zod.ts`), strict objects with no default and no transform —
     // the anonymous branch, the authenticated branch and their discriminated
     // union (Iso_api_auth__MePermissions*ResponseSchema). +3 added.
-    expect(pins).toHaveLength(811);
+    // 811 -> 817 is the push channel's spec face (ADR-0012 §6): the push
+    // transport configuration (`system/push-config.zod.ts`: the vendor enum,
+    // the APNs and FCM blocks and the block holding them) and the push
+    // delivery data and its route (`api/push-delivery.zod.ts`), strict or plain objects of
+    // required and optional strings, enums and regex refinements, no default
+    // and no transform (Iso_system_pushConfig__*, Iso_api_pushDelivery__*).
+    // +6 added.
+    // 817 -> 818 is the push device registry's stored device shape
+    // (`system/push-device.zod.ts`, `UserDeviceSchema`): a plain object of
+    // required and optional strings, enums, a boolean and ISO instants, no
+    // default and no transform (Iso_system_pushDevice__UserDeviceSchema).
+    // +1 added.
+    expect(pins).toHaveLength(818);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

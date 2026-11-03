@@ -354,6 +354,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'record',
     why: "planned, not yet rendered — the binding's one-row query is validated at parse and refused on every page that is not `type: 'app'`, but no renderer mounts it as the page's `record` until the console's page-root binding lands. A form control offered today would let an author bind a row no predicate can read yet",
   },
+  // #28979 — a record page's app scope landed spec-first the same way and is
+  // `live` since the console's page assignment reads the route's app. The
+  // form offer was decided with the enforcement: not offered yet, for the
+  // reason below.
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'apps',
+    why: "live, not offered in this form — the console opens the scoped page inside each app the list names (the page assignment reads the route's app), but no registered form widget spells a list of app names: there is no app picker, and a free-text list would let an author type a package id or a label where an app name is required, which the parse refuses only after the fact. Authored in source or the page JSON until an app-name picker exists",
+  },
   // #28022 — an app's per-audience landing list lands spec-first the same way:
   // `planned` in the liveness ledger, read by no console until the landing
   // redirect card. Offering it in the app form first would be the UI half of

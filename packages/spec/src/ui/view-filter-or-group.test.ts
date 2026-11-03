@@ -233,7 +233,7 @@ describe('the wire door and the published shape', () => {
     expect(issues[0]!.message).toContain('`id` is a console row key');
   });
 
-  it('the element publishes both kinds, and the group says it is not yet rendered', () => {
+  it('the element publishes both kinds, and the group carries no PLANNED marker', () => {
     const json = z.toJSONSchema(ViewFilterElementSchema, { io: 'input', unrepresentable: 'any' }) as {
       anyOf?: Array<{ properties?: Record<string, unknown> }>;
     };
@@ -241,7 +241,8 @@ describe('the wire door and the published shape', () => {
       ['field', 'operator', 'value'],
       ['or'],
     ]);
-    expect(ViewFilterOrGroupSchema.description?.startsWith('[PLANNED — not yet rendered]')).toBe(true);
+    expect(ViewFilterOrGroupSchema.description?.startsWith('An any-of group:')).toBe(true);
+    expect(ViewFilterOrGroupSchema.description).not.toContain('[PLANNED');
   });
 
   it('`isViewFilterOrGroup` tells the element kinds apart by the own `or` key', () => {

@@ -147,7 +147,7 @@ describe('connector-credential-literal — the pin set', () => {
     for (const sentinel of Object.values(S)) expect(wire.includes(sentinel), sentinel).toBe(false);
   });
 
-  it('reads as one sentence per map; the stdio env verdict promises `auth` only over http', () => {
+  it('reads as one sentence per map; the stdio env verdict names `auth.credentialRef` with `transport.credentialEnv`', () => {
     const byPath = new Map(lintConnectorCredentialLiterals(litStack()).map((f) => [f.path, f]));
     expect(byPath.get(LIT_PATHS[0])!.message).toBe(
       "header 'Authorization' in providerConfig.headers holds a credential-shaped literal, kept in metadata, "
@@ -155,12 +155,23 @@ describe('connector-credential-literal — the pin set', () => {
     );
     expect(byPath.get(LIT_PATHS[3])!.message).toBe(
       "env 'MCP_UPSTREAM' in providerConfig.transport.env holds a credential-shaped literal, kept in metadata, "
-        + 'not the secrets layer; a stdio server takes no `auth`; `auth.credentialRef` reaches it only over http',
+        + "not the secrets layer; move it to the connector's `auth.credentialRef` with `transport.credentialEnv`",
     );
     for (const f of byPath.values()) {
       expect(f.message.includes('\n'), f.path).toBe(false);
       expect(f.message.length, f.path).toBeLessThanOrEqual(210);
     }
+  });
+
+  it('the stdio env hint names the credentialEnv route, spelling `auth` as the header hint does', () => {
+    const byPath = new Map(lintConnectorCredentialLiterals(litStack()).map((f) => [f.path, f]));
+    const env = byPath.get(LIT_PATHS[3])!.hint;
+    const header = byPath.get(LIT_PATHS[0])!.hint;
+    const shared = "auth: { type: 'bearer', credentialRef }";
+    expect(header).toContain(shared);
+    expect(env).toContain(shared);
+    expect(env).toContain('transport.credentialEnv');
+    expect(env).not.toContain("kind: 'http'");
   });
 });
 
@@ -284,7 +295,8 @@ describe('connector-credential-literal — `os explain`', () => {
     for (const fact of [
       'withholds each of them whole',
       'ADR-0097 §3',
-      'A stdio MCP server takes no `auth`',
+      'A stdio MCP server takes the same `auth`',
+      '`providerConfig.transport.credentialEnv`',
       'a heuristic',
       'A `{variable}` template is not a literal',
       'never the value itself',

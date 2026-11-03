@@ -34,6 +34,7 @@ import {
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
@@ -343,6 +344,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#28645 — what the app bundle answers in render (null outside a
   // `MetadataProvider`): the page a page route opens is read there first.
   const bundledReads = useBundledReads();
+  // objectstack#29416 — a page the bundle does not hold is asked by name.
+  const readItemsByName = useReadItemsByName(metadata);
   // objectui#7373 — where this file's two "you cannot be here" exits land. Both
   // sit BELOW the readiness gate further down (`metadataLoading` &c), so the
   // list they resolve against has settled; an app list that failed to load is
@@ -481,15 +484,20 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     hostRoutePaths,
     (pageName) => {
       // objectstack#28645 — the bundle's page when it holds this package's;
-      // the `/meta/page` list, prefer-local, for a page it does not hold.
+      // objectstack#29416 — else the page by name, prefer-local, and the
+      // `/meta/page` list only when the by-name answer cannot be the pick.
       const bundled = bundledReads?.item('page', pageName, (activeApp as any)?._packageId);
       if (bundled?.state === 'hit') return { page: bundled.value, settled: true };
       if (bundled?.state === 'pending') return { page: undefined, settled: false };
-      const status = getTypeStatus?.('page');
-      return {
-        page: preferLocal(metadata.pages as any[], pageName, (activeApp as any)?._packageId),
-        settled: status === undefined || status === 'ready' || status === 'error',
-      };
+      const { item, settled } = readItemPreferLocal(
+        readItemsByName,
+        'page',
+        pageName,
+        (activeApp as any)?._packageId,
+        () => metadata.pages,
+        getTypeStatus?.('page'),
+      );
+      return { page: item, settled };
     },
     // objectui#13046 — a record route reads the objects its declared record
     // page binds, picked from the page list as `RecordDetailView` picks it.

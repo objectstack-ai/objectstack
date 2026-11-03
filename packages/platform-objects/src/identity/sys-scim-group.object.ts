@@ -35,7 +35,6 @@ export const SysScimGroup = ObjectSchema.create({
   description: 'IdP-pushed SCIM 2.0 groups, scoped per provisioning connection',
   displayNameField: 'display_name',
   nameField: 'display_name', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{display_name}',
   highlightFields: ['display_name', 'connection_id', 'updated_at'],
 
   listViews: {

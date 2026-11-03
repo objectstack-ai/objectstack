@@ -28,7 +28,7 @@ const result = DatasourceSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Unique datasource identifier |
+| **name** | `string` | ✅ | Unique datasource identifier (snake_case). Reserved: 'drivers', a path the datasource admin API serves itself, so a datasource of that name could never be read by name. |
 | **label** | `string` | optional | Display label |
 | **driver** | `string` | ✅ | Underlying driver type |
 | **config** | `Record<string, any>` | ✅ | Driver specific configuration |

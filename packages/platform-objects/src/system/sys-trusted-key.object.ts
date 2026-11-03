@@ -65,7 +65,6 @@ export const SysTrustedKey = ObjectSchema.create({
   description:
     "Publisher public keys this environment accepts a plugin artifact's signature from. Public keys only; written by `os plugin trust`.",
   nameField: 'key_id',
-  titleFormat: '{key_id}',
   highlightFields: ['key_id', 'status', 'source', 'fingerprint', 'added_at'],
   listViews: {
     all: {

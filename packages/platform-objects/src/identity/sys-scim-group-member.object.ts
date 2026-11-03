@@ -31,18 +31,17 @@ export const SysScimGroupMember = ObjectSchema.create({
   },
   description: 'SCIM group membership rows pushed by the IdP (group ↔ provisioned user)',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // columns `titleFormat` names. With no pointer declared, the registry's
+  // columns `titleFormat` named. With no pointer declared, the registry's
   // designate-only pass stamped `nameField: 'id'` (the first title-eligible
   // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
-  // wins over `titleFormat`) drew the raw id as the record page's H1.
-  // `titleFormat` stays for renderers that still read it first;
-  // `identity-display-title.test.ts` holds the two to the same text.
-  // `scim_user_id` and `group_id` are lookups, so the formula reads their stored
-  // ids: a formula is evaluated on the stored row, before `$expand`, and
-  // cannot reach a related record's own title.
+  // wins over `titleFormat`) drew the raw id as the record page's H1. The
+  // retired `titleFormat` template beside it is gone (refused at save and by
+  // `os validate`); `identity-display-title.test.ts` holds the formula to the
+  // text that template drew. `scim_user_id` and `group_id` are lookups, so the
+  // formula reads their stored ids: a formula is evaluated on the stored row,
+  // before `$expand`, and cannot reach a related record's own title.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{scim_user_id} in {group_id}',
   highlightFields: ['group_id', 'scim_user_id', 'created_at'],
 
   listViews: {

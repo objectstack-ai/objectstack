@@ -89,6 +89,7 @@ import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
 import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledReads } from '../providers/bundledReads.js';
+import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
 import { getIcon } from '../utils/getIcon.js';
@@ -488,6 +489,7 @@ export function AppHeader({
   // objectstack#28645 — the dashboard or page the phone title names, read from
   // the app bundle first; the list below only for one the bundle does not hold.
   const bundledReads = useBundledReads();
+  const readItemsByName = useReadItemsByName(metadata);
   const { currentAppName, recordTitle } = useNavigationContext();
 
   /**
@@ -715,12 +717,22 @@ export function AppHeader({
       if (pathParts[3]) {
         const pageName = pathParts[3];
         const bundledPage = bundledReads?.item('page', pageName, (currentApp as any)?._packageId);
+        // objectstack#29416 — a page the bundle does not hold is read by name,
+        // and from the `/meta/page` list only when that answer cannot be the
+        // prefer-local pick (`readItemPreferLocal`).
         const pageDef =
           bundledPage?.state === 'hit'
             ? bundledPage.value
             : bundledPage?.state === 'pending'
               ? undefined
-              : preferLocal(metadata.pages as any[], pageName, (currentApp as any)?._packageId);
+              : readItemPreferLocal(
+                  readItemsByName,
+                  'page',
+                  pageName,
+                  (currentApp as any)?._packageId,
+                  () => metadata.pages,
+                  metadata.getTypeStatus?.('page'),
+                ).item;
         // A page's `label` may be an inline locale map; drawn raw, the phone
         // bar's title blanked the page (objectui#13488).
         const fallback = metadataText(pageDef?.label, language) ?? humanizeSlug(pageName);

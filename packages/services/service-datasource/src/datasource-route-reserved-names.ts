@@ -18,21 +18,32 @@
  * patched, removed and probed (`POST /datasources/test/test`) through its own
  * doors.
  *
- * ONE list for both halves. The registrar mounts each shadowing literal from
- * the constant below, and `DatasourceAdminService` refuses each name in
- * {@link ROUTE_SHADOWED_DATASOURCE_NAMES}. The drift pin
+ * ONE list for every half, and it is the spec's
+ * (`ROUTE_SHADOWED_DATASOURCE_NAMES` in `@objectstack/spec/data`), so the
+ * metadata surface refuses the same names: `DatasourceSchema.name` rejects
+ * each one at `defineStack`, `os validate`, `os build` and the metadata save
+ * door. Here, the registrar mounts each shadowing literal from a segment typed
+ * as a member of that list, and `DatasourceAdminService` refuses each name in
+ * it at create. The drift pin
  * (`__tests__/datasource-route-reserved-names.test.ts`) enumerates what the
  * registrar actually mounts and fails both ways: a literal sibling of a
- * same-method `/:name` route that is not listed here, and a listed name that
- * no longer shadows anything.
+ * same-method `/:name` route that is not listed, and a listed name that no
+ * longer shadows anything.
  */
 
-/** The driver-catalog literal: `GET /datasources/drivers`, mounted beside `GET /datasources/:name`. */
-export const DRIVER_CATALOG_SEGMENT = 'drivers';
+import { ROUTE_SHADOWED_DATASOURCE_NAMES as SPEC_ROUTE_SHADOWED_DATASOURCE_NAMES } from '@objectstack/spec/data';
+
+/**
+ * The driver-catalog literal: `GET /datasources/drivers`, mounted beside
+ * `GET /datasources/:name`. Typed as a member of the spec's reserved list, so
+ * a catalog segment the spec does not reserve does not compile.
+ */
+export const DRIVER_CATALOG_SEGMENT: (typeof SPEC_ROUTE_SHADOWED_DATASOURCE_NAMES)[number] = 'drivers';
 
 /**
  * Every literal segment the admin registrar mounts beside a same-method
  * `/datasources/:name` route — a datasource of one of these names could never
- * be reached through that by-name door.
+ * be reached through that by-name door. The spec's list itself (the same
+ * frozen array), widened to `string` for the door's membership test.
  */
-export const ROUTE_SHADOWED_DATASOURCE_NAMES: readonly string[] = Object.freeze([DRIVER_CATALOG_SEGMENT]);
+export const ROUTE_SHADOWED_DATASOURCE_NAMES: readonly string[] = SPEC_ROUTE_SHADOWED_DATASOURCE_NAMES;

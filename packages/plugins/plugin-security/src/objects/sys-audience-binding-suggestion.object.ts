@@ -39,7 +39,11 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
   // [ADR-0090 D5/D9] The everyone-anchor suggestion and its deployment-level
   // decision, in the words Setup shows.
   description: 'A package\'s suggestion to give one of its permission sets to everyone who signs in, and the decision taken on it.',
-  titleFormat: '{package_id}: {permission_set_name} → {anchor}',
+  // [ADR-0079] The record title: the suggested permission set, the field the
+  // registry stamped when the retired `titleFormat` template stood here (an
+  // object definition that declares one is refused at save and by
+  // `os validate`).
+  nameField: 'permission_set_name',
   highlightFields: ['package_id', 'permission_set_name', 'anchor', 'status'],
 
   fields: {

@@ -20,22 +20,32 @@
  * group-wide visibility and cross-org workflow are inherent to the shape, and
  * a hard per-org wall makes both an architecture problem.
  *
- * ## Open code, entitled activation
+ * ## Open code; activation is entitled only on a commercial host
  *
  * The wall's IMPLEMENTATION is open — the Layer 0 compiler, `accessible_org_ids`
- * resolution and the D5 write stamping all ship in open packages — but ENABLING
+ * resolution and the D5 write stamping all ship in open packages — and ENABLING
  * a multi-organization posture (`group` or `isolated`) requires the
  * `@objectstack/organizations` runtime to be mounted (ADR-0105 D12, ADR-0093 D5).
  * That runtime is open code too: it ships from this repository under Apache-2.0
- * (ADR-0132 D1). What stays commercial is the entitlement — the licence gate the
- * commercial package of the same name adds by subclassing the open one (ADR-0132
- * D2, D3). The two are separate questions and must not be conflated: open code
- * does not mean free activation.
+ * (ADR-0132 D1). Implementation and entitlement are separate questions and must
+ * not be conflated, and which side of the split a deployment sits on answers
+ * the second one:
  *
- * Cloud ADR-0016's 铁律 (强制免费、治理收费) is satisfied by the first half alone —
- * it guarantees that a deployment RUNNING a multi-org shape is safe, which the
- * platform delivers by REFUSING to run one unwalled (ADR-0093 D5), not by giving
- * the posture away. You never silently get an unenforced organization boundary.
+ * - On an OPEN install, activation is gate-free. The open runtime carries no
+ *   licence check of any kind (ADR-0132 D2) and entitles both walled postures
+ *   by construction (ADR-0132 D4): mounting it is enough.
+ * - On a COMMERCIAL host, activation is entitled. The commercial package of the
+ *   same name subclasses the open one and answers its licence gate in its own
+ *   constructor, and the host's manifest resolves the name to that package
+ *   (ADR-0132 D2, D3); it may also narrow which walled postures it entitles.
+ *   There, and only there, open code does not mean free activation.
+ *
+ * Cloud ADR-0016's 铁律 (强制免费、治理收费) is satisfied by the wall itself, on
+ * both sides of the split — it guarantees that a deployment RUNNING a multi-org
+ * shape is safe, which the platform delivers by REFUSING to run one unwalled
+ * (ADR-0093 D5). Whether switching the posture on is free is the entitlement
+ * question above, not the iron rule's. You never silently get an unenforced
+ * organization boundary.
  */
 
 import { z } from 'zod';
@@ -75,9 +85,11 @@ export function postureEnforcesWall(posture: TenancyPosture): boolean {
  * runtime (open code, ADR-0132 D1) fills an absent value too, in its write
  * middleware, but it is not the only stamper.
  *
- * What does need that runtime is ACTIVATING a walled posture (ADR-0105 D12):
- * open code does not mean free activation. This predicate is the shared
- * vocabulary for the stamping rule, whichever package does the stamping.
+ * What does need that runtime is ACTIVATING a walled posture (ADR-0105 D12).
+ * On an open install mounting it is enough (ADR-0132 D4); only on a commercial
+ * host is that activation licence-gated (ADR-0132 D2), and there open code does
+ * not mean free activation. This predicate is the shared vocabulary for the
+ * stamping rule, whichever package does the stamping.
  */
 export function postureStampsOrganization(posture: TenancyPosture): boolean {
   return postureEnforcesWall(posture);
