@@ -13,14 +13,21 @@
  * the other actions are fixed, the chip is as wide as its form, and the
  * title's box is the room the row leaves it, capped at its text. Gaps read 0
  * (no stylesheet).
+ *
+ * objectstack#29693 (the last describe block) — the title keeps a readable
+ * width: when the row would leave it less than its first twelve characters,
+ * the identity chips and the item tools fold into the ⋯ menu. The same stubbed
+ * row, with the tools (the header's fold contract, as `StudioItemTools` keeps
+ * it) and the header's own ⋯ as boxes of their own, and the twelve
+ * characters' width stubbed on the text range.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { Workflow } from 'lucide-react';
-import { StudioItemHeader, useStudioTabRowFold } from './StudioItemHeader';
+import { StudioItemHeader, useStudioItemHeaderFold, useStudioTabRowFold, type StudioFoldedTool } from './StudioItemHeader';
 import { STUDIO_KIND_CHIP } from './studio-tokens';
 
 const TITLE = 'Task board (kanban view)';
@@ -33,6 +40,9 @@ const OPEN_IN_DATA = 137;
 const CHIP_FULL = 132;
 const CHIP_FOLDED = 28;
 const TITLE_TEXT = 178;
+/** objectstack#29693 — the item tools' button group, and the header's own ⋯. */
+const TOOLS = 146;
+const OWN_MORE = 32;
 const layout = { row: 632 };
 
 const resizeCallbacks = new Set<() => void>();
@@ -46,9 +56,16 @@ const chipWidth = () => {
   const chip = screen.queryByTestId('probe-chip');
   return chip ? (chip.hasAttribute('data-folded') ? CHIP_FOLDED : CHIP_FULL) : 0;
 };
-const actionsWidth = () => chipWidth() + OPEN_IN_DATA;
+const toolsWidth = () => (screen.queryByTestId('probe-tools') ? TOOLS : 0);
+const ownMoreWidth = () => (screen.queryByTestId('hdr-more') ? OWN_MORE : 0);
+const actionsWidth = () => chipWidth() + OPEN_IN_DATA + toolsWidth() + ownMoreWidth();
+/** The kind chip, while the row holds it (objectstack#29693: it can fold into the menu). */
+const kindChipWidth = () => {
+  const chip = screen.queryByTestId('hdr-kind-chip');
+  return chip && !chip.closest('[role="menu"]') ? KIND_CHIP : 0;
+};
 /** The title's box: what the row leaves it, capped at its text. */
-const titleBox = () => Math.max(0, Math.min(TITLE_TEXT, layout.row - ICON - KIND_CHIP - actionsWidth()));
+const titleBox = () => Math.max(0, Math.min(TITLE_TEXT, layout.row - ICON - kindChipWidth() - actionsWidth()));
 
 beforeEach(() => {
   layout.row = 632;
@@ -72,8 +89,13 @@ beforeEach(() => {
       if (isRow(this)) return rect(layout.row);
       if (this.dataset.testid === 'probe-chip') return rect(chipWidth());
       if (this.dataset.testid === 'hdr-kind-chip') return rect(KIND_CHIP);
+      if (this.dataset.testid === 'probe-tools') return rect(TOOLS);
+      if (this.dataset.testid === 'hdr-more') return rect(OWN_MORE);
       if (this.dataset.testid === 'hdr-title') return rect(titleBox());
       if (this.parentElement && isRow(this.parentElement)) {
+        // The identity chips' wrapper is a `contents` box in the console;
+        // with no stylesheet here it is a box as wide as the chips it holds.
+        if (this.dataset.slot === 'identity-chips') return rect(kindChipWidth());
         if (this.tagName === 'SPAN') return rect(ICON);
         if (this.tagName === 'DIV') return rect(actionsWidth());
       }
@@ -176,6 +198,132 @@ describe('a foldable chip in the title row gives way before the title (objectui#
   it('CONTROL: without a foldable chip the title is cut and its tooltip still says it whole', () => {
     layout.row = 300;
     render(<Leaf withProbe={false} />);
+    expect(screen.getByTestId('hdr-title')).toHaveAttribute('title', `${TITLE}\n${INTERNAL_ID}`);
+  });
+});
+
+/** objectstack#29693 — the twelve characters' width the text range answers. */
+const READABLE = 120;
+
+/**
+ * The item tools as `StudioItemTools` keeps the header's fold contract: the
+ * button group (`data-studio-fold`) leaves the row while the header is
+ * folded, and the tools are handed over as menu items.
+ */
+function ProbeTools({ onOpen }: { onOpen: (id: string) => void }) {
+  const fold = useStudioItemHeaderFold();
+  const setTools = fold?.setTools;
+  React.useEffect(() => {
+    if (!setTools) return;
+    const tools: StudioFoldedTool[] = [
+      { id: 'layers', label: 'Layers', icon: Workflow, onSelect: () => onOpen('layers') },
+      { id: 'references', label: 'References', icon: Workflow, count: 3, onSelect: () => onOpen('references') },
+    ];
+    setTools(tools);
+    return () => setTools(null);
+  }, [setTools, onOpen]);
+  if (fold?.folded) return null;
+  return <div data-testid="probe-tools" data-studio-fold="tools" />;
+}
+
+function FoldingLeaf({ onOpen = () => {}, foldMenu = true }: { onOpen?: (id: string) => void; foldMenu?: boolean }) {
+  return (
+    <StudioItemHeader
+      icon={Workflow}
+      title={TITLE}
+      titleProps={{ 'data-testid': 'hdr-title', title: INTERNAL_ID }}
+      chips={
+        <span className={STUDIO_KIND_CHIP} data-testid="hdr-kind-chip">
+          View
+        </span>
+      }
+      foldMenu={foldMenu ? { label: 'More', testId: 'hdr-more' } : undefined}
+      actions={
+        <>
+          <ProbeTools onOpen={onOpen} />
+          <button type="button">Open in Data</button>
+        </>
+      }
+    />
+  );
+}
+
+/** Open the header's own ⋯ (Radix opens a menu on pointer down). */
+function openOwnMore(): HTMLElement {
+  const trigger = screen.getByTestId('hdr-more');
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  return screen.getByRole('menu');
+}
+
+describe('the title keeps a readable width: chips and item tools fold into the ⋯ menu first (objectstack#29693)', () => {
+  let rangeSpy: { mockRestore: () => void } | null = null;
+  beforeEach(() => {
+    rangeSpy = vi.spyOn(Range.prototype, 'getBoundingClientRect').mockImplementation(() => rect(READABLE));
+  });
+  afterEach(() => {
+    rangeSpy?.mockRestore();
+    rangeSpy = null;
+  });
+
+  it('at a 330 px row the kind chip and the tools leave the row, a ⋯ holds them, and the title keeps its twelve characters', () => {
+    layout.row = 330;
+    render(<FoldingLeaf />);
+    // Shown, they would leave the title 330 − 32 − 38 − 146 − 137 = −23 px.
+    // Folded, 330 − 32 − 137 − 32 = 129 px: at least the 120 px of twelve characters.
+    expect(screen.queryByTestId('probe-tools')).toBeNull();
+    expect(screen.queryByTestId('hdr-kind-chip')).toBeNull();
+    expect(screen.getByTestId('hdr-more')).toHaveAccessibleName('More');
+    expect(titleBox()).toBeGreaterThanOrEqual(READABLE);
+  });
+
+  it('the ⋯ menu holds the folded chips and the tools, and a tool opens from it', () => {
+    layout.row = 330;
+    const onOpen = vi.fn();
+    render(<FoldingLeaf onOpen={onOpen} />);
+    const menu = openOwnMore();
+    expect(within(menu).getByTestId('studio-item-header-folded-chips')).toContainElement(within(menu).getByTestId('hdr-kind-chip'));
+    expect(within(menu).getAllByRole('menuitem').map((el) => el.getAttribute('data-testid'))).toEqual([
+      'studio-item-tool-layers',
+      'studio-item-tool-references',
+    ]);
+    expect(within(menu).getByTestId('studio-item-tool-references')).toHaveTextContent('References3');
+    fireEvent.click(within(menu).getByTestId('studio-item-tool-references'));
+    expect(onOpen).toHaveBeenCalledWith('references');
+  });
+
+  it('it follows the row: folds when the row narrows, comes back when the title would keep its width beside them', () => {
+    render(<FoldingLeaf />);
+    expect(screen.getByTestId('probe-tools')).toBeInTheDocument();
+    expect(screen.queryByTestId('hdr-more')).toBeNull();
+    resizeRow(330);
+    expect(screen.queryByTestId('probe-tools')).toBeNull();
+    // 480 − 32 − 38 − 146 − 137 = 127 px with them back: they come back.
+    resizeRow(480);
+    expect(screen.getByTestId('probe-tools')).toBeInTheDocument();
+    expect(screen.getByTestId('hdr-kind-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('hdr-more')).toBeNull();
+  });
+
+  it('CONTROL: at 470 px the title would keep only 117 px beside them: they stay folded', () => {
+    render(<FoldingLeaf />);
+    resizeRow(330);
+    resizeRow(470);
+    expect(screen.queryByTestId('probe-tools')).toBeNull();
+    expect(screen.getByTestId('hdr-more')).toBeInTheDocument();
+  });
+
+  it('CONTROL: at a 632 px row the title has its room: nothing folds and there is no ⋯ of the header’s own', () => {
+    render(<FoldingLeaf />);
+    expect(screen.getByTestId('probe-tools')).toBeInTheDocument();
+    expect(screen.getByTestId('hdr-kind-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('hdr-more')).toBeNull();
+  });
+
+  it('CONTROL: a header whose pillar names no fold menu folds nothing (the title is cut instead)', () => {
+    layout.row = 330;
+    render(<FoldingLeaf foldMenu={false} />);
+    expect(screen.getByTestId('probe-tools')).toBeInTheDocument();
+    expect(screen.getByTestId('hdr-kind-chip')).toBeInTheDocument();
     expect(screen.getByTestId('hdr-title')).toHaveAttribute('title', `${TITLE}\n${INTERNAL_ID}`);
   });
 });
