@@ -286,6 +286,23 @@ afterEach(() => {
 
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * Every "Read-only" that names the PACKAGE as its reason: the identity strip's
+ * chip and, since objectstack#29705, the header badge, which draws the same
+ * word through the same key. A type-gate lock carries no such reason.
+ */
+function packageReadOnlyMarks(): HTMLElement[] {
+  return screen
+    .queryAllByText('Read-only', { exact: true })
+    .filter((el) => (el.getAttribute('title') ?? '').includes('Read-only package'));
+}
+
+/** The package names itself as the reason, and every "Read-only" on screen gives that reason. */
+function expectPackageReadOnly(): void {
+  expect(packageReadOnlyMarks()).not.toHaveLength(0);
+  expect(screen.getAllByText('Read-only', { exact: true })).toEqual(packageReadOnlyMarks());
+}
+
 describe('PermissionMatrixEditPage — the locked editor offers New similar (objectui#5987)', () => {
   it('renders "New similar" as the primary action where Save would be, and no Save', async () => {
     await renderRouted();
@@ -483,7 +500,7 @@ describe('PermissionMatrixEditPage — no clone prompt where the artifact tier i
   it('a host-locked package (readOnly) shows the package lock, not a clone prompt', async () => {
     await renderPlain({ readOnly: true, packageId: 'com.example.showcase' });
 
-    expect(screen.getByText('Read-only', { exact: true })).toBeInTheDocument();
+    expectPackageReadOnly();
     expect(cloneButtons()).toHaveLength(0);
   });
 });

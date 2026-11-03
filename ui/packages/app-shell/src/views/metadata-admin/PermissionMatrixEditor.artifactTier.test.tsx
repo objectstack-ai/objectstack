@@ -137,11 +137,29 @@ async function renderMatrix(props?: { packageId?: string; readOnly?: boolean }) 
   await screen.findByText('Account');
 }
 
+/**
+ * Every "Read-only" that names the PACKAGE as its reason: the identity strip's
+ * chip and, since objectstack#29705, the header badge, which draws the same
+ * word through the same key. A type-gate lock carries no such reason.
+ */
+function packageReadOnlyMarks(): HTMLElement[] {
+  return screen
+    .queryAllByText('Read-only', { exact: true })
+    .filter((el) => (el.getAttribute('title') ?? '').includes('Read-only package'));
+}
+
+/** The package names itself as the reason, and every "Read-only" on screen gives that reason. */
+function expectPackageReadOnly(): void {
+  expect(packageReadOnlyMarks()).not.toHaveLength(0);
+  expect(screen.getAllByText('Read-only', { exact: true })).toEqual(packageReadOnlyMarks());
+}
+
 /** The identity-strip read-only badge, or null when the surface is writable. */
 function lockBadge(): HTMLElement | null {
   return (
     screen.queryByText(/^Read-only \(/) ??
-    screen.queryByText('Read-only', { exact: true })
+    packageReadOnlyMarks()[0] ??
+    null
   );
 }
 
@@ -184,7 +202,7 @@ describe('PermissionMatrixEditPage — the ARTIFACT tier locks an env-scope over
     // mirror-image lie of the one #4446 removed.
     expect(screen.queryByText(TYPE_CAPTION)).toBeNull();
     // NOT the package wording either — no read-only PACKAGE is involved.
-    expect(screen.queryByText('Read-only', { exact: true })).toBeNull();
+    expect(packageReadOnlyMarks()).toHaveLength(0);
 
     // The hint carries the server's own reason, the same place the 403 text
     // puts it. It names the env hatch only to say the hatch does not open a set
@@ -338,8 +356,7 @@ describe('PermissionMatrixEditPage — MUST NOT CHANGE: what the artifact tier m
 
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
-    const badge = screen.getByText('Read-only', { exact: true });
-    expect(badge).toHaveAttribute('title', expect.stringContaining('Read-only package'));
+    expectPackageReadOnly();
     expect(screen.queryByText(ARTIFACT_CAPTION)).toBeNull();
     expect(screen.queryByText(TYPE_CAPTION)).toBeNull();
   });
