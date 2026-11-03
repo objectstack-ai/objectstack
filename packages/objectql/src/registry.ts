@@ -722,13 +722,33 @@ function admittedFieldPatches(
 type ServedObjectLayer = 'served' | 'code';
 
 /**
- * [#29903, #29872] Whether `contributor` is an `extend` contribution of a
- * package OTHER than `packageId`: one a fold restricted to `packageId`'s own
- * contributions ({@link SchemaRegistry.getAllObjects}'s `onlyExtensionsOf`)
- * leaves out. The base layer (`own` / `overlay`) is never foreign.
+ * [#29903, #29872] The options that leave `extend` contributions out of an
+ * object fold ({@link SchemaRegistry.getAllObjects}, `listItems`,
+ * `foldObjectExtendersOnto`):
+ *
+ *  - `withoutExtensionsOf` — that package's contributions are left out;
+ *  - `onlyExtensionsOf` — every OTHER package's contributions are left out,
+ *    so only that package's own extensions fold. The protocol's per-package
+ *    layer passes it, naming the listed package.
+ *
+ * Both may be given; a contribution either one leaves out is left out. The
+ * base layer (`own` / `overlay`) is never left out.
  */
-function isForeignExtension(contributor: ObjectContributor, packageId: string | undefined): boolean {
-  return packageId !== undefined && contributor.ownership === 'extend' && contributor.packageId !== packageId;
+export interface ObjectExtensionFoldOptions {
+  withoutExtensionsOf?: string;
+  onlyExtensionsOf?: string;
+}
+
+/** Whether `options` leaves any contribution out (otherwise the fold is the ordinary one). */
+function leavesExtensionsOut(options: ObjectExtensionFoldOptions | undefined): options is ObjectExtensionFoldOptions {
+  return options?.withoutExtensionsOf !== undefined || options?.onlyExtensionsOf !== undefined;
+}
+
+/** [#29903, #29872] Whether `options` leaves `contributor` out of the fold. */
+function isLeftOutExtension(contributor: ObjectContributor, options: ObjectExtensionFoldOptions): boolean {
+  if (contributor.ownership !== 'extend') return false;
+  if (options.withoutExtensionsOf !== undefined && contributor.packageId === options.withoutExtensionsOf) return true;
+  return options.onlyExtensionsOf !== undefined && contributor.packageId !== options.onlyExtensionsOf;
 }
 
 /**
@@ -4685,11 +4705,12 @@ export class SchemaRegistry {
 
   /**
    * [#29903, #29872, ADR-0146 D8 item 3] An object as {@link resolveObject}
-   * resolves it, but with only `packageId`'s own `extend` contributions folded
-   * in, as if no other package had extended it: the same base layer
-   * (`overlay ?? own`), that package's extensions folded in the same order, the
-   * same tail. With no other package's extension it IS {@link resolveObject}'s
-   * answer (the cached body). Uncached otherwise, as {@link resolveOwnerLayer} is.
+   * resolves it, but with the `extend` contributions `options` names left out
+   * of the fold ({@link ObjectExtensionFoldOptions}), as if those packages had
+   * never extended it: the same base layer (`overlay ?? own`), every other
+   * extender folded in the same order, the same tail. With no such
+   * contribution it IS {@link resolveObject}'s answer (the cached body).
+   * Uncached otherwise, as {@link resolveOwnerLayer} is.
    *
    * The reader is the protocol's per-package layer, which serves a package's
    * objects to the package's own export as the package declares them: never
@@ -4699,10 +4720,10 @@ export class SchemaRegistry {
    * ({@link getObjectExtensionsOf}); folded in here too, its field and field
    * patches travel twice, the second time as if the owner shipped them.
    */
-  private resolveObjectWithOnlyExtensionsOf(fqn: string, packageId: string | undefined): ServiceObject | undefined {
-    const contributors = packageId === undefined ? undefined : this.objectContributors.get(fqn);
-    if (!contributors || !contributors.some((c) => isForeignExtension(c, packageId))) return this.resolveObject(fqn);
-    const kept = contributors.filter((c) => !isForeignExtension(c, packageId));
+  private resolveObjectLeavingExtensionsOut(fqn: string, options: ObjectExtensionFoldOptions | undefined): ServiceObject | undefined {
+    const contributors = leavesExtensionsOut(options) ? this.objectContributors.get(fqn) : undefined;
+    if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!))) return this.resolveObject(fqn);
+    const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
     const ownerContrib = kept.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
     return this.foldExtenders(kept, kept.find(c => c.ownership === 'overlay') ?? ownerContrib);
@@ -5512,7 +5533,7 @@ export class SchemaRegistry {
    * matching {@link resolveObject}, so this narrows nothing the fold was doing
    * on an unfolded base.
    */
-  foldObjectExtendersOnto<T>(name: string, base: T, options?: { onlyExtensionsOf?: string }): T {
+  foldObjectExtendersOnto<T>(name: string, base: T, options?: ObjectExtensionFoldOptions): T {
     if (base === null || typeof base !== 'object') return base;
     const fqn = this.resolveObjectKey(name);
     // With nothing to fold, the body still gets its picklist-bound fields
@@ -5520,11 +5541,10 @@ export class SchemaRegistry {
     // registry never saw is served in the one shape every other read uses.
     // By reference when no field names a picklist.
     if (fqn === undefined) return this.finishServedObject(base);
-    // [#29903, #29872] `options.onlyExtensionsOf`: every other package's
-    // `extend` contributions are left out, as on {@link getAllObjects}.
-    const only = options?.onlyExtensionsOf;
+    // [#29903, #29872] The contributions `options` names are left out, as on
+    // {@link getAllObjects} ({@link ObjectExtensionFoldOptions}).
     const registered = this.objectContributors.get(fqn);
-    const contributors = only === undefined ? registered : registered?.filter((c) => !isForeignExtension(c, only));
+    const contributors = leavesExtensionsOut(options) ? registered?.filter((c) => !isLeftOutExtension(c, options)) : registered;
     if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.finishServedObject(base);
     return this.foldExtendersOntoDefinition(
       contributors,
@@ -6263,12 +6283,14 @@ export class SchemaRegistry {
    * Get all registered objects (merged).
    * 
    * @param packageId - Optional filter: only objects contributed by this package
-   * @param options.onlyExtensionsOf - [#29903, #29872] each object is resolved
-   *   with only this package's `extend` contributions folded in, every other
-   *   package's left out ({@link resolveObjectWithOnlyExtensionsOf}). Only the
-   *   protocol's per-package layer passes it, naming the listed package.
+   * @param options - [#29903, #29872] each object is resolved with the `extend`
+   *   contributions these name left out of the fold
+   *   ({@link ObjectExtensionFoldOptions}, {@link resolveObjectLeavingExtensionsOut}):
+   *   `withoutExtensionsOf` one package's, `onlyExtensionsOf` every package's
+   *   but one. The protocol's per-package layer passes `onlyExtensionsOf`,
+   *   naming the listed package.
    */
-  getAllObjects(packageId?: string, options?: { onlyExtensionsOf?: string }): ServiceObject[] {
+  getAllObjects(packageId?: string, options?: ObjectExtensionFoldOptions): ServiceObject[] {
     const results: ServiceObject[] = [];
 
     for (const fqn of this.objectContributors.keys()) {
@@ -6279,7 +6301,7 @@ export class SchemaRegistry {
         if (!hasContribution) continue;
       }
 
-      const merged = this.resolveObjectWithOnlyExtensionsOf(fqn, options?.onlyExtensionsOf);
+      const merged = this.resolveObjectLeavingExtensionsOut(fqn, options);
       if (merged) {
         // Tag with contributor info for UI
         (merged as any)._packageId = this.getObjectOwner(fqn)?.packageId;
@@ -7679,17 +7701,20 @@ export class SchemaRegistry {
    * export, which carries a package's own items enabled or not); every
    * served read leaves it unset and hides them.
    *
-   * [#29903, #29872] `options.onlyExtensionsOf` resolves each listed object
-   * with only that package's `extend` contributions folded in, every other
-   * package's left out ({@link getAllObjects}); no other type reads it. Only
-   * the per-package layer passes it, naming the listed package, so a base's
+   * [#29903, #29872] `options.withoutExtensionsOf` / `options.onlyExtensionsOf`
+   * resolve each listed object with those `extend` contributions left out of
+   * the fold ({@link getAllObjects}); no other type reads them. The per-package
+   * layer passes `onlyExtensionsOf`, naming the listed package, so a base's
    * export carries the base's objects unchanged by its `.custom` pair and by
    * every other package that extends them.
    */
-  listItems<T>(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean; onlyExtensionsOf?: string }): T[] {
+  listItems<T>(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean } & ObjectExtensionFoldOptions): T[] {
     // Special handling for 'object' and 'objects' types - use objectContributors
     if (type === 'object' || type === 'objects') {
-      return this.getAllObjects(packageId, { onlyExtensionsOf: options?.onlyExtensionsOf }) as unknown as T[];
+      return this.getAllObjects(packageId, {
+        withoutExtensionsOf: options?.withoutExtensionsOf,
+        onlyExtensionsOf: options?.onlyExtensionsOf,
+      }) as unknown as T[];
     }
 
     const items = Array.from(this.metadata.get(type)?.values() || []) as T[];

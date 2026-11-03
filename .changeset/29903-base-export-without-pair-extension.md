@@ -14,6 +14,5 @@ After an administrator added a field to a vendor package's object through Studio
 - **The pair's export** is unchanged: it carries the extension in `objectExtensions`.
 - **Every served read is unchanged**: `GET /api/v1/meta/object/<name>`, the object list, the console and the data API keep serving the object with the pair's field and labels folded in.
 
-An extension contributed by any other installed package is still folded into the base's object in the base's export, as before.
 
 `SchemaRegistry.listItems` takes a `withoutExtensionsOf` option beside `includeDisabledPackages`, and `getAllObjects` and `foldObjectExtendersOnto` take the same option: each object is resolved with that package's `extend` contributions left out of the fold. Only the metadata protocol's per-package layer (the package export) passes it.

@@ -425,8 +425,18 @@ describe('#29903, #29872 — a read can fold only one package\'s own extensions'
     industry: body?.fields?.industry?.label,
     name: body?.fields?.name?.label,
   });
-  const listed = (reg: SchemaRegistry, packageId: string, options?: { onlyExtensionsOf?: string }) =>
+  const listed = (reg: SchemaRegistry, packageId: string, options?: { withoutExtensionsOf?: string; onlyExtensionsOf?: string }) =>
     (reg.listItems<any>('object', packageId, options)).find((o) => o?.name === OBJ);
+
+  it('[#29903] `withoutExtensionsOf` leaves that one package\'s extension out, and folds every other', () => {
+    const reg = extended();
+    expect(shape(listed(reg, OWNER_PKG, { withoutExtensionsOf: PAIR_PKG }))).toEqual({ region: false, industry: 'Industry', name: 'Account name' });
+    expect(listed(reg, OWNER_PKG, { withoutExtensionsOf: PAIR_PKG })?._packageId).toBe(OWNER_PKG);
+    expect(shape(reg.foldObjectExtendersOnto(OBJ, vendorAccount(), { withoutExtensionsOf: PAIR_PKG })))
+      .toEqual({ region: false, industry: 'Industry', name: 'Account name' });
+    // A package that extends nothing changes nothing: the cached merged object.
+    expect(listed(reg, OWNER_PKG, { withoutExtensionsOf: 'com.nobody' })).toBe(reg.getObject(OBJ));
+  });
 
   it('the owner\'s listed object with only its own extensions is the object as no package had extended it', () => {
     const reg = extended();
