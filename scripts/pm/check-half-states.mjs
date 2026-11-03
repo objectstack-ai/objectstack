@@ -8129,6 +8129,218 @@ export function isTriageRulingComment(body) {
   return TRIAGE_RULING_ANCHORS.some((re) => re.test(bare));
 }
 
+// ---------------------------------------------------------------------------
+// H74 — an open `pm:queue` / `pm:blocked` card with NO triage audit record in
+// EITHER channel. Maintainer word, 2026-11-03, verbatim: 「他在等,为什么没有用
+// 邮箱提醒你,是否应该立卡改进技能」.
+//
+// The shape: a lane seat files a card with its domain, its grade and `pm:queue`
+// in one write, so every triage sweep disjunct keyed on a MISSING label (H13's
+// sibling readings) passes it by, while the lane side reads 「无分诊审计评论 ⛔
+// 不得认领」 and stops. Both sides wait for the other and nothing rings; the
+// seat that noticed reported it to the maintainer instead of the triage mailbox.
+// Measured the day the word was given: fifteen open queue cards in this shape,
+// two of them p1. The protocol text now carries both halves — the lane rings
+// `Request: triage · #n · first-touch audit` in the round it finds one, and the
+// triage sweep derives the set — and this row IS the sweep's derivation, so the
+// two channels converge on one set.
+//
+// ⛔ Report-only (instrument-discipline: a report row carries no gate and no
+// label): it writes nothing and refuses nothing. Band `state`, H13's: a label
+// says 「queued」 and the record that makes a card queueable is absent.
+// ---------------------------------------------------------------------------
+
+/** The labels H74 speaks about — a card offered to a lane, or parked behind one. */
+export const H74_POPULATION_LABELS = Object.freeze(['pm:queue', 'pm:blocked']);
+
+/**
+ * Exempt by label — the filing card's own list, plus the one in-tree anchor
+ * template that is filed AS `pm:queue` and whose title the main-red regex
+ * below does not open: `fleet-patrols.yml`'s platform-checklist watchdog
+ * (title `check:platform-checklist is red on main`, routing labels
+ * `pm:queue,tooling`, identity label `platform-checklist-watchdog`). Read by
+ * its identity label the way `queue-flake-anchor` is, because the identity
+ * label is the machine's and is never graded off, while the title is one
+ * template's wording. Tracking anchors, epics, seat posts, QA runs, parked
+ * cards and both machine anchors are never first-touched the way a lane card
+ * is, so their silence is the design. Census 2026-11-03 of every
+ * `.github/workflows/**` template that files a card: only this one applies
+ * `pm:queue` on create (`test-nightly-tiers.yml` and the scheduled full-run
+ * card file without it — the full-run refresh may re-queue an unassigned card —
+ * and both titles open `: red on main`, which the regex below reads).
+ */
+export const H74_EXEMPT_LABELS = Object.freeze([
+  TRACKING_ANCHOR_LABEL,
+  'pm:epic',
+  'pm:seat',
+  'qa-run',
+  'status:parked',
+  'queue-flake-anchor',
+  'platform-checklist-watchdog',
+]);
+
+/**
+ * Exempt by title — a main-red anchor card (SKILL.md: 「main-red 锚卡,免审计评论」).
+ * The anchor has no label and no template; its spelling is measured off the
+ * board (2026-11-03, 167 title hits): a seat-filed anchor opens `main red:` /
+ * `main red (…)` / `main red since …` (#28622, #27806, #24057), and the
+ * scheduled-run anchors end their prefix with `: red on main` (#29494,
+ * #28580). ⛔ A card ABOUT main-red (`pm-dispatch(main-red): …`, #29445) opens
+ * with neither and stays in the population.
+ */
+export const H74_MAIN_RED_ANCHOR_TITLE = /^\s*main[ -]red\b|:\s*red on main\b/iu;
+
+/**
+ * The parent read answered with something other than a row or a 404 — the
+ * sub-issue relation is UNREADABLE, which the predicate reports as UNJUDGED
+ * (#4690: an unknown is never an accusation and never a clean reading).
+ */
+export const H74_PARENT_UNREADABLE = Object.freeze({ unreadable: true });
+
+/**
+ * Is this card the fleet's? An App opened it (`user.type` `Bot`, every
+ * `[bot]` login) OR its body opens with a seat signature, since seat-operated
+ * human accounts file cards too. An unreadable author reads as the fleet's,
+ * ⛔ never promoted to a human's. The reading of execution-duties.md 「非车队卡
+ * (作者非 `Bot` 且首行非席位签名)」, shared with H67's read order. Pure.
+ */
+export function isFleetCard(issue) {
+  if (readSignatureLine(issue?.body) !== null) return true;
+  const author = artefactAuthor(issue);
+  return !(author && !author.isApp);
+}
+
+/**
+ * Does this sub-issue INHERIT its parent's domain or grade (SKILL.md: 「sub-issue
+ * 承父卡域 … 免审计评论」)? True when the parent row carries one of the card's
+ * own `domain:*` or `priority:*` labels. Pure; a parent that is not a row
+ * (null, undefined, the unreadable sentinel) inherits nothing.
+ */
+export function h74InheritsFromParent(issue, parent) {
+  if (!parent || parent === H74_PARENT_UNREADABLE || !Array.isArray(parent.labels)) return false;
+  const inherited = labelNames(parent);
+  return labelNames(issue).some((l) => (l.startsWith('domain:') || l.startsWith('priority:')) && inherited.includes(l));
+}
+
+/** The heading a signed first-touch record carries — the filing card's spelling, `## Triage`. */
+const H74_AUDIT_HEADING = /^\s{0,3}#{2,6}[ \t]*Triage\b/imu;
+
+/**
+ * Is this text a triage audit record? Two shapes, both the filing card's: a body
+ * whose first line is a `triage#N` signature and which carries a `## Triage`
+ * heading (fences stripped, so a quoted record is a citation), or one of the
+ * older openings `isTriageRulingComment` already reads, signature-tolerant.
+ * Pure.
+ */
+export function isTriageAuditRecord(text) {
+  const body = String(text ?? '');
+  if (isTriageRulingComment(body)) return true;
+  const signature = readSignatureLine(body);
+  if (signature === null || signature.lane !== 'triage') return false;
+  return H74_AUDIT_HEADING.test(stripMarkdownCode(body, { inline: false }));
+}
+
+/**
+ * Does H74 speak about this card at all? ISSUES only, never a PR; an OPEN card
+ * only (the label on a closed one is residue, H22/H39's reading); a readable
+ * `labels` carrying a population label and none of the exempt ones (#4690: an
+ * unreadable `labels` is out, never read as unlabelled); a FLEET card (the
+ * filing card's 「`[maintainer]` cards」 read as SKILL.md's 非车队卡: a human
+ * author with no seat signature is never first-touched this way); not a
+ * main-red anchor card. The third exemption, a sub-issue inheriting its
+ * parent's domain or grade, costs a read and is judged in the predicate.
+ */
+export function h74SpeaksAbout(issue) {
+  if (!issue || issue.pull_request) return false;
+  if (issue.state === 'closed') return false;
+  if (!Array.isArray(issue.labels)) return false;
+  const labels = labelNames(issue);
+  if (!labels.some((l) => H74_POPULATION_LABELS.includes(l))) return false;
+  if (labels.some((l) => H74_EXEMPT_LABELS.includes(l))) return false;
+  if (!isFleetCard(issue)) return false;
+  return !H74_MAIN_RED_ANCHOR_TITLE.test(String(issue.title ?? ''));
+}
+
+/**
+ * Which cards are worth the PARENT read — H74's second gathering policy, pinned
+ * for the same reason as the first: only a card whose thread was READ and found
+ * clean would fire, so only that card buys the sub-issues parent read
+ * (`subIssueParentPath`, H45's fetch class). An unconsulted or unreadable
+ * thread buys nothing: its row is silent or UNJUDGED already.
+ */
+export function h74NeedsParentRead(issue, commentBodies) {
+  return Array.isArray(commentBodies) && h74QueuedWithoutTriageAudit(issue, commentBodies) !== null;
+}
+
+/**
+ * Which cards are worth a thread fetch — H74's gathering policy, exported and
+ * pinned for `needsMaintainerActionComments`'s reason: a policy that decides
+ * what gets READ AT ALL is where a silent hole would live. Membership, then the
+ * body not already answering.
+ */
+export function needsTriageAuditComments(issue) {
+  return h74SpeaksAbout(issue) && !isTriageAuditRecord(issue?.body);
+}
+
+/**
+ * H74 — null when clean, out of scope or UNCONSULTED; else the finding sentence.
+ *
+ * Three thread states, never two (#4690; H4/H9/H55's contract): `undefined`
+ * unconsulted — the row stays SILENT rather than fabricate a card nobody read
+ * (the summary clause counts the gap); `null` consulted and UNREADABLE — the
+ * row fires UNJUDGED, never clean; `string[]` read.
+ *
+ * `parent` carries FOUR input states (H45's three plus the unreadable
+ * sentinel): `undefined` not read — the row judges without the sub-issue
+ * exemption; `null` the documented 404, parentless; a row — exempt when the
+ * card inherits its domain or grade from it; `H74_PARENT_UNREADABLE` — the
+ * row fires UNJUDGED, never clean and never silent.
+ *
+ * ⛔ No angle-bracket fragment and no tracker number in the sentence: it is
+ * rendered into a GitHub issue body, and the card it is about is the row's
+ * own link.
+ */
+export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
+  if (!h74SpeaksAbout(issue)) return null;
+  if (isTriageAuditRecord(issue.body)) return null;
+  if (commentBodies === undefined) return null;
+  if (Array.isArray(commentBodies) && commentBodies.some((b) => isTriageAuditRecord(b))) return null;
+  if (h74InheritsFromParent(issue, parent)) return null;
+  const state = labelNames(issue)
+    .filter((l) => H74_POPULATION_LABELS.includes(l))
+    .map((l) => `\`${l}\``)
+    .join(' + ');
+  if (parent === H74_PARENT_UNREADABLE) {
+    return (
+      `${UNJUDGED_MARKER} ${state} card with no triage audit record in either channel (both read) whose ` +
+      'sub-issues PARENT read failed this sweep — whether it inherits a domain or grade from a parent is ' +
+      'UNJUDGED, not settled. Read the parent by hand before acting: an unreadable relation is not an ' +
+      'absent one.'
+    );
+  }
+  if (commentBodies === null) {
+    return (
+      `${UNJUDGED_MARKER} ${state} card whose body carries no triage audit record and whose comment thread ` +
+      'could NOT be read this sweep — the thread is UNJUDGED, not empty. Read it by hand before acting: an ' +
+      'unreadable channel is not an absent one.'
+    );
+  }
+  return (
+    `${state} with NO triage audit record in EITHER channel — not in the body, and not in any comment on the ` +
+    'thread (both were read): nothing opening with a `triage#N` signature and carrying a `## Triage` heading, ' +
+    'and none of the older `Triage:` record openings. The card is invisible to both sides: every triage sweep ' +
+    'disjunct keys on a MISSING label and this card has them all, while the lane side reads 「无分诊审计评论 ⛔ ' +
+    '不得认领」 and stops — each waits for the other and nothing rings. Remedy, triage side: audit it in THIS ' +
+    'round exactly as an ungraded card (first touch: domain, grade, type, `Path:`), and count it in the round ' +
+    'record. Lane side: a seat that would otherwise pull this card rings `Request: triage · #n · first-touch ' +
+    'audit` on the triage mailbox in the same round (`record-recognisers.mjs --mailbox-keys` prints the shape) ' +
+    '— ⛔ never a silent wait, and never a report to the maintainer in the mailbox\'s place. Report-only: ⛔ ' +
+    'never a label, comment or body written from this script. Exempt by design: `tracking`, `pm:epic`, ' +
+    '`pm:seat`, `qa-run`, `status:parked`, `queue-flake-anchor` and `platform-checklist-watchdog` carriers; a non-fleet card (human ' +
+    'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s domain or grade.'
+  );
+}
+
 /**
  * The newest `Claim:` comment on a thread, WITH its timestamp — and
  * deliberately not `governingClaim`, which is the same read narrowed to claims
@@ -17302,12 +17514,8 @@ export function h67ReadOrder(issues, cap = H67_TIMELINE_READ_CAP) {
     return at === -1 ? H67_SELECTION_ORDER_LABELS.length : at;
   };
   // Non-fleet before fleet, inside one rank only; a seat-signed body or an
-  // unreadable author reads as the fleet's.
-  const fleet = (issue) => {
-    if (readSignatureLine(issue?.body) !== null) return 1;
-    const author = artefactAuthor(issue);
-    return author && !author.isApp ? 0 : 1;
-  };
+  // unreadable author reads as the fleet's (`isFleetCard`, shared with H74).
+  const fleet = (issue) => (isFleetCard(issue) ? 1 : 0);
   const age = (issue) => {
     const parsed = Date.parse(issue?.created_at ?? '');
     return Number.isFinite(parsed) ? parsed : Infinity;
@@ -17820,6 +18028,12 @@ export const SWEEP_COUNT_KEYS = [
   'awaitingUndated',
   'maintainerActionCandidates',
   'maintainerActionProbed',
+  // H74's coverage pair: body-clean `pm:queue` / `pm:blocked` cards whose thread
+  // was worth a read, and how many threads were actually read. A shortfall is
+  // not silent (an unread thread fires its own card's UNJUDGED row) but is owed
+  // for the reason every pair here is owed (#4690).
+  'triageAuditCandidates',
+  'triageAuditProbed',
   'blockerTargets',
   'blockerResolved',
   'dispatchRefTargets',
@@ -18181,6 +18395,10 @@ export function summaryLine(counts, findingCount) {
   const awaitingUndated = counts.awaitingUndated ?? 0;
   const maProbed = counts.maintainerActionProbed ?? 0;
   const maCandidates = counts.maintainerActionCandidates ?? 0;
+  // H74's pair — the same shape as H55's over the same shared cache, for a
+  // different candidate set: the queue cards no label-keyed disjunct can see.
+  const taProbed = counts.triageAuditProbed ?? 0;
+  const taCandidates = counts.triageAuditCandidates ?? 0;
   // The fourth pair, and the one whose shortfall is NOT silent: an unresolved
   // `Blocked-by:` target fires its own H19 row on the card that names it, so
   // this number is a total rather than the only place the gap is visible. It
@@ -18342,6 +18560,9 @@ export function summaryLine(counts, findingCount) {
     `\`updated_at\`, judged rather than counted; \`Maintainer-action:\` threads read on ${maProbed} of ` +
     `${maCandidates} judged candidate(s)` +
     `${maProbed < maCandidates ? " — each unread thread fires its own card's H55 row, never dropped" : ''}. ` +
+    `First-touch audits (H74): comment threads read on ${taProbed} of ${taCandidates} body-clean \`pm:queue\` / ` +
+    `\`pm:blocked\` candidate(s)` +
+    `${taProbed < taCandidates ? " — each unread thread fires its own card's UNJUDGED H74 row, never dropped" : ''}. ` +
     `Blocker liveness (H19): targets resolved on ${btResolved} of ${btTargets} distinct \`Blocked-by:\` ` +
     `target(s) named by open \`pm:blocked\` card(s)` +
     `${
@@ -18770,6 +18991,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h14Fallback', '`Blocked-by:` comment fallback read on '],
   ['h9Restart', '`Restart-when:` hold comments read on '],
   ['h55Awaiting', 'Awaiting-maintainer entries (H55): '],
+  ['h74Audit', 'First-touch audits (H74): '],
   ['h19Blockers', 'Blocker liveness (H19): '],
   ['h20Dispatch', 'Dispatch liveness (H20 + H27): '],
   ['h32Seats', 'Seat liveness (H32): '],
@@ -19388,6 +19610,14 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // `inventory`: it alarms about one card. What is left is `stall`'s definition:
   // forward motion stopped, and nothing else will move it.
   H73: 'stall',
+
+  // H74 is a `state`, H13's band for H13's reason: a label (`pm:queue` /
+  // `pm:blocked`) says the card is on a lane's board, and the record that puts a
+  // card there — the triage first touch — is absent from both channels. ⛔ Not
+  // `gate`: nothing was stripped. ⛔ Not `stall`: whether the card is actually
+  // stopped is what the lane's knock and the sweep's audit go and find out.
+  // ⛔ Not `inventory`: it alarms about one card.
+  H74: 'state',
 
   // H63 is a `state`, and the other three bands are refused on their own
   // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
@@ -21019,6 +21249,9 @@ async function sweep(options = {}) {
     markerNearMissAnnounced: [],
     maintainerActionCandidates: 0,
     maintainerActionProbed: 0,
+    // H74's pair, initialised on the same grounds as every counter above.
+    triageAuditCandidates: 0,
+    triageAuditProbed: 0,
     // H56's census (#17314) — how many of the comments H44 already read carry
     // a platform clock to judge a typed stamp against, and the two ways one
     // does not. Initialised so a sweep that throws early renders numbers.
@@ -22956,6 +23189,36 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   const maintainerActionFor = (issue) =>
     maintainerAction.unreadable.has(issue.number) ? null : maintainerAction.comments.get(issue.number);
 
+  // The first-touch audit thread read — H74's one purchase, the same
+  // gated-fallback pattern as H55's over the same shared cache, so a queue card
+  // H2 (assigned) or H4 (blocked, body-clean) already fetched costs no second
+  // request. Its stats pair is separate because it answers for a different
+  // candidate set, and nothing goes quiet on a failure: an unreadable thread
+  // fires its own card's UNJUDGED row, saying the channel is unjudged, not empty.
+  const triageAudit = { comments: new Map(), unreadable: new Set() };
+  const gatherTriageAuditComments = async (issue) => {
+    if (triageAudit.comments.has(issue.number) || triageAudit.unreadable.has(issue.number)) return;
+    stats.triageAuditCandidates = (stats.triageAuditCandidates ?? 0) + 1;
+    try {
+      const bodies = await commentsFor(issue);
+      stats.triageAuditProbed = (stats.triageAuditProbed ?? 0) + 1;
+      triageAudit.comments.set(issue.number, bodies);
+    } catch {
+      triageAudit.unreadable.add(issue.number);
+    }
+  };
+  /** What H74 gets for a card: `undefined` unconsulted, `null` unreadable, else the bodies. */
+  const triageAuditFor = (issue) =>
+    triageAudit.unreadable.has(issue.number) ? null : triageAudit.comments.get(issue.number);
+  /** H74's parent read — H45's fetch class and H45's 404 reading; any other failure is the sentinel. */
+  const readTriageAuditParent = async (issue) => {
+    try {
+      return await rest(subIssueParentPath(OWNER_REPO, issue.number));
+    } catch (err) {
+      return err?.status === 404 ? null : H74_PARENT_UNREADABLE;
+    }
+  };
+
   // H32's gathered seat markers (#11706), judged after the label pages finish:
   // the predicate needs the LANE INVENTORY, and that is a count over the
   // `pm:queue`/`pm:dispatched` listings which are only complete once this loop
@@ -23018,6 +23281,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (needsMaintainerActionComments(issue)) await gatherMaintainerActionComments(issue);
     const unnamedAct = h55AwaitingWithoutMaintainerAction(issue, maintainerActionFor(issue));
     if (unnamedAct) findings.push([issue, 'H55', unnamedAct]);
+    // H74 — the first-touch audit record, judged across BOTH channels on H55's
+    // gated-fetch trade: membership is free (`pm:queue` and `pm:blocked` are
+    // pages this loop consumes, so the row can never be about a card the sweep
+    // did not list), and the thread is bought only for a body-clean member
+    // (`needsTriageAuditComments`), off the shared cache.
+    if (needsTriageAuditComments(issue)) await gatherTriageAuditComments(issue);
+    const auditBodies = triageAuditFor(issue);
+    // The sub-issue exemption is the one read bought AFTER both channels are
+    // clean: the sub-issues parent (H45's fetch class, same 404 reading). Its
+    // failure is never silent — the predicate fires UNJUDGED on the sentinel.
+    const auditParent = h74NeedsParentRead(issue, auditBodies) ? await readTriageAuditParent(issue) : undefined;
+    const unaudited = h74QueuedWithoutTriageAudit(issue, auditBodies, auditParent);
+    if (unaudited) findings.push([issue, 'H74', unaudited]);
     // H29 + H30 — the same free reads, one label-set and one timestamp. Their
     // populations are covered here BY CONSTRUCTION: every H29 pair contains at
     // least one label this loop lists (the ONE-OF vocabulary is the label pages
@@ -24953,6 +25229,11 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // beside its positive twin, the threshold boundary, the governing stamp, the
   // re-entry line, the owing seat, the live record shapes, the text, the band.
   'H73 ruled card in the decision box': 25,
+  // Registered with the first-touch audit row, pin just under the count: the
+  // firing case with both record shapes as its positive controls, the body
+  // channel, every exemption beside a non-exempt twin, the population edges,
+  // the three thread states, the text, the summary pair and the band.
+  'H74 first-touch audit': 46,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28331,6 +28612,90 @@ async function selfTest() {
   b(BATTERY29386, 'H73 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H73')}/${familyRegistryCoverage().emitted.includes('H73')}`, 'stall/true');
   b(BATTERY29386, 'H73: not a loud finding — it never escalates a sweep', isLoudFinding(row73()), false);
   b(BATTERY29386, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY29386) && SELF_TEST_BATTERIES[BATTERY29386] > 0, true);
+
+  // -- H74: an open `pm:queue` / `pm:blocked` card with no triage audit record in
+  //    either channel. One card WITH an audit comment and one WITHOUT, as the
+  //    filing card asks, each record shape its own positive control, and every
+  //    exemption beside the non-exempt twin that still fires.
+  const BATTERY74 = 'H74 first-touch audit';
+  const SIG74 = 'triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U';
+  const LANE_SIG74 = 'domain:server#4 · os-support-ai · session_01WGufzhd2Ad9ANGTyAMW7pH';
+  const AUDIT74 = `${SIG74}\n\n## Triage\n\n- lands in domain:server; p2; Task.\nPath: none`;
+  const OLD74 = 'Triage: lands in packages/rest; p2; rationale: the route owner is the server lane.';
+  const card74 = (extra = {}) => ({
+    number: 29613,
+    state: 'open',
+    title: 'rest(record): the audit log row is dropped on bulk delete',
+    labels: [{ name: 'pm:queue' }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    body: `${LANE_SIG74}\n\n## 维护者速读\n\n- 问题:…`,
+    ...extra,
+  });
+  const h74 = (comments, extra = {}) => h74QueuedWithoutTriageAudit(card74(extra), comments);
+  const row74 = (comments, extra = {}) => String(h74(comments, extra) ?? '');
+  b(BATTERY74, 'H74 fires: a queued card whose body and thread (both read) carry no audit record', typeof h74(['looks good', 'Claim: PM loop round 2']), 'string');
+  b(BATTERY74, 'H74 row: names the state label and both channels', ['`pm:queue` with NO triage audit record in EITHER channel', 'both were read'].every((x) => row74([]).includes(x)), true);
+  b(BATTERY74, '⛔ H74: a signed `## Triage` comment on the thread is the record — clean', h74(['first comment', AUDIT74]), null);
+  b(BATTERY74, '⛔ H74: the older `Triage:` opening is a record too — clean', h74([OLD74]), null);
+  b(BATTERY74, 'H74 control: the same `Triage:` opening under a LANE signature still reads (a self-triage record) — clean', h74([`${LANE_SIG74}\n\n${OLD74}\nRuling-ref: 「车道席自分诊」`]), null);
+  b(BATTERY74, 'H74 control: a triage-signed comment with NO `## Triage` heading is not a record — fires', typeof h74([`${SIG74}\n\nRound record: nothing to grade this fire.`]), 'string');
+  b(BATTERY74, 'H74: a `## Triage` heading as the FIRST line reads under the older anchor whatever the signature (H33\'s reading, kept) — clean', [h74([`${LANE_SIG74}\n\n## Triage\n\nself-triage: p2`]), h74(['## Triage\n\np2'])].join(), ',');
+  b(BATTERY74, 'H74 control: a `## Triage` heading BELOW prose is a record only under the TRIAGE signature — a lane-signed one fires', typeof h74([`${LANE_SIG74}\n\nRound note first.\n\n## Triage\n\nplease grade this`]), 'string');
+  b(BATTERY74, 'H74 control: …and the same body under the triage signature is clean, so the silence is the signature\'s', h74([`${SIG74}\n\nRound note first.\n\n## Triage\n\np2`]), null);
+  b(BATTERY74, '⛔ H74: a `## Triage` heading inside a backtick FENCE is a citation, not a record — fires', typeof h74([`${SIG74}\n\nquoting the template:\n\`\`\`\n## Triage\n\`\`\`\n`]), 'string');
+  b(BATTERY74, 'H74: a deeper heading (`### Triage`) under the triage signature reads', h74([`${SIG74}\n\n### Triage\n\np2`]), null);
+  b(BATTERY74, 'H74 body channel: a BODY that is itself the record is clean, and buys no thread', [h74(undefined, { body: AUDIT74 }), h74([], { body: AUDIT74 }), needsTriageAuditComments(card74({ body: AUDIT74 }))].join(), ',,false');
+  b(BATTERY74, 'H74 gating: a body-clean member is worth a fetch', needsTriageAuditComments(card74()), true);
+  b(BATTERY74, '⛔ H74 thread states: UNCONSULTED is silent, never a fabricated row', h74(undefined), null);
+  b(BATTERY74, 'H74 thread states: UNREADABLE fires UNJUDGED, never clean', row74(null).startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(row74(null)) && row74(null).includes('not empty'), true);
+  b(BATTERY74, 'H74 population: `pm:blocked` is spoken about too, and the row names it', row74([], { labels: [{ name: 'pm:blocked' }, { name: 'domain:spec' }] }).startsWith('`pm:blocked` with'), true);
+  b(BATTERY74, '⛔ H74 population: a `pm:dispatched` card is out of scope (its claim is H2\'s subject)', h74([], { labels: [{ name: 'pm:dispatched' }, { name: 'domain:spec' }] }), null);
+  for (const exempt of ['tracking', 'pm:epic', 'pm:seat', 'qa-run', 'status:parked', 'queue-flake-anchor', 'platform-checklist-watchdog']) {
+    b(BATTERY74, `⛔ H74 exempt: a \`${exempt}\` carrier is silent`, h74([], { labels: [{ name: 'pm:queue' }, { name: exempt }] }), null);
+  }
+  b(BATTERY74, 'H74 exempt control: the same card with an unrelated label beside `pm:queue` still fires', typeof h74([], { labels: [{ name: 'pm:queue' }, { name: 'tooling' }] }), 'string');
+  // 「`[maintainer]` cards」 read as SKILL.md's 非车队卡: a human author whose body opens with no seat signature.
+  const HUMAN74 = { login: 'yibowang', type: 'User' };
+  const APP74 = { login: 'objectstack-fleet[bot]', type: 'Bot' };
+  b(BATTERY74, '⛔ H74 exempt: a non-fleet card — human author, no seat signature — is silent, whatever its labels', h74([], { user: HUMAN74, body: '## 问题\n\n导出按钮无反应' }), null);
+  b(BATTERY74, 'H74 exempt control: the same human account with a SEAT-SIGNED body is the fleet\'s — fires', typeof h74([], { user: HUMAN74 }), 'string');
+  b(BATTERY74, 'H74 exempt control: an App author with an unsigned body is the fleet\'s — fires', typeof h74([], { user: APP74, body: '## 问题\n\n导出按钮无反应' }), 'string');
+  b(BATTERY74, '⛔ H74 exempt control: an UNREADABLE author is never promoted to a human\'s — fires', typeof h74([], { user: undefined, body: '## 问题\n\n导出按钮无反应' }), 'string');
+  b(BATTERY74, 'H74 fleet reader: the one `isFleetCard` drives H67\'s order leg too — a human card sorts before a fleet card in one rank', h67ReadOrder([{ number: 2, labels: [{ name: 'pm:queue' }], user: APP74, body: 'x' }, { number: 1, labels: [{ name: 'pm:queue' }], user: HUMAN74, body: 'x' }]).read.map((i) => i.number).join(), '1,2');
+  // A main-red anchor card, by its measured title openings.
+  for (const title of ['main red: Dogfood Regression Gate — GET /packages/:id/customizations 404s', 'main red (Dogfood Regression Gate 1/3) since 21c4bdd8: two pins', 'main red since #24009: the census still pins route-ledger.ts', 'Main-red: Spec property liveness cites a retired key', '4-hourly full run: red on main (CI)', 'nightly-tiers: red on main']) {
+    b(BATTERY74, `⛔ H74 exempt: a main-red anchor title is silent — ${title.slice(0, 24)}…`, h74([], { title }), null);
+  }
+  b(BATTERY74, 'H74 exempt control: a card ABOUT main-red (`pm-dispatch(main-red): …`) stays in the population — fires', typeof h74([], { title: 'pm-dispatch(main-red): when the anchor card closes, the held seats are rung' }), 'string');
+  b(BATTERY74, 'H74 exempt control: `red on main` without the prefix colon is prose, not an anchor — fires', typeof h74([], { title: 'rest: the export route goes red on main-like boards' }), 'string');
+  // A sub-issue inheriting its parent's domain or grade — the read bought last.
+  const domainParent = { number: 29600, labels: [{ name: 'tracking' }, { name: 'domain:server' }] };
+  const gradeParent = { number: 29601, labels: [{ name: 'tracking' }, { name: 'priority:p2' }] };
+  const strangerParent = { number: 29602, labels: [{ name: 'tracking' }, { name: 'domain:ui' }, { name: 'priority:p1' }] };
+  b(BATTERY74, '⛔ H74 exempt: a sub-issue whose parent carries its `domain:*` is silent', h74QueuedWithoutTriageAudit(card74(), [], domainParent), null);
+  b(BATTERY74, '⛔ H74 exempt: …or its `priority:*`', h74QueuedWithoutTriageAudit(card74(), [], gradeParent), null);
+  b(BATTERY74, 'H74 exempt control: a parent sharing NEITHER label inherits nothing — fires', typeof h74QueuedWithoutTriageAudit(card74(), [], strangerParent), 'string');
+  b(BATTERY74, 'H74 exempt control: a parentless card (the documented 404) fires, and an unread parent fires as before', [typeof h74QueuedWithoutTriageAudit(card74(), [], null), typeof h74([])].join(), 'string,string');
+  b(BATTERY74, 'H74 parent states: the UNREADABLE sentinel fires UNJUDGED, never clean and never silent', (() => { const r = String(h74QueuedWithoutTriageAudit(card74(), [], H74_PARENT_UNREADABLE)); return r.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(r) && r.includes('PARENT read failed'); })(), true);
+  b(BATTERY74, '⛔ H74 parent states: a parent row never EXCUSES a card an audit already answers, and never reaches an out-of-scope card', [h74QueuedWithoutTriageAudit(card74(), [AUDIT74], strangerParent), h74QueuedWithoutTriageAudit(card74({ state: 'closed' }), [], strangerParent)].join(), ',');
+  b(BATTERY74, 'H74 parent gating: only a card whose thread was READ and found clean buys the parent read', [h74NeedsParentRead(card74(), []), h74NeedsParentRead(card74(), [AUDIT74]), h74NeedsParentRead(card74(), null), h74NeedsParentRead(card74(), undefined), h74NeedsParentRead(card74({ title: 'main red: x' }), [])].join(), 'true,false,false,false,false');
+  b(BATTERY74, 'H74 inherit reader: a null, undefined or sentinel parent inherits nothing, never a crash', [h74InheritsFromParent(card74(), null), h74InheritsFromParent(card74(), undefined), h74InheritsFromParent(card74(), H74_PARENT_UNREADABLE), h74InheritsFromParent(card74(), { labels: undefined })].some(Boolean), false);
+  b(BATTERY74, '⛔ H74 population: a closed card, a PR row, an unreadable `labels` and a missing row are all silent, none a crash', [h74([], { state: 'closed' }), h74([], { pull_request: {} }), h74([], { labels: undefined }), h74QueuedWithoutTriageAudit(undefined, [])].every((v) => v === null), true);
+  b(BATTERY74, 'H74 population: a null body is no crash and no record — the card still fires on an empty thread', typeof h74([], { body: null }), 'string');
+  b(BATTERY74, 'H74 exempt list: the constant carries exactly the filing card\'s six labels plus the watchdog anchor\'s identity label', [...H74_EXEMPT_LABELS].sort().join(), ['platform-checklist-watchdog', 'pm:epic', 'pm:seat', 'qa-run', 'queue-flake-anchor', 'status:parked', 'tracking'].join());
+  // The watchdog anchor as fleet-patrols.yml files it: App author, `pm:queue,tooling` routing, identity label. Its
+  // title does NOT open the main-red regex (no colon before `red on main`), so the identity label is what exempts it.
+  const WATCHDOG74 = { title: 'check:platform-checklist is red on main', user: APP74, body: 'os-platform-checklist-watchdog\n\nThe gate is red on main.' };
+  b(BATTERY74, '⛔ H74 exempt: the platform-checklist watchdog anchor is silent by its identity label', h74([], { ...WATCHDOG74, labels: [{ name: 'platform-checklist-watchdog' }, { name: 'pm:queue' }, { name: 'tooling' }] }), null);
+  b(BATTERY74, 'H74 exempt control: the same card WITHOUT the identity label is in the population — the title alone does not exempt it', typeof h74([], { ...WATCHDOG74, labels: [{ name: 'pm:queue' }, { name: 'tooling' }] }), 'string');
+  b(BATTERY74, 'H74 exempt control: …because its title does not open the main-red regex', H74_MAIN_RED_ANCHOR_TITLE.test(WATCHDOG74.title), false);
+  b(BATTERY74, 'H74 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row74([])) || /#[0-9]/.test(row74([])) || /[<>]/.test(row74(null)) || /#[0-9]/.test(row74(null)), false);
+  b(BATTERY74, 'H74 text: names both remedies — the triage first touch and the lane\'s bell — and the report-only boundary', ['audit it in THIS round', '`Request: triage · #n · first-touch audit`', '--mailbox-keys', 'never a label, comment or body written'].every((x) => row74([]).includes(x)), true);
+  b(BATTERY74, 'H74 summary: the coverage pair is reported', saidBy('h74Audit', summaryLine({ triageAuditCandidates: 15, triageAuditProbed: 15 }, 0)).includes('comment threads read on 15 of 15 body-clean'), true);
+  b(BATTERY74, 'H74 summary: …and a shortfall says each unread thread fires its own UNJUDGED row', saidBy('h74Audit', summaryLine({ triageAuditCandidates: 15, triageAuditProbed: 12 }, 0)).includes("fires its own card's UNJUDGED H74 row"), true);
+  b(BATTERY74, 'H74 summary: both count keys ride the enumerated forwarding contract', ['triageAuditCandidates', 'triageAuditProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  b(BATTERY74, 'H74 band: registered as `state` (H13\'s), and the sweep really pushes it', `${familyBand('H74')}/${familyRegistryCoverage().emitted.includes('H74')}`, 'state/true');
+  b(BATTERY74, 'H74: not a loud finding — it never escalates a sweep', isLoudFinding(row74([])), false);
+  b(BATTERY74, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY74) && SELF_TEST_BATTERIES[BATTERY74] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
