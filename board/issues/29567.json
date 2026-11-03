@@ -2,8 +2,8 @@
   "number": 29567,
   "kind": "issue",
   "title": "Studio: a system-scope package opens as editable, with no read-only chip and no Customize, because parsePackages drops system and cloud packages",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:53:08Z",
-  "updated_at": "2026-11-02T19:19:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T21:12:41Z",
+  "closed_at": "2026-11-02T21:10:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29567",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured gap in a landed door, found by the #28579 slice 3 run (run record #29560, PR #29559 `FOLLOW-UPS.md` §15b item 4). The seat confirmed the skip in source.\nReader: `domain:ui` (`ui/packages/app-shell/src/views/studio-design/packages-io.ts`, `parsePackages`: `if (scope === 'system' || scope === 'cloud') continue;`).\nDedupe (open AND closed): `parsePackages system`, `NOT_OVERRIDABLE studio`. #29489 is the landing copy only. No card.\nreach: every system-scope package opened in Studio. Measured on `com.objectstack.plugin-auth` and its dashboard `system_overview`.\ntype: Bug\n\n## What happens\nStudio opens `com.objectstack.plugin-auth` with no read-only chip and no Customize. Editing `system_overview` there is refused 403 `NOT_OVERRIDABLE`, shown as an alert. The person is never offered the route that works.\n\nOver the API the same dashboard **is** customizable in its pair: `ensure-customization` answers 201 (namespace `sys_custom`, `^3`), the declared PUT and the publish land, and every read serves the override. So the server supports it, and only the console does not know the package is read-only.\n\n## Wanted\nStudio reads a system-scope package as read-only, as it reads a code-booted one, and offers Customize where the server's ensure door would accept it. Whether system packages should be customizable at all is a product call; the console and the server must at least agree. Pin both states."

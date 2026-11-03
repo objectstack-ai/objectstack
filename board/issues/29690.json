@@ -1,0 +1,34 @@
+{
+  "number": 29690,
+  "kind": "issue",
+  "title": "Studio: a Chinese name yields no identifier at any create door; derive one by pinyin, by one rule everywhere",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T01:43:43Z",
+  "updated_at": "2026-11-03T02:02:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29690",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ② filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「同意立卡」, agreeing the four UX proposals with the direction written here. Priority on 「相关卡 p1, 让车道处理」. ⛔ Not a claim.\nReader: `domain:ui`. If the pinyin source belongs on the server, say so in the claim.\nDedupe: `pinyin api name`, `API name Chinese label`, `not derived`. `@objectstack/plugin-pinyin-search` is search recall only. **New.**\ntype: enhancement\n\n**Business reason.** A Chinese-speaking administrator names things in Chinese. Today every create door stops them and asks them to invent an English identifier, several times in their first ten minutes.\n\n## What happens\n\nRead on `main` at `3482f3d8d2`. Type 维修中心 or 客户等级 as the name: the identifier stays empty, and Create waits for a hand-typed one.\n\n| door | where | sentence (zh) |\n|:--|:--|:--|\n| New package | `metadata-admin/PackageFormDialog.tsx:538` | 显示名称里没有可用来生成 ID 的英文字母，请手动填写 |\n| New object and other items | `studio-design/CreateItemDialog.tsx:113` (`toFieldNameLoose`) | 显示名称里没有可用来生成标识的英文字母 |\n| Add field | `studio-design/AddFieldPopover.tsx:147` | 标签里没有可用来生成 API 名称的英文字母 |\n| Generic create | `metadata-admin/ResourceEditPage.tsx:739` | `engine.create.nameNotDerived` |\n\nAn independent review also reports the picklist option value door, and that the package dialog's subtitle promises its advanced section is filled in from the name. Check both.\n\n## Direction (agreed)\n\n- One derivation, shared by every door: Latin letters as today; Chinese by pinyin, as snake_case (`weixiu_zhongxin`). The preview shows it, and the person can still edit it.\n- ⛔ Not a generated opaque name such as `field_3`. These identifiers are written into formulas and APIs, so a person and an AI must be able to read them.\n- The existing rules hold: the namespace prefix, the `__c` suffix in a pair, and the taken-name hint. A collision gets the existing hint.\n- `pinyin-pro` is a dependency of the server plugin only today. Weigh the console bundle cost against an alternative, and state the choice in the PR.\n\n## Done when\n\nEach door above, in zh-CN, offers a valid editable identifier for a Chinese name, and a pin covers the shared derivation.\n\nLinks back: #29672 (the run that met this)."
+}

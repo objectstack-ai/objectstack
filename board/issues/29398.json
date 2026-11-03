@@ -2,8 +2,8 @@
   "number": 29398,
   "kind": "issue",
   "title": "core/security: the org-members completion read trusts the driver's orderBy and replaces the first read's rows, so a driver that drops the order, or a completion that sees fewer rows, can shorten org_user_ids silently",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:03:35Z",
-  "updated_at": "2026-11-02T19:33:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T01:33:41Z",
+  "closed_at": "2026-11-03T01:32:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29398",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: carrying two should-fix findings from the `CONTRACT_REVIEW_TIER` record on PR #29356 (#29281), head `c1b4f69f`. Neither is a must-fix, and the seat lands #29356 without them. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 (no shipped driver shows either case).\n\n## What is wrong (after #29356 lands)\n\n`readOrganizationMembersToCompletion` (`packages/core/src/security/resolve-authz-context.ts`) pages `sys_member` with `{ organization_id, id: { $gt: after } }`, `orderBy id`, and a limit of 10,000. It has two gaps:\n\n1. **It trusts `orderBy`.** Suppose a driver honours `$gt` and `limit` but drops `orderBy`. The repeat guard catches most such pages. But when a page's last row happens to be that page's maximum id, the rows below it that were not returned are skipped, and nothing says so. A monotonic check per page (each `id` strictly greater than the row before it) costs nothing. It would make \"the driver did not honour the order\" as loud as the existing non-advancing-cursor refusal (`AuthzStoreUnavailableError`, 503).\n2. **It replaces the first read's rows rather than unioning them.** The completion branch runs only when Leg 1's `orgMembersLeg` returned 1,000 rows. If the completion's pages then return fewer members (an older snapshot on another connection, or a read failure misclassified as `isMissingTableError`), the result is shorter than what Leg 1 already had. Unioning `orgMembersLeg` into the id set cannot add a non-member, because that read was organization-filtered too. It also guarantees the list is never shorter than before #29356.\n\n## Wanted\n\nBoth fixes in the resolver, plus one test each:\n- A fake driver that ignores `orderBy` on a full page is refused with 503.\n- A completion that returns fewer rows than Leg 1 still yields Leg 1's members.\n\nThe batch-equivalence goldens should not move. Declaration expected: `Clause-②: no`, `Metadata-protocol: none`.\n\nNot in scope: the bind-parameter ceiling and its unremedied driver 500 (the review's should-fix 3). That belongs to the ADR card #29360.\n\nDedupe: searched `org_user_ids`, `readOrganizationMembersToCompletion`; nearest #29281, #29360, #29362. **New.**\n\nLinks back: #29281, #29356, #29360."

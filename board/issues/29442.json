@@ -2,8 +2,8 @@
   "number": 29442,
   "kind": "issue",
   "title": "spec(automation): a flow start input may declare that it is a record id of a named object (#29425 ruling A)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:02:17Z",
-  "updated_at": "2026-11-02T19:59:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T02:06:13Z",
+  "closed_at": "2026-11-03T02:04:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29442",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: ruling A on #29425 (6580257050, batch #458 item 1, maintainer 「同意」). Handled under ruling C: this card and its PR state the rule only. The ruling orders the spec half first. The server half (every start door checks a declared input) is Blocked-by this card.\n\n**Ask.** A flow's start-input declaration gains an optional record-reference form: the input is the id of a record of a named object. The brief suggests `type: 'record'` beside `objectName`, the word the CRUD nodes already use. The spelling is this card's to set. Its describe states the rule: every door that starts the flow by name loads a declared input from the named object in the caller's own scope before the run exists. Unreadable → `404 RECORD_NOT_FOUND`. Not an id → `400 VALIDATION_FAILED` naming the input. An input without the declaration keeps #29365's visible-read rule. Wire it into the flow schema and lint where start inputs are validated, with gen artifacts and docs.\n\nDeclarations: `Clause-②: yes (widening)`, `Metadata-protocol: added`. A spec **minor**, with a `Skills-docs:` line."

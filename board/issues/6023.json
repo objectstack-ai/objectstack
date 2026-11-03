@@ -1,7 +1,7 @@
 {
   "number": 6023,
   "kind": "issue",
-  "title": "[PM seat] domain:devx @ objectstack — 🟢 os-warren · 由 os-warren 账户的项目负责",
+  "title": "[PM seat] domain:devx @ objectstack — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:28Z",
-  "updated_at": "2026-11-02T07:22:47Z",
+  "updated_at": "2026-11-02T23:53:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 454,
+  "comments": 455,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6023",
-  "body": "domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163, and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM — 🟢 os-warren\n\n- **Holder:** `os-warren` (`GET /user`) · `session_01JQwxbaBjisxkQo9hht9bFB` (project thread \"Dispatch the devx lane\", the os-warren account's project) · seated 2026-11-02T07:20Z, opening mark 6571451556.\n- **Previous holder:** `os-zhuang` · `session_01QUs3BvP5Aq9USg5GtmgAAR`, sign-off brief 6553234492, no stay-behind.\n- **Mailbox:** PR #29098 (`Mailbox-of: domain:devx#1 · os-warren`), subscribed by the seated session.\n- **Patrol:** trig_01PCwRHDdLDV3M34Z4318iEU · 18 * * * * (hourly, bound to the seated session).\n- **Concurrency:** at most 3 card threads in hand.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#1` + `head:claude/` PRs.\n\n## Ledger\n\n- **Carried from the previous revision** (the vacant body under brief 6553234492; re-verified per card at its next touch, not at seating): timed holds #27228, #25936, #25870, #25169, #22034 by their own `Restart-when` lines; blocked #27197 (`Blocked-by: #27196`), #26688 (cross-repo docs.objectos.ai#345). Carried, not filed: the `Lint UI` / `ui_consumers` note from the ACCEPT on PR #28501.\n- **Queue at seating:** `pm:queue` ∩ `domain:devx` = #27377 (18.3.0 sweep anchor), #29013, #29026.\n- **First known work, after 18.3.0 ships:** fold the wave-4 checklist accuracy lines on #27377 into `docs/qa/platform-checklist`.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Seat 2 (#20163, `marchtian`) is in office; no `split` notice is in force.\n"
+  "body": "domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163, and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-warren` · `session_01JQwxbaBjisxkQo9hht9bFB` (project thread \"Dispatch the devx lane\"), seated 2026-11-02T07:20Z, signed off 2026-11-02T23:51Z on the maintainer's 「devx 车道走下班流程」 with in-flight zero. Sign-off brief: the comment that follows this revision. `check-handover.mjs` exit 0. No stay-behind.\n- **Mailbox:** PR #29098, closed in this sign-off; the next holder opens its own at seating.\n- **Patrol:** trig_01PCwRHDdLDV3M34Z4318iEU disabled (not deleted).\n- **Takeover:** `/pm-dispatch 接手`, then read this post and the sign-off brief first.\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#1` + `head:claude/` PRs.\n\n## Ledger\n\n- **Queue at sign-off:** `pm:queue` ∩ `domain:devx` = #29627 (p3; even in the round-3 order, so `domain:devx#2`'s by alternation; untriaged at sign-off).\n- **Held by seat 2 (`marchtian`):** #29520 (codemod pilot), #29561 (console-intercept gate's ui members), #28579 slice 3.\n- **Held by other sessions:** #26993 (`os-tesla`).\n- **Decision box:** #29466 (`needs-user-decision`).\n- **Blocked, by their own `Blocked-by:` lines:** #29469, #29465, #29315, #27197, #26688.\n- **Timed holds, by their own `Restart-when:` lines:** #28333, #27228, #25936, #25870, #25169, #22034.\n- **Awaiting the maintainer:** #27030, #25452, #24539.\n- **Main-red anchor:** #29494 (p0, generated). Triage 6583152845 reads it as already fixed by PR #29451; the next green 4-hourly run closes it.\n- **Owed after 18.3.0 ships:** fold the wave-4 checklist accuracy lines on #27377 into `docs/qa/platform-checklist`, including the re-point of `studio-authoring.expression-editors` A2/A4/A6/N0.\n- **Open with the maintainer, privately:** one question raised in the project thread on 2026-11-02, carried into the next term. ⛔ It is not filed and gets no card here.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Seat 2 (#20163, `marchtian`) is in office; no `split` notice is in force.\n\n<!-- signed: domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB -->"
 }

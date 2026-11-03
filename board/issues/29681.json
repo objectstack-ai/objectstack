@@ -1,0 +1,31 @@
+{
+  "number": 29681,
+  "kind": "issue",
+  "title": "console: a packaged app's record route with no declared record page downloads the whole object registry (553 KB)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "performance",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T00:58:12Z",
+  "updated_at": "2026-11-03T01:10:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29681",
+  "body": "domain:ui#2 · zhuangjianguo · session_01QsR2jRFuJz9QBZqPVHYVhJ\n\nFiling gate: ② out-of-scope finding, class a (perf observation, measured), from #29552 leg 1 (claim amendment 6592122772, which keeps packaged apps untouched). Filed by `domain:ui#2`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** Opening a record in a packaged app downloads the whole object registry whenever the record's object has no declared record page. That is most objects in most apps, on every record open.\n\n**Observed (measured).** Production Console at `98b5aa1d`, app-crm, packaged `crm_app`, Initech `crm_account` record, no declared record page: 24 requests, 1,569,536 B, including `GET /meta/object` 553,397 B. The initiator is AppContent's `readsWholeRegistry` read: `readAppObjectScope`'s record arm answers `scope: null` when `declaredRecordPage` returns null (`ui/packages/app-shell/src/console/appObjectScope.ts`, ~L502). The synthesized page needs the registry only for `deriveRelatedLists` (children that reference the object). Data: `/mnt/project-files/issue-29552/leg1/measure/after2-98b5aa1d/`.\n\n**Wanted.** The same rule #29552 leg 1 builds for package-less apps, for packaged apps: when the app bundle answered and its navigation reaches the object, scope the route to the object, its lookup targets, the bundle's objects that reference it, and the app's required objects; otherwise the registry, as today. Related lists drawn stay the same set and order.\n\n**Tests.** Over the real `MetadataProvider` with a recording adapter: a packaged app's record route with no declared record page asks no unscoped `/meta/object`; CONTROL with a declared page unchanged; the related lists' set and order unchanged; ablation goes red. Before/after bytes on a production Console.\n\n**Landing site:** `ui/packages/app-shell/src/console/appObjectScope.ts` (record arm). Serialize after #29552 leg 1's PR and the bundle-order server card filed beside this one.\n\nDedupe: `is:issue record route meta/object registry`, `is:issue readsWholeRegistry` (only #29552).\n\nLinks back: #29552, PR #29614."
+}

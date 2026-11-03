@@ -15,17 +15,15 @@
     "needs-user-decision",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T13:41:38Z",
-  "updated_at": "2026-11-02T15:14:40Z",
+  "updated_at": "2026-11-02T21:54:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29383",
   "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ① a design question named by the `CONTRACT_REVIEW_TIER` review of PR #29370's sibling PR #29369 (#29248), record 6578506913, kept out of that PR to hold it to its claimed surface (it would be a `Clause-②: no (narrowing)` rider on a widening). ⛔ Not a claim. No grade: triage sets it.\n\n## What the code does\n\n`packages/spec/src/ui/action.zod.ts`, `ActionSchema`'s refinement on `confirmText` beside a non-empty `params` (≈L2280–2305 on `main`): refused, because the console opens a confirm dialog and then a separate params dialog, and the remedy the message names is to move the sentence into `description`, which the params dialog draws under its title. The comment beside it says the refusal is scoped by schema boundary: `BulkActionDefSchema` renders the pair as ONE dialog (correct there), and `InlineActionSchema` `.pick()`s from the field factory, so the refusal does not reach it.\n\n`InlineActionSchema` (≈L2581) picks both `params` and `confirmText`. On `main` it did not pick `description`, so an inline author had nowhere to move the sentence and refusing the pair would have left no remedy. PR #29369 adds `description: true` to the pick, so that reason no longer holds once it lands.\n\n## The question\n\nDoes an inline action with `confirmText` and non-empty `params` open two dialogs in the renderer (`elements.tsx` → `ActionRunner` → `useConsoleActionRuntime`), the same way a registered action does? Not measured here.\n\n- If it does: the inline door should refuse the pair with the same message family (move the sentence to `description`), a `Clause-②: no (narrowing)` change with an ADR-0087 entry and a census of inline actions that carry both keys across `examples/`, `packages/**` and cloud fixtures.\n- If it draws one dialog: the inline shape is like the bulk shape, and the `action.zod.ts` comment should say so instead of leaving the question open.\n\n## Wanted\n\nMeasure the renderer path for an inline action carrying both keys, count the in-repo inline actions that do, and land whichever of the two answers the measurement gives, with a test that pins it.\n\nBlocked-by: #29248 (the inline `description` pick, PR #29369)\n\nReader who acts: the `packages/spec` ui-schema owner (`domain:spec` by the anchoring rule).\n\nDedupe: searched `confirmText params InlineAction`, `confirmText params inline action refuse`, `confirm-params-guard`: only the closed copy-slot cards #24798 / #24814 and unrelated dialog cards. **New.**"

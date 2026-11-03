@@ -1,0 +1,35 @@
+{
+  "number": 29685,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth)!: a user preference's owner is fixed when it is saved",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T01:25:47Z",
+  "updated_at": "2026-11-03T02:07:53Z",
+  "closed_at": "2026-11-03T02:07:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T02:07:52Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29685",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ82oFrZdNaDiqbKbJU8Jh3ja)_\nFixes #29630\n\nClause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — no skill or doc teaches changing a saved preference's owner; the one page that names the rule, `content/docs/permissions/system-context.mdx` row 26c, is updated here\n\n## 维护者速读\n\n- 改了什么:`sys_user_preference` 加一条保存规则:更新时若把 `user_id` 改成另一个用户,一律 403 `PERMISSION_DENIED`(系统写除外),与 #29575 给 `sys_personal_view` 的规则同形;两个对象现在共用 plugin-auth 里的一份检查 `owner-fixed-rule.ts`。\n- 为什么改:用户偏好属于保存它的那个用户,规则此前没有对这个对象成立。\n- 风险与回滚:只收窄一种写入(改偏好的属主);只改 `value` 的写入、回显原属主的写入、系统写入都不受影响。回滚即 revert 本 PR。\n- 先看:`packages/plugins/plugin-auth/src/owner-fixed-rule.ts`(共用检查)、`user-preference-hooks.ts`(注册与对象判定)、`personal-view-hooks.ts`(改为调用共用检查,文案不变)。\n- 两分钟验证:`pnpm --filter @objectstack/dogfood exec vitest run --maxWorkers=2 test/user-preference-owner-fixed.dogfood.test.ts`,预期 7/7 通过,三种调用者各一条 403。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **New rule on `sys_user_preference`.** A non-system update that sends a `user_id` other than the stored one is refused `403 PERMISSION_DENIED`, for a member, an organization administrator and a platform administrator alike. The refusal names the row and the `user_id` column and echoes no other id. An update that echoes the stored `user_id`, or does not send it, saves as before; a system write is not judged.\n- **One shared check.** `packages/plugins/plugin-auth/src/owner-fixed-rule.ts` (`isOwnerChange`, `ownerFixedError`, `assertOwnerUnchanged`) now holds the rule for both `sys_personal_view` and `sys_user_preference`. `personal-view-hooks.ts` calls it instead of its inline copy; its behaviour and message are byte-identical. Not exported from a published entry.\n- **Registration.** `user-preference-hooks.ts` registers one `beforeUpdate` hook on `sys_user_preference`, in `AuthPlugin` and in `IdentityObjectsPlugin`, beside the personal-view hooks, so the rule travels with the table.\n- **Docs.** `content/docs/permissions/system-context.mdx` row 26c covers both objects and anchors on the shared check (register regenerated).\n- **Changeset.** `.changeset/29630-user-preference-owner-fixed.md`: `@objectstack/plugin-auth` patch, BREAKING banner, both declaration lines, ADR-0087 `not-required`.\n\nResumed from `claude/project-thread-rq4y7m@34568e18` (the previous card thread's hand-off), merged with `origin/main` `7dae3b3c`. The last commit trims the shared check's header and the changeset's \"Who sees it\" line to the rule alone.\n\n## Why\n\nThe card asks for the `sys_personal_view` shape (#29575) on this object: a user's preferences are their own UI state, and their owner is fixed when they are saved.\n\n## Tests\n\nOn `424e9295`:\n\n- `packages/plugins/plugin-auth/src/user-preference-hooks.test.ts`: registration; a member, an org admin and a platform admin are refused 403; the message names the row and column and no other id; clearing the owner is a change of owner; controls: echo, value-only update, system write, another object.\n- `packages/qa/dogfood/test/user-preference-owner-fixed.dogfood.test.ts` (REST): member, org admin and platform admin cannot hand their own preference to another user (403, the row keeps its owner); controls: echo saves; the owner reads, lists and updates their own preference.\n- `pnpm --filter @objectstack/plugin-auth build && test && typecheck` under the lock: VERDICT command-exit 0, Test Files 216 passed (216), Tests 3703 passed, 10 skipped.\n- Full dogfood battery (`pnpm --filter @objectstack/dogfood test`, the `(narrowing)` arm) under the lock on the full build: VERDICT command-exit 0, Test Files 400 passed, 3 skipped (403); Tests 3304 passed, 28 skipped (3332).\n- Ablations (previous card thread, on `3bbd5da8`, each red then restored with the blob equal to HEAD and `git diff HEAD` empty): dropping the rule call reds the 5 unit refusal pins and keeps the 5 controls green; making the shared check always false reds 6 pins across both objects; guarding the registration (plugin-auth rebuilt, dist-preflight marker present, then `--absent` after restore) reds the member and org-admin REST pins. The platform-admin REST pin stays green under that last ablation because an existing write check already refuses that caller's write there; the unit pin holds the rule on its own for that caller. Since then only comments and the changeset changed in tested files.\n\n## Acceptance notes\n\n- `Clause-②: no (narrowing)`: one accepted write is now refused, and no public export or published type moves.\n- The ablation readings are carried from the hand-off report on the card; the tested code is unchanged since.\n\n## Verification\n\n<details><summary>Derived gates on 424e9295</summary>\n\n- Full build under the lock (`pnpm build --concurrency=2`): VERDICT command-exit 0, Tasks 117 successful, 117 total. History unshallowed for the teardown self-test fixture.\n- `node scripts/pm/dispatch-gates.mjs --commands` (9 paths vs merge base `7dae3b3c`): 95 families. Each run once, stdin from /dev/null, exit captured before any pipe: 95 exit 0, including `check-plugin-teardown-shape.mjs --self-test` (48 cases), `spec check:skill-examples` (282 prose examples), `check:dual-build-cjs-loads` (115 entry points across 70 packages), `check:system-context-census` and `check:type-check-debt` (0 raw tsc errors above the ledger).\n- `dispatch-gates --ran`: 95 derived, 95 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm lint`: exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWZsNmNDugrjfzMoJW)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 29569,
   "kind": "issue",
   "title": "Studio: the All metadata object_extension list shows a .custom pair's extension row with no name ('—')",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "finding",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:54:18Z",
-  "updated_at": "2026-11-02T20:06:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T22:20:01Z",
+  "closed_at": "2026-11-02T22:16:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29569",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured display defect, found by the #28579 slice 3 run (run record #29560, PR #29559 `FOLLOW-UPS.md` §15b item 6). The seat has not re-measured it. Display only, so it is p3.\nReader: `domain:ui` (the All metadata list for `object_extension`).\nDedupe (open AND closed): `object_extension name list`. No card.\nreach: every `object_extension` row in the All metadata area. Measured on the extension of `showcase_task` in `com.example.showcase.custom`.\ntype: Bug\n\n## What happens\nThe `object_extension` list in Studio's All metadata area draws the pair's extension row with \"—\" in the name column. The extension's request in the run was `{ extend, fields }`, with no `name`, so the likely cause is a name column that reads `name` where an extension carries `extend`. The seat has not traced it.\n\n## Wanted\nThe row shows the extended object's name (and its label if the list shows labels). Pin it."

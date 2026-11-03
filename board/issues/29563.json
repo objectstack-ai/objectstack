@@ -2,8 +2,8 @@
   "number": 29563,
   "kind": "issue",
   "title": "packages: the base export carries a published dashboard or report override from its .custom pair, where ADR-0146 D8 item 3 says the base export is unchanged",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:51:11Z",
-  "updated_at": "2026-11-02T19:41:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T21:22:27Z",
+  "closed_at": "2026-11-02T21:20:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29563",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured contract break, found by the #28579 slice 3 run (run record #29560, PR #29559 `FOLLOW-UPS.md` §15b item 1). The run reproduced it through Studio and over the API. The seat has not re-measured it.\nReader: `domain:server` (the export read in `packages/runtime` / `packages/metadata-protocol`).\nDedupe (open AND closed): `export override`, `ADR-0146 D8 export`. #28409 (closed) built the one effective read, and #28914 (open) is the whole-ontology export. Neither covers a base export that serves the pair's item.\nreach: any read-only base whose `.custom` pair has published a dashboard or report override. Measured on `com.example.showcase` with `showcase_ops_dashboard` and `showcase_hours_by_status`.\ntype: Bug\n\n## What happens\nAfter a published override of `showcase_ops_dashboard` (or the report `showcase_hours_by_status`) in `com.example.showcase.custom`, `GET /api/v1/packages/com.example.showcase/export` carries the item with the edited label and the `overrides` key. A published **view** override does not show up in the base export, so the types disagree with each other.\n\n## Why it is wrong\nADR-0146 D8 item 3: \"`GET /packages/hotcrm.custom/export` carries the overriding item with its `overrides` block; `GET /packages/hotcrm/export` carries the base unchanged.\" An export of the base that carries the customer's override cannot be redeployed as the vendor's package, and it stamps a `.custom` item into the base's file.\n\nD8 item 2 also lists \"the export of X's app surface\" among the reads that serve the override. The fix should say which export that phrase means, so that it is not read as `GET /packages/X/export`. If it does mean that route, the ADR contradicts itself, and the owner should rule before the code changes.\n\n## Wanted\n`GET /packages/<base>/export` carries the base's own documents for every type, the same as it already does for views. The pair's export keeps the override with its `overrides` block. Add a pin per type (view, dashboard, report at least), and fix `studio-authoring.package-customize-restore-display` acceptance[4] when it passes."

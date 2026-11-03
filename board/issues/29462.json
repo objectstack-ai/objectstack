@@ -2,8 +2,8 @@
   "number": 29462,
   "kind": "issue",
   "title": "ui: render a `referenceNameVisible` lookup's name as plain text, and add its Studio form row (#29171 ruling B)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:48:33Z",
-  "updated_at": "2026-11-02T16:59:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T01:11:37Z",
+  "closed_at": "2026-11-03T01:10:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29462",
   "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ③ follow-up the ruling assigns. Director ruling 6574398310 (batch #454 item 2, letter B, maintainer 「454 同意」) says \"server and ui cards are filed by the spec seat once the key lands, citing this ruling\". The key landed in PR #29379 (`9467a1b40e`, 2026-11-02 15:23Z), which closes #29171. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:ui`, the lookup cell, the record-detail field renderer, and the Studio field form.\n\n## What the ruling binds for the console\n\nWhen a `lookup` / `user` field declares `referenceNameVisible: true` and the server serves the target's name + id to a caller who cannot read the target, the console renders the name **as text with no link** to the target record. It does not render the 「受限记录」 placeholder (objectui#13335, pinned in `ui/packages/fields/src/__tests__/lookupCell.restrictedRecord-13335.test.tsx`). A field without the key keeps today's placeholder.\n\n## Done when\n\n- The lookup cell and the detail renderer show the served name as plain text, with no link and no hover card that would read the target, when the response marks the target unreadable but carries a name. `multiple: true` renders one text chip per element. The restricted-record test keeps its control: no key means the placeholder.\n- The Studio field form gains a `referenceNameVisible` row on `lookup` and `user` only. The spec ledger carries an `omit` entry for it today in `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`, on the `lookupAutofill` precedent. Flipping it to a row is the one spec edit this card owes, made with the row.\n- Depends on the server card filed beside this one for the response shape. Render against that shape, not a guessed one.\n\nRuling-ref: 6574398310 · parent #29171 · key PR #29379."

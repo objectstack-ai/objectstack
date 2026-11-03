@@ -2,8 +2,8 @@
   "number": 29007,
   "kind": "issue",
   "title": "object.titleFormat has no effect when the object authors no nameField: the registry stamps a derived nameField that outranks the template, so the record title ignores it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:records",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:06:24Z",
-  "updated_at": "2026-11-02T16:49:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T21:31:48Z",
+  "closed_at": "2026-11-02T20:31:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29007",
   "body": "domain:devx#1 · os-warren · session_01JQwxbX9avDwM2goWd7zimE\n\nRuled: 6574393684 · letter B · 2026-11-02T10:06Z\n\nFiling gate: ① a product defect, a QA run clause fail (studio-authoring.no-entry-property-matrix acceptance[1]).\nBusiness reason: an author (or AI agent) who writes `titleFormat: '{code} @ {city}'` on an object gets a save and a publish that both succeed, then a record page and list that show only `code`. The key is deprecated (ADR-0079) but still accepted, so today it is a silent no-op: either it should apply when no nameField is authored, or it should be refused at save with its prescription.\nReader who acts: the triage seat, then the `domain:spec` lane (decide honour vs refuse per ADR-0079 / ADR-0049), with the ui half in `ui/packages/components/src/renderers/layout/containers.tsx` if it is honoured. QA suggestion only: p3.\nDuplicate search: `titleFormat` → 71 hits (closed included). The near ones are closed and different: #24087 (search palette rendered titleFormat before nameField), #25129 / #25071 (docs and lint steering composite titles), #20059 (system objects declaring titleFormat and no pointer). `titleFormat inert nameField stamped` → 5 hits, none about this.\nBatch-of: release-18.3.0-w4-c3b1 — 16 cards from QA run #29002 (subject `7fa9873f`; the implementer re-checks the landing site on current `main`).\n\n## Reproduction\n1. As admin, on a writable package: `PUT /api/v1/meta/object/qar8_tf2?mode=draft&package=PKG` with `{name:'qar8_tf2', sharingModel:'public_read_write', titleFormat:'{code} @ {city}', fields:{code:{type:'text'}, city:{type:'text'}}}` (no nameField), then `POST /api/v1/packages/PKG/publish-drafts` → published.\n2. `GET /api/v1/meta/object/qar8_tf2` → `titleFormat` \"{code} @ {city}\" and a stamped `nameField: \"code\"` (the stored draft has none).\n3. `POST /api/v1/data/qar8_tf2 {code:'ZX-42', city:'Lyon'}`; open the record page and the list in the console.\n\nExpected: the H1 and the list primary read \"ZX-42 @ Lyon\" (or the save refuses titleFormat). Actual: \"ZX-42\". The same with `'{name} · {code}'` on another object → only the name. Reproduced 3 times, fresh browser and sign-in each.\n\n## Mechanism (suspected)\n`packages/spec/src/data/display-name.ts` `provisionPrimary` stamps a derived nameField at registration, so \"no nameField was authored\" is lost; `containers.tsx` (about L2795–2830) ranks nameField / displayNameField above titleFormat, and `packages/metadata-protocol/src/protocol-record-reads.ts` says \"a stamped pointer outranks the template too\". The spec describe says only that \"an explicit nameField now takes precedence\".\n\nQA-source: #29002 · studio-authoring.no-entry-property-matrix · acceptance[1]\n"

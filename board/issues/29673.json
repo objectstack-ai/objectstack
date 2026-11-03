@@ -1,0 +1,34 @@
+{
+  "number": 29673,
+  "kind": "issue",
+  "title": "Studio in zh-CN: a new object publishes \"successfully\" and never reaches the data plane, because its echoed queue column carries a translated label",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T00:55:05Z",
+  "updated_at": "2026-11-03T01:15:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29673",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ① a measured break. Filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「发记录并立卡」. ⛔ Not a claim.\nQA-source: #29672 · studio-authoring.first-run-loop · acceptance[2]\nReader: `domain:server` (the read that translates, the registry judge, and the swallowed failure in `packages/metadata-protocol` / `packages/objectql`). The Studio echo is in `ui`; the seat states in its PR which door it fixes.\nDedupe: `queue translated label`, `isInjectedColumnDefinition`, `registerObject failed`, `zh-CN publish object`. #8037 and #28981 are nearby, neither is this. **New.**\nreach: every person building an object in Studio with a zh-CN console, on the first publish. en is unaffected. Other locales with a bundle label for the column are not measured.\ntype: Bug\n\n**Business reason.** A Chinese-speaking administrator builds their first object, sees 已发布, and gets a page that cannot load records. Restarting does not help, and nothing tells them why. This is the first thing the product asks of a new builder.\n\n## What happens\n\nMeasured on `main` at `3482f3d8d2`.\n\n| step | result |\n|:--|:--|\n| Studio in zh-CN: new object, add a field | autosave PUT carries `fields.queue.label` = 队列, among the injected columns |\n| Publish | `POST /packages/PKG/publish-drafts` 200, outcome `published`, toast 已发布本软件包的 1 项 |\n| `GET /api/v1/meta/object/OBJ` | 200 |\n| `GET /api/v1/data/OBJ` | **404** `OBJECT_NOT_FOUND`, \"Object 'OBJ' is not registered\" |\n| Server log | `[Protocol] registerObject failed for OBJ: Object \"OBJ\" declares a field named `queue`, which the platform reserves ...` |\n\nRunner reading, not re-derived by the PM seat: a restart on the same database logs `[Protocol] Failed to hydrate object/...`, and the data door stays 404.\n\n## Reproduce with a control\n\n1. `GET /api/v1/meta/object/showcase_task` with `Accept-Language: zh-CN`: `fields.queue.label` is 队列. Without the header it is Queue.\n2. `PUT /api/v1/meta/object/qazh_q_en?mode=draft&package=PKG` with `sharingModel: 'private'`, one text field, and the English `queue` definition. Publish. `GET /data/qazh_q_en`: 200.\n3. The same with the zh-CN `queue` definition under `qazh_q_zh`. Publish answers `published`. `GET /data/qazh_q_zh`: 404.\n\nThe label is the only difference.\n\n## Why (read from source, the dev confirms)\n\n`packages/objectql/src/registry.ts:4852` compares the declared column to `QUEUE_FIELD_DEF` byte for byte with `isInjectedColumnDefinition`. A translated label is not identical, so it reads as an author's field and throws the reserved-name error. `packages/metadata-protocol/src/protocol.ts:10480` catches that in a `console.warn`, so publish still reports success. Other injected columns are stored with translated labels too and do not throw.\n\n## Wanted\n\nTwo separate faults, both to be closed:\n\n1. An edit that echoes a read never stores a translated label as the source, on any injected column and any field. A translated read must not be written back as the document.\n2. Publish tells the truth: an item whose registration fails is reported as failed, not `published`. The maintainer's stated rule for this product is loud refusal over silent tolerance.\n\nAlso: a repair for rows already stored this way, since a restart does not recover them, or a statement in the PR of why none is needed. A pin that drives the zh-CN echo through the real door, and a named zh-CN leg on `studio-authoring.first-run-loop`, which names no locale today.\n\nLinks back: #29672. Not part of an epic."
+}

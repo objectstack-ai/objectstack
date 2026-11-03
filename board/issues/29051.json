@@ -2,8 +2,8 @@
   "number": 29051,
   "kind": "issue",
   "title": "automation: a flow with a top-level cycle passes os validate and build; detectCycles runs only at registration and has no author-time home",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:automation",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:26:36Z",
-  "updated_at": "2026-11-02T17:57:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T22:06:13Z",
+  "closed_at": "2026-11-02T21:42:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29051",
   "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① out-of-scope finding of the #28893 dev (os-dev-report 6570600658), filed by `domain:server` seat 5. Graded by this seat: p3, the same class as #28893 (a flow the engine refuses at registration passes the author-time gate, and is silently not registered at boot). Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: an author shipping a flow whose top-level graph has a cycle without a back edge (`start → a → b → a`).\nReader who acts: a `domain:server` seat, with the `domain:spec` seat if the check moves into spec.\n\n## What happens\n\nMeasured by the #28893 dev: such a flow passes `os validate` / `os build` with exit 0. The engine refuses it at `registerFlow` via `detectCycles` (`packages/services/service-automation/src/flow-registration-checks.ts` ~line 738), which is not exported from the package index. Spec has no exported DAG check beside `validateControlFlow` (region bodies are cycle-checked by `analyzeRegion`; the top level is not).\n\n## Wanted\n\n- Choose a home:\n  - (a) a spec export beside `validateControlFlow` that `detectCycles` then calls (a spec card; ⛔ no copy); or\n  - (b) a service-automation index export (a widening of that package's surface).\n- Then add the author-time call in the same CLI gate PR #29043 adds (`flow-region-shape.ts`), with the engine's message.\n- Tests red first; the back-edge case still passes.\n\nBlocked-by: #28893 (PR #29043 adds the gate this extends).\n\nDedupe: searched `flow top-level cycle validate detectCycles`; none. **New.**\n\nLinks back: #28893, PR #29043."

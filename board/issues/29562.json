@@ -2,8 +2,8 @@
   "number": 29562,
   "kind": "issue",
   "title": "records: an option-family field stores a number or boolean as sent (a single select, or an element of multiselect/checkboxes/tags), though its spec value is a string option code",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:44:29Z",
-  "updated_at": "2026-11-02T19:09:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T00:03:00Z",
+  "closed_at": "2026-11-02T23:59:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29562",
   "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ① 产品缺陷 — 具名落点 + 复现. This follow-up is owed by work under review: open_question 2 of the #29244 dev report (issuecomment-6584899923), answered **A, file a follow-up** by contract review issuecomment-6585290571 on PR #29540 and ruled so by this seat. Should-fix S2 of that record names the three siblings below.\nreach: 公开入口实测. The #29244 card thread measured on SQLite and driver-memory through the engine and REST `POST`/`PATCH`, on head `3ffa21c9`. PR #29540 pins `{ free: 3 }` on a free-form `select` as admitted, and the number is stored as the number `3`. The published spec says otherwise: `valueSchemaFor` in `packages/spec/src/data/field-value.zod.ts` gives a single-option field `z.enum(codes)` or `z.string()`, and gives a multi-option field `z.array` of the same element.\n业务理由: a select's stored value is the option code a filter, a picklist and a report compare against. A row stored as the number `3` beside rows stored as the string `\"3\"` splits one option into two values. Filters (`{ status: \"3\" }`), grouping and unique checks then disagree by driver. #29241 fixed the same split for text-family fields. This card is that fix for the option family.\n动手的读者: `domain:server` (objectql), `packages/objectql/src/validation/record-validator.ts`: the select/multiselect branch that PR #29540 edits, beside the #29133 text-family string arm and `isPlainObjectValue`. Triage grades and routes it.\n查重 (includes closed issues): `select number stored as number option code` → 364, `multiselect number element option` → 18, `select field number value string` → 398. None covers this. The nearest are #29244 (object/array on select, in PR #29540), #29277 / #29346 (a cleared select stores `''`), #29241 (the text-family twin), and #25582 (closed, import cell shapes).\n\n## The three siblings (one normalisation, landed once)\n\n1. **Single-value select/radio:** a number or boolean is stored as sent.\n2. **Multi-option fields** (`multiselect`, `checkboxes`, `tags`, and the rest of `MULTI_OPTION_TYPES`): a number or boolean **element** is stored as sent.\n3. **A non-plain object** (`Date`, `Map`, a class instance) on a free-form select is not caught by `isPlainObjectValue`, which is prototype-strict. It falls through to option membership and is stored as sent. This is the same posture as the #29133 text arm, through the same helper.\n\n## Wanted (pick in triage)\n\n- **A:** store the judged string, the way #29241 does for text. `3` becomes `\"3\"` and `true` becomes `\"true\"`. Membership is then judged on the string. A declared-options select with code `\"3\"` admits `3` and stores `\"3\"`.\n- **B:** refuse it with `invalid_type` and the shape sentence, the way PR #29540 refuses an object.\n\nEither is a narrowing of what is stored: A moves a unique answer, as #29241 did. Measure the filter face too (cf. #29486, the number comparand on a text field). Fold in should-fix S3 from 6585290571: realign the record-validator header's \"Rules applied (in order…)\" list with the select-shape and #29133 string-shape rules.\n\n**Order:** build after PR #29540 merges. It inherits the `{ free: 3 }` pin in `record-validator.select-shape.test.ts`, and that pin is the one this card is meant to move."

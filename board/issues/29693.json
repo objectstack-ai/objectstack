@@ -1,0 +1,34 @@
+{
+  "number": 29693,
+  "kind": "issue",
+  "title": "Studio: an item header keeps the item name readable; chips and tools collapse first",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T01:43:52Z",
+  "updated_at": "2026-11-03T02:17:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29693",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ② filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「同意立卡」, agreeing the four UX proposals with the direction written here. Priority on 「相关卡 p1, 让车道处理」. ⛔ Not a claim.\nReader: `domain:ui` (`if-item-header` and the flow and object headers; the rails' customization mark).\nDedupe: `Studio header title truncated`. **New.**\ntype: enhancement\n\n**Business reason.** With the right panel open on an ordinary laptop, a person cannot read which item they are editing.\n\n## What happens\n\nMeasured by screenshot on `main` at `3482f3d8d2`, pane about 1024 px wide, right panel open.\n\n- Interfaces: 工时按状态分布 shows as 工, and 进行中 as 进. The flow header shows \"P…\".\n- After an edit, the type tag, the override chip, the draft state, five tool icons and the more menu take the row. An independent review saw the title vanish at 1183 px too.\n- The flow rail: the selected customized row showed only 已定制（ObjectStack Showcase）, with the name gone.\n- The more menu's trigger sits under the right panel.\n\n## Direction (agreed)\n\n- The name holds a readable minimum width, about 12 characters, with the full name as a tooltip. Chips and tool icons collapse into the more menu first, and the trigger stays reachable.\n- The rail's mark never takes the name's space: shorten it to an icon or 已定制.\n\nDone when: at about 1024 px with the right panel open, all pillars show a readable name, and the more menu is clickable without collapsing the panel.\n\nLinks back: #29672 (off-clause observations)."
+}

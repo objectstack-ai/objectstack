@@ -2,8 +2,8 @@
   "number": 29408,
   "kind": "issue",
   "title": "objectql read path: a declared column the driver did not return stays an absent key, so mongo/memory rows are sparse where SQL rows are not",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:18:04Z",
-  "updated_at": "2026-11-02T17:51:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T22:09:39Z",
+  "closed_at": "2026-11-02T22:08:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29408",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured cross-driver gap, named as follow-up D.1 of the #29094 ruling (option A, maintainer 「同意」, ruling comment 6579342813). Non-blocking, so it is filed as p3.\nReader: `domain:server`, `packages/objectql/src/declared-read-columns.ts` and the engine's read path that calls it.\nDedupe (open AND closed): \"materializeDeclaredFields null driver\" → #8489, #9276 and #4953 (all closed; #9276 is the `undefined`-valued own key, a different shape). \"declared column absent mongo read null\" → none. None fills an absent declared column on read.\nreach: any object served by the mongo or memory driver whose row was inserted without a value for a declared field, read through REST or the engine.\ntype: Bug\n\nBusiness reason: the same record reads differently by driver. SQL answers a declared column as `null`, while mongo and memory leave the key out. A client predicate such as an action `visible` faults on the missing key and hides the button. #29094 keeps that surface sparse by ruling, but a column the read named, and whose persisted state is in hand, has no reason to be absent.\n\n## What the code does on `main`\n- `withDeclaredColumnsOnly` / `rowsWithDeclaredColumnsOnly` (`packages/objectql/src/declared-read-columns.ts`, around line 106) only remove keys outside the declared set. They never add a declared key the driver left out.\n- `packages/drivers/driver-mongodb/src/mongodb-driver.ts` (around lines 83–85) says nothing is stored for a field given no value, so the row has no key for a field that was never written. The memory driver keeps stored null and absent key apart in the same way.\n\n## Wanted\nWhen the read selects a declared column (an explicit `$select` that names it, or a whole-record GET), and the driver returns no key for it, the engine answers `null`. That matches the \"IN HAND\" rule of `materializeDeclaredFields`: the persisted state is in hand, so `null` is honest. Columns the read did not select stay absent, and so do columns that field-level security refused. Pin the result across SQL, mongo and memory."

@@ -1,7 +1,7 @@
 {
   "number": 18549,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 2 — 🟢 os-steve · 由 os-steve 账户的项目负责",
+  "title": "[PM seat] domain:spec · seat 2 — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-steve"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T00:45:41Z",
-  "updated_at": "2026-11-02T11:43:41Z",
+  "updated_at": "2026-11-03T01:01:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 135,
+  "comments": 137,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18549",
-  "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\n**This post is the seat (`domain:spec` seat 2).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/spec.md`, ⛔ not copied here. The previous body (⏳ vacant, written by `os-tesla` `session_01L9qibx5r5nhDMwpRs4SL6D`, with its sign-off brief 6550183759) is the prior revision of this body.\n\n## Current PM\n\n🟢 `os-steve` · `session_01ADHkmSduNGC2SZXszyrNut` (a thread of the Claude Code project \"objectstack spec server\" on the `os-steve` account) · seated 2026-11-02T11:39Z on the maintainer's summons in that project (「spec 车道再加一个座位」).\n\n- **Patrol:** `trig_01LXB2LzxZPgNR1STNR2Z5j2` · `39 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** #29313 (`domain:spec#2 · os-steve`), subscribed by the seat session.\n- **Concurrency:** up to 5 card threads in flight (`batch:5`), the same cap as seat 1 #6017. Pick order is the full lane order (`execution-duties.md` 取卡全序), alternating with seat 1; cards that share a file stay serial in one seat.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`; ⛔ GitHub MCP writes; the `os-steve` account writes no content (assignee only).\n- Posture, round ledger and round reports live in the project, ⛔ not here (project-seat stub).\n\n## Inherited ledger\n\nIn flight at seating: none (the predecessor's brief 6550183759 lists every seat-2 card as landed; no open `domain:spec` card carries a `Seat: domain:spec#2` claim). The rest of the open lane is read live on the board.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch. A file a seat-1 card holds stays with seat 1 until that card lands.\n- **`packages/spec/src/migrations/registry.ts`** is generated and not in git; writers edit `entries/` and `registry.ts.template`. **`merge=os-regen` paths** merge with `bash scripts/pm/os-regen-merge.sh`.\n- **`.objectui-sha`:** the one `SINGLE_CLAIM_PATHS` entry.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n- Other `domain:spec` seats: #6017 (seat 1, same account and project), #18883 (seat 3), #18917 (seat 4), #19357 (seat 5). ⛔ No liveness judgement on them.\n"
+  "body": "domain:spec#2 · os-support-ai · session_01WGufzhJG3tKnksHVa1krBz\n\n**This post is the seat (`domain:spec` seat 2).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/spec.md`, ⛔ not copied here. The previous body (⏳ vacant after `os-steve` `session_01ADHkmSduNGC2SZXszyrNut`) is the prior revision of this body and the archive of that tenure.\n\n## Current PM\n\n🟢 **`os-support-ai`** · `session_01WGufzhJG3tKnksHVa1krBz` (project thread \"Run PM dispatch spec seat 2\"), seated 2026-11-03T00:51Z. Summons: the maintainer (Yibo Wang, `os-support-ai`), 「开两个座位」, in this account's project. The release marker is the clock-out brief 6591584075, so the seat is taken directly.\n\n- **Patrol:** `trig_012ck3mDE4HY2xR8ohcDJWnZ` · `50 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** PR objectstack-ai/objectstack#29671 (`Mailbox-of: domain:spec#2 · os-support-ai`), subscribed.\n- **Concurrency:** at most FIVE active dev cards in this seat (the maintainer, 「每个座位并发5」, 2026-11-03T00:52Z).\n- **Inherited from the previous tenure:** #29360 (`pm:queue`, PR #29501 ACCEPTed, Tier H, waits on a `GOVERNED_APPROVERS` approval; land by hand-off note 6589840994, ⛔ do not re-dispatch). #28640 (`pm:blocked`, `Blocked-by: #29342`).\n- Posture, ledger and round reports live in the project (pointer only).\n\n## Hot-file serial queue\n\n- **This seat holds:** #29415 and #29441, both in `packages/spec/src/api/protocol.zod.ts` (different regions: the `cascadeDeleteObjects` describes vs `GetMetaItemsRequestSchema`; ordinary concurrency, the later lander merges main and regenerates). ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n- **`.objectui-sha`:** the one `SINGLE_CLAIM_PATHS` entry.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Tier:** this session runs below `CONTRACT_REVIEW_TIER`; the account's at-tier budget is spent (maintainer, 2026-10-28), so every contract review this seat owes goes to triage as `Request: contract-review`, ⛔ never in-seat.\n- **Split with seat 3 (#18883, same account and project):** first claim wins; each seat re-reads the other's live `Claim:` comments before claiming.\n- Other `domain:spec` seats: #6017 (seat 1), #18883 (seat 3), #18917 (seat 4), #19357 (seat 5). ⛔ No liveness judgement on them.\n"
 }

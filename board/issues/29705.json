@@ -1,0 +1,32 @@
+{
+  "number": 29705,
+  "kind": "issue",
+  "title": "Studio: one vocabulary for an item's state across the pillars, All metadata and Access",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T02:11:50Z",
+  "updated_at": "2026-11-03T02:11:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29705",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ② filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「第二批也立卡」. Priority on 「相关卡 p1, 让车道处理」. ⛔ Not a claim.\nReader: `domain:ui` (`engine.badge.*` and the directory strings in `ui/packages/i18n/src/namespaces/studio/`).\nGoverns: ADR-0146 D1, D3.\nDedupe: `All metadata badge`, `createOnly`. **New.**\ntype: enhancement\n\n**Business reason.** The same state has different names by screen, so a person has to learn which screen means what, and \"可写\" on a read-only package reads as a contradiction.\n\n## What happens\n\nMeasured by screenshot on `main` at `3482f3d8d2`, zh-CN, on `/_console/studio/com.example.showcase/metadata`.\n\n- The header says 只读 for the package, and its tiles say 可写 on dashboard, report and view, where it means \"can be customized\". Others say 仅可新建 (`engine.badge.createOnly`).\n- The page's lead sentence: 平台协议共暴露 21 个元数据类型（其中 17 个支持运行时覆盖）. \"Protocol\" and \"runtime override\" are engineering terms. It also predates ADR-0146's package-level override.\n- Pillars use 只读 and 自定义. Access adds OWD, CRUD and `Private 私有`; the review reports these, and whether they belong in this vocabulary is the dev's reading.\n\n## Direction\n\n- One word per state, taken from the pillars: read-only, can be customized, customized, added, switched off. Used on the tiles, badges and marks.\n- The tile's word answers \"what can I do here\", in the package's context.\n- The lead sentence states what a person can do, with no count of protocol types.\n- Strings and badge mapping only, no new state.\n\nLinks back: #29691, ADR-0146 D1, D3."
+}

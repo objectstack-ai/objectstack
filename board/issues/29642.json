@@ -1,0 +1,30 @@
+{
+  "number": 29642,
+  "kind": "issue",
+  "title": "[Decision] Push delivery data: name the server that sent a push, so a mobile shell with several saved servers opens a tap on the right one",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T23:39:32Z",
+  "updated_at": "2026-11-03T00:16:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29642",
+  "body": "repo:mobile#1 · os-justin · session_01QSeKYnW1Xf6HDSWz1eGAqv\n\nFiling category ②: a decision only the maintainer can make (the shape of a public contract). It came from objectstack-ai/mobile#174, where the dev stopped on that card's own stop condition.\n\n## 维护者速读\n\n- **一句话问题：** App 里存了多台服务器后，点开 B 服务器发来的推送，会在当前的 A 服务器上打开；推送内容里没有任何「是哪台服务器发的」信息，App 无从判断。\n- **为什么现在定：** 推送契约还在 objectstack-ai/objectstack#29218（草稿，未合并）里，现在加一个可选字段最便宜；合并后再加就是第二次放宽契约。\n- **推荐：** B。Console 注册设备时报上自己加载的来源（就是 App 存下的那个地址），服务器存进设备记录，发推送时原样带回。\n- **需要你做的：** 选 A / B / C。\n\n## Governing text\n\n- `packages/spec/src/api/push-delivery.zod.ts` at objectstack-ai/objectstack#29218 head `aff751de`, lines 90-99. `PushDeliveryDataSchema` is a `z.object` with exactly `notificationId` (required) and `route` (optional, same-server relative path). It has no host, origin or server key.\n- The file is absent on `main` (re-check: `git cat-file -e origin/main:packages/spec/src/api/push-delivery.zod.ts`, which fails).\n- ADR-0012 (push renderer output: title, body, data, sound, badge) carries no identity either.\n- APNs and FCM tell the app nothing about the sender. Every saved server registers the same device token, so the shell cannot tell senders apart locally.\n\n## Options\n\n| Option | What | Customer-visible effect | Effort |\n| --- | --- | --- | --- |\n| A | The push channel adds a server-origin key to `PushDeliveryDataSchema`, taken from the server's configured public URL. | Taps open on the right server, except where the server is reached under another hostname or behind a rewriting proxy. There the origin does not match a saved host, so the tap is dropped. That failure is safe but silent. | One optional key in #29218, plus one line in the #29041 channel. No precedent. |\n| B | The Console sends the origin it was loaded from (`window.location.origin`, which is exactly the host the shell saved) in `RegisterDeviceRequest`. The server stores it on the `UserDevice` row, and the push channel copies it into the push data. | Taps open on the right server in every deployment shape, because the value is the host the shell itself saved. | One optional member each on `RegisterDeviceRequestSchema`, `UserDeviceSchema` and `PushDeliveryDataSchema`, all inside #29218 before it merges, plus the Console's registration call. No precedent. |\n| C | No platform change. The shell keeps routing on the current connection and documents the limit. | Wrong-server taps stay. | None. |\n\n## Four axes\n\n- **Long-term soundness (weight first):** B ties the identity to the exact registration that receives the push, which is how multi-account mobile clients usually scope their tokens. A depends on the server knowing its own public URL, which proxies break.\n- **Real business pull:** saved connections shipped in objectstack-ai/mobile#173, so the defect is reachable today for any user with two servers. No store users yet.\n- **AI-error prevention:** with B, a mismatch is structurally impossible because the value round-trips. With A, a misconfigured public URL fails silently. With C, the wrong page opens with no signal.\n- **Startup focus:** B adds three optional members, all in a PR that has not merged, so there is no second widening later. C adds nothing but keeps the defect.\n\n```\nos-decision-facets\n① long-term: B round-trips the registered origin; A depends on server self-knowledge\n② pull: reachable since mobile#173 for any multi-server user\n③ AI-error: B structurally matched; A silent drop on proxy; C wrong page\n④ scope: B three optional members inside an unmerged PR; C none\nPrior rulings read: push payload server origin|PushDeliveryDataSchema → 2 queries, 0 rulings; ADR-0012 none on identity; thread: none\n```\n\n**Recommendation: B.**\n- Confidence gap: not yet checked whether the Console's registration call (objectstack-ai/objectstack#29042) can send the loaded origin before #29218 merges.\n- Self-check: on axis ① alone, B wins; ②③④ do not flip it.\n\n**After the ruling:**\n- The spec seat adds the member(s) to #29218, or to a follow-up PR if #29218 has merged.\n- objectstack-ai/mobile#174 resumes with a host lookup through the saved-connections `switch` path.\n\nClause-②: yes (this widens a published-to-be contract), so the spec lane owns the change."
+}

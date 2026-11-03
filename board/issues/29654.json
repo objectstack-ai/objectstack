@@ -1,0 +1,33 @@
+{
+  "number": 29654,
+  "kind": "pull_request",
+  "title": "chore(pm): retire half-state row H34; H2 reports every card it named",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T00:00:35Z",
+  "updated_at": "2026-11-03T01:10:26Z",
+  "closed_at": "2026-11-03T01:10:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T01:10:22Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29654",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xCjGpvHD4tRyZ72DtPifmqL)_\n\nPart of #29471\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:删除半态巡检行 H34(认领评论用了非冒号分隔符)。它只在 H2 已经报告的卡上出现,所以由 H2 接着报。\n- 为什么改:#29471 的逐行预筛(评论 6591407246)里只有 H34 三项全过:无独占规则、线上 0 行、被留下的行完整覆盖。席位认领 6591424775。\n- 风险与回滚:只动 `scripts/pm/check-half-states.mjs`;198 种状态逐一比对,H34 报的 42 种 H2 全报,H2 本身逐字不变。可整 PR revert。\n- 先看:删掉的 H34 段落与巡检循环里的两行调用。\n- 两分钟验证:`node scripts/pm/check-half-states.mjs --self-test`,预期 5166 条全过(主干 5202)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **H34 is deleted**: its rationale banner, `CLAIM_NEAR_MISS_MARKER`, `looksLikeClaimContent` and `nearMissClaimSeparators` (all read only by H34), `h34ClaimShapedNonCanonicalSeparator`, its band-registry row, its two-line call beside H2 in the sweep loop, and its self-test block.\n- **H2 is untouched**: `h2AssigneeNoClaimComment` and its call are byte-identical.\n- **Prose pointers** that named H34 now name H2 (an assigned card with no claim the marker reads) or H1 (an unassigned one): the `CLAIM_COMMENT_MARKER` docblock, the list-item marker note, the near-miss census overlap note, H33's blind-spot paragraph and its self-test comment, H50's population note, the H44/H64 artefact-recognition notes and the H60 band comment. Three test names changed (one H50 case and two BATTERY68 cases) with the same assertions.\n- One H60 case compared H60's band to H34's (`familyBand('H60') === familyBand('H34')`). With H34 gone, it now pins `familyBand('H60') === 'state'`, the value both had.\n- No gate, row, constant or battery is added. No battery shrank, so no pin moved.\n\n## Why: every card H34 named is an H2 row\n\nH34 returned null unless the card was pm-tracked (`pm:queue` or `pm:dispatched`), was assigned, had a readable thread and had no comment matching `CLAIM_COMMENT_MARKER`. Under those same conditions, `h2AssigneeNoClaimComment` returns true. So by construction, every H34 row sat on a card H2 already reported. H34 only added the separator's codepoint as a diagnosis. The sweep called both on the same thread in the same loop.\n\nMeasured by importing both trees (`main` at d280265b and this head) and judging 198 states: 6 label sets × 3 assignee sets × 11 threads (em dash, en dash, hyphen, fullwidth colon, blockquoted dash, canonical colon, dash plus colon, prose control, a null body, several near misses, and an empty thread):\n\n- H34 fired on 42 of the 198 states, and H2 fired on all 42 (0 misses).\n- H2's verdict is identical on all 198 states before and after.\n\nLive on objectstack: 0 H34 rows in a full sweep finished 2026-11-02T23:43Z (code at d280265b), per the #29471 pre-screen.\n\n## Verification\n\n- `node scripts/pm/check-half-states.mjs --self-test` on 9fcce366: **5166 cases pass** (5202 at d280265b, so 36 fewer). All 36 are the H34 block.\n- Every battery reads the same `n/floor` as at d280265b, so nothing was re-pinned.\n- Net lines: **+33 / −381 (−348)**, one file.\n\n<details><summary>Local gates on 9fcce366 (`dispatch-gates --commands`)</summary>\n\n- On head 9fcce366, `node scripts/pm/dispatch-gates.mjs --commands` derived 47 commands. All 47 ran, each with a 900 s timeout, with exit codes recorded before any pipe. **All 47 exited 0.**\n- The `--ran` reconciliation printed: `47 derived famil(ies) accounted for — 47 run, 0 NOT-MEASURED`.\n- `node scripts/check-commit-card-trailers.mjs --range d280265b..HEAD`: exit 0.\n- Prerequisite: `pnpm install --frozen-lockfile`.\n- Families CI runs beyond the derived list are read from this PR's check runs, not re-run locally.\n\n</details>\n\n## Acceptance notes\n\n- What is lost is the diagnosis H34 added: the separator's codepoint and the \"re-post with `Claim:`\" remedy. The card is still reported, by H2's row \"assignee set but no claim comment on the thread\".\n- The ownership-marker near-miss census still names a dash-written claim as the `separator` form in its summary clause, so the spelling stays visible on the summary line.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [ ] 3. No formatter ran; `pnpm lint` passes. (no formatter ran; `pnpm lint` was not run locally, so the CI lint job decides it)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `scripts/pm/**` only; `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (except the 维护者速读 block, which the seat contract writes in Chinese)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAmM3BRQQcQSA67VE3L\n"
+}

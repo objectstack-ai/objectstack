@@ -1,0 +1,35 @@
+{
+  "number": 29617,
+  "kind": "issue",
+  "title": "spec + runtime: a package export carries no namespace and no dependencies, so a reinstalled .custom pair lands under the wrong namespace without its base edge; declare both on PackageExportManifestSchema and emit them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T21:51:05Z",
+  "updated_at": "2026-11-03T01:33:36Z",
+  "closed_at": "2026-11-03T01:32:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29617",
+  "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ① the measured blocker of the #28914 server slice (os-dev-report `6589329364`, class b), anticipated by the #28914 spec slice's open question 3 (hand-off 6588925516, option A). Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets it (it blocks a p1).\n\n## What happens\n\nMeasured on `origin/main` `81cd9eb0` through the real door (`HttpDispatcher` + protocol + ObjectQL on SQLite, the #29563 harness): a runtime holds a code base `com.example.showcase` and its pair `com.example.showcase.custom`, installed with `namespace: showcase_custom` and `dependencies: { com.example.showcase: ^1 }`, one dashboard override published.\n\n- `GET /packages/com.example.showcase.custom/export` answers only `dashboards`, `id`, `name`, `version`. `namespace`, `dependencies` and `type` are absent; the registry row on the same runtime holds all of them.\n- `assemblePackageManifest` (`packages/runtime/src/domains/packages.ts`) does not emit them, and `PackageExportManifestSchema` (`packages/spec/src/api/package-lifecycle.zod.ts` L183: `id`, `name`, `version`, `label` + catchall) does not declare them.\n- Reinstall loses both: install-local falls back to `deriveNamespaceFromPackageId` (gives `custom`) and reads `manifest.dependencies` for the ADR-0141 D5 install order and the ADR-0146 D2 override gate. `POST /packages` refuses the export outright (400: no `type`, flat collection keys).\n\nSo the whole-ontology export (#28914) cannot promise \"installable packages\" until each entry carries both.\n\n## Wanted\n\n- `PackageExportManifestSchema` declares `namespace` and `dependencies` as optional fixed keys (shapes as the install manifest's), and `assemblePackageManifest` emits them from the registry row **in the same change**, so neither key is declared and not produced.\n- A round-trip pin: export a `.custom` pair, reinstall it through install-local, read back the same namespace and the base edge.\n- `type` and the flat-collection refusal of `POST /packages` are out of scope (that door is not a reinstall door; adding `type` alone would not make it one). Name them in the PR as out of scope.\n- Cross-domain (spec + runtime) in one PR, per the option the spec slice recorded; triage confirms the lane.\n\nSerial: PR-level, beside #29373 (open, same schema, `withheldMaps`). #28914's server slice resumes on top of this card.\n\nDedupe: searched `PackageExportManifestSchema namespace dependencies`, `export manifest namespace dependencies reinstall`, `assemblePackageManifest namespace`; nearest #28914 (the consumer), #29373 (same schema, another key), #28404 (the pairing constants, closed). **New.**\n\nLinks back: #28914, PR #29100, #29373, #29563."
+}

@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T19:51:51Z",
-  "updated_at": "2026-11-02T19:59:06Z",
+  "updated_at": "2026-11-02T22:22:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29579",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① the two should-fix findings of the `CONTRACT_REVIEW_TIER` record on PR #29576 (#29460, head `7e8a7b30`, verdict PASS), plus open question 3 of the #29460 dev (os-dev-report `6586656992`), which that review confirmed as a spec-lane follow-up. Filed by `domain:server` seat 3 for the `domain:spec` lane. ⛔ Not a claim. Suggested-grade: p3 (reference text and a type name only; the served behaviour is unchanged and the current describe is not false about it).\n\n## What happens\n\nPR #29576 serves `FieldSchema.referenceNameVisible` on `$expand`. A refused target answers `{ id, name, readRefused: true }`. Three gaps remain in `packages/spec/src/data/field.zod.ts` (source reading, not reproduced):\n\n1. **The name's source.** The describe says the served name is \"the target object's `nameField` value\". The engine resolves the ADR-0079 D4 display name instead (`nameField`, then `displayNameField`, then the derived title), through `resolveRecordDisplayName`. Since D7's designate-only provisioning the two coincide for registry-owned objects, but the describe is narrower than the resolver and can drift from it.\n2. **The floor cases.** The describe lists three cases where the `Record #` floor with the id is served instead of the name. These are a name column kept by FLS, by a `maskingRule`, or by a formula hop. `servableNameField` in `packages/objectql/src/engine-reference-name-visible.ts` serves the floor in two more cases:\n   - an explicit `nameField` on a column that is neither title-typed nor autonumber;\n   - no usable answer from the security layer.\n3. **No named schema.** The expanded form of a lookup is `ReferenceIdValueSchema | z.record(z.string(), z.unknown())` (`field-value.zod.ts`). The served object satisfies it, so nothing is refused today. But the shape the ui card (#29462) renders has no name in the spec, and the PR #29576 body's table is its only statement.\n\n## Wanted\n\n- Item 1: the describe names the ADR-0079 display name, not `nameField`.\n- Item 2: the describe lists all five floor cases, or ends its list with a closing clause that covers the cases the engine cannot read without computing what the security layer owns.\n- Item 3: a named schema (for example `ReferenceNameOnlyValueSchema`) for `{ id, name, readRefused: true }`, joined into the expanded lookup value's union. The engine's exported `ReferenceNameOnlyValue` type then derives from it. Declare it `Metadata-protocol: added` with `Clause-②: yes (widening)` if the union widens. Otherwise the type only names an accepted shape, and a different declaration may fit; the spec seat measures which.\n- Regenerate the reference docs the describe feeds (`content/docs/references/data/field.mdx`).\n\nSerial: after PR #29576 merges (same file, `field.zod.ts`).\n\nDedupe: searched `referenceNameVisible describe`, `ReferenceNameOnlyValue`; nearest #29460, #29462. **New.**\n\nLinks back: #29460, #29576, #29462, #29171."

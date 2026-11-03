@@ -2,8 +2,8 @@
   "number": 29503,
   "kind": "issue",
   "title": "plugins: the rest of the sharing and approvals recipient reads still truncate at 10,000 rows or turn a failed read into \"nobody\" (sys_team_member, sys_user_position, holdsRole/teamHasMember, queue expandSpec) — #29362 close-out",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T16:46:52Z",
-  "updated_at": "2026-11-02T19:44:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T22:06:48Z",
+  "closed_at": "2026-11-02T22:05:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29503",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① out-of-scope findings of the #29362 dev (os-dev-report `6582502987`, findings 1 and 2) and should-fix 2 and 3 of the `CONTRACT_REVIEW_TIER` record on PR #29497, accepted by the seat. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p2 (same class as #29362: on a directory outage, or past 10,000 rows, a recompute can revoke share grants or route an approval to nobody).\n\n## What happens\n\n#29362 (PR #29497) makes the two `sys_member` reads, sharing `TeamGraphService.expandRoleUsers` and approvals `expandMembershipTierUsers`, read to completion through the shared `keysetWalk` (`@objectstack/types`). A failed or incomplete read now throws instead of answering `[]`. The same family still answers short or empty elsewhere (source reading, not reproduced):\n\n1. **`sys_team_member`**: plugin-sharing `TeamGraphService.expandUsers` reads at `limit: 10000`, with a catch that answers `[]`.\n2. **`sys_user_position`**: the `expandPositionUsers` limb in both plugin-sharing and plugin-approvals reads at `limit: 10000`, and the catch swallows the failure.\n3. **`holdsRole` / `teamHasMember`** (plugin-sharing): `limit: 1`, and the catch answers `false`. A per-user recompute (`recipient-membership-recompute.ts`) can therefore revoke one user's grant on an outage, where `expandRoleUsers` now refuses.\n4. **Queue `expandSpec`** (`ownership-queue-service.ts`, around L306-L313): catches any expansion failure, warns \"contributes nobody until it can\", and answers `[]`. So a `queue` sharing rule whose queue has a `position` member still has `revokeRuleGrantsForRetiredRecipients` diff against a set missing those members on an outage. ADR-0142 declares this posture for the queue service. Changing it needs that ADR read first, and is named here so the family closes in one place.\n5. **`membershipObjectAbsent`** is spelled the same in `team-graph.ts` and `approval-service.ts` after #29362, the one copy that can drift. Home it beside `isMissingTableError` in `@objectstack/types` if this card adds a third caller. ⛔ Not otherwise.\n\n## Wanted\n\n- Each read in 1-3 reads to completion through `keysetWalk`, and refuses on a failed or truncated read, exactly as #29362 did. Absence (`isMissingTableError` with the object named, or the registry's `OBJECT_NOT_FOUND` on that object) still answers no holders.\n- Item 4: measure ADR-0142's text first. If the ADR declares \"nobody\" on failure as the queue's contract, report that and leave the posture to a ruling. ⛔ Do not narrow a declared behaviour silently.\n- Pins at 9,999 / 10,001 rows and for a failed read at each site, as #29362 has them.\n- ⛔ No new export from `@objectstack/core`.\n\nSerial: after PR #29497 merges (same files).\n\nDedupe: searched `sys_team_member holdsRole`, `expandSpec contributes nobody`; nearest #29362, #29398 (core org-members orderBy trust, separate). **New.**\n\nLinks back: #29362, #29497, #29398."

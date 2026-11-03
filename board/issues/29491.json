@@ -2,8 +2,8 @@
   "number": 29491,
   "kind": "issue",
   "title": "lint null-guard gate: three accuracy follow-ups from the contract review of the flow-condition widening",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T16:23:34Z",
-  "updated_at": "2026-11-02T19:58:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T21:22:33Z",
+  "closed_at": "2026-11-02T21:20:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29491",
   "body": "domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB\n\nFiling gate: the three should-fix findings of the contract review record 6582253324 on PR #29474 (for #29026), at head `c7417c1fc8`. The review found no must-fix, so the PR lands and these follow. Filed by the `domain:devx` seat that lands #29474. ⛔ Not a claim. No grade: triage sets it.\n\nAll three are in `packages/lint` (`validate-null-guards.ts`, `validate-expressions.ts`) and its changeset prose, read as of PR #29474. Re-read them on `main` once that PR merges.\n\n## 1. Build and runtime publish doors can disagree (runtime stricter)\n\nAt `os validate`, a start condition `budget != null` (bare) proves `record.budget`, so an edge comparing `record.budget` with an ordering operator passes. At the runtime publish gate the bare set is empty (`perWriteSnapshotEntrance` opens the scope), the presumption is not derived, and the same edge is refused. Deriving the presumption from a bare guard over an unprovable bound set would be unsound, so the stricter side is defensible, but a flow that `os validate` accepts and the publish gate refuses is a trap nobody records. Either record it in the ledger's flow row and the changeset's runtime-gate sentence, or have the runtime gate stand down on a presumption-dependent finding the way the entrance judgment does.\n\n## 2. `isAlwaysValuedSummary` overstates the backfill\n\nIts doc comment says the engine \"backfills a stored NULL\", which reads as automatic. The backfill is the one-off `os migrate summary-nulls` (`summary-backfill.ts`, #6063); `initializeSummaryFields` is create-time only. A parent from before #6013 that was never migrated still reads NULL, and on a validation rule that fault fails the write closed. The comment (and any doc that repeats it) should say the always-valued judgment for `count` / `sum` presumes the migration ran.\n\n## 3. The `!= null` hint is incomplete for `previous.x` on a create leg\n\nThe gate reports an unguarded `previous.x` and prescribes `!= null`. On an insert, `previous` is bound to `null` (`seedRunVariables`), so `previous.x != null` itself faults; the full guard is `previous != null && previous.x != null`. The hint could name `previous != null &&` for a `previous.` operand.\n\n## Done when\n\nEach item is fixed in code or comment, or answered in the ledger with the reason it stands, and a test pins item 3's hint text if it changes.\n\nBlocked-by: #29026\nDedupe: searched `null guard previous create leg`, `isAlwaysValuedSummary`, `summary-nulls backfill lint`: only #29026, #29482. **New.**"

@@ -1,7 +1,7 @@
 {
   "number": 20966,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 2 — 🟢 os-steve · 由 os-steve 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 2 — 🟢 os-warren · 由 os-warren 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-steve"
+    "os-warren"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:12:24Z",
-  "updated_at": "2026-11-02T08:09:17Z",
+  "updated_at": "2026-11-03T00:13:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 83,
+  "comments": 85,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20966",
-  "body": "domain:server#2 · os-steve · session_01ADHkmQxwoGb5fSnrFkpxmt\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed 2026-11-02T08:09Z (split corrected; seated at 2026-11-02T08:05Z).</sub>\n\n## Current PM\n\n🟢 **`os-steve`** · `session_01ADHkmQxwoGb5fSnrFkpxmt` · 由 os-steve 账户的项目负责 (project \"objectstack spec\", seat-2 thread).\n\n- **Summons (provenance):** the maintainer, verbatim: 「开 server 2、3、5 号席位, 前任已经下班，接手所有开发，包括跟进之前未完成的开发落地。」 The previous holder's sign-off brief `6571931990` is the release marker and the newest seat event, so the seat was taken directly.\n- **Patrol:** `trig_01Dk2o9v3bs8GkgWU5h7uSYv` · hourly at :04, self-bound to this session.\n- **Mailbox:** PR #29128 (head `claude/project-thread-u4tdgk`; a cloud seat cannot push `mailbox/…`), subscribed.\n- **Concurrency:** up to 5 card threads for this seat (the project's default; the maintainer may change it).\n- **Sibling seats this project took at the same time:** seat 3 (#26761) and seat 5 (#28677), each in its own thread. Seat 1 (#6367) is re-seated by this project too. Split: each seat takes its own predecessor's hand-back ledger; seat 1's seven hand-backs stay with seat 1. New cards from `pm:queue` by the full order; the claim timestamp arbitrates.\n\n## Inherited ledger\n\nPointers only; each card carries its own `Release:` / `Resume-from:` and this seat's new `Claim:`.\n\n- **From seat 2's previous term** (`session_0186vfjHHMsRXC9EUT9hTFMo`, brief `6571931990`): queued #28997 (series, mailbox only), #29046 (#28930), #29058 (#28944), #29087 (#28956); paused drafts #29090 (#28987), #29097 (#28866), #29103 (#28992). Follow-ups owed: the `?object[]=` view-list card (#29046), the `timeZone` docs sentence (#29031), the readonly-columns clone card (#29034).\n- **Waiting on the maintainer:** closing #28117 and #28780.\n\n## Hot-file serial queue\n\nRe-derived from live `Claim:` comments and open PR file lists before every dispatch; read #26761 and #28677 too. None held by this seat beyond the PRs above.\n\n## Notes\n\n- Pointer: posture and round ledger live in the project; the canonical ledger is the labels, the assignee, the `Claim:` comments (`Seat: domain:server#2`) and the `head:claude/` PRs.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:server#2 · os-warren · session_01JQwxbXKRzgnVvjzxaYxLUf\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed 2026-11-03T00:12Z at seating.</sub>\n\n## Current PM — 🟢 os-warren\n\n- **Holder:** `os-warren` · `session_01JQwxbXKRzgnVvjzxaYxLUf` (project thread \"Take server lane seat 2\", the os-warren account's project) · opening mark 6591834600.\n- **Previous holder:** `os-steve` · `session_01ADHkmQxwoGb5fSnrFkpxmt`, sign-off brief 6591667069, stay-behind none. Its body is the previous revision of this post.\n- **Mailbox:** PR #29657 (`Mailbox-of: domain:server#2 · os-warren`), subscribed by the seated session.\n- **Patrol:** trig_01K9qs5jUhRGcDM44Pt1Y211 · 11 * * * * (hourly, bound to the seated session).\n- **Concurrency:** at most 5 card threads in hand.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **Carried from the previous revision:** #29610 → draft PR #29637 (contract review PASS 6591028293; owed: check-run re-read, ACCEPT, landing; release 6591594770). Decision box #29594 (`needs-user-decision`, analysis 6588653995): this seat executes the ruling. Queue notes from the previous holder: #29435 waits on #29390; #29557 and #29558 follow #29233; #29544 (lint).\n\n## Hot-file serial queue\n\n- None held by this seat. `protocol.ts` (`packages/metadata-protocol/src/protocol.ts`, spec `api/protocol.zod.ts`, spec `identity/protocol.ts`) is frozen until 2026-11-03 06:00Z at the latest; this seat dispatches nothing touching it before then.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Seats 4 and 5 are 🟢 `os-warren` sibling threads of the same project; seat 1 is `os-steve`. Lane cards are taken by the full order; collisions are settled by the claim timestamp.\n- Session effort: project default, not verified `high`.\n"
 }

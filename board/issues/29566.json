@@ -2,8 +2,8 @@
   "number": 29566,
   "kind": "issue",
   "title": "Studio: /studio/~all/metadata/<type> cannot be opened; ResourceListPage's ?package= repair rewrites the cross-package list to one package's leg",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:52:07Z",
-  "updated_at": "2026-11-02T19:54:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T20:33:34Z",
+  "closed_at": "2026-11-02T20:32:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29566",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured regression of a landed route, found by the #28579 slice 3 run (run record #29560, PR #29559 `FOLLOW-UPS.md` §15b item 3). The seat read the repair in source; it has not re-measured the redirect.\nReader: `domain:ui` (`ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx`, the effect after the \"Repair `?package=`\" comment, about line 344).\nDedupe (open AND closed): `ResourceListPage package`, `~all metadata`. No card.\nreach: every Setup metadata URL that redirects to Studio's cross-package area, and every bookmark of it.\ntype: Bug\n\n## What happens\nTyped directly, even with `?package=all`, `/_console/studio/~all/metadata/object` and `/_console/studio/~all/metadata/flow` are rewritten to `?package=com.example.showcase`, and then to that package's leg. The list of a type across all packages cannot be opened. The repair runs whenever the area names no package.\n\nThis fails `platform-core.setup-metadata-redirects-to-studio` acceptance[0] (for `/apps/setup/metadata/object`) and acceptance[3] (the package-less Packaged automation bookmark).\n\n## Wanted\nThe `~all` area keeps its cross-package list. The repair picks a package only where the page actually needs one (create, or a leg that is per-package), and never on the `~all` list. Pin the `~all` URL staying put."

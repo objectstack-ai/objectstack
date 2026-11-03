@@ -1,7 +1,7 @@
 {
   "number": 6017,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 1 — 🟢 os-steve · 由 os-steve 账户的项目负责",
+  "title": "[PM seat] domain:spec · seat 1 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:12Z",
-  "updated_at": "2026-11-01T21:04:02Z",
+  "updated_at": "2026-11-02T23:56:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 457,
+  "comments": 458,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6017",
-  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\n**This post is the seat (`domain:spec` seat 1).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/spec.md`, ⛔ not copied here. The previous body (⏳ vacant, written by `os-tesla` `session_01L9qibwb6hBqszPTYJobitm`, with its sign-off brief 6550174459) is the prior revision of this body.\n\n## Current PM\n\n🟢 `os-steve` · `session_01ADHkmPi25XXKx92Xmg4viS` (a thread of the Claude Code project \"objectstack\" on the `os-steve` account) · seated 2026-11-01T16:29Z on the maintainer's summons in that project (「接手 spec seat 1」).\n\n- **Patrol:** `trig_01PsmaaCS18LH9fNpKKrijqQ` · `28 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** #28741 (`domain:spec#1 · os-steve`), subscribed by the seat session.\n- **Concurrency:** up to 5 card threads in flight (`batch:5`), on the maintainer's word in the project 「并发5」 (it replaces the earlier serial order). Pick order is the full lane order (`execution-duties.md` 取卡全序); cards that share a file stay serial.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`; ⛔ GitHub MCP writes; the `os-steve` account writes no content (assignee only).\n- Posture, round ledger and round reports live in the project, ⛔ not here (project-seat stub).\n\n## Inherited ledger\n\nIn flight at seating: none (no open `domain:spec` card carries a `Seat: domain:spec#1` claim; the predecessor's brief lists every seat-1 card as landed or handed over). `domain:spec` `pm:queue` is empty at seating; the rest of the open lane (findings without a `pm:` label, #28640 in the decision box, holds and the epic) is read live on the board.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- **`packages/spec/src/migrations/registry.ts`** is generated and not in git; writers edit `entries/` and `registry.ts.template`. **`merge=os-regen` paths** merge with `bash scripts/pm/os-regen-merge.sh`.\n- **`.objectui-sha`:** the one `SINGLE_CLAIM_PATHS` entry.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n- Other `domain:spec` seats: #18549 (seat 2), #18883 (seat 3), #18917 (seat 4), #19357 (seat 5). ⛔ No liveness judgement on them.\n\n"
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\n**This post is the seat (`domain:spec` seat 1).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/spec.md`, ⛔ not copied here. The previous body (🟢 `os-steve` `session_01ADHkmPi25XXKx92Xmg4viS`, seated 2026-11-01T16:29Z) is the prior revision of this body.\n\n## Current PM\n\n⏳ **vacant** since 2026-11-02T23:12Z. The last holder, `os-steve` · `session_01ADHkmPi25XXKx92Xmg4viS` (seated 2026-11-01T16:29Z), signed off on the maintainer's order 「当前任务处理完，合并后就下班」. Its clock-out brief, the newest seat-signed comment on this issue, is the release marker. Take the seat directly with `/pm-dispatch 接手`.\n\n- **Patrol:** none (`trig_01PsmaaCS18LH9fNpKKrijqQ` deleted at sign-off).\n- **Mailbox:** none (#28741 closed at sign-off).\n\n## Handover ledger\n\n- **In flight:** none. `check-handover` is clear. 32 cards landed this term, each with a landing note and `pm:dispatched` removed (the list is in the brief).\n- **Waiting on a ruling** (`needs-user-decision`, unassigned, hand-off comment on each card):\n  - #28993: PR #29190 built on A, with the B patch ready\n  - #29383: measured, nothing committed\n  - #29377: PR #29509 PASSed, A landable after a regen-merge\n- **Free for any spec seat** (their serial partners have landed): #28522, #28205, #29335.\n- **Handed to `domain:server`:** #28914 (spec slice #29100 landed; the route remains).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- **`packages/spec/src/migrations/registry.ts`** is generated and not in git; writers edit `entries/` and `registry.ts.template`. **`merge=os-regen` paths** merge with `bash scripts/pm/os-regen-merge.sh`.\n- **`.objectui-sha`:** the one `SINGLE_CLAIM_PATHS` entry.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n- Other `domain:spec` seats: #18549 (seat 2), #18883 (seat 3), #18917 (seat 4), #19357 (seat 5). ⛔ No liveness judgement on them.\n\n\n"
 }

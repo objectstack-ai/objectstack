@@ -1,0 +1,34 @@
+{
+  "number": 29674,
+  "kind": "issue",
+  "title": "Studio Access: a New similar copy of a permission set reads \"0 objects granted\" in its pair, though the server holds its grants",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T00:55:08Z",
+  "updated_at": "2026-11-03T01:09:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29674",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236. Filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「发记录并立卡」. ⛔ Not a claim.\nQA-source: #29672 · studio-authoring.access-permission-set-lifecycle · off-clause\nPart of #28236 · governs: ADR-0146 D4 (New similar), D3\nReader: `domain:ui` (the package-scope permission matrix).\nDedupe: `permission set clone empty`, `New similar matrix`. #28573 and #28563 built the door; neither says this. **New.**\nreach: every permission set copied from a read-only package.\ntype: Bug\n\n**Business reason.** An administrator copies a vendor permission set to adjust it, and sees it as empty. They would reasonably read that as the copy having failed, or re-grant by hand what it already holds.\n\n## What happens\n\nMeasured on `main` at `3482f3d8d2`.\n\n1. `POST /api/v1/security/permission-sets/showcase_contributor/clone` with `{name, label}`: 200, in `com.example.showcase.custom`.\n2. `GET /api/v1/meta/permission/NAME?package=com.example.showcase.custom`: **8 objects, 3 fields**.\n3. Open `/_console/studio/com.example.showcase/access?surface=permission%3ANAME`: the header reads 已授权 0 个对象 · 0 个字段覆盖, the matrix 没有匹配的对象。, and the scope chip 仅本包对象.\n\nRunner readings, not re-derived: the package-scope matrix lists only the pair's own objects, and the pair declares none. Editing a capability on the copy keeps the grants. The all-metadata door shows every object.\n\n## Wanted\n\nThe copy's page shows and lets the person edit the grants the copy holds, including on objects of the base. The count states the same truth as the server's read.\n\nLinks back: #29672, #28236, ADR-0146 D4."
+}

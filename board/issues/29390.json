@@ -2,8 +2,8 @@
   "number": 29390,
   "kind": "issue",
   "title": "metadata-protocol: a commit revert or package-commit rollback can restore a row bound to a read-only base package that the #28905 close now refuses to write",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:studio",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:00:59Z",
-  "updated_at": "2026-11-02T14:21:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T00:00:20Z",
+  "closed_at": "2026-11-02T23:59:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29390",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the contract review of PR #29270 (#28905), record 6577747588, should-fix S1.\n\n#28905 closes the save, publish and rollback doors to a write naming a read-only code package on the five overlay types (`403 NOT_OVERRIDABLE`, with the pair fix). `revertCommit` and `rollbackToPackageCommit` restore rows through `repo.restoreVersion` (`source: 'protocol.revertCommit'`), outside the save door. So reverting a commit recorded before the close can restore a row bound to the base. The changeset's \"Still open\" list does not name this path.\n\nAsk: decide and implement one of two. (a) The revert path applies the same close when the restored row would be bound to a read-only base that the pair fix can take, refusing with the same sentence. (b) The path stays open by design, because a commit recorded before the close keeps its revert, as the dogfood control #29090 states. In that case name it in the docs and in the ADR-0087 entry (see the S3 card). Measure first which commits can carry such a row today.\n\nFiles: `packages/metadata-protocol/src/protocol.ts` (the commit doors) and `protocol-packaged-base-refusal.ts`. Serial with the S6 card (same refusal module)."

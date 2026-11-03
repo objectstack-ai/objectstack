@@ -13,7 +13,6 @@
   "labels": [
     "area:studio",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:02:19Z",
-  "updated_at": "2026-11-02T19:56:26Z",
+  "updated_at": "2026-11-02T20:23:18Z",
   "closed_at": "2026-11-02T19:56:26Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",

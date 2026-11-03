@@ -1,0 +1,34 @@
+{
+  "number": 29622,
+  "kind": "pull_request",
+  "title": "test(runtime): pay the view read's lint load at module top in meta-write-org-scope",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T22:19:54Z",
+  "updated_at": "2026-11-02T22:55:05Z",
+  "closed_at": "2026-11-02T22:55:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T22:55:03Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29622",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9V2uHgH5HekdBdXA8rYk895)_\nFixes #29603\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改测试。`meta-write-org-scope.test.ts` 在文件顶部预先加载 `@objectstack/lint`，runtime 的 vitest 配置把这个包根指到源码。\n- 为什么改：那个 ⭐ D6 用例里的视图读取会第一次懒加载 lint 包，vitest 下冷编译要 1.2 秒（最慢 1.7 秒），全算进用例的 5 秒超时里，分片负载一高就超时变红。现在这笔开销在收集阶段付掉，用例本身降到约 20 毫秒。\n- 风险与回滚：不动产品代码，不加超时，不重试，断言一条没改。回滚即还原本 PR。\n- 先看：`packages/runtime/src/meta-write-org-scope.test.ts`（顶部那条 import 和注释），`packages/runtime/vitest.config.ts`（新的 `@objectstack/lint` 别名）。\n- 两分钟验证：`pnpm --filter @objectstack/runtime exec vitest run --project local src/meta-write-org-scope.test.ts --reporter=verbose`，预期 20 个用例全绿，⭐ D6 用例几十毫秒（main 上约 1.2 秒）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/runtime/src/meta-write-org-scope.test.ts`: a module-top `import '@objectstack/lint'`, with a comment naming the cost it moves. No case, assertion or timeout changes.\n- `packages/runtime/vitest.config.ts`: one anchored alias, `^@objectstack/lint$` → `../lint/src/index.ts`, beside the existing `/runtime` entry. `check:test-source-alias` requires it for the new import (its remedy text, verbatim shape), and it is the same entry metadata-protocol's lazy import resolves through, so the view read now judges the lint rule in the checkout rather than `dist/`.\n\n## Why\n\nThe failure on `1a95c746` (run 41514567522, Test Core 3/8, job 125515971369) was a **timeout**, not an assertion: `Error: Test timed out in 5000ms.` at `meta-write-org-scope.test.ts:419:5`; the file ran 5978 ms that run.\n\nWhere the time goes, measured by timing the case's steps in a scratch copy (deleted): `makeStack` 0 ms, the `PUT /view/…` 19 ms, the **first** `GET /view/…` 1500 ms, a second identical GET 2 ms. The first GET is the first view read in the file. A served view read decorates `_diagnostics` with the lint's form-layout warnings (`withFormLayoutWarnings`, called from `getMetaItem`'s `serveFormLayout`), and that helper imports the lint package root lazily on first use: `loadFormLayoutLint`, `packages/metadata-protocol/src/metadata-diagnostics.ts:481`. Under vitest that first import is a cold transform of the lint module graph, inside the clocked case. The sibling plural-spelling case does the same PUT but no GET, which is why it runs in 3 ms.\n\nThe lazy import is deliberate product design (the kernel boot path reaches `@objectstack/lint` only through `/runtime`), so the product code stays as it is. The fix is the repo's clocked-window rule (AGENTS.md § Build & Test; `scripts/check-test-source-alias.mjs`): pay the first load at module top, during collection, which no timeout clocks. The protocol's later `import()` gets the same module instance back (measured: the first GET drops from 1500 ms to 7 ms). `check:test-source-alias` cannot see this load on its own, because it happens in another package's code.\n\n## Tests\n\nDuration of the ⭐ case and the file (sum of its 20 case durations), `--maxWorkers=1`, one vitest process per run, under `os-verify-lock.sh` (shared-box seconds):\n\n| | ⭐ case p50 / max | file total p50 / max | slowest sibling (max) |\n|---|---|---|---|\n| before, `2da42e74`, 20 runs | 1202 / 1740 ms | 1433 / 1939 ms | 130 ms |\n| before, 4 concurrent copies on 4 cores | 1463 / 1654 ms | 1695 / 1862 ms | 62 ms |\n| after, `867f4777`, 20 runs | 20 / 32 ms | 218 / 268 ms | 72 ms |\n| after, 4 concurrent copies on 4 cores | 20 / 30 ms | 283 / 329 ms | 95 ms |\n\nThe case now runs at sibling speed. The load moved into collection (the run's `import` phase), which `testTimeout` does not clock.\n\nForced test edits: none. No assertion, timeout or case moved; the case still proves the overlay-enabled `view` lands env-wide and the read serves it.\n\n<details><summary>Runtime suite on the final head</summary>\n\n`pnpm --filter @objectstack/runtime test` (vitest project `local`) on `867f4777`, under the lock: `Test Files 528 passed (528)`, `Tests 8506 passed | 19 skipped (8525)`, VERDICT command-exit 0. The same suite on the first head `da6bf162` (preload only): 528/528, 8506 passed.\n\n</details>\n\n## Verification\n\nHead `867f4777` (branch merged with `origin/main` `81cd9eb0e` before the PR).\n\n- `node scripts/pm/dispatch-gates.mjs --commands` on `867f4777`: 50 commands (2 paths, 19 changed lines). All 50 ran on this head, each exit 0. `--ran` reconciliation: `50 derived, 50 run, 0 NOT-MEASURED, 0 UNRUN`.\n- On the first head, `check:test-source-alias` was red (`NEW unaliased artifact import(s) … @objectstack/lint`); the alias in `vitest.config.ts` is its remedy, green on this head (`120 packages with tests scanned`).\n- `pnpm --filter @objectstack/runtime typecheck`: exit 0 (`check:test-typecheck: OK`, debt ledger held).\n- Lint: root eslint over `packages/runtime` with `--no-inline-config` (the package has no lint script): exit 0.\n- No ablation: the diff changes no tested behaviour. The before/after table above is the reverse reading: without the preload the case pays the 1.2 s load, with it 20 ms.\n- Dogfood: n/a (no `!`, no `(narrowing)` arm).\n- CI check-runs: not read yet; the seat reads them at ACCEPT.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no new names)\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on `packages/runtime`, exit 0)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset. (test-only: `skip-changeset`)\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 section is Chinese by repo rule).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRczGnhouFCUs9DfQ2)_\n"
+}

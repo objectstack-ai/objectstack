@@ -1,0 +1,32 @@
+{
+  "number": 29613,
+  "kind": "issue",
+  "title": "metadata-protocol: page, app, dataset, doc and book serve a published override only from the registry bare slot; build the row-served path, then take them out of it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T21:38:28Z",
+  "updated_at": "2026-11-03T02:14:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29613",
+  "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nFiling gate: ① a follow-up split from #29600 by the seat's ruling A (on #29600), from the #29600 card thread's measurement (os-dev-report `6589050829`, open question 1 and out-of-scope findings class b ×2). Filed by `domain:server` seat 5. ⛔ Not a claim. Suggested grade: p2 (same family as #29600; the export symptom is filtered at the door by PR #29597).\n\n## What happens\n\nMeasured by the #29600 card thread on main `0ab4a09e`, with the real ObjectQL and the metadata-protocol dist (a pair draft save with overrides, then a per-item publish):\n\n- For `page`, `app`, `dataset`, `doc` and `book`, `hydrateOverlayIntoRegistry` registers a published `.custom` override in the registry's **bare slot**, wearing the **base's** envelope, which is the #29600 defect. For these five types, though, the bare slot is also the **only** place the override is served from. `getMetaItem` (no package, the base, the pair), `getMetaItems` (no package, the base) and `GET /me/apps` (`registry.getAllApps`) all read it there.\n- Widening the #22057 guard to these types, as #29600 does for view, dashboard, report and email_template, makes every one of those readers fall back to the shipped body. Keeping the bare slot and changing only its envelope still loses the override from the effective list. Either way it is a narrowing, so #29600 leaves these five types out.\n- Two related readings (class b in the same report):\n  - the per-package layer naming the **pair** lists nothing for these five types after a published override (ADR-0146 D8 item 3 says the pair's export carries the overriding item);\n  - `getMetaItemLayered` naming the base serves the shipped body as its effective layer, while `getMetaItem` naming the base serves the override (ADR-0146 D8 item 2).\n\n## Wanted\n\n1. Give the five types the row-served override path that dashboard, report and email_template already have: the by-name read, both list reads, the layered read's effective layer, the per-package layer naming the pair, and the `/me/apps` reader.\n2. Then widen the #22057 guard to them, under the same condition #29600 lands (a row whose bound package ships no artifact of the name while another package does; the #4624 two-shipper case keeps its bare entry).\n3. Pin per type: no served reading moves (measure before and after), the per-package base layer lists only the base's item, and the pair layer lists the override.\n\nSerial: after #29600 lands (same hydrator region). `/me/apps` sits outside `packages/metadata-protocol`; the card thread confirms its file surface with the seat.\n\nDedupe: searched `bare slot page app dataset override`, `getAllApps override pair`, `per-package layer pair empty`, `layered effective override`; nearest #29600 (its four row-served types), #29563 (export symptom), #22057 (view). **New.**\n\nLinks back: #29600, PR #29597, #29563, #22057, #4624, ADR-0146 D8."
+}

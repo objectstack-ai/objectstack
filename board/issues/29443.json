@@ -2,8 +2,8 @@
   "number": 29443,
   "kind": "issue",
   "title": "Personal views, first version: a reader saves a list as 「我的视图」, a user-owned row only they see, then renames, deletes or sets it as their default (#28971 ruling C)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:03:41Z",
-  "updated_at": "2026-11-02T19:55:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T23:04:58Z",
+  "closed_at": "2026-11-02T23:01:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29443",
   "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ③ 维护者直派 — the first-version execution card the #28971 ruling orders. Maintainer, on option C 「做个人视图，第一版排在四张卫生卡之后，范围按卡上写的」: 「同意」 (ruling 6570568131, 2026-11-02T06:21Z). Relative dates sub-ruling: 「三点都按 A：相对日期立独立卡，在 #28971 第一版立卡前合入…」 (6572083158).\nRefs #28971\n\n## Filing preconditions (ruling execution step 4), re-checked at `origin/main` `a6441636` (2026-11-02T15:02Z)\n\n| Check | Reading |\n|:--|:--|\n| The four hygiene cards #28949, #28948, #28950 and #28912 | all closed, completed |\n| Relative dates in the list filter panel, #29115 | closed, completed |\n| ADR-0131 D13 \"user-owned D3 object\" | holds (L910) |\n| ADR-0017 `personal` is \"visible only to its `owner`\" | holds (L71) |\n| `view.zod.ts`: per-user view scoping is \"a parked direction\" | holds (L5866) |\n| View creation is admin-only (`saveAsViewButton = isAdmin`) | holds (`ObjectDataPage.tsx` L579) |\n| The metadata write gate has no user dimension (`metaSaveVerdict`) | holds |\n| Favorites carry no filter state (`href:` names the view only) | holds (`listViewFavorites.ts` L132) |\n| A query on an unreadable field is refused server-side | holds (`predicate-guard.ts` L159) |\n| `this_week` preset (`{week_start}`, `{week_end}`) | holds (`date-range-presets.ts` L44/L125) |\n\n#29037 (retire the inert `personal` declarations) and #29038 (ADR note) are still open. The ruling does not order them before this card, and this card touches neither file.\n\n## What the first version is\n\nA **named personal view** is a row of user data. It is not view metadata.\n- It is a user-owned platform object, modelled on `sys_user_preference` (`packages/platform-objects/src/identity/sys-user-preference.object.ts`). Row scope is the owner only. It is never exported with a package and never written through `/meta`.\n- Its configuration is spec's `ListView` shape and is validated against it on save, so a bad value is refused loudly. A filter on a field the reader cannot read is already refused by the server.\n- Its id does not use the `object.key` view syntax, so it cannot collide with a package view name. No unnamed preference layer sits on top of a personal view.\n\n**In:** save the current list as my view; a 「我的视图」 group in the view switcher; rename; delete; set as my default (reuse the existing pin).\n**Not in (不包含):** sharing and team views; admin management and transfer on leaving; a field picker; packaging, import and export. Sharing waits until this version has landed and usage is measured, and it then needs a ruling on whether non-admins may produce environment metadata.\n\n## Steps (two lanes, two PRs, in this order)\n\n1. **`domain:server`**: the platform object, its row scope (owner only, organization-scoped per ADR-0131), and the save-time `ListView` validation, plus tests that pin each of these:\n   - another member cannot read, list, update or delete the row;\n   - an admin is not given a back door, because the first version has no admin management;\n   - an invalid `ListView` body is refused;\n   - an unreadable field in the filter is refused at query time.\n   No new author-writable protocol key and no `packages/spec/**` schema key. If a spec key turns out to be needed, stop with needs_decision. The object's name is chosen in the PR and stated in its body.\n2. **ui lane** (Blocked-by step 1's PR): the switcher's 「我的视图」 group, save-as-my-view available to any reader, rename, delete, and set as my default. It reads the merged set (package views, environment views, my views). Precedents: #27943 for the switcher, objectui#12471 for user-owned list state.\n\n## 业务理由\n\nA salesperson keeps two to four working sets on one list, such as 「我的本周跟进」. Today a reader has one unnamed setting per view, so a new filter overwrites the last one, and a second set lives only in a browser bookmark. Creating a view is admin-only and visible to everyone. Without this card the end state that ADR-0017, #7611 and ADR-0131 D13 all name stays empty, and an author or the assistant keeps writing `scope: 'personal'`, which saves but is visible to everyone.\n\n## 动手的读者\n\nStep 1: `domain:server` seat 1, which claims it on this card next. Step 2: a ui-lane seat once step 1's PR lands. While ui seats are vacant, the coordinator routes it.\n\n## 查重\n\nSearches, with hit counts including closed issues:\n- `personal view user-owned`: 8\n- `我的视图`: 142\n- `save as my view`: 361\n- `personal views first version`: 7\n\nNone of the hits is an execution card for this version. The nearest are #28971 (the ruling), #29037 and #29038 (the ruling's side cards), and #27943 (switcher precedent)."

@@ -1,0 +1,35 @@
+{
+  "number": 29612,
+  "kind": "pull_request",
+  "title": "docs(lint): a declared never-string-capable search column is admitted but contributes no clause",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T21:38:05Z",
+  "updated_at": "2026-11-02T22:28:30Z",
+  "closed_at": "2026-11-02T22:28:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T22:28:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29612",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8GoPCMAEZf1wXgQu2mQ7K6f)_\n\nFixes #29585\n\nClause-②: no\nMetadata-protocol: none\n\nDispatched by `domain:spec#5 · os-warren · session_01JQwxbWR3K3h7i1ytwycVg1`; dev = card thread `session_01JQwxbY5V8enQpRc6k9NscP`.\n\n## 维护者速读\n\n- 改了什么:只改注释。`packages/lint/src/validate-searchable-fields.ts` 模块说明里讲对象自身 `searchableFields` 的那一段,改为「json 等从不存字符串的列仍被接纳进搜索集,但搜索展开不给它出子句;只由这类列组成的集合返回零行,不报错;单值 lookup 走 `$icontains`」。\n- 为什么改:#29502 之后 `$search` 展开跳过这类列,旧注释仍说 json/lookup 列经 `$contains`「a scan that CAN match」。spec 侧的同款修正是 #29584。\n- 风险与回滚:零行为改动,规则、发现、断言都没动(测试文件只改了三处注释);回滚即 revert。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `packages/lint/src/validate-searchable-fields.ts`, the module docblock paragraph on the object's own `searchableFields` (the \"dividing line is STORAGE\" paragraph): a lookup or json column declared there is admitted to the resolved set, neither a 400 nor a finding. What it contributes is the expansion's call (`expandSearchToFilter`, `@objectstack/objectql`): a single-valued lookup becomes an `$icontains` over the stored foreign key (a `multiple: true` one, a `$contains` membership match), a scan that can match; a column whose declared type can never hold a string (the text-operator door's `door-refusal` verdict, `textOperatorDoorVerdict`, json among them) is admitted but contributes no clause, and a set made only of such columns answers no rows, never an error.\n- `packages/lint/src/validate-searchable-fields.test.ts`, three comments that still carried the old \"`$contains` over the stored JSON text … CAN match\" reasoning (\"does not flag a field that exists but is an odd search target\", \"passes a view entry of odd type once the object declares it searchable\", and the CONTROL \"a json or lookup entry on the OBJECT's own set stays clean\"): reworded to the docblock's reading, keeping the ADR-0072 D1 reason for staying clean. No assertion, fixture or test name moves. The test file does not ship, so the changeset is unchanged.\n- `.changeset/29585-searchable-fields-lint-no-clause-comment.md`: `@objectstack/lint` patch. The docblock ships in the published `.d.ts` (measured below).\n\nNo rule behaviour, finding, message or assertion moves.\n\n## Why\n\nSince #29502 (#29394) the `$search` expansion skips never-string-capable columns, so the docblock's \"a scan that CAN match\" via `$contains` was false for json, and named the wrong operator for a single lookup. Same correction as the spec twin #29584.\n\n## Verification\n\nPremise measured on `origin/main` `81cd9eb0` with a throwaway vitest file in `packages/objectql` (deleted, not committed), calling `expandSearchToFilter('acme', { fields, searchableFields })` with `name: text`, `payload: json`, `account_id: lookup`, `members: lookup multiple: true`:\n\n```\n[\"payload\"]                       → {\"$or\":[]}\n[\"account_id\"]                    → {\"$or\":[{\"account_id\":{\"$icontains\":\"acme\"}}]}\n[\"members\"]                       → {\"$or\":[{\"members\":{\"$contains\":\"acme\"}}]}\n[\"name\",\"payload\",\"account_id\"]   → {\"$or\":[{\"name\":{\"$icontains\":\"acme\"}},{\"account_id\":{\"$icontains\":\"acme\"}}]}\n```\n\nAn `$or` with no arm is FALSE (the module header of `search-filter.ts`): no rows, no error.\n\nChangeset decision: after `turbo run build --filter=@objectstack/lint... --filter=@objectstack/objectql...` (exit 0), the new phrase \"admitted but contributes NO\" is in `packages/lint/dist/index.d.ts` and `dist/index.d.cts`; positive control \"ADR-0061 — searchable set\" hits the same two files. So the text publishes and takes a patch changeset, not skip-changeset.\n\nGates run at head `a123ca3f`, and the lint suite and eslint again at head `f0848a59` after the test-comment commit:\n\n- `pnpm --filter @objectstack/lint exec vitest run`: Test Files 192 passed (192), Tests 7891 passed (7891), at both heads.\n- `pnpm exec eslint packages/lint/src/validate-searchable-fields.ts packages/lint/src/validate-searchable-fields.test.ts`: exit 0.\n- `pnpm check:empty-changeset`: exit 0 (1 declaring changeset added).\n- `pnpm check:changeset-fixed`: exit 0.\n- `pnpm check:changeset-gate-self-tests`: exit 0.\n- `pnpm check:adr-0087-registration`: exit 0 (1 non-breaking changeset seen).\n- `node scripts/check-changeset-no-major.mjs`: pass.\n\nNo protocol.ts file is touched.\n\n## Does \"neither a 400 nor a finding\" still hold for a json entry?\n\nYes. The runtime accepts the entry (no 400; the resolved set is not narrowed), so flagging it would reject metadata the runtime accepts (ADR-0072 D1); a warning for a never-matching entry would be a new gate, and the seat ruled that no separate card is filed.\n\n## Human Minimum\n\nNothing; the seat lands it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbY5V8enQpRc6k9NscP\n\n<!-- signed: domain:spec#5 · os-warren · session_01JQwxbY5V8enQpRc6k9NscP -->\n"
+}

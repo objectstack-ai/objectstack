@@ -1,0 +1,35 @@
+{
+  "number": 29683,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): the layered read of a form view naming a field its object lacks carries the form-field-unknown warning",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T01:08:06Z",
+  "updated_at": "2026-11-03T01:54:47Z",
+  "closed_at": "2026-11-03T01:54:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T01:54:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29683",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ811zUetuVLmmG85oB1QY7WM)_\n\nFixes #29435\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：分层读取（`GET /api/v1/meta/view/NAME?layers=true`）现在对 `effective` 跑与单项读取相同的表单布局检查，表单视图引用对象不存在的字段时，`_diagnostics.warnings` 带上 `form-field-unknown` 警告。\n- 为什么改：Studio 的界面栏目和元数据编辑器在没有草稿时读分层结果；已发布、无草稿的表单视图此前显示 `valid: true`，作者看不到警告，字段在运行时被静默跳过。\n- 风险与回滚：只追加警告，`valid` 仍取 schema 的结论；非 view 类型原样返回。回滚即还原本 PR，无迁移。\n- 先看：`packages/metadata-protocol/src/protocol-meta-layered-reads.ts` 中 `_diagnostics` 的计算（约 L510），以及测试文件末尾的 #29435 一节。\n- 两分钟验证：`pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.form-layout-diagnostics.test.ts`，预期 12 个测试全绿。\n- 需要你做的：无,席位落地\n\n## What changes\n\n`getMetaItemLayered` (`packages/metadata-protocol/src/protocol-meta-layered-reads.ts`) computed `_diagnostics` with `computeMetadataDiagnostics(request.type, effective)` alone, which is schema-only. `getMetaItem` adds the lint's form-layout warnings through `withFormLayoutWarnings` (#29196, #29309). So a published form view whose section names `no_such_field` read `{ valid: true }` on the layered read while the single-item read of the same body warned.\n\nThe layered read now runs `withFormLayoutWarnings` on `effective`, with the schema verdict as the prior `_diagnostics`. The object lookup is the same one `getMetaItem` uses (`host.engine.registry.getObject`, the served object with its extensions folded on). It covers `form-field-unknown` and `form-section-group-unknown`, at the same item-relative paths. Warnings only, so `valid` stays the schema's answer. A non-view type, or a body that is not a record, gets back exactly the schema verdict.\n\nThe pass runs before redaction and before `servedLockState`, where the schema verdict already ran, so it judges the same raw `effective` body.\n\nExecution-context exemption: `serveFormLayout` skips the pass on the execution face (`opts.face === 'execution'`). `getMetaItemLayered` has no face parameter and no execution caller; it is the `?layers=true` authoring read. So there is no execution leg to exempt, and the pass runs unconditionally. Stated in the code comment.\n\nFiles (3, +84 / -2):\n\n- `packages/metadata-protocol/src/protocol-meta-layered-reads.ts`: the pass, one import.\n- `packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts`: a new `describe` at the end, plus `getItem: () => undefined` on the stub registry (the layered read's code-layer lookup; no package ships these views). The pins sit in the same file as the #29196 pins rather than a new file beside it, so they reuse its stub engine instead of copying 150 lines of harness.\n- `.changeset/29435-layered-read-form-layout-warnings.md`: patch for `@objectstack/metadata-protocol`.\n\nNo `packages/spec` hunk. The response shape is unchanged: `_diagnostics.warnings` already exists on `MetadataDiagnostics`.\n\n## Tests\n\nTwo new tests in `protocol.form-layout-diagnostics.test.ts`:\n\n1. A published form view naming `no_such_field`: `getMetaItemLayered(...)._diagnostics` equals `{ valid: true, warnings: [{ path: 'config.sections.0.fields.1', message }] }`, with the message taken from `validateFormLayout` run in the test, and equals `getMetaItem`'s `item._diagnostics` for the same item.\n2. Control: a published form naming only real fields, `region__c` (an extension field) among them, reads exactly `{ valid: true }`.\n\nRed first on `7dae3b3c` (fix not applied): test 1 failed with `expected { valid: true } to deeply equal { valid: true, warnings: [ … ] }`, test 2 passed. With the fix: 12/12.\n\nAblation (`node scripts/ablation-replace.mjs`, fix committed first at `7349766e`): the anchor `const _diagnostics = effective !== null && typeof effective === 'object'` was replaced with `false && …` (anchor 1 → 0, blob `fdc7bda8` → `1bc73586`). Test 1 red, 11 green. Restored: blob equals HEAD `fdc7bda8`, `git diff HEAD` empty. The test imports `./protocol.js` from `src`, so no `dist/` leg applies.\n\n## Acceptance notes\n\n- The card asks for the pins \"beside\" `protocol.form-layout-diagnostics.test.ts`; they are inside it, for the harness reason above.\n- No out-of-scope finding.\n\n## Verification\n\n<details><summary>Package suite and typecheck</summary>\n\n`pnpm --filter @objectstack/metadata-protocol test`: Test Files 308 passed, 4 skipped (312); Tests 22264 passed, 26 skipped (22290). `pnpm --filter @objectstack/metadata-protocol typecheck`: `tsc --noEmit` exit 0 (the tsconfig excludes only `node_modules` and `dist`, so the test file is checked).\n\n</details>\n\n<details><summary>Derived gates and lint</summary>\n\nRun on head `7349766e`. `node scripts/pm/dispatch-gates.mjs --commands` derived 59 commands from the 3-path change set. All 59 recorded `exit 0`, plus `pnpm lint` exit 0.\n\nThree exited 3 (PREREQUISITE NOT MET) on the first pass and were re-run after supplying the prerequisite, all then exit 0:\n\n- `node scripts/check-plugin-teardown-shape.mjs --self-test`: the pinned positive-control commit `621a4876` was outside the shallow clone; fetched that one commit.\n- `pnpm check:lean-entry-closure`: needed `packages/objectql/dist`; built `@objectstack/objectql`.\n- `pnpm check:dual-build-cjs-loads`: needed every published package's `dist/`; built the workspace (117 tasks, 78 cached). 115 require entry points across 70 packages load.\n\n`dispatch-gates --ran`: 59 derived, 59 run, 0 NOT-MEASURED, 0 UNRUN (`pnpm lint` recorded outside the derivation). CI-only families (type-check lanes, Build Core, Test Core shards) are left to this PR's check-runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbXJ2AjZ1uaAswCJcq1)_\n"
+}

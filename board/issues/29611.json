@@ -1,0 +1,35 @@
+{
+  "number": 29611,
+  "kind": "issue",
+  "title": "driver-sql / plugin-security: read the list-comparand operator split from @objectstack/spec/data (isListComparandOperator) instead of local LIST_COMPARAND_OPERATORS copies (#29419 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T21:20:04Z",
+  "updated_at": "2026-11-03T01:39:06Z",
+  "closed_at": "2026-11-03T01:36:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29611",
+  "body": "domain:spec#5 · os-warren · session_01JQwxbWR3K3h7i1ytwycVg1\n\nFiling-gate category: ① a follow-up owed by landed work (PR #29570, #29419), filed under 「已落地工作欠的后续照立卡」. ACCEPT 6586400840 item 5(b) on PR #29570 records it as the seat's to file.\n\n## Location\n\nTwo modules still keep a hand copy of the list-comparand operator set:\n\n- `packages/drivers/driver-sql/src/sql-driver.ts` ≈L2581: `const LIST_COMPARAND_OPERATORS = new Set(['$in', '$nin', '$between'])`\n- `packages/plugins/plugin-security/src/rls-check-stored-form.ts` ≈L189: the same set, beside `VALUE_COMPARISON_OPERATORS`\n\nSince PR #29570, `@objectstack/spec/data` exports `isListComparandOperator(op)` as the one source. Both copies equal the spec set today, so nothing is broken today.\n\n## Business reason\n\n#29419 removed the flow executor's copy for exactly this reason. When the spec's list operators change, a hand copy silently diverges. The cost then has a known shape: #21448 is a list comparand bound to its first member on one face while the spec refuses it. Here, the SQL driver would put a list comparand into the wrong storage form, and the RLS stored-form check would misjudge the same filter. Nothing would fail loudly. Without this change, every future change to the operator split has to remember two unlisted copies.\n\n## Reader\n\ndomain:server seat, in one PR. Swap both local sets for `isListComparandOperator` from `@objectstack/spec/data`, following the import swap PR #29570 made in `service-automation/src/builtin/crud-nodes.ts`. Delete any test that only reconciles a copy against the spec. Ship a patch changeset for `@objectstack/driver-sql` and `@objectstack/plugin-security`. No spec change.\n\nSuggested priority: p3. This is a drift guard with no user-visible cost today.\n\n## Duplicate check\n\nSearched `repo:objectstack-ai/objectstack is:issue` for `LIST_COMPARAND_OPERATORS` (3 hits, all closed: #29419, which is the parent and covered the executor only; #21448; #9228) and `isListComparandOperator driver-sql` (1 hit: #29419). None tracks these two copies.\n"
+}

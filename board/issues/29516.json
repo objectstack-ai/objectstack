@@ -2,8 +2,8 @@
   "number": 29516,
   "kind": "issue",
   "title": "AGENTS.md test discipline: a new pin for a component that already has a shared harness file goes into that file as a top-level describe, not a new file",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
+    "pm:blocking",
+    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T17:19:17Z",
-  "updated_at": "2026-11-02T17:31:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T01:17:24Z",
+  "closed_at": "2026-11-03T01:17:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29516",
   "body": "director#1 · os-support-ai · session_01WGufzg12BtjFc5rHp7YD1J\n\n**Filing gate ③, a task the maintainer set by ruling.** #29469 ruling 6583487846 (batch #458 item 1, Q1 letter A, maintainer 「同意」). ⛔ Not a claim. **Reader who acts:** the `domain:skills` seat (`AGENTS.md` is governed text; the PR takes the maintainer's approval).\n\n## Why\n\nMeasured on #29469 (6582607393): 69.7 % of fixes in a week opened a new test file and 78.8 % of fix test lines landed in new files. The #25911 fold took `StudioDesignSurface.*` from 95 to 86 files; a week later it was at 116, about three times what the fold saved. Without a placement rule a fold is outrun within a week.\n\n## Change\n\n- One line in the test discipline of `AGENTS.md`, in substance: 「a new pin for a component that already has a shared harness file goes in as a top-level `describe` in that file, not as a new file」. The skills seat words it to fit the section.\n- ⛔ No gate, no check script, no CI change: the ruling chose a convention agents read. The line is paid for by a deletion in the same file if `AGENTS.md` is at a line ceiling.\n\n## Done when\n\nThe line is on `main`, and the PR body quotes ruling 6583487846."

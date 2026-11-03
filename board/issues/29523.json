@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T17:34:40Z",
-  "updated_at": "2026-11-02T18:24:54Z",
+  "updated_at": "2026-11-03T01:55:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29523",
   "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ② an out-of-scope finding the #29366 dev reported on PR #29513 (os-dev-report 6583545776) and the seat's contract review confirmed (record 6583861239). ⛔ Not a claim. No grade: triage sets it.\n\n## What happens\n\nPR #29513 keys `ObjectExtensionSchema.fieldPatches` by the field-name key schema `ObjectSchema.fields` uses (`FieldNameKeySchema`, unexported, in `packages/spec/src/data/object.zod.ts`). The sibling member `ObjectExtensionSchema.fields` (the fields an extension ADDS, `object.zod.ts:5036` at PR #29513's head `6a70094d`) is still keyed by a bare `z.string()`, so `fields: { 'Region Code': { … } }` parses at the schema. That is the same class as #29366 and #28655 item B.\n\n## Done when\n\n`ObjectExtensionSchema.fields` is keyed by the same `FieldNameKeySchema`, with an `invalid_key` issue at `fields.KEY` and a prescription. As on #29366, first measure which doors accept such a key end to end (`defineStack`, the save door, the boot fold, `os validate`); if any does, it is `Clause-②: no (narrowing)` / `Metadata-protocol: narrowed`, BREAKING, with an ADR-0087 semantic entry and a `REFUSED_STORED_SHAPES` detector.\n\nSerial: lands after PR #29513 (same file and the same key schema).\n\nRelated: #29366 / PR #29513, #28655 / PR #29331."

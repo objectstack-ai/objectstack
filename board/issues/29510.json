@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T17:11:33Z",
-  "updated_at": "2026-11-02T17:11:33Z",
+  "updated_at": "2026-11-03T01:42:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29510",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the seat ruling on #25467 step E1 (PR #29488, merged as `8118be4bec`). `getMetaTypes()`'s explicit return type was moved out of E1.\n\n`ObjectStackProtocolImplementation.getMetaTypes()` has an inferred return type that emits 793 lines of `.d.ts`. Pasting it inline as a literal would keep the d.ts identical but duplicate 793 lines that drift silently. Keeping it inferred lets the declaration emitter print a class comment inside it (E0's seat record, item 5), so every E2 cut reads its raw d.ts block by hand.\n\n**Ask (option B of the E1 report):** declare a named composed return type, built from the existing exported types, and add a type-equality pin (compile-time `Equal<>`) against the type main emits today. The d.ts text changes, but the type does not. Then retire the per-cut raw-diff reading.\n\n`Clause-②: no`, `Metadata-protocol: none`, a patch changeset. Serial with the E2 cuts on `protocol.ts`: schedule it between two cuts, outside a freeze day."

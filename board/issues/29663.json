@@ -1,0 +1,30 @@
+{
+  "number": 29663,
+  "kind": "issue",
+  "title": "pm-dispatch: a new key or export name that repo precedent settles is the seat's call under the veto window; only a genuine divergence goes to the maintainer (maintainer 2026-11-03)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T00:37:02Z",
+  "updated_at": "2026-11-03T00:56:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29663",
+  "body": "Filing gate: ③ a pm-rule clarification named by the maintainer, quoted verbatim below.\nReader: `domain:skills` seat 2 (#19287, vacant at filing; the next holder), one PR of skill text only under `.claude/skills/pm-dispatch/**` (`SKILL.md` 〈升级与决策〉 and/or `references/triage-duties.md`), at the governed register's tier for that path and at the ceiling model per the maintainer's standing rule for skills cards.\nDedupe (`gh api search/issues`, 2026-11-03 00:36Z): open `domain:skills` cards = 31, none about name approval or the escalation clause; open issues containing 「升级与决策」 = 8 (seat posts and unrelated feature cards); open issues containing 「否决窗口」/\"veto window\" = 14, same set plus seat posts. Nearest closed neighbours: #19940 (which landings must reach the maintainer; it kept the pending-release-note correction as a human gate) and #23934 (「卡先于弹窗」). Neither covers a new public name. 0 duplicates.\n\n## The order\n\nWarren, 2026-11-03, project thread 「Decide pending spec name approvals」, verbatim and untranslated:\n\n> 按照 skills 这个需要批准吗 (00:08:26Z, on six spec PRs whose only open item was his approval of a new key or export name)\n>\n> 是技能有问题吗？是否应该立卡更新skills？ (00:33:18Z)\n\nand his two decision-card answers in the same thread:\n\n> 以后新键名/导出名还送你批吗? → 只有真分歧才送 (00:32:19Z; the option read: 先例定不了、备选名真分歧时才开 fable 决策线程;其余席位自定。这就是技能原文的标准。)\n>\n> 立一张 skills 卡补这句澄清吗? → 立,我来立 (00:35:04Z)\n\n## What the rules say today, and what happened\n\n- `SKILL.md` 〈升级与决策〉: 「只在至少一条成立时升级:选项在产品语义或公开契约形状上真实分歧且既有规范定不了」 … 「其余归 PM 裁量:派发与排序,维护者否决窗口而非许可门」.\n- `references/triage-duties.md` line 42: 「`needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序」.\n- Neither line says what a NEW KEY NAME on an already-ruled protocol card is. Triage read \"a new public key\" as a 契约形状提案 and wrote, on every `Metadata-protocol: added` card it audited on 2026-11-02, that the new authorable name \"waits for the maintainer's approval before merge\" and that the PR body must quote that approval (audits 6583861409 on #29442, 6587041711 on #29579; the same clause reached #29473, #29574 and #29617 through the seats' claims). The parent ruling on #29425 (6580257050) had already said the key's spelling \"is the spec card's to set\".\n- Measured cost: six PRs (#29571, #29618, #29623, #29583, #29589, #29651) sat accepted-but-unqueued on 2026-11-02 evening waiting only for that nod; the maintainer approved all six unchanged at 00:08Z, each name having a repo precedent the seat had already cited (`objectName` on CRUD and START nodes; RFC 6749 `redirect_uri` and the plugin option `connectorOAuthRedirectUri`; `FileRefusedValueSchema` + `metadataRefused: true`; the server's own `getPublicConfig()` keys; `ManifestSchema`'s own `namespace` / `dependencies`). One of the six (#29589) was a real human gate for a different reason: the DELIBERATE CORRECTION class of `scripts/check-empty-changeset.mjs` (ruling D on #17712) says \"get it confirmed on the PR\" and has no second command. That gate is untouched by this card.\n\n## Rule to write (the one point, nothing else)\n\nA new key, accepted value or export name whose spelling repo precedent settles (the same word already used for the same concept in the spec, the producer or the standard the key implements) is the seat's call: the seat names the precedent in the PR body and lands under the maintainer's veto window, with no approval line and no `needs-user-decision`. It goes to the maintainer only when the candidate names genuinely diverge on product semantics or public contract shape and existing spec cannot settle it, which is the existing 〈升级与决策〉 test. Triage's audit comment does not add an approval gate of its own.\n\n## Where it lands\n\nOne sentence in `SKILL.md` 〈升级与决策〉 (if paid under the line ratchet; the file sits at its ceiling) or one clause on `references/triage-duties.md` line 42 saying that a precedent-settled name is not a 契约形状提案. No change to `AGENTS.md`, to the DELIBERATE CORRECTION gate, or to the six cards already ruled.\n\n## Acceptance\n\n- The text names the precedent test (same word, same concept, in spec / producer / standard), says the seat lands it under the veto window, and says a genuine divergence on semantics or contract shape is the only path to the maintainer, in those words.\n- Line ratchet paid line for line; every touched line ≤ 120 bytes; no issue numbers in operative text (id-lint).\n- Independent contract review on the PR head before the seat's ACCEPT, per the governed path's tier.\n- Round report cites this card's order lines verbatim."
+}

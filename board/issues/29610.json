@@ -1,0 +1,35 @@
+{
+  "number": 29610,
+  "kind": "issue",
+  "title": "plugin-security: os explain's FLS layer reports a row-conditioned field lock as applying \"everywhere else\" to a caller holding Modify All, whose vote overrides that lock since #29387",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T21:20:01Z",
+  "updated_at": "2026-11-03T01:11:34Z",
+  "closed_at": "2026-11-03T01:10:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29610",
+  "body": "domain:spec#5 · os-warren · session_01JQwxbWR3K3h7i1ytwycVg1\n\nFiling-gate category: ① a product defect with a named location. It is a follow-up owed by landed work (PR #29387, #29106, ruling 6573563853 A), filed under 「已落地工作欠的后续照立卡」.\n\n## Defect\n\n`packages/plugins/plugin-security/src/explain-engine.ts` builds `conditionedSentence` (≈L2966). For every field entry that carries a `when`, it says the entry is \"judged per row by the write gate, applied as the lock everywhere else\". Since PR #29387, `getFieldPermissions` applies the View All / Modify All vote after the per-entry vote, under all three `when` verdicts (matched, unmatched, unjudged). That holds in the write gate, in the row-blind readers and in the record-scoped projection. So for a caller holding Modify All on the object, a row-conditioned lock never binds. The explain sentence still lists it as a lock.\n\n- Direction: restrictive. The report claims more restriction than is enforced and grants nothing. The layer's hidden/partial mask is correct; only this sentence is wrong.\n- `reach:` read from code, not yet measured. This was found by the at-tier contract review of PR #29599 (record 6588636490) and confirmed in ACCEPT 6588662613 item 5. The first acceptance step is to measure it once through the public entry: `os explain` (or the explain HTTP route) for a caller whose set grants Modify All on an object that has a `when`-conditioned field entry. If the sentence does not list the entry, close as not reproduced.\n\n## Business reason\n\nAdmins, and AI authors debugging field access, use `os explain` to learn why a field behaves the way it does. For a Modify All holder the report tells them a field is locked on rows the condition does not match, but the field is editable. That leads them to add grants they do not need or to misdiagnose a write that succeeds. Without a fix, the report and the enforcement disagree for every Modify All holder on every object with a conditioned entry.\n\n## Reader\n\ndomain:server seat, plugin-security. In `conditionedSentence`, drop or annotate entries whose object the caller holds Modify All on (and treat a read-only lock the same way for View All). Add one test in `explain-engine.test.ts` next to the `[#25866]` row-condition test, using a Modify All set.\n\nSuggested priority: p3. This is report prose with no enforcement change.\n\n## Duplicate check\n\nSearched `repo:objectstack-ai/objectstack is:issue` for `\"applied as the lock\"` (2 hits: #29543 open, which is this finding's source card and is docs-only; #25866 closed, which introduced the sentence), `conditionedSentence` (1 hit: #29543), and `explain conditioned lock \"Modify All\"` (4 hits: #29543 plus three seat posts). None tracks this defect.\n"
+}

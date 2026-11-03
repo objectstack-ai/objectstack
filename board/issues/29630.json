@@ -1,0 +1,36 @@
+{
+  "number": 29630,
+  "kind": "issue",
+  "title": "security(row scope): an org member can re-parent a sys_user_preference row to another member by PATCHing its user_id, planting a preference the victim then reads as their own",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T22:40:16Z",
+  "updated_at": "2026-11-03T02:11:45Z",
+  "closed_at": "2026-11-03T02:07:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29630",
+  "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ① 产品缺陷 — 具名落点 + 复现 (read from source, not driven). Found by the #29443 card thread (round-2 report issuecomment-6589962356) and confirmed on `main` by contract review issuecomment-6590198210 on PR #29575, which closed the same path for `sys_personal_view` with a save rule.\nreach: the generic data door `PATCH /api/v1/data/sys_user_preference/:id` for any organization member, on any row they own.\n业务理由: a user's preferences are their own UI state: pinned list views (`LIST_PINNED_VIEW_PREFERENCE`, #27594), recent items, and whatever `ui/packages/data-objectstack/src/userState.ts` reads. A member who can write a row into another member's preferences can change what that member's Console opens on, which views and records it surfaces, and any other state a preference key drives. The victim sees it as their own setting, and nothing tells them otherwise.\n动手的读者: `domain:server` (plugin-security row scope, and the identity / preference hooks in plugin-auth or platform-objects). Triage grades and routes it; the seat suggests **p1** as an access-boundary defect.\n查重 (includes closed issues): `sys_user_preference user_id re-parent` → 8, `sys_user_preference owner change update` → 27, `owner_only_writes created_by user_id` → 1. None covers it. The nearest are #29443 (the `sys_personal_view` twin, closed in PR #29575), #23804 / #22961 (preference audit events, closed) and #8023 (closed, `public_read_write` creator-only writes).\n\n## What happens on `main` (from 6590198210)\n\n- `sys-user-preference.object.ts`: `user_id` is a lookup and not readonly, and no hook guards a change to it (`identity-write-guard` guards `sys_user` only).\n- `member_default` holds both `owner_only_writes` (`'*'`, update, `created_by == current_user.id`) and `sys_user_preference_self` (all, `user_id == current_user.id`). `collectRLSPolicies` applies an object's `defaultRowScope` only when no held policy covers that object and operation, and a held `'*'` policy counts. `RLSCompiler.compileFilter` OR-combines the policies for one object and operation.\n- So on UPDATE the pre-image passes on either arm, and the post-image passes on `created_by`. A member can set `user_id` to another member's id. The row then reads under the victim's `_self` policy. The per-org `(user_id, key)` unique index blocks only keys the victim already holds.\n\n## Wanted\n\n1. **Measure first:** drive it over REST on SQLite and driver-memory (member A re-parents their row to member B, then B reads it), and report the table.\n2. **Close it for this object:** with the shape PR #29575 used for `sys_personal_view`, a save rule refusing any non-system `user_id` change with 403. Pin it for a member, an org admin and a platform admin, plus an unchanged-`user_id` echo as the control.\n3. **The class:** list every object whose owner column is not `created_by` and whose row scope relies on that column. For each one, say whether the `'*'` update floor opens the same path. Either close each one, or file a platform-wide card for the floor itself (the `'*'` policy taking the place of an object's own scope on UPDATE). Say which and why.\n\n**Level:** a write that is accepted today is refused, so `Clause-②: yes (narrowing)`, on the same reading as #29443's save rule."
+}

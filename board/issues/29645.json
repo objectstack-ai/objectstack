@@ -1,0 +1,36 @@
+{
+  "number": 29645,
+  "kind": "issue",
+  "title": "validation(text): a non-plain object (Date, Map, class instance) on a text-family field passes the string arm and is stored as sent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T23:41:22Z",
+  "updated_at": "2026-11-03T02:06:28Z",
+  "closed_at": "2026-11-03T02:05:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29645",
+  "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ① 产品缺陷 — 具名落点 (read from source). Follow-up S4 of contract review issuecomment-6591249009 on PR #29638 (#29562): the text-family twin of #29562's sibling (3).\nreach: the engine write doors (insert, update by id, update by predicate) from flows, hooks and server code. A JSON body over REST carries no `Date`, `Map` or class instance.\n业务理由: `packages/objectql/src/validation/record-validator.ts`'s `BOUNDED_STRING_FIELD_TYPES` arm (#29133) refuses a plain object or array with the value-shape sentence, but its object test is `isPlainObjectValue`, which is prototype-strict. So `new Date(0)` on a `text` field passes on its string reading, and the #29241 door leaves it, so the driver stores whatever it makes of a `Date`. #29562 closed the same gap for option fields by refusing any non-plain object `invalid_type`; the text family was out of that card's ruling.\n动手的读者: `domain:server` (record validator). Triage grades it; the seat suggests p3.\n查重: `text field Date non-plain object stored` → none covering it; nearest #29133, #29241, #29562.\n\n## Wanted\n\n1. Measure first: `Date`, `Map`, `Set`, a class instance and a typed array on `text`, `textarea`, `email`, `url`, `phone` and the rest of `BOUNDED_STRING_FIELD_TYPES`, on SQLite and driver-memory: what is stored and what is answered.\n2. Refuse a non-plain object on the text family `invalid_type` with the value-shape sentence, through the same helper #29562 used for option fields (no copy). A string, number or boolean keeps #29241's rule.\n3. Pin it per type, plus a control showing a plain string still lands.\n\n**Level:** an engine write accepted today is refused, so `Clause-②: no (narrowing)` (no unique answer moves), the reading #29133 used."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 29626,
+  "kind": "pull_request",
+  "title": "chore(pm): retire half-state row H25; H29 reports the awaiting-state pairs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T22:32:38Z",
+  "updated_at": "2026-11-02T23:12:28Z",
+  "closed_at": "2026-11-02T23:12:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T23:12:25Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29626",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xCjGpvHD4tRyZ72DtPifmqL)_\n\nPart of #29471\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:删除半态巡检行 H25(`pm:awaiting-maintainer` 与另一个 pm 状态标签共存),并删掉 H29 里「含 awaiting 的标签对归 H25」那一行跳过,让 H29 报出 H25 原来报的全部标签对。\n- 为什么改:#29471 普查把 H25 列为一档(无读者、30 天无引用);席位裁决选项 C(评论 6589866189):只删 H25,H24 保留。\n- 风险与回滚:只动 `scripts/pm/check-half-states.mjs`;没有哪个状态组合失去报告。回滚即 revert 本 PR。\n- 先看:`h29PmStateExclusivity` 删掉的那行 `continue`,以及 H29 自测里由「静默」翻成「报出」的七条。\n- 两分钟验证:`node scripts/pm/check-half-states.mjs --self-test`,预期 5202 条全过(主干 5219)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **H25 is deleted**: its rationale block, `AWAITING_MAINTAINER_CONFLICT_REASON` (only H25 read it), `h25AwaitingMaintainerExclusivity`, its line in the header docblock, its band-registry entry, its call in the sweep loop and the `h25row` test helper.\n- **H29 now owns the awaiting pairs.** The line `if (a === AWAITING_MAINTAINER_LABEL || b === AWAITING_MAINTAINER_LABEL) continue; // H25's` is deleted, so H29 reports every pair that contains `pm:awaiting-maintainer`. This is the one behaviour change to a staying row, ruled by the seat (option C, [#29471 comment 6589866189](https://github.com/objectstack-ai/objectstack/issues/29471#issuecomment-6589866189)). H29's H3 exclusion (`pm:queue` + `pm:dispatched`) is unchanged.\n- **Kept**: `AWAITING_MAINTAINER_EXCLUSIVE_LABELS`, because `PM_EXCLUSIVE_STATE_LABELS` spreads it; the `queued` fixture, which H3, H8, H19, H22 and H29 cases use; H24 and the H8 case that names it, per the ruling.\n- **Prose pointers** that named H25 as a live row now name H29: the `AWAITING_MAINTAINER_LABEL` reader list, the `GOVERNED_PR_DECISION_LABEL` note, H55's header, the H66/H67 population notes, the patrol input-set note, the sweep-loop comment and the H66 battery case's name. These are comment and test-name text only, with no output change.\n- No gate, row, constant or battery is added. No battery shrank, so no pin moved.\n\n## Why\n\nThe #29471 census put H25 in tier 1: no named reader and no 30-day citation. The census grouped it with H24 as \"the label pairs H29 already covers\", but on `main` H29 skipped every awaiting pair as H25's, and H24 is a label-and-assignee intersection that H29 never reads. The seat narrowed the family to H25 and ruled that H29 takes over H25's pairs, so no state loses its report.\n\n### No state loses its report\n\nMeasured by importing both trees (`origin/main` 0a4e74ea and this head) and judging every non-empty subset of the six-label ONE-OF vocabulary as an open card:\n\n- 63 label sets judged. H25 fired on 31 of them, and the new H29 fires on all 31 (0 misses).\n- On all 63 sets, the answer to \"does H3, H25 or H29 fire?\" is the same before and after.\n- On every set without `pm:awaiting-maintainer`, H29's sentence is byte-identical before and after.\n\n## Verification\n\n- `node scripts/pm/check-half-states.mjs --self-test` on 608b9084: **5202 cases pass** (5219 on `main`, so 17 fewer). The 17 removed are 14 H25 cases (9 single cases and the 5-case per-label loop), `H29: …and H25 does fire on it`, the H55 adjacency case that called H25, and the H55 reconciliation case that read H25's header prose.\n- **The seven flipped cases**, each from \"silent here, H25's\" to \"fires here\": `H29: a pair containing the awaiting state is this row's`, the 5-case loop `H29: awaiting + <state> fires here`, and `H29: …and names the awaiting pairs too`.\n- Every battery reads the same `n/floor` as on `main` (H66 182/172, H70/H71 31/30 and so on), so nothing was re-pinned.\n- Net lines: **+35 / −156 (−121)**, one file.\n\n<details><summary>Local gates on 608b9084 (`dispatch-gates --commands`)</summary>\n\n- On head 608b9084, `node scripts/pm/dispatch-gates.mjs --commands` derived 47 commands. All 47 ran, each with a 900 s timeout, with exit codes recorded before any pipe. **All 47 exited 0.**\n- The `--ran` reconciliation printed: `47 derived famil(ies) accounted for — 47 run, 0 NOT-MEASURED`.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD`: exit 0.\n- Prerequisite: `pnpm install --frozen-lockfile`.\n- Families CI runs beyond the derived list are read from this PR's check runs, not re-run locally.\n\n</details>\n\n## Acceptance notes\n\n- `scripts/pm/ensure-pm-labels.sh:212` still names H25 in a comment as a consumer of the label. That file was outside this card's surface, so it was left alone. A one-word follow-up (H25 → H29) belongs to whichever family next touches that file.\n- H24 stays. It is the only row that reports an open `pm:queue` card with an assignee, and H49, H50, H66 and H71 each decline that shape as H24's.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [ ] 3. No formatter ran; `pnpm lint` passes. (no formatter ran; `pnpm lint` was not run locally, so the CI lint job decides it)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `scripts/pm/**` only; `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (except the 维护者速读 block, which the seat contract writes in Chinese)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAmM3BRQQcQSA67VE3L\n"
+}

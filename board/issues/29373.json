@@ -2,8 +2,8 @@
   "number": 29373,
   "kind": "issue",
   "title": "spec: the package export manifest declares `withheldMaps` (each connector header/env map withheld whole), classified `door` for the unmanaged import (#28640 ruling ③A, spec half of #29342)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T13:22:01Z",
-  "updated_at": "2026-11-02T17:33:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T23:11:32Z",
+  "closed_at": "2026-11-02T22:36:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29373",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: executing a recorded ruling. #28640 ruling ③A (director record 6566912252: \"the package export marks each withheld map position so an import elsewhere knows the map is incomplete\"), and the seat ruling on #29342 (option A, which places the marker on the export manifest). The #29342 dev's measurement (os-dev-report 6578135265) found that every position an import can read is spec-owned. Filed by `domain:server` seat 3 for the `domain:spec` lane. ⛔ Not a claim. Suggested-grade: p2 (it blocks #29342, p2).\n\n## What the ruling binds\n\n- `PackageExportManifestSchema` (`packages/spec/src/api/package-lifecycle.zod.ts`) gains a fixed key `withheldMaps`, an array of `{ type, name, path }`. Example: `{ type: 'connector', name: 'stripe', path: 'providerConfig.headers' }`. `path` is one of the connector's four withheld maps: `providerConfig.headers`, `defaultHeaders`, `transport.headers`, `transport.env`.\n- `UNMANAGED_INSTALL_KEY_DISPOSITIONS` (`packages/spec/src/kernel/unmanaged-install.ts`) classifies `withheldMaps` as `door`, so the unmanaged import does not refuse an exported package that carries it.\n- ⛔ No per-entry hiding and no name list. The maps stay withheld whole, and the credential heuristic does not become an export contract (③A).\n- Declaration: `Metadata-protocol: none` (the key is not authorable on any item); `Clause-②: yes (widening)`, because the unmanaged door accepts one more key.\n\n## Where (dev readings on `origin/main` `57cde8cb`)\n\n- The export (`GET /packages/:id/export`, `runtime/src/domains/packages.ts` `assemblePackageManifest`) reads served items, so the connector redactor drops the four maps and the export writes each item with the map absent. No marker convention exists to reuse: `redactedKeys` is never put on the wire, and webhook `headers` are dropped the same way.\n- An unclassified top-level manifest key gets the whole unmanaged import refused (`package-unmanaged-install.ts` default arm).\n- Also noted, not measured: the export's top-level `label` is not classified in the unmanaged table either. Measure it and classify it in the same PR if it is a real gap.\n\n## Wanted\n\nThe key, its describe text, the table row, the unmanaged table's totality test, liveness and docs, with the declaration lines above. After it lands, the server half is #29342: the export writes the list, and both install doors name each incomplete map in their answer.\n\nDedupe: searched `withheldMaps`, `export manifest withheld connector headers`; nearest #29342, #28640, #28596. **New.**\n\nLinks back: #28640, #29342, #28596."

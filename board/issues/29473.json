@@ -2,8 +2,8 @@
   "number": 29473,
   "kind": "issue",
   "title": "GET /auth/config serves nine features keys the spec does not declare, and nothing pins the feature registry to the schema",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:59:04Z",
-  "updated_at": "2026-11-02T20:03:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T01:12:10Z",
+  "closed_at": "2026-11-03T01:10:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29473",
   "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ① an out-of-scope finding (class b, carrier: the seat) that the #29344 dev reported and the seat's contract review confirmed on PR #29455's head `0d814466` (record 6581701011). ⛔ Not a claim. No grade: triage sets it.\n\n## What was measured\n\nPR #29455 declares `features.sso` on `AuthFeaturesConfigSchema` (`packages/spec/src/api/auth-endpoints.zod.ts`), the response schema of `GET /api/v1/auth/config`. The same response carries nine more `features` keys the server serves (plugin-auth `getPublicConfig()`, `auth-manager.ts`) that the schema does not declare. A client that parses the response through `GetAuthConfigResponseSchema` loses them, because a plain object schema strips unknown keys:\n\n- booleans, all classified in `PUBLIC_AUTH_FEATURES` (`packages/spec/src/kernel/public-auth-features.ts`): `multiOrgEnabled`, `degradedTenancy`, `oidcProvider`, `deviceAuthorization`, `admin`\n- non-flag values, all listed in `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS`: `tenancyPosture`, `audiencePosture`, `termsUrl`, `privacyUrl`\n\n`deviceAuthorization` has a live reader (`ui/apps/console/src/pages/auth/DeviceAuthPage.tsx:77`). Also undeclared, at the top level of `GetAuthConfigResponseSchema`: `devSeedAdmin` (`auth-manager.ts:4634`, dev-only).\n\nNo pin ties the registry or the non-flag list to the schema's keys. The three existing pins are: plugin-auth `public-feature-registry.test.ts` (served keys ≡ registry), platform-objects feature-gate guard (registry ≡ gates), and spec `public-auth-features.test.ts` (the registry's names). So a key can be served, classified and read while the contract never declares it, which is how `sso` (#29344) and `cloudManaged` (#25292) each needed their own card.\n\n## Wanted\n\n1. Declare each served key on `AuthFeaturesConfigSchema` (and `devSeedAdmin` on `GetAuthConfigResponseSchema`, or rule it out as dev-only), with a describe that says what the producer means, in the #25292 / PR #29455 pattern. Each is `Clause-②: yes (widening)` · `Metadata-protocol: added`; the names are the served names, so the maintainer is asked only if a rename is proposed.\n2. Add one pin in `packages/spec` that every key in `PUBLIC_AUTH_FEATURES` and `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` is a declared key of `AuthFeaturesConfigSchema` (retired keys excepted), so the next served key cannot be left undeclared.\n\nReader who acts: the `packages/spec` api-schema owner (`domain:spec`). Land after PR #29455, which touches the same schema.\n\nAlso seen, for the ui lane, prose only: `ui/packages/auth/src/types.ts:284-289` documents `features.sso` as \"wired; when falsy the `/sign-in/sso` route isn't mounted\", but the served value is \"usable\", so a served `false` can mean \"wired, no provider yet\" with the route mounted. The type (`sso?: boolean`) is right.\n\nRelated: #29344 / PR #29455, #25292 / PR #25309."

@@ -1,0 +1,32 @@
+{
+  "number": 29706,
+  "kind": "issue",
+  "title": "Studio: zh-CN first screens stop mixing English: the clone notice, the new package form, the flow rail group",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T02:11:54Z",
+  "updated_at": "2026-11-03T02:11:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29706",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ② filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「第二批也立卡」. Priority on 「相关卡 p1, 让车道处理」. ⛔ Not a claim.\nReader: `domain:ui`; the clone notice's string is in `packages/runtime`, so the claim states how it is translated.\nDedupe: `zh-CN English notice`, `Human-readable package name`. #29675 is a separate read fault. **New.**\ntype: enhancement\n\n**Business reason.** These are among the first things a Chinese-speaking builder sees. A mixed screen reads as unfinished, and it makes it unclear which words are safe to ignore.\n\n## What happens\n\n| where | what | status |\n|:--|:--|:--|\n| New similar on a flow | the banner's second sentence, \"The copy is switched off and does not run until you switch it on…\", renders in English in zh-CN. The source is a server string, `packages/runtime/src/flow-clone.ts:191` | measured by screenshot at `3482f3d8d2` |\n| New package form | labels such as Display name and Human-readable package name under a zh title. `packages/spec/src/kernel/manifest.zod.ts:674` has that text as a `describe` | reported by an independent review; re-measure |\n| Automations rail | a draft object's flow group reads `REPAIRS_REPAIR_TICKET`, its machine name uppercased | reported by the review; re-measure |\n| Column picker | system fields listed before the builder's own | reported by the review; re-measure |\n\nThe #29650 refusal sentence is also English, but it goes away with that fix.\n\n## Direction\n\n- A sentence the server sends for a person to read has a translation path, or is sent as a code the console translates. Pick the existing pattern; state it in the PR.\n- The form's labels come from the i18n catalog, not from spec `describe` text.\n- A group is labelled with the object's label.\n- The builder's own fields sort first.\n\nDrop any row that does not reproduce, and say so on the card.\n\nLinks back: #29690, #29650."
+}

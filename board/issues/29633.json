@@ -1,0 +1,36 @@
+{
+  "number": 29633,
+  "kind": "pull_request",
+  "title": "docs(agents): a new pin for a component with a shared harness file goes into that file",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T22:52:55Z",
+  "updated_at": "2026-11-03T01:44:56Z",
+  "closed_at": "2026-11-03T01:17:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-03T01:17:22Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29633",
+  "body": "domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\n<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67x6U9HRyDEsbiooisu4nhmuK)_\n\nFixes #29516\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`AGENTS.md` 的测试纪律段加一句:组件已有共享测试夹具文件时,新的回归钉作为该文件的顶层 `describe` 写入,不新开文件;同时删掉 Kernel 节里已过时的「`EnhancedObjectKernel` is deprecated」一行(该类已移除)。\n- 为什么改:#29469 测得一周内 69.7% 的修复新开了测试文件,折叠一周后就被新文件抵消;维护者对 Q1 选 A 回了「同意」。\n- 风险与回滚:只是一条约定,不加门禁、不加检查;回滚即 revert 本 PR。\n- 先看:`AGENTS.md` 的 § Build & Test,「Clocked windows…」那一段末尾新加的两行;§ Kernel 删掉的一行。\n- 两分钟验证:`pnpm check:pm-skill-ratchet`,预期 `AGENTS.md is 1050 lines (ceiling 1050; headroom 0)`。\n- 需要你做的:作为 Tier H 治理文本,需要你批准合并。\n\n## What changes\n\nOne sentence joins the test discipline in `AGENTS.md` § Build & Test, at the end of the paragraph that starts \"Clocked windows measure behaviour, never loading\". It sits next to the paragraph's other rules about test files (the 10 s budget and when a test may be deleted):\n\n> A new pin for a component that already has a shared harness file goes into that file as a top-level `describe`, not a new file (ruling record 6583487846).\n\nNo gate, no check script and no CI change, as the ruling chose: this is a convention agents read.\n\nTo pay for the two lines, § Kernel loses its stale line \"`EnhancedObjectKernel` is deprecated — do not use.\" and the blank line above it (see the line budget below).\n\n## Why\n\nRuling 6583487846 on #29469 (batch #458 item 1, **Q1 letter A**, maintainer 「同意」 2026-11-02T17:15Z) reads: \"one line in the test discipline of `AGENTS.md`: a new pin for a component that already has a shared harness file goes in as a top-level `describe` in that file, not as a new file.\" The card's measurement (#29469, 6582607393): 69.7 % of a week's fixes opened a new test file, and the #25911 fold of `StudioDesignSurface.*` (95 → 86 files) was back at 116 a week later.\n\n### Line budget (no ceiling row moved)\n\n| file | lines before / after / ceiling | widest line touched | paid by |\n|:--|:--|:--|:--|\n| `AGENTS.md` | 1050 / 1050 / 1050 | 89 bytes (cap 120) | +2: the sentence, on two new lines after the paragraph, which stays byte-identical to `main`. −2: the stale line \"`EnhancedObjectKernel` is deprecated — do not use.\" in § Kernel, with its blank line. The class is removed, not deprecated; its home is `packages/core/README.md` (\"`EnhancedObjectKernel` has been **removed**. Migrate to `ObjectKernel`.\") and the `os doctor` deprecation pattern in `packages/cli/src/commands/doctor.ts`. |\n\nThe applicable rows of `scripts/pm/check-skill-line-ratchet.mjs` are `['AGENTS.md', 1050]` (line ceiling), the `AGENTS.md` widest-table-row pin (768, untouched: no table edited) and `MAX_LINE_BYTES = 120`. No line was rewrapped: per the skills lane charter (`.claude/skills/pm-dispatch/references/lanes/skills.md`, 「棘轮逐行付账,⛔ re-wrap 筹行」) the ratchet is paid line by line.\n\n`CLAUDE.md`, `.claude/**` and `docs/agents/**` were searched for a restatement of a test-file placement rule; none exists, so nothing else needed to change.\n\n## Verification\n\n<details><summary>Local gates on 7409cb0b: 15 derived, 15 run, all exit 0 (`dispatch-gates --ran`)</summary>\n\n- On head 7409cb0b, `node scripts/pm/dispatch-gates.mjs --commands --changed` derived 15 commands. All 15 ran after `pnpm install --frozen-lockfile` (exit 0), each with a 900 s timeout and its exit code recorded before any pipe. All 15 exited 0:\n  `check-closing-keyword-parity` (run and `--self-test`), `check-comment-mask-corpus`, `check:agent-test-spelling`, `check:docs-audit-scope`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes`, `check:pm-governed-merges`, `check:pm-governed-prose`, `check:pm-skill-id-lint`, `check:pm-skill-ratchet`, `check:refd-timer-probe`, `check:required-contexts`, `check:watch-hint-literal`.\n- The `--ran` reconciliation printed: `15 derived famil(ies) accounted for — 15 run, 0 NOT-MEASURED`. Changed lines: 4 (+2 / -2, one file), under the 3000 human-merge threshold.\n- `check:pm-skill-ratchet` reads `AGENTS.md is 1050 lines (ceiling 1050; headroom 0)` and `widest table row is 768 bytes (pin 768; headroom 0)`.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD` exited 0.\n- Families CI runs beyond the derived list are read from this PR's check runs, not re-run locally.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [ ] 3. No formatter ran; `pnpm lint` passes. (no formatter ran; `pnpm lint` was not run locally on this Markdown-only diff, so the CI lint job decides it)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `AGENTS.md` only; `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (except the 维护者速读 block, which the seat contract writes in Chinese)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAmNaTByKyGLGR8Ydt5\n"
+}

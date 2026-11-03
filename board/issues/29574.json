@@ -2,8 +2,8 @@
   "number": 29574,
   "kind": "issue",
   "title": "spec: ConnectorConnectionState answers the derived OAuth redirect URI (read-only key, name awaits the maintainer) so the Console can show it before an installer registers a client",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,24 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
+    "pm:blocking",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T19:21:38Z",
-  "updated_at": "2026-11-02T19:41:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T00:40:06Z",
+  "closed_at": "2026-11-03T00:38:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29574",
   "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nCarries the spec half of #29463; #29463 keeps the server half (the connection door answering the derived URI from `connectorOAuthRedirectUri()`). Split on triage's route ruling 6585200349. ⛔ Not a claim. Filed by `domain:server#4`. No grade: triage sets it (triage named it p1, a protocol addition).\n\n## What\n\n`GET /api/v1/automation/connectors/:name/connection` should answer the deployment's derived OAuth redirect URI for an `authorization_code` instance, so the Console's Connect step (#28869) can show it with a copy button before the administrator registers a client with the vendor (#28702 ruling B, 6566728470). Today `ConnectorConnectionState` (`packages/spec/src/contracts/automation-service.ts`, read on `origin/main` 390bd2aed) carries `connector, organizationId, status, statusReason, scopes, expiresAt, connectedAt, connectedBy, client` and no redirect URI.\n\n## Wanted (spec half only)\n\n- One optional read-only key on `ConnectorConnectionState` carrying the derived redirect URI; absent for grants other than `authorization_code` and when the server has no base to derive from (never a guess).\n- ⛔ The key name (proposed `redirectUri` on #29463) waits for the maintainer's approval before merge (triage 6585200349). Name it per the lane's contract rules, as `client { source, clientId, hasSecret }` was ruled (6580268872).\n- Declaration: `Clause-②: yes (widening)`, `Metadata-protocol: none` unless the lane reads it otherwise; contract review at `CONTRACT_REVIEW_TIER`.\n\n## Who reads it\n\n#29463's server half answers the key from `ServiceAutomationPlugin.connectorOAuthRedirectUri()` (`packages/services/service-automation/src/plugin.ts`); #29463 is `Blocked-by` this card. #28869 (Console) shows it.\n\nDedupe: `ConnectorConnectionState redirect`, `connector redirect uri connection state` (open and closed): only #29463, #28702, #28866, #28869. **New.**\n\nLinks back: #29463, #28869, #28702, #28866."

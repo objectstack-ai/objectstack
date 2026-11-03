@@ -1,0 +1,33 @@
+{
+  "number": 29600,
+  "kind": "issue",
+  "title": "metadata-protocol: a published .custom override of a dashboard or report is registered in the registry's bare slot wearing the base's envelope (the #22057 guard spares only views)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T20:46:20Z",
+  "updated_at": "2026-11-03T00:30:26Z",
+  "closed_at": "2026-11-03T00:13:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29600",
+  "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ① an out-of-scope finding of the #29563 dev (os-dev-report `6588016343`, out_of_scope_findings class b), accepted by this seat on PR #29597. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested grade: p2 (PR #29597 closes the visible symptom at the export door; the registry state behind it stays wrong for every other reader of the per-package layer).\n\n⛔ Hold: the fix is in `packages/metadata-protocol/src/protocol.ts`, frozen by server seat 5 until 2026-11-03T06:00Z at the latest. Dispatch after the freeze lifts.\n\n## What happens\n\nMeasured by the #29563 card thread over the real protocol and engine (the harness of PR #29597's new pin, reading `engine.registry` for `dashboard` and `report`):\n\n- A published `.custom` row of a name the base ships is hydrated by `hydrateOverlayIntoRegistry` (`protocol.ts`) and registered with `registry.registerItem` in the **bare slot**, wearing the **base's** artifact envelope: `_packageId` is the base's, `_provenance` is `package`, so `isCodeArtifactBody` reads it as the base's own code document. `lookupArtifactItem` falls back to the base's code artifact, which is where the envelope comes from.\n- `readFlattenedMetaItems`' per-package layer then lists that copy under the base, beside the base's own item.\n- The #22057 guard (\"a VIEW row bound to one package, never under a name another ships\", `protocol.ts` ~L11916 and ~L12089) spares `view` only. Every other overlay type (dashboard, report, and any type the same hydrator handles) takes the bare slot this way.\n\nVisible consequence before PR #29597: `GET /packages/BASE/export` carried two items per overridden dashboard or report, the second with the edited label and the `overrides` block (ADR-0146 D8 item 3 says the base export is unchanged). PR #29597 filters such items at `assemblePackageManifest`; this card removes the cause.\n\n## Wanted\n\n- The hydrator registers a published `.custom` override under the pair's envelope, never the base's, for every overlay type, as #22057 already does for `view`. The minimal change named by the dev: widen the #22057 guard beyond `view`.\n- Pin per type (view, dashboard, report at least): after a published override, the per-package layer lists the base's own item only under the base, and the override only under the pair.\n- Once it lands, PR #29597's export filter becomes a belt-and-braces guard; keep its pin green either way.\n\nSerial: `protocol.ts` freeze (server seat 5), and any card holding the #22057 region at the time.\n\nDedupe: searched `hydrateOverlayIntoRegistry bare slot`, `22057 view guard envelope`, `override registered under base envelope`; nearest #22057 (closed, view only), #29563 (the export symptom). **New.**\n\nLinks back: #29563, PR #29597, #22057, ADR-0146 D8."
+}

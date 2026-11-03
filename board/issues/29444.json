@@ -12,18 +12,18 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
+    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:04:36Z",
-  "updated_at": "2026-11-02T15:04:36Z",
+  "updated_at": "2026-11-03T01:10:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29444",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: ruling A on #29236 (6580261740), the workload's `domain:ui` follow-up. Blocked-by #29236 (the server PR) and #29441 (spec).\n\nAfter #29121, Console Home reads each object the app roster requires by name, one request per name (8 on app-crm). Once `GET /meta/:type?names=a,b,c` ships, the roster gate makes one request for its `requiresObject` union. Remember that an unknown name is simply absent from the answer, so the gate must treat a missing item as it treats a 404 today.\n\nAcceptance: Home outside an app makes one object metadata request for the roster gate, measured on app-crm."

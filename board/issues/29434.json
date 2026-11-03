@@ -2,8 +2,8 @@
   "number": 29434,
   "kind": "issue",
   "title": "connector-mcp: a stdio MCP server has no secrets-layer route for its credentials, so `transport.env` can only carry a literal (the route #29341's advisory cannot point to)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:54:46Z",
-  "updated_at": "2026-11-02T16:12:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T23:27:16Z",
+  "closed_at": "2026-11-02T23:25:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29434",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① an out-of-scope finding of the #29341 dev (os-dev-report `6579919803`, noted with no carrier), confirmed by the contract review on PR #29424 (record `6580241094`, ③). Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 (an enhancement; a literal still works, it just sits in metadata).\n\n## What happens\n\n- A declarative `mcp` connector with an http transport can take `auth: { ..., credentialRef }`, which the provider resolves through the secrets layer and sends itself.\n- A stdio transport takes no `auth`. `connector-mcp/src/mcp-provider.ts:82` says auth is \"Not applied to stdio transports\", and `content/docs/automation/connectors.mdx:232` says stdio credentials ride `transport.env`.\n- So a stdio server's API key can only be a literal in `transport.env`. That map is withheld on read, but the literal is stored in metadata.\n- #29341's advisory (`connector-credential-literal`) warns on such a literal. It can only say that `auth.credentialRef` reaches the server over an http transport, because no route exists for stdio.\n\n## Wanted\n\n- Decide a route for stdio credentials that keeps the literal out of metadata, for example `transport.env` entries whose value is resolved from a credential reference at spawn time. The spelling of any new key is a spec-lane question: report options before adding one.\n- Then the #29341 advisory's stdio wording can steer to that route.\n\nDedupe: searched `stdio credentialRef transport env`; nearest #29341, #29342, #28640. **New.**\n\nLinks back: #29341, #29424, #28640."

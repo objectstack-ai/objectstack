@@ -1,0 +1,28 @@
+{
+  "number": 29672,
+  "kind": "issue",
+  "title": "QA run · studio-authoring-42-plus-2 (44/44) · 3482f3d8 · 2026-11-03 · 33 PASS / 3 PARTIAL / 7 FAIL / 1 BLOCKED / 0 NOT-RUN",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "qa-run"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T00:53:39Z",
+  "updated_at": "2026-11-03T00:55:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29672",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nQA run record, run on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「然后 studio 相关的功能再完整的测试一下」; filing: 「发记录并立卡」. The record is text only.\n\n## Environment fingerprint\n\n- Framework: `main` at `3482f3d8d2`. `pnpm install --frozen-lockfile`, `pnpm build`, `pnpm console:build`. The console is this tree's own build, served at `/_console`.\n- Four runners in parallel, each with its own showcase boot, port (3791–3794), file database and `OS_HOME`, in tabs of the desktop app's built-in browser pane.\n- Personas: the seeded admin; members made per item.\n- **Isolation.** Session cookies ignore ports, so runners on `localhost` overwrote each other's cookie until this was found mid-run. Runners then moved to `rN.localhost` and re-drove every fail and gate-related reading there. Two artefacts were discarded that way. Some passes ran before isolation with a bearer identity; each runner's detail names which.\n- Not run: the `ui/e2e/live` specs, which need the console dev server. Those items were driven by hand.\n\n## Scope\n\nAll 42 active items of `area:studio-authoring` not judged an hour earlier, plus `i18n.studio-follows-app-locale` and `access-security.readonly-package-locks-studio`.\n\nCarried-forward: #29648 · studio-authoring.package-customize-restore-display · FAIL\nCarried-forward: #29648 · studio-authoring.package-extension-field-c · PASS\nCarried-forward: #29648 · studio-authoring.package-customization-counts-and-marks · PASS\n\n## Item verdicts\n\n| item | rev | verdict | failed or open clauses | disposition |\n|:--|:--|:--|:--|:--|\n| first-run-loop | 10 | **FAIL** | [2], zh-CN only | product defect |\n| object-designer-roundtrip | 12 | pass | en leg | |\n| record-page-roundtrip | 13 | **FAIL** | [0] | stale spec (#28907) |\n| draft-publish-lifecycle | 11 | pass | | |\n| authoring-validation-not-persisted | 6 | pass | | |\n| org-override-registry-gate | 9 | pass | | |\n| meta-save-preconditions-and-draft-rows | 2 | pass | | |\n| multi-package-item-rows | 4 | pass | | |\n| save-door-runs-authoring-rules | 4 | pass | | |\n| removed-key-save-door-refusal | 4 | pass | | |\n| uninstalled-package-refused | 3 | pass | | |\n| api-written-keys-survive-studio-save | 3 | **FAIL** | [2] | stale spec (`titleFormat` retired) |\n| expression-editors | 8 | **FAIL** | [2], [4], [6] | product defect, #27482 |\n| metadata-diagnostics-sweep | 10 | pass | | |\n| validation-rules-authoring | 3 | **FAIL** | [1] | product defect, #27482 family |\n| hooks-tab-authoring | 3 | pass | | |\n| actions-tab-presets | 3 | pass | | |\n| object-api-tab-curl | 2 | pass | | |\n| summary-field-authoring | 5 | pass | | |\n| picklist-bound-select | 4 | blocked(fixture) | needs a source edit | |\n| no-entry-property-matrix | 4 | **FAIL** | [1], [2]; unmeasured rows named not-run | product defect + stale rows |\n| held-edit-leave-guard | 5 | partial | [1] blocked(environment) | |\n| held-edit-publish-refusal | 3 | pass | | |\n| view-authoring-live | 5 | pass | | |\n| custom-page-render-and-blocks | 2 | pass | | |\n| page-variables-and-actions | 2 | pass | | |\n| custom-page-source-tiers | 5 | partial | [5] blocked(environment) | |\n| interfaces-create-dialogs | 2 | pass | | |\n| dashboard-widget-and-filter-types | 5 | pass | | |\n| report-authoring-options | 3 | pass | | |\n| app-and-nav-properties | 5 | pass | `requiresObject` cell per knownGaps | |\n| authored-page-slots-and-variables | 3 | pass | | |\n| doc-on-app-menu | 9 | pass | | |\n| i18n.studio-follows-app-locale | 7 | **FAIL** | [2], [3] | [2] product defect, [3] stale spec |\n| packaged-automation-studio-lock | 7 | pass | | |\n| automations-rail-and-new-flow | 2 | pass | | |\n| flow-edge-type-authoring | 4 | pass | | |\n| org-scope-flows | 2 | pass | substituted fixture, stale spec | |\n| flow-status-matches-runtime | 2 | partial | [4] and [1]'s second boot blocked(environment) | |\n| permission-matrix-editor-ux | 9 | pass | narrow check read at pane width | |\n| access-permission-set-lifecycle | 7 | pass | | |\n| access-facets-runtime | 4 | pass | | |\n| access-owd-and-suggestions | 5 | pass | | |\n| access-security.readonly-package-locks-studio | | pass | | |\n\nPer-clause tables, evidence and reproductions are in the four comments below, one per runner. They run together past the size of one issue body.\n\nThe PM seat re-derived the first-run-loop fail itself (Studio and API, with an en control), `i18n` [2]'s English read over the API, and the permission-set copy finding (Studio and API). The other fails and findings are the runners' readings."
+}

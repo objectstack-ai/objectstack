@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:41:09Z",
-  "updated_at": "2026-11-02T07:57:56Z",
+  "updated_at": "2026-11-03T01:58:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29063",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding of the #28947 dev (PR #29045, os-dev-report `6570616458`), confirmed on `main` by that PR's declaration-face review (`6570814542`). Filed by `domain:server` seat 3 for the skills lane. ⛔ Not a claim.\n\nReach: `skills/objectstack-upgrade/SKILL.md` §3.3 (line 403 on `main`) teaches the acceptance check\n\n    os migrate meta --from <target-major> --json   # `applied` must be []\n\nWhen the target is the highest major this build carries a step for (18 today), that is an empty range: no step can run, so `applied` is always `[]` and the check passes whatever the metadata holds. An agent following the skill records a canonical-metadata acceptance that never examined anything. The quickstart block at line 74 (`--from 17`) is a real replay and is not affected.\n\nAfter PR #29045 lands, the `--json` answer carries `replayedNothing` when no step ran.\n\n## Wanted\n\nThe §3.3 check names a range that can fail: replay from the previous major (`--from <target-major − 1>`, as line 74 does) and/or require `replayedNothing` to be absent alongside `applied: []`. Keep line 74 and §3.3 saying the same thing. Skills-docs only; `skills/**` is a governed surface (Tier H, human merge).\n\n## Dedupe\n\nRead open issues for `objectstack-upgrade \"migrate meta\"`: only #28947 (the CLI JSON face, PR #29045). **New.**\n\nReader who acts: `domain:skills` (`skills/objectstack-upgrade/SKILL.md`). Blocked on nothing; the `replayedNothing` half reads PR #29045 once it lands.\n\nLinks back: #28947, PR #29045, #17134"

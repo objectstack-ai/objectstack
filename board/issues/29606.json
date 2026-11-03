@@ -1,0 +1,35 @@
+{
+  "number": 29606,
+  "kind": "issue",
+  "title": "plugins: the business-unit member reads in sharing and approvals still stop at 10,000 rows and answer \"nobody\" on a failed read; the queue member and approver-index reads stop at their caps",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T20:57:17Z",
+  "updated_at": "2026-11-03T00:30:48Z",
+  "closed_at": "2026-11-03T00:28:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29606",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① out-of-scope findings of the #29503 dev (os-dev-report `6588119628`, `out_of_scope_findings` items 1 and 2). Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 (business units past 10,000 members are rare; same family as #29362 / #29503).\n\n## What happens (source reading, not reproduced through a public door)\n\nAfter PR #29602 (#29503), the team, position and role-holder reads in sharing and approvals read to completion and refuse a failed read. The same family still answers short or empty in these places:\n\n1. **`sys_business_unit_member`:**\n   - plugin-sharing `business-unit-graph.ts` (around L186 and L217) and `primary-bu-projection.ts` (around L140) read at a 10,000-row bound.\n   - plugin-approvals `expandBusinessUnitUsers` reads at `limit: 10000`, with a catch that answers `[]`.\n2. **Caps that are not completion reads:**\n   - The queue service reads `sys_queue_member` at `QUEUE_READ_LIMIT` (10,000).\n   - Approvals `organizationAdministrators` reads at `APPROVER_INDEX_CAP` and warns when the cap is hit.\n   Measure whether either can drop a real holder, and report it before changing either one.\n\n## Wanted\n\n- Item 1: each read reads to completion through `keysetWalk` (`@objectstack/types`) and refuses a failed or truncated read, exactly as #29362 and #29503 do. Absence is checked with `isObjectAbsentError` (`@objectstack/types`, added by #29503) and still answers no holders.\n- Item 2: measure first. If a cap can silently drop a holder, take the same treatment. If the cap is a declared bound with a loud warning, report that and leave it.\n- Add pins at 9,999 and 10,001 rows, plus one for a failed read, at each site that changes.\n- ⛔ No new export from `@objectstack/core`.\n\nLevel: a read that answered \"nobody\" and now refuses is a narrowing. Expect `!`, `Clause-②: no (narrowing)` and the full dogfood battery.\n\nSerial: after PR #29602 merges (same packages and helpers). If it touches `ownership-queue-service.ts`, also wait for the queue-posture card filed beside this one.\n\nDedupe: searched `sys_business_unit_member limit 10000`, `expandBusinessUnitUsers catch`; nearest #29503, #29362. **New.**\n\nLinks back: #29503, #29602, #29362."
+}

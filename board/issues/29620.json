@@ -1,0 +1,36 @@
+{
+  "number": 29620,
+  "kind": "pull_request",
+  "title": "ci(fleet-write): the advisory mint comment names its four write rows and the read mint",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T22:02:38Z",
+  "updated_at": "2026-11-02T23:44:18Z",
+  "closed_at": "2026-11-02T23:27:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-02T23:27:27Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29620",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xU1C787MQBQdgHEzN2hGGe1)_\n\nFixes #29448\n\n## What changes\n\nItem 3 of the card, alone, because it sits on a Tier H file. Items 1 and 2 are in the companion Tier S PR, which carries `Part of #29448`.\n\n`.github/workflows/fleet-write.yml`, the comment above `permission-repository-advisories` in the mint step: it said THREE consumers (`advisory_report`, `advisory_collaborators_add`, `advisory_state`). It now names the four rows that write (adding `advisory_create`), and says that `advisory_read` gets a separate READ-ONLY mint through the same input: the validator writes `permission_repository_advisories=read` for its stroke, never `write`.\n\nComment lines only. No step, input, `with:` value, permission or code path changes; `git diff -w` shows no changed line that is not a `#` comment, and the file still parses as YAML.\n\n## Why\n\nThe comment documented the mint as main had it before `advisory_create` and `advisory_read` landed; the op table (`scripts/pm/fleet-write/ops.mjs`, \"The four rows that touch a security advisory\" and \"The one row that READS an advisory\") and the validator's self-test (the read's stroke mints `repository-advisories: read`, a writing row's mints `write`) are what the workflow does today.\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 37 commands for this diff; all 37 exit 0 on this head, including `check:pm-fleet-write-dispatch`, `check:required-contexts`, `check:workflow-step-name-quoting`, `check:workflow-status-functions`, `check:pm-expected-skips`, `check:step-collectors` and `check-comment-mask-corpus`.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD` exit 0.\n\nClause-②: no\nMetadata-protocol: none\n\n_Keep one value on each of the two lines above, each line starting with its key.\n[Human Minimum](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#human-minimum)\nitem 5 says what they mean._\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [ ] 3. No formatter ran; `pnpm lint` passes. (no formatter ran; `pnpm lint` itself was not run locally, the diff touches no linted package source)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request. (the card is split in two PRs by the seat's order, both off `main`, neither stacked)\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAjYkaBE16yPTYraBmt\n"
+}

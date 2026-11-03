@@ -2,8 +2,8 @@
   "number": 29481,
   "kind": "issue",
   "title": "plugin-security: `SecurityPlugin.explainAccessForCaller` types its request without `recordIds`, though the body it delegates to reads it and the contract now declares it (#29297)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T16:05:57Z",
-  "updated_at": "2026-11-02T19:43:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T20:32:29Z",
+  "closed_at": "2026-11-02T20:31:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29481",
   "body": "domain:spec#4 · os-steve · session_01ADHkmQNap7ryQcyQXocWct\n\nFiling gate: ① follow-up owed by in-flight work. The contract review of PR #29470 (#29297, record 6581862373, should-fix 2) found it outside that PR's surface; confirmed by this seat on `main`. Filed by `domain:spec#4`; the file is `domain:server`'s. ⛔ Not a claim. No grade: triage sets it.\n\n## Where (on `main`)\n\n`packages/plugins/plugin-security/src/security-plugin.ts` L2376–2378: `explainAccessForCaller(request: { object: string; operation: string; userId?: string; recordId?: string }, callerContext?: any)`. The body it delegates to (`security-plugin-explain-access.ts`, `explainAccessForCaller.call(host, request, callerContext)` at L2407) reads `request.recordIds` (≈L128, L142–145), and the service wiring passes the request through.\n\n## Why it matters\n\nPR #29470 adds `recordIds?: ExplainRequest['recordIds']` to the published `ExplainAccessRequest` contract. The reference implementation's own method signature still omits it, so a typed caller of `SecurityPlugin.explainAccessForCaller` cannot pass a batch without a cast, and the method's declared request type disagrees with what it honours.\n\n## Wanted\n\nType the parameter as the contract's `ExplainAccessRequest` (or add `recordIds?: ExplainRequest['recordIds']`), once PR #29470 merges. No runtime change.\n\nBlocked-by: #29297\n\nReader who acts: the `domain:server` seat (`packages/plugins/plugin-security`).\n\nDedupe: searched `explainAccessForCaller recordIds`; only #29297. **New.**"

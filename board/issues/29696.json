@@ -1,0 +1,30 @@
+{
+  "number": 29696,
+  "kind": "issue",
+  "title": "metadata-protocol: a flow read's _diagnostics schema half judges the raw stored body, so a legacy D2 row the publish doors and the engine accept reads valid: false",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T01:49:45Z",
+  "updated_at": "2026-11-03T01:59:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29696",
+  "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ① out-of-scope finding of the #29557 dev (os-dev-report 6593260917, finding a), carried by the seat's contract record on PR #29694. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3, the same narrow legacy population as #29557.\n\n## What happens\n\nAfter PR #29694 (#29557), the save door, both publish doors and the draft read's publish verdict judge a flow in its ADR-0087 D2-converted spelling, through `storedFlowVerdictBody` / `flowVerdictBody` (`packages/metadata-protocol/src/protocol-flow-save-replay.ts`). The flow read's `_diagnostics` **schema** half still judges the raw served body. So a row in a legacy D2 spelling (`get_record` `config.filters`) reads `valid: false` while the doors and the engine accept it. The #29557 dev measured this in the harness; it predates PR #29694.\n\nTwo related readings:\n\n- The restore path judges a history body raw. The dev noted it but did not measure it.\n- `storedFlowVerdictBody`'s docblock says the stored chain is \"the full one\" the engine replays. Through `flowVerdictBody` it still excludes `FLOW_FALLBACK_VERDICT_NOT_REPLAYED` (`flow-decision-mode-inclusive-explicit`), so a draft that needs only that conversion is still refused at publish. That is conservative, but the docblock and the engine's chain should agree. Measure which one the engine replays.\n\n## Wanted\n\n- The read's `_diagnostics` schema half judges the same body the doors judge, through the same seam. The served body stays as it is.\n- Measure the restore path; if it judges raw, route it through the seam too.\n- Settle the excluded conversion: either the stored verdict replays exactly the engine's chain, or the docblock says why it does not.\n- Pins: a legacy D2 row reads `valid: true` on the flow read, and a row the rules refuse after conversion still reads `valid: false`.\n\nSerial: after PR #29694.\n\nDedupe: searched `_diagnostics flow converted body`, `flow read valid false legacy spelling`; the nearest is #29557 (the doors). **New.**\n\nLinks back: #29557, PR #29694, #21982, #29233."
+}

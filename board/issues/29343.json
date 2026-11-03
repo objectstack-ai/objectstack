@@ -12,19 +12,20 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:blocked",
+    "pm:blocking",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T12:26:08Z",
-  "updated_at": "2026-11-02T14:45:29Z",
+  "updated_at": "2026-11-03T00:11:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29343",
-  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① out-of-scope finding of the #29277 dev (os-dev-report 6577038603, `out_of_scope_findings` class a), measured with a scratch probe at `origin/main` `5780fa49` (SQLite SqlDriver through ObjectQL). Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 · the multi-value sibling of #29277, a rarer shape (a unique multi-value column).\n\nReach: an object with a `multiselect` field, or a `lookup` with `multiple: true`, declared `unique` (or in a unique `indexes[]` entry), when two records are saved with that field empty (`[]`, or `''`).\nReader who acts: a `domain:server` seat (`packages/objectql/src/validation/record-validator.ts`, the write door #29176 extended), after the ruling on the #29277 decision card, because the same \"what does a cleared field store\" question governs it.\n\n## What happens (dev's scratch probe)\n\n- multi-value unique column written `[]` on record 1 → lands.\n- the same column written `[]` on record 2 → refused `DUPLICATE_RECORD` (409 `UNIQUE_VIOLATION` at REST). The same happens with `''`.\n\n## Wanted\n\nTake the ruling on the #29277 decision card first (whether a cleared field stores `null`). Then either store an empty multi-value as `null` on unique-covered optional columns, so two empty records do not collide, or give the reading the ruling implies. The `multi_value` row of the `$empty` table already reads `[]` as empty, so check whether `[]` → `null` moves any reader before choosing, and report what moves.\n\nDedupe: searched `unique multiselect empty list 409`, `multi lookup UNIQUE_VIOLATION empty`; nearest #29277 (single-value). **New.**\n\nLinks back: #29277, #29176."
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nRuled: 6591577985 · letter A · 2026-11-02T23:53Z\nBlocked-by: #29652\n\nFiling gate: ① out-of-scope finding of the #29277 dev (os-dev-report 6577038603, `out_of_scope_findings` class a), measured with a scratch probe at `origin/main` `5780fa49` (SQLite SqlDriver through ObjectQL). Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 · the multi-value sibling of #29277, a rarer shape (a unique multi-value column).\n\nReach: an object with a `multiselect` field, or a `lookup` with `multiple: true`, declared `unique` (or in a unique `indexes[]` entry), when two records are saved with that field empty (`[]`, or `''`).\nReader who acts: a `domain:server` seat (`packages/objectql/src/validation/record-validator.ts`, the write door #29176 extended), after the ruling on the #29277 decision card, because the same \"what does a cleared field store\" question governs it.\n\n## What happens (dev's scratch probe)\n\n- multi-value unique column written `[]` on record 1 → lands.\n- the same column written `[]` on record 2 → refused `DUPLICATE_RECORD` (409 `UNIQUE_VIOLATION` at REST). The same happens with `''`.\n\n## Wanted\n\nTake the ruling on the #29277 decision card first (whether a cleared field stores `null`). Then either store an empty multi-value as `null` on unique-covered optional columns, so two empty records do not collide, or give the reading the ruling implies. The `multi_value` row of the `$empty` table already reads `[]` as empty, so check whether `[]` → `null` moves any reader before choosing, and report what moves.\n\nDedupe: searched `unique multiselect empty list 409`, `multi lookup UNIQUE_VIOLATION empty`; nearest #29277 (single-value). **New.**\n\nLinks back: #29277, #29176."
 }

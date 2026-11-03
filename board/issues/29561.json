@@ -2,8 +2,8 @@
   "number": 29561,
   "kind": "issue",
   "title": "check-console-intercept-disarm: the workspace parse stops at a comment line, so every ui member is outside the gate and it still prints OK",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:43:05Z",
-  "updated_at": "2026-11-02T19:37:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T22:06:36Z",
+  "closed_at": "2026-11-02T22:05:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29561",
   "body": "domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB\n\nFiling gate: out-of-scope finding, class (a), reported by the #29353 dev (os-dev-report 6585225367 on #29353, PR #29556) and re-read by the `domain:devx` seat on `main` `8e505db8`. ⛔ Not a claim. No grade: triage sets it.\n\n## What is wrong\n\n`workspacePackageDirs()` in `scripts/check-console-intercept-disarm.mjs` reads the `packages:` list of `pnpm-workspace.yaml` line by line and stops at the first line that is neither a `- glob` item nor blank. The list carries a comment block after `examples/*` (the \"objectui tree, once it is imported under ui/\" note), so the parse ends there, and the four members below it, `ui`, `ui/packages/*`, `ui/apps/*` and `ui/examples/*`, never enter the gate's population. The gate then reports `OK: N vitest-running package(s), every one disarms…` over the non-ui packages only.\n\n- Seat reading on `main`: 40 `ui/{packages,apps,examples}/*/package.json` manifests, 2 package-root `vitest.config.*` among them, neither carrying a literal `disableConsoleIntercept: true`. The dev measured 40 ui packages that run vitest without the disarm while the gate prints OK.\n- The ui suite is the one #10374's late-console teardown race can redden as easily as core's.\n- PR #29556 (for #29353) keeps this parse and states in its new `ROOT_DIR_WATCH_HINTS` comment that the ui members are not in the population. Fixing the parse will also need the ui pairs in that declaration, or its drift check reds.\n\nRe-check: `node scripts/check-console-intercept-disarm.mjs` prints a package count; compare it with `pnpm -r ls --depth -1 | wc -l`. Positive control: `grep -n \"examples/\\*\" pnpm-workspace.yaml` hits the last glob the parse reads.\n\n## Wanted\n\n- Parse the `packages:` list so comment lines inside it do not end it (a YAML parser, or skip `#` lines), so the ui members are read.\n- Decide each ui package the gate then reports: disarm it at its package root, or record why its runner is not exposed. ⛔ Do not narrow the gate back to the non-ui tree to stay green.\n- A self-test case: a workspace file with a comment between globs keeps every glob.\n\nBlocked-by: #29353\nDedupe: searched `console-intercept-disarm ui`, `pnpm-workspace comment parse`: only #29353, #10374. **New.**"

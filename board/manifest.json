@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-02T20:18:46.611Z",
+  "generated_at": "2026-11-03T02:23:33.992Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-02T20:03:10.958Z",
-      "since": "2026-11-02T14:05:39Z",
+      "cursor": "2026-11-03T02:07:58.639Z",
+      "since": "2026-11-02T20:03:10.958Z",
       "slice": 300
     },
     "history": {
@@ -20,28 +20,28 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-02T14:05:39Z",
-  "since_reason": "resuming the previous run at 2026-11-02T14:05:39Z",
-  "next_since": "2026-11-02T20:03:10.958Z",
+  "since": "2026-11-02T20:03:10.958Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-02T20:03:10.958Z)",
+  "next_since": "2026-11-03T02:07:58.639Z",
   "resume": null,
   "counts": {
-    "issues_open": 306,
-    "issues_closed": 12903,
+    "issues_open": 307,
+    "issues_closed": 12960,
     "issues_transferred": 5,
-    "pulls_open": 53,
-    "pulls_closed": 14208,
-    "records": 27475
+    "pulls_open": 44,
+    "pulls_closed": 14281,
+    "records": 27597
   },
   "board": {
-    "open_issues_count": 292,
-    "open_pull_requests": 48,
-    "read_at": "2026-11-02T20:18:46.053Z"
+    "open_issues_count": 284,
+    "open_pull_requests": 39,
+    "read_at": "2026-11-03T02:23:28.258Z"
   },
   "count_check": {
     "verdict": "ok",
     "reason": null,
-    "expected": 244,
-    "archived": 306,
+    "expected": 245,
+    "archived": 307,
     "shortfall": 0,
     "surplus": 0,
     "gone_ledger": 62,
@@ -52,10 +52,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 642,
+  "requests": 527,
   "run": {
-    "numbers_read": 338,
-    "files_written": 659,
+    "numbers_read": 272,
+    "files_written": 509,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -64,34 +64,17 @@
     "blank_pages_reasked": 0,
     "reconcile": {
       "first": {
-        "verdict": "surplus",
-        "expected": 244,
-        "archived": 310,
+        "verdict": "ok",
+        "expected": 245,
+        "archived": 307,
         "shortfall": 0,
-        "surplus": 4
+        "surplus": 0
       },
-      "listed": 292,
-      "candidates": 9,
+      "listed": 284,
+      "candidates": 5,
       "left": 0,
       "reread": [],
-      "transferred": [
-        {
-          "number": 25769,
-          "to": "objectstack-ai/hotcrm#2395"
-        },
-        {
-          "number": 26958,
-          "to": "objectstack-ai/hotcrm#2396"
-        },
-        {
-          "number": 27235,
-          "to": "objectstack-ai/hotcrm#2397"
-        },
-        {
-          "number": 28788,
-          "to": "objectstack-ai/hotcrm#2398"
-        }
-      ],
+      "transferred": [],
       "destroyed": [
         {
           "number": 19374,
@@ -117,7 +100,7 @@
       "unreadable": [],
       "blank_pages_reasked": 0,
       "reason": null,
-      "wrote": 4,
+      "wrote": 0,
       "cut_short": false
     }
   }

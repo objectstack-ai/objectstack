@@ -13,6 +13,7 @@
   "labels": [
     "domain:server",
     "enhancement",
+    "pm:blocking",
     "pm:queue",
     "priority:p1"
   ],
@@ -20,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:21:55Z",
-  "updated_at": "2026-11-02T19:22:57Z",
+  "updated_at": "2026-11-03T02:12:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29041",
   "body": "## Context\n\n- ADR-0012 ships four built-in notification channels and marks `push` (`plugin-notification-push`, APNs HTTP/2 + FCM HTTP v1) as **MUST ship M1**. §6 specifies the device registry (`sys_user_device`, vendor discriminator) and the token-invalidation feedback loop.\n- None of it exists. objectstack-ai/objectstack#3612 deleted the client's device-registration and preference methods because the `/notifications/devices` and `/notifications/preferences` routes were never built. The client's own docblock (`packages/client/src/index.ts`, `notifications`) says they \"return together with the server (and a route-ledger row keeps them honest)\".\n- Push has a real consumer now: the mobile shell (objectstack-ai/mobile#144). It obtains the native APNs/FCM device token and hands it to the Console over its bridge, so the Console can register it under the signed-in session. Until the server side exists, phone users get no push at all.\n\n## Ask\n\n1. Device registry:\n   - routes to register, refresh and unregister a device for the current user;\n   - storage per ADR-0012 §6 (`sys_user_device`, vendors `apns` and `fcm` in core);\n   - invalidation handling when APNs or FCM reports a dead token.\n2. The `push` channel: APNs (token-based auth) and FCM HTTP v1 transports, configured per environment.\n3. A notification payload contract for push that carries a Console `route` (for example `/apps/crm/opportunity/123`). The shell opens that route on tap and ignores URLs that point off the server.\n4. Restore the client methods, with the route-ledger row the docblock refers to.\n\nOut of scope here: China-market vendor transports (HMS, Xiaomi, OPPO, vivo), which ADR-0012 already routes to plugins.\n\nGoverning text: `docs/adr/0012-notification-platform.md` (§6, the channel table); the `notifications` docblock in `packages/client/src/index.ts`.\n\n## Acceptance\n\n- A signed-in session registers a token. A `notify` flow node delivers a push to it through a mock APNs/FCM endpoint in tests. A token reported invalid is retired.\n- The payload carries `route`.\n- Client methods and the route ledger agree."

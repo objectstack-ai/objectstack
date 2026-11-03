@@ -1,0 +1,36 @@
+{
+  "number": 29644,
+  "kind": "issue",
+  "title": "pm/fleet-write: advisory_read holds its sender to target-write, by the maintainer's ruling, since the collaborator gate refuses every live read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T23:41:08Z",
+  "updated_at": "2026-11-03T01:13:58Z",
+  "closed_at": "2026-11-03T01:10:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29644",
+  "body": "domain:skills#2 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n## What\n\n`advisory_read` (the sealed advisory read, #29420, landed in #29536) holds the sender to `senderGate: 'collaborator'` in `scripts/pm/fleet-write/ops.mjs`. The maintainer has ruled it becomes `'target-write'`, the gate every other relay row keeps.\n\n## The ruling\n\nThe maintainer, in session `session_01QSeKYn5CmmdShCJifm6WYj` on 2026-11-02, answering the seat's question whether the read's sender gate should change from collaborator to write on the target repository, verbatim:\n\n> 同意改成对仓库有写权限,立卡派发修复\n\nThis settles the open question the #29420 os-dev report left for the maintainer (comment 6584655262, `open_questions[0]`, options A collaborator / B target-write). The ruling is B.\n\n## The measurement that prompted it (the first live reads, 2026-11-02)\n\n- `advisory_collaborators_add` for the sender landed, and its PATCH answer lists the sender among the collaborators (run 41545025429).\n- Three `advisory_read` strokes after it, on two advisories, were each refused at fence `sender` (\"is not a collaborator on it\"): runs 41545143476, 41545259848, 41546082963.\n- A re-sent `advisory_collaborators_add` on one of those advisories was a no-op: its pre-PATCH GET, under the write grant, already lists the sender (run 41546190167).\n- So the write-grant GET lists the sender in `collaborating_users`, and the read-grant GET the fence judges does not. Why the read-grant answer omits it is **unverified** (a hypothesis: the platform withholds `collaborating_users` from a read-only grant).\n- A sender with write on the target can already add itself to any advisory whose id it holds (`ops.mjs`, the sender-gate paragraph above `advisory_read`), so the collaborator gate excluded no one; it only blocked every live read.\n\n## Acceptance\n\n- `advisory_read`'s `senderGate` is `'target-write'`; the header prose and the row comment record the ruling verbatim, in place of \"the card's recommendation\" and \"the maintainer rules which stands, on the pull request\".\n- The relay self-tests that pin the default gate move with it; an unknown gate still fails closed.\n- After merge, one live `advisory_read` by a seat with write on the target opens (the seat runs it; recorded here as a run id, no advisory id).\n\n## Out of bounds\n\n- ⛔ The row's `grant` stays `read`. If a read under the read grant is refused once the gate is switched, that is a fork for the maintainer, never a raise to write.\n- ⛔ No advisory text, id or mechanism in the PR, the commits or the changeset."
+}

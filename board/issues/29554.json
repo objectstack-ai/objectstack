@@ -2,8 +2,8 @@
   "number": 29554,
   "kind": "issue",
   "title": "spec(conversions): the stored pass maps no object_extension row onto objectExtensions, so no conversion or refused-shape detector ever runs over a stored extension",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:34:20Z",
-  "updated_at": "2026-11-02T19:27:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T01:13:42Z",
+  "closed_at": "2026-11-03T01:10:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29554",
   "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ② an out-of-scope finding the #29366 dev reported on PR #29513 (round 2, head `fb1c5bc9`) and the seat's delta review confirmed in the tree (6585110935). ⛔ Not a claim. No grade: triage sets it.\n\n## What happens\n\n`applyConversionsToStoredItem` (`packages/spec/src/conversions/stored.ts`) wraps a stored row in the stack collection named by `SINGULAR_TO_PLURAL[type] ?? STORED_ONLY_COLLECTIONS[type]` and returns the row untouched when neither names one. `object_extension` is in neither map, so a stored `object_extension` row is never wrapped as `objectExtensions: [row]`. As a result:\n\n- no ADR-0087 conversion that walks `objectExtensions[]` replays over a stored extension row at any rehydration seam;\n- no `REFUSED_STORED_SHAPES` detector can list one, so `os migrate meta --stored` reads every stored extension as already on protocol. PR #29513's entry `object-extension-field-patch-key-grammar-refused` has to name a manual check for exactly this reason.\n\nThe dev's probe: an `object_extension` row with `fieldPatches.Industry` and a time default came back as the same reference, 0 TODOs, 0 notices; the control `object` row had its time default rewritten (1 notice).\n\n## Done when\n\n- First measure which stored-row type name the extension rows carry (`object_extension`, and any plural spelling the protocol read fallback finds) and whether the manifest map omits it deliberately (as it does `translations`).\n- `STORED_ONLY_COLLECTIONS` (or the shared map, if the omission is not deliberate) maps it to `objectExtensions`, with a test that a stored extension row now gets an `objectExtensions` conversion and a control that other types are unchanged.\n- Then a `REFUSED_STORED_SHAPES` detector for `object-extension-field-patch-key-grammar-refused`, and that entry's `acceptanceCriteria` and changeset sentence that say `--stored` does not list such a row are corrected.\n\nSerial: after PR #29513 (it touches that entry).\n\nRelated: #29366 / PR #29513, #19620 (`STORED_ONLY_COLLECTIONS`), #29523."

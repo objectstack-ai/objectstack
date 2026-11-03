@@ -1,0 +1,35 @@
+{
+  "number": 29592,
+  "kind": "issue",
+  "title": "ui: the console opens a record page scoped to the current app (`PageSchema.apps`), so an app can reach its own `sys_user` page (#28979 ruling A)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T20:29:58Z",
+  "updated_at": "2026-11-02T23:34:45Z",
+  "closed_at": "2026-11-02T23:33:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29592",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ③ follow-up the ruling assigns. The director's ruling on #28979 (batch #453 item 1, letter A, maintainer 「同意」) binds a page-level app scope. The spec half landed in PR #29437 (`b16ee8ba06`, 2026-11-02 20:11Z), which closes #28979. The key is declared `[PLANNED — not yet rendered]` until the console reads it. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:ui`, the console's record-page resolution (`usePageAssignment` in `ui/packages/app-shell`).\n\n## What landed in spec\n\n- `PageSchema.apps?: string[]` on a `type: 'record'` page bound to an object. The entries are app **names** (`AppSchema.name`), at least 1, unique.\n- `defaultRecordPageObject(page, app?)` in `packages/spec/src/ui/default-record-page.ts` is the one reading of a slot. With `app` passed, it answers which object this page is the record page for inside that app. Without `app`, it reads the deployment default (`isDefault`).\n- There is one page per object per app. The stack door, the registry door and the save door refuse a second one (`DEFAULT_RECORD_PAGE_CONFLICT`, carrying `app`).\n\n## What the console must do\n\nOn a record route, resolve the page in this order:\n1. Resolve the route's app segment to the app with `matchAppBySegment` (package id first, then name, already in the tree). Take the first page for which `defaultRecordPageObject(p, app.name) === objectName`.\n2. Otherwise, use today's default read (`isDefault`).\n3. Otherwise, use today's declaration order.\n\nWith no scoped page, every branch falls through to today's line.\n\n⚠️ **Contract review flag ③.2 on #29437 (must get right).** The route segment is NOT the app name. `/apps/SEGMENT` is `appRouteSegment(app) = app._packageId ?? app.name` (`ui/packages/app-shell/src/utils/appRoute.ts`). So resolve the segment to the app, then pass `app.name`. Never compare the raw segment to `apps` entries.\n\nA corner to pin: a package that ships two apps shares one package-id segment, and `matchAppBySegment` resolves that segment to the first app. The second app's scoped page is reachable only under its name segment, as the `appAddressSegment` docblock states.\n\n## Done when\n\n- **Pin 1 (the ruling's own).** The duly composition opens its scoped `sys_user` page (`duly_member`, `apps: ['duly']`) from People inside the Duly app. Setup → Users, under `/apps/com.objectstack.setup/...`, still opens plugin-auth's `sys_user_detail`.\n- With no `apps` anywhere, resolution is byte-identical to today. The existing assignment tests stay green unchanged.\n- The two-apps-one-package corner above is pinned.\n- The spec liveness row for `page.apps` flips from `planned` to `live`, citing the console reader. The describe's `[PLANNED — not yet rendered]` marker and its closing \"until the console reads it\" sentence are removed in the same PR. That is the one spec edit this card owes.\n\nDownstream: objectstack-ai/duly#113 tracks duly's URL-action stopgap. It can be deleted once this card lands.\n\nRuling-ref: #28979 batch #453 item 1 (A) · parent #28979 · key PR #29437."
+}

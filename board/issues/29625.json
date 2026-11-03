@@ -1,0 +1,30 @@
+{
+  "number": 29625,
+  "kind": "issue",
+  "title": "skills(objectstack-automation): integration-recipes recipe 6 still says a stdio MCP server's credentials ride `transport.env`; a static credentialRef now reaches stdio through `transport.credentialEnv` (#29434)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T22:26:15Z",
+  "updated_at": "2026-11-02T22:55:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29625",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① an out-of-scope finding of the #29434 card thread (os-dev-report `6589858238`, noted with no carrier), confirmed by the contract review on PR #29621 (③). Filed by `domain:server` seat 3 for the skills lane. ⛔ Not a claim. Suggested-grade: p3 (teaching text; the old route still works, it just is no longer the only one).\n\n## What happens\n\n`skills/objectstack-automation/references/integration-recipes.md` (around line 158, recipe 6) says: \"`mcp` (`http` only; a `stdio` server's credentials ride `transport.env`)\". \"`http` only\" stays true for the recipe's grant-bearing kinds. But once PR #29621 lands, a static `auth.credentialRef` reaches a stdio server through `providerConfig.transport.credentialEnv`: the host-resolved secret is placed in the child's environment under that variable name. The parenthetical then teaches the literal-in-metadata route that the #29341 advisory warns against.\n\n## Wanted\n\n- Recipe 6 (and recipe 1 if it says the same) names `auth: { type: 'bearer', credentialRef }` with `transport.credentialEnv` for a stdio server's static credential. Use the spelling of `content/docs/automation/connectors.mdx` (\"A stdio server's credential\") and the advisory's hint.\n- Check the skill's eval prompts for the old route, and update them if one asserts it.\n- ⛔ `skills/**` is a governed path: land only after `GOVERNED_APPROVERS` approval.\n\nSerial: after PR #29621 merges.\n\nDedupe: searched `integration-recipes stdio transport.env`, `credentialEnv`; nearest #29434, #29607. **New.**\n\nLinks back: #29434, #29621, #29341."
+}

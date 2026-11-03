@@ -1,0 +1,33 @@
+{
+  "number": 29652,
+  "kind": "issue",
+  "title": "spec: an emptied optional multi-value field stores and reads null, as never set — amend the #9447 sentence in FieldSchema's multiple / required docs (ruling A on #29343)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T23:57:30Z",
+  "updated_at": "2026-11-03T01:48:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29652",
+  "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ② a maintainer ruling's spec half. Ruling A on #29343 (record 6591577985) reverses #9447's empty representation for optional multi-value fields; per pm-dispatch SKILL.md a protocol change is its own card, landed before the defect card that consumes it. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3 (blocks #29343, p3).\n\n## What to change\n\n`packages/spec/src/data/field.zod.ts` on `origin/main` `3482f3d8d`:\n\n- The `multiple` doc block (`:1357-1363`) and the `multiple` describe say an emptied multi-value lookup \"reads back as `[]`, never `null`\", binding every writer.\n  Re-check: `git grep -n \"#9447\" origin/main -- packages/spec/src/data/field.zod.ts` → 1316, 1357.\n- The `required` doc block (`:1311-1319`) says \"the empty set is always representable (it reads back as `[]`, never `null` — see `multiple`)\".\n\nAmend both to the ruled rule:\n\n- A cleared **optional** multi-value field (every type `isMultiValueField` answers true for) is stored as `null` by the write door, the same as one never set. `[]` and `''` written to it store `null`.\n- `required` on a multi-value field still means a non-empty list: `[]` fails `required` (unchanged).\n- The `$empty` table's `multi_value` row (`filter-empty-operator.ts:77`) is unchanged: `null` and `[]` both read as empty.\n- The doc blocks cite the new ruling (#29343, record 6591577985) beside #9447 and drop \"readers never need a null branch\". The describe carries only the rule (#22093).\n\nRegenerate `content/docs/references/data/field.mdx` (`gen:docs`).\n\n## Grading notes for the claiming seat\n\n- Text only, no key or accept set moves. It does change a published semantic contract, so `Clause-②: yes` (semantic face) and contract review at the ruled tier, as #9447's own landing did (PR #9493). The spec docblock ships in dist, so a patch changeset is owed.\n- Consumer: #29343 lands the built door branch `claude/project-thread-tfknlu` after this merges, moving the objectql, runtime and service-automation pins to `null`. This card does not touch those pins.\n- Not frozen: `field.zod.ts` is outside the protocol.ts freeze.\n\nDedupe: searched `9447 in:body`, `\"never null\" multi-value`; the nearest are #9447 (the ruling being amended, closed) and #29343 (the consumer). **New.**\n\nLinks back: #29343, #9447, #29346, PR #9493."
+}
