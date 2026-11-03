@@ -513,31 +513,32 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
         }
       });
 
-      it('control: a row it reads keeps its verdict and its guidance — admitted inside the scope, refused outside it, judged on the stored row', async () => {
+      it('control: a row it reads keeps its verdict and its guidance — admitted inside the scope, refused outside it after one read as the caller, judged on the stored row', async () => {
         const h = await boot(posture);
         await seedDelegation(h);
         let holder = 0;
         for (const table of Object.keys(TABLES) as Table[]) {
           for (const caller of ['delegate', 'orgAdminDelegate'] as const) {
             const context = DELEGATES[caller];
-            // Inside the scope: admitted, and the row is read as the caller once —
-            // the gate's read is the operation's own pre-image read.
+            // Inside the scope: admitted.
             const id = `in_scope_${caller}_${table}`;
             await seedHolding(h, table, id, ORG_A, IN_SCOPE_HOLDERS[holder++], 'bu_a_ops');
             expect(await readOutcome(h, table, id, context), `${caller} reads ${table} ${id}`).toBe('row');
             for (const op of ['update', 'delete'] as const) {
-              const { answer, reads } = await writeCountingCallerReads(h, table, op, id, context);
-              expect(answer, `${caller} ${op} ${table}: ${answer.message}`).toEqual({ status: 200 });
-              expect(reads, `${caller} ${op} ${table}: caller reads of the row`).toBe(1);
+              const r = await write(h, table, op, id, context);
+              expect(r, `${caller} ${op} ${table}: ${r.message}`).toEqual({ status: 200 });
             }
             expect(await stored(h, table, { id }), `${caller} ${table}: the delete landed`).toHaveLength(0);
           }
           // Outside the scope, in its own organization: the guidance names the
-          // unit or the holder, and is not the answer for no row.
+          // unit or the holder, and is not the answer for no row. The row is
+          // read as the caller once: the gate's read is the operation's own
+          // pre-image read, which the refusal's read-door question reuses.
           const outId = `out_of_scope_${table}`;
           await seedHolding(h, table, outId, ORG_A, 'u_seeded', 'bu_a_other');
           for (const op of ['update', 'delete'] as const) {
-            const out = await write(h, table, op, outId, DELEGATES.delegate);
+            const { answer: out, reads } = await writeCountingCallerReads(h, table, op, outId, DELEGATES.delegate);
+            expect(reads, `delegate ${op} ${table}: caller reads of the row`).toBe(1);
             expect([out.status, out.code], `delegate ${op} ${table}: ${out.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
             expect(out.message).toMatch(table === 'sys_user_position' ? /business unit 'bu_a_other' is outside/ : /target user 'u_seeded' is outside/);
             expect(out).not.toEqual(await write(h, table, op, NOWHERE, DELEGATES.delegate));
@@ -563,7 +564,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
     });
   }
 
-  it("control, 'single': a row of another organization that a delegate reads keeps its guidance, and every in-scope write it made before still lands — the refused read included", async () => {
+  it("control, 'single': a row of another organization that a delegate reads keeps its guidance, and every in-scope write it made before still lands — the refused read included — reading the row as the caller once", async () => {
     const h = await boot('single');
     await seedDelegation(h);
     let holder = 0;
@@ -584,8 +585,11 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
         const inId = `in_scope_${caller}_${table}`;
         await seedHolding(h, table, inId, ORG_A, IN_SCOPE_HOLDERS[holder++], 'bu_a_ops');
         for (const op of ['update', 'delete'] as const) {
-          const r = await write(h, table, op, inId, DELEGATES[caller]);
+          const { answer: r, reads } = await writeCountingCallerReads(h, table, op, inId, DELEGATES[caller]);
           expect(r, `${caller} ${op} ${table}: ${r.message}`).toEqual({ status: 200 });
+          // The gate's read is the pre-image the write door's own read question
+          // asks after it; a refused read is never kept, so it is asked again.
+          if (caller !== 'writeOnlyDelegate') expect(reads, `${caller} ${op} ${table}: caller reads of the row`).toBe(1);
         }
         expect(await stored(h, table, { id: inId }), `${caller} ${table}: the delete landed`).toHaveLength(0);
       }
