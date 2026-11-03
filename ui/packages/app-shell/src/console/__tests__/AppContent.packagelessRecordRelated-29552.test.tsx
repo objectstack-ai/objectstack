@@ -68,10 +68,13 @@ vi.mock('../../views/ObjectView', () => ({
     <div data-testid="object-view">{objects.map((o) => o.name).join(',')}</div>
   ),
 }));
+/** objectstack#29878 — the object names each render of the record view was handed, in order. */
+const recordViewRenders = vi.hoisted(() => [] as string[][]);
 vi.mock('../../views/RecordDetailView', async () => {
   const { deriveRelatedLists: derive } = await import('../../utils/deriveRelatedLists');
   return {
     RecordDetailView: ({ objects }: { objects: Array<{ name: string }> }) => {
+      recordViewRenders.push(objects.map((o) => o.name));
       const { objectName } = useParams();
       const def = objects.find((o) => o.name === objectName);
       const related = def ? derive(def as never, objects as never[]).map((r) => `${r.childObject}.${r.referenceField}`) : [];
@@ -162,7 +165,14 @@ function serverBundle(app: Doc) {
 }
 
 type Peek = { status: 'none' } | { status: 'pending'; settled: Promise<unknown> } | { status: 'ready'; items: ReturnType<typeof serverBundle> };
-const server = { calls: [] as string[], peek: null as Peek | null, objects: OBJECTS, pages: [] as Doc[] };
+const server = {
+  calls: [] as string[],
+  peek: null as Peek | null,
+  objects: OBJECTS,
+  pages: [] as Doc[],
+  /** By-name object reads the server answers with this error envelope instead (objectstack#29878). */
+  refuse: {} as Record<string, { httpStatus: number; code: string }>,
+};
 
 function makeAdapter() {
   const host: Record<string, unknown> = {
@@ -188,6 +198,8 @@ function makeAdapter() {
           const bundled = peek?.status === 'ready' ? peek.items.get(type)?.get(name) : undefined;
           if (bundled) return Promise.resolve(structuredClone(bundled.envelope));
           server.calls.push(`${type}/${name}`);
+          const refusal = type === 'object' ? server.refuse[name] : undefined;
+          if (refusal) return Promise.reject(Object.assign(new Error(refusal.code), refusal));
           const item = (type === 'object' ? server.objects : []).find((o) => o.name === name);
           return item
             ? Promise.resolve({ type, name, item: structuredClone(item) })
@@ -246,6 +258,8 @@ beforeEach(() => {
   server.calls = [];
   server.objects = OBJECTS;
   server.pages = [];
+  server.refuse = {};
+  recordViewRenders.length = 0;
   server.peek = { status: 'ready', items: serverBundle(OPS_APP) };
   localStorage.clear();
   sessionStorage.clear();
@@ -462,6 +476,93 @@ describe('a packaged app’s record route with no declared record page reads its
   });
 
   it('CONTROL: a record drawer over the route reads the registry beside it (objectstack#27626)', async () => {
+    boot('/apps/crm/crm_account/record/r1?recordId=r2');
+    await waitFor(() => expect(objectCalls()).toContain('object'));
+  });
+});
+
+/**
+ * objectstack#29878 — the record page draws a record's field-change history
+ * (`RecordDetailView`'s `historyEnabled`) only when the objects it is handed
+ * hold `sys_audit_log` and the record's object declares
+ * `enable.trackHistory`. The registry held it; the record route's scoped read
+ * (#29552, #29681) did not, so a packaged or package-less app's record page
+ * asked the page payload `fieldChanges: false` and never read the audit rows.
+ * The route now asks `sys_audit_log` by name for a tracked object, through
+ * the same scope, and waits for it, so the view's first render holds it.
+ */
+describe('a tracked object’s record route asks sys_audit_log by name (objectstack#29878)', () => {
+  const AUDIT: Doc = { name: 'sys_audit_log', _packageId: 'com.objectstack.audit', fields: { actor: { type: 'text' } } };
+  const TRACKED: Doc[] = [
+    ...OBJECTS.map((o) => (o.name === 'crm_account' ? { ...o, enable: { trackHistory: true } } : o)),
+    AUDIT,
+  ];
+  const firstRender = () => recordViewRenders.find((names) => names.includes('crm_account')) ?? [];
+  const drawnObjects = () => (screen.getByTestId('record-view').textContent ?? '').split(',');
+
+  beforeEach(() => {
+    server.objects = TRACKED;
+  });
+
+  it('a packaged app: the view’s first render holds sys_audit_log, read by name through the package scope', async () => {
+    server.peek = { status: 'ready', items: serverBundle(CRM_APP) };
+    boot('/apps/crm/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('sys_user'));
+    await settle();
+
+    expect(firstRender()).toContain('sys_audit_log');
+    expect(objectCalls()).not.toContain('object');
+    expect(sorted(objectCalls())).toEqual(sorted(['object?package=app.crm', 'object/sys_user', 'object/sys_audit_log']));
+    expect(drawnRelated()).toEqual(registryRelated('crm_account'));
+  });
+
+  it('a package-less app: the same, through the names-only scope', async () => {
+    boot('/apps/ops/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('sys_user'));
+    await settle();
+
+    expect(firstRender()).toContain('sys_audit_log');
+    expect(objectCalls()).not.toContain('object');
+    expect(sorted(objectCalls())).toEqual(sorted(['object/sys_user', 'object/sys_audit_log']));
+    expect(drawnRelated()).toEqual(registryRelated('crm_account'));
+  });
+
+  it('CONTROL: an object without trackHistory asks nothing more', async () => {
+    server.peek = { status: 'ready', items: serverBundle(CRM_APP) };
+    boot('/apps/crm/crm_contact/record/c1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_contact'));
+    await settle();
+
+    expect(objectCalls()).not.toContain('object/sys_audit_log');
+    expect(drawnObjects()).not.toContain('sys_audit_log');
+  });
+
+  it('a refused read keeps history off and the page drawn, with no registry read', async () => {
+    server.refuse = { sys_audit_log: { httpStatus: 403, code: 'PERMISSION_DENIED' } };
+    server.peek = { status: 'ready', items: serverBundle(CRM_APP) };
+    boot('/apps/crm/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('sys_user'));
+    await settle();
+
+    expect(objectCalls()).toContain('object/sys_audit_log');
+    expect(objectCalls()).not.toContain('object');
+    expect(drawnObjects()).not.toContain('sys_audit_log');
+    expect(drawnRelated()).toEqual(registryRelated('crm_account'));
+  });
+
+  it('an absent sys_audit_log (404) keeps history off and the page drawn', async () => {
+    server.objects = TRACKED.filter((o) => o.name !== 'sys_audit_log');
+    boot('/apps/ops/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('sys_user'));
+    await settle();
+
+    expect(objectCalls()).toContain('object/sys_audit_log');
+    expect(objectCalls()).not.toContain('object');
+    expect(drawnObjects()).not.toContain('sys_audit_log');
+  });
+
+  it('CONTROL: a record drawer over the route still reads the registry, which holds it (objectstack#27626)', async () => {
+    server.peek = { status: 'ready', items: serverBundle(CRM_APP) };
     boot('/apps/crm/crm_account/record/r1?recordId=r2');
     await waitFor(() => expect(objectCalls()).toContain('object'));
   });
