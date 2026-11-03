@@ -150,6 +150,7 @@ export const SECURITY_CBP_NO_RELATION = 'security-controlled-by-parent-no-relati
 export const SECURITY_CBP_AMBIGUOUS_RELATION = 'security-controlled-by-parent-ambiguous-relation';
 export const SECURITY_MODIFY_ALL_DELETE_WITHHELD = 'security-modify-all-delete-withheld';
 export const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN = 'security-controlled-by-parent-owner-policy-without-opt-in';
+export const SECURITY_SUPERUSER_FIELD_MASK_INERT = 'security-superuser-field-mask-inert';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
