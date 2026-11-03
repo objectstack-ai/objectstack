@@ -31,6 +31,7 @@ import {
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_SUPERUSER_FIELD_MASK_INERT,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
@@ -1457,6 +1458,149 @@ describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)',
 });
 
 /**
+ * ── Rule: security-superuser-field-mask-inert (ADR-0066 D2 ⑧ as amended) ────
+ *
+ * Ruling of record 6573563853, letter A: a set holding View All / Modify All
+ * on an object votes on every field of it, so the same set's `readable: false`
+ * (View All or Modify All) or edit lock (Modify All) binds none of its holders.
+ * The pair is legal, so the finding is a warning. Each case below is a set
+ * PARSED by `PermissionSetSchema`, the normalized set the runtime reads, unless
+ * it says otherwise.
+ */
+describe('validateSecurityPosture · a field mask its own set\'s View All / Modify All makes inert', () => {
+  const inert = (stack: Record<string, unknown>) =>
+    validateSecurityPosture(stack)
+      .filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
+      .map((f) => [f.severity, f.where, f.path]);
+  const parsed = (...sets: Array<Record<string, unknown>>) => ({
+    permissions: sets.map((s) => PermissionSetSchema.parse(s)),
+  });
+
+  it('the resume-decider fixture before its repair: Modify All beside an edit lock', () => {
+    // `deal_manager` in service-automation's `resume-decider-identity.integration.test.ts`
+    // reached every deal through Modify All until the ruling made its
+    // `restricted_note` lock inert; it now reaches them through org depth.
+    expect(inert(parsed({
+      name: 'deal_manager', label: 'Deal manager',
+      objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
+      fields: { 'deal.restricted_note': { readable: true, editable: false } },
+    }))).toEqual([['warning', 'permission set "deal_manager"', 'permissions[0].fields["deal.restricted_note"]']]);
+  });
+
+  it('the explain-principal-person fixture before its repair: View All beside a read mask', () => {
+    // `qa_pp_directory_masked` in plugin-security's `explain-principal-person.test.ts`
+    // reached every user through View All until the ruling made its email
+    // mask inert; it now reaches them through a row policy.
+    expect(inert(parsed({
+      name: 'qa_pp_directory_masked',
+      objects: { sys_user: { allowRead: true, viewAllRecords: true }, qa_pp_board: { allowRead: true } },
+      fields: { 'sys_user.email': { readable: false, editable: false } },
+      systemPermissions: ['manage_users'],
+    }))).toEqual([['warning', 'permission set "qa_pp_directory_masked"', 'permissions[0].fields["sys_user.email"]']]);
+  });
+
+  it('the composed sets of admin-ledger-decision-metadata.dogfood.test.ts: only the read mask is inert', () => {
+    // Spelled as that file composes them, from shared consts, which is why a
+    // structural grep for the pair finds nothing there. View All on the user
+    // object leaves the two `editable: false` grants binding; it unbinds the
+    // `readable: false` on `email`, in both sets that carry it.
+    const read = { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false };
+    const grants = { sys_user: { ...read, viewAllRecords: true }, sys_audit_log: read };
+    const withheldField = { 'sys_user.email': { readable: false, editable: false } };
+    const classFieldsReadable = {
+      'sys_user.role': { readable: true, editable: false },
+      'sys_user.must_change_password': { readable: true, editable: false },
+    };
+    expect(inert(parsed(
+      { name: 'ald_unmask_set', label: 'ALD unmask', objects: grants, fields: classFieldsReadable },
+      { name: 'ald_withhold_set', label: 'ALD withhold', objects: grants, fields: { ...classFieldsReadable, ...withheldField } },
+      { name: 'ald_withhold_only_set', label: 'ALD withhold only', objects: { sys_user: { allowRead: true, viewAllRecords: true } }, fields: withheldField },
+    ))).toEqual([
+      ['warning', 'permission set "ald_withhold_set"', 'permissions[1].fields["sys_user.email"]'],
+      ['warning', 'permission set "ald_withhold_only_set"', 'permissions[2].fields["sys_user.email"]'],
+    ]);
+  });
+
+  it('Modify All unbinds a read mask too; View All never unbinds an edit lock', () => {
+    expect(inert(parsed({
+      name: 'ps', objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
+      fields: { 'deal.amount': { readable: false } },
+    }))).toEqual([['warning', 'permission set "ps"', 'permissions[0].fields["deal.amount"]']]);
+    expect(inert(parsed({
+      name: 'ps', objects: { deal: { allowRead: true, viewAllRecords: true } },
+      fields: { 'deal.amount': { readable: true, editable: false } },
+    }))).toEqual([]);
+  });
+
+  it('reads the set as the runtime does: its own entry for the object, else its wildcard', () => {
+    // `holdsSuperuserBypass`: `objects[name] || objects['*']`, a lookup and
+    // never a merge, so an explicit entry without the bits answers alone.
+    expect(inert({
+      permissions: [{ name: 'ps', objects: { '*': { modifyAllRecords: true } }, fields: { 'deal.amount': { readable: true, editable: false } } }],
+    })).toEqual([['warning', 'permission set "ps"', 'permissions[0].fields["deal.amount"]']]);
+    expect(inert({
+      permissions: [{
+        name: 'ps',
+        objects: { '*': { modifyAllRecords: true }, deal: { allowRead: true } },
+        fields: { 'deal.amount': { readable: false } },
+      }],
+    })).toEqual([]);
+  });
+
+  it('an unparsed entry votes what it spells: an omitted edit bit is a lock under Modify All', () => {
+    // Parsing writes `editable: false` into the omitted key, so the raw and
+    // the parsed set answer the same.
+    const raw = { name: 'ps', objects: { deal: { modifyAllRecords: true } }, fields: { 'deal.amount': { readable: true } } };
+    expect(inert({ permissions: [raw] })).toEqual([['warning', 'permission set "ps"', 'permissions[0].fields["deal.amount"]']]);
+    expect(inert(parsed(raw))).toEqual(inert({ permissions: [raw] }));
+  });
+
+  it('controls: a row policy or org depth beside a mask, and another set\'s bypass, get nothing', () => {
+    expect(inert(parsed({
+      // `qa_pp_directory_masked` as repaired: every row through a row policy.
+      name: 'qa_pp_directory_masked',
+      objects: { sys_user: { allowRead: true }, qa_pp_board: { allowRead: true } },
+      fields: { 'sys_user.email': { readable: false, editable: false } },
+      rowLevelSecurity: [{ name: 'qa_pp_directory_rows', object: 'sys_user', operation: 'select', using: "id != ''" }],
+      systemPermissions: ['manage_users'],
+    }))).toEqual([]);
+    expect(inert(parsed({
+      // `deal_manager` as repaired: every deal through org read and write depth.
+      name: 'deal_manager', label: 'Deal manager',
+      objects: { deal: { allowRead: true, allowEdit: true, readScope: 'org', writeScope: 'org' } },
+      fields: { 'deal.restricted_note': { readable: true, editable: false } },
+    }))).toEqual([]);
+    // The rule judges one set: a holder of both sets is unmasked by the
+    // runtime, but neither set's author wrote an inert entry.
+    expect(inert(parsed(
+      { name: 'admin', objects: { deal: { allowRead: true, modifyAllRecords: true } } },
+      { name: 'clerk', objects: { deal: { allowRead: true } }, fields: { 'deal.amount': { readable: false } } },
+    ))).toEqual([]);
+  });
+
+  it('says which bit unbinds which mask, in one line, and the id is explained', () => {
+    const [read] = validateSecurityPosture(parsed({
+      name: 'ps', objects: { sys_user: { allowRead: true, viewAllRecords: true } },
+      fields: { 'sys_user.email': { readable: false } },
+    })).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
+    const [write] = validateSecurityPosture({
+      permissions: [{ name: 'ps', objects: { '*': { modifyAllRecords: true } }, fields: { 'deal.note': { readable: false, editable: false } } }],
+    }).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
+    expect(read.message).toContain('viewAllRecords');
+    expect(read.message).toContain('readable: false');
+    expect(write.message).toContain("objects['*']");
+    expect(write.message).toContain('modifyAllRecords');
+    for (const f of [read, write]) {
+      expect(f.message, f.message).not.toContain('\n');
+      expect(f.message.length, f.message).toBeLessThanOrEqual(200);
+      expect(f.hint, f.hint).not.toContain('\n');
+      expect(f.hint.length, f.hint).toBeGreaterThan(0);
+    }
+    expect(explainRule(SECURITY_SUPERUSER_FIELD_MASK_INERT)).toBeDefined();
+  });
+});
+
+/**
  * ── The structural meta-guard (#4992 pattern, #5009/#5018 shape) — #5017 ─────
  *
  * #4984 removed the `??` alias reads from a sharing rule's fields; #5009
@@ -1658,6 +1802,28 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'ObjectPermissionSchema',
     keys: () => shapeKeysOf(ObjectPermissionSchema),
   },
+  // [#29544] The super-user bypass mirror (`holdsSuperuserBypass`, verbatim
+  // from `@objectstack/core`): the set it is asked about, and the one
+  // object-permission entry its lookup lands on.
+  {
+    receiver: 'set',
+    expected: ['objects'],
+    declaredBy: 'PermissionSetSchema',
+    keys: () => Object.keys(PermissionSetSchema.shape),
+  },
+  {
+    receiver: 'op',
+    expected: ['modifyAllRecords', 'viewAllRecords'],
+    declaredBy: 'ObjectPermissionSchema',
+    keys: () => shapeKeysOf(ObjectPermissionSchema),
+  },
+  // [#29544] One field-permission entry, read by the inert-mask arm.
+  {
+    receiver: 'mask',
+    expected: ['editable', 'readable'],
+    declaredBy: 'PermissionSetSchema.fields{}',
+    keys: () => shapeKeysOf(PermissionSetSchema.shape.fields),
+  },
   // [#25575] One object-permission entry, read by the Modify All delete arm.
   {
     receiver: 'grant',
@@ -1798,6 +1964,8 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'predicate', // a policy's `using` / `check` text, a string — `.trim`.
       // #27472: `externalOwnershipGap`'s answer — `.column`, a field of that helper's own return value.
       'ownershipGap',
+      // #29544: the inert-mask arm's list of unbound bits — `.filter` / `.join` / `.length`, JS methods.
+      'inertBits',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -1913,6 +2081,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_SUPERUSER_FIELD_MASK_INERT,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -1939,6 +2108,16 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
   {
     label: 'modify-all-delete-withheld',
     stack: { permissions: [{ name: 'ps', label: 'PS', objects: { item: { allowEdit: true, allowDelete: false, modifyAllRecords: true } } }] },
+  },
+  {
+    label: 'superuser-field-mask-inert',
+    stack: {
+      permissions: [{
+        name: 'ps', label: 'PS',
+        objects: { deal: { allowRead: true, viewAllRecords: true } },
+        fields: { 'deal.amount': { readable: false, editable: false } },
+      }],
+    },
   },
   {
     label: 'anchor-high-privilege',
@@ -2071,7 +2250,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 17 since #25575: allowDelete: false beside modifyAllRecords: true.
     // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
     // 19 since #26591: the same rule id, for a policy keyed only on a column the opt-in does not admit.
-    expect(pushedRuleIds()).toHaveLength(19);
+    // 20 since #29544: a field mask its own set's View All / Modify All makes inert.
+    expect(pushedRuleIds()).toHaveLength(20);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

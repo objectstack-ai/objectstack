@@ -6,6 +6,13 @@ import { TeamGraphService, managerIsProvablyOutsideOrg, readMembershipToCompleti
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
+/**
+ * [#29655] Rows per page of a child-unit read — the bound the read always
+ * carried, so a parent with fewer children issues the one read it always did,
+ * and one with more is read in further pages rather than cut.
+ */
+const CHILD_UNIT_PAGE_ROWS = 1000;
+
 type DeptCache = {
   descendants?: Map<string, string[]>;
   expandUsers?: Map<string, string[]>;
@@ -86,7 +93,8 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     const cached = this.cache.descendants!.get(businessUnitId);
     if (cached) return cached;
 
-    // Verify seed itself is active + within tenant scope.
+    // Verify seed itself is active + within tenant scope. [#29655] A failed
+    // seed read throws, so nothing is cached for it.
     const seedActive = await this.seedIsUsable(businessUnitId);
     if (!seedActive) {
       this.cache.descendants!.set(businessUnitId, []);
@@ -97,20 +105,8 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     const queue: string[] = [businessUnitId];
     while (queue.length) {
       const parent = queue.shift()!;
-      let children: any[] = [];
-      try {
-        children = await this.engine.find('sys_business_unit', {
-          where: this.orgScope({ parent_business_unit_id: parent, active: { $ne: false } }),
-          fields: ['id'],
-          limit: 1000,
-          context: SYSTEM_CTX,
-        });
-      } catch {
-        children = [];
-      }
-      for (const c of children ?? []) {
-        const cid = String((c as any).id ?? '');
-        if (cid && !seen.has(cid)) {
+      for (const cid of await this.readChildUnits(parent)) {
+        if (!seen.has(cid)) {
           seen.add(cid);
           queue.push(cid);
         }
@@ -122,29 +118,57 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
   }
 
   /**
+   * [#29655] The ids of every active child unit of `parent`, read to
+   * completion through the one walk the member reads share
+   * ({@link readMembershipToCompletion}) — or a refusal.
+   *
+   * It read once at a 1,000-row bound and answered `[]` on any failure, and
+   * the subtree feeds the `unit_and_subordinates` member read: a child past
+   * the bound, or every child of a parent whose read failed, dropped out of
+   * the subtree with its members, and the reconcilers revoked their grants. A
+   * failed read, or a walk that cannot vouch for completion, now throws before
+   * {@link descendants} caches anything; a stack that never materialises
+   * `sys_business_unit` has no child units.
+   */
+  private async readChildUnits(parent: string): Promise<string[]> {
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_business_unit',
+      where: this.orgScope({ parent_business_unit_id: parent, active: { $ne: false } }),
+      fields: [],
+      subject: `the child units of business unit '${parent}'`,
+      pageRows: CHILD_UNIT_PAGE_ROWS,
+    });
+    if (!rows) return [];
+    return rows.map((r) => String(r?.id ?? '')).filter(Boolean);
+  }
+
+  /**
    * Is the seed unit itself active and inside the tenant scope?
    *
    * Shared by both widths so they agree on what an unusable seed is: a unit
    * that does not exist, sits in another organization, or carries
    * `active: false` contributes NOBODY — it is never merely "expanded without
-   * its descendants". A read failure answers `false` (fail closed: an
-   * unreadable unit must not grant).
+   * its descendants".
+   *
+   * [#29655] A read that FAILS is not an unusable seed: it throws, so neither
+   * width caches an answer for it. It answered `false` ("fail closed: an
+   * unreadable unit must not grant"), but that `false` was cached as nobody
+   * for the pass, and a business-unit graph write's recompute read it as
+   * "this rule now reaches nobody" and revoked every grant the rule gave. A
+   * refusal grants nothing either, and revokes nothing. A stack that never
+   * materialises `sys_business_unit` has no usable seed and answers `false`.
    */
   private async seedIsUsable(businessUnitId: string): Promise<boolean> {
-    try {
-      const seedRows = await this.engine.find('sys_business_unit', {
-        where: this.orgScope({ id: businessUnitId }),
-        fields: ['id', 'active'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      const seedRow: any = Array.isArray(seedRows) ? seedRows[0] : null;
-      if (!seedRow) return false;
-      if (seedRow.active === false) return false;
-      return true;
-    } catch {
-      return false;
-    }
+    const seedRows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_business_unit',
+      where: this.orgScope({ id: businessUnitId }),
+      fields: ['active'],
+      subject: `business unit '${businessUnitId}'`,
+    });
+    const seedRow = seedRows?.[0];
+    if (!seedRow) return false;
+    if (seedRow.active === false) return false;
+    return true;
   }
 
   /**

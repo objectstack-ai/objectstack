@@ -20,6 +20,7 @@
 
 import type { HierarchyScope } from '@objectstack/spec/contracts';
 import { objectPermissionGrants, type ObjectAccessScope } from '@objectstack/spec/security';
+import { customizationBasePackageId } from '@objectstack/spec/kernel';
 
 export interface ObjectPerm {
   allowCreate?: boolean;
@@ -352,6 +353,21 @@ export function fieldKeyObject(key: string): string {
 
 function asScopeSet(scope: Iterable<string>): Set<string> {
   return scope instanceof Set ? scope : new Set(scope);
+}
+
+/**
+ * objectstack#29674 (ADR-0146 D3) — the packages whose objects a set saved at
+ * `packageId` is scoped to, in the order their rows are listed: the package
+ * itself first. A paired `<base>.custom` package receives the permission sets
+ * FOR its base ("New similar" copies of the base's sets, and sets created
+ * there), and a pair declares none of the base's objects, so its sets are
+ * scoped to the base's objects as well as its own. Scoped to the pair alone, a
+ * copy granting 8 base objects listed none of them and read "0 objects
+ * granted". Every other package is scoped to itself.
+ */
+export function permissionObjectScopePackages(packageId: string): string[] {
+  const base = customizationBasePackageId(packageId);
+  return base === null ? [packageId] : [packageId, base];
 }
 
 /**

@@ -1733,19 +1733,28 @@ export const FieldSchema = lazySchema(() => {
    * Declared per referencing field by the application author, never on the
    * target object: the application decides whose names its own pages reveal.
    * `true` declares that a principal who can read the record carrying this
-   * field MAY see, for the record this field points at, its display name (the
-   * target object's `nameField` value, ADR-0079) and its id, even when that
-   * principal cannot read the target record. Nothing else of the target:
+   * field MAY see, for the record this field points at, its display name and
+   * its id, even when that principal cannot read the target record. The name
+   * is the ADR-0079 D4 display name `resolveRecordDisplayName` answers: the
+   * target object's `nameField`, else its `displayNameField`, else the derived
+   * title field. The served value is `ReferenceNameOnlyValueSchema`
+   * (`field-value.zod.ts`). Nothing else of the target:
    * `$expand` on this field MUST return the same name and id only, the field's
    * own `displayField` MUST NOT widen what is shown, and the renderer shows the
    * name as text with no link to the target record. A principal who can read
    * the target is served exactly what it is served without the key.
    *
    * The key lifts the RECORD-level refusal only. A field-level rule on the
-   * name field itself still holds: when the reader's field-level security
-   * keeps that field from it, the field declares a `maskingRule`, or it is a
-   * formula reading through another reference, the name served is the
-   * ADR-0079 floor (`Record #` and the id).
+   * name field itself still holds, and the engine reads that field only where
+   * it computes nothing the security layer owns. The name served is the
+   * ADR-0079 floor (`Record #` and the id) in five cases (objectql's
+   * `servableNameField`): the reader's field-level security keeps
+   * that field from it; the field declares a `maskingRule`; it is a formula
+   * reading through another reference; an explicit `nameField` (or
+   * `displayNameField`) points at a column that is neither title-typed nor
+   * `autonumber`; or no field-level answer can be had for the reader. A
+   * target with no resolvable or no non-empty name reads as the same floor,
+   * as it does for every reader.
    *
    * Absent or `false` keeps the restricted-reference posture: a lookup whose
    * target the reader cannot read shows no name. Valid on `lookup` and on
@@ -1755,14 +1764,19 @@ export const FieldSchema = lazySchema(() => {
   referenceNameVisible: z.boolean().optional().describe(
     'Declared name exposure (`lookup` and `user` fields only). TRUE declares that a principal who can '
     + 'read the record carrying this field may see the referenced record\'s display name (the target '
-    + 'object\'s `nameField` value) and id even when that principal cannot read the referenced record. '
-    + 'Served on `$expand`: a target the reader is refused (the object\'s read gate or its row scope) '
-    + 'answers `{ id, name, readRefused: true }`, per element on a multi-value field; an unexpanded read '
+    + 'object\'s `nameField`, else its `displayNameField`, else the derived title field) and id even when '
+    + 'that principal cannot read the referenced record. Served on `$expand`: a target the reader is refused '
+    + '(the object\'s read gate or its row scope) answers `{ id, name, readRefused: true }` '
+    + '(`ReferenceNameOnlyValueSchema`), per element on a multi-value field; an unexpanded read '
     + 'answers the stored id, as for every reader. Nothing else of the target: `$expand` on this field '
     + 'returns the same name and id only, the field\'s `displayField` does not widen it, and the name '
-    + 'renders as text with no link to the target. A field-level rule on the name field still holds: '
-    + 'when the reader may not read that field, it is masked, or it is a formula reading through another '
-    + 'reference, the name is the `Record #` floor with the id. A principal who can read the target is '
+    + 'renders as text with no link to the target. A field-level rule on the name field still holds, and '
+    + 'the name field is read only where nothing the security layer owns must be computed: the name is the '
+    + '`Record #` floor with the id when the reader may not read that field, it declares a `maskingRule`, '
+    + 'it is a formula reading through another reference, an explicit `nameField` (or its `displayNameField` '
+    + 'alias) points at a column that is neither title-typed nor autonumber, or no field-level answer can be '
+    + 'had for the reader. A target '
+    + 'with no resolvable or no non-empty name reads as the same floor. A principal who can read the target is '
     + 'served exactly what it is served without the key. Absent or false keeps the restricted-reference '
     + 'posture for a target the reader cannot read. Declared on the referencing field only; there is no '
     + 'target-object switch. Refused on any other type.'
@@ -1831,9 +1845,12 @@ export const FieldSchema = lazySchema(() => {
    * it per the #9689 idempotent-materialization ruling). On every other type
    * the key was inert by construction — the engine's referential delete walk
    * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
-   * `reference` (the family predicate `statesDeleteSemantics` in
+   * `reference`, and on a `user` field that declares a `deleteBehavior` (the
+   * family predicate `statesDeleteSemantics` in
    * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
-   * object, written by the object's parse when the author leaves it out) — yet
+   * object, written by the object's parse when the author leaves it out; a
+   * `user` field's target is `sys_user`, fixed by the type, and #29253 made its
+   * authored value take effect) — yet
    * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
@@ -2746,8 +2763,10 @@ export const FieldSchema = lazySchema(() => {
   // No ADR-0087 conversion carries it (the D3 entry
   // `user-field-foreign-reference-refused` says why): rewriting the field to a
   // `lookup` would add it to the referential delete walk with
-  // `deleteBehavior: 'set_null'`, which a `user` field never joined, and
-  // `deleteBehavior` has no value meaning "leave it", so the author decides.
+  // `deleteBehavior: 'set_null'`, while a `user` field that declares no
+  // `deleteBehavior` stays out of that walk (#29253: one that declares a value
+  // joins it), and `deleteBehavior` has no value meaning "leave it", so the
+  // author decides.
   if (
     field.type === 'user'
     && field.reference !== undefined
@@ -2762,7 +2781,8 @@ export const FieldSchema = lazySchema(() => {
         `\`reference: '${field.reference}'\`. To link records of \`${field.reference}\`, declare a ` +
         `\`lookup\`: \`{ type: 'lookup', reference: '${field.reference}' }\` (\`Field.lookup('${field.reference}', …)\`), ` +
         "and choose its `deleteBehavior` (a `lookup` defaults to `'set_null'` when the target record is " +
-        'deleted; a `user` field never did). If a person was meant, drop `reference`.',
+        'deleted; a `user` field has no default and keeps the id unless it declares one). If a person was ' +
+        'meant, drop `reference`.',
     });
   }
 
@@ -3310,9 +3330,12 @@ export const FieldSchema = lazySchema(() => {
     // stay legal. `tree` (hierarchical reference) keeps materializing with
     // `lookup`: it is in the relational family, where the key states delete
     // semantics, and the delete walk reads it there (#22957). `user` is
-    // stored identically to `lookup` but sits outside the delete walk's family
-    // (`master_detail`, `lookup`, `tree`) exactly like `text` does, so it takes
-    // the non-reference side; an authored value there still round-trips.
+    // stored identically to `lookup` but takes the non-reference side: it
+    // joins the delete walk only when its author DECLARES a `deleteBehavior`
+    // (#29253, `statesDeleteSemantics`), so a materialized value here would be
+    // a delete outcome nobody chose. A bare `user` field therefore parses with
+    // no key and keeps the deleted user's id; an authored value round-trips
+    // and takes effect.
     if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
       patch.deleteBehavior = 'set_null';
     }
