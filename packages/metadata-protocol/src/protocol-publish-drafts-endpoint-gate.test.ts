@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), so the fake engine below cannot accept a call ObjectQL

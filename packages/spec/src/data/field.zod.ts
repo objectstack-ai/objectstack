@@ -1313,11 +1313,12 @@ export const FieldSchema = lazySchema(() => {
    *
    * On a multi-value lookup (`multiple: true`), `required` means NON-EMPTY
    * array: an emptied required set fails validation loudly — `[]` does not
-   * satisfy `required` (#9447, maintainer ruling 2026-08-18). The empty set is
-   * always representable (it reads back as `[]`, never `null` — see
-   * `multiple`), so the required check judges emptiness, not absence. The
-   * describe is form help in Studio and carries the rule, not the ruling date
-   * (#22093).
+   * satisfy `required` (#9447, maintainer ruling 2026-08-18; this half stands
+   * under ruling A on #29343, record 6591577985). An emptied OPTIONAL
+   * multi-value field is stored as `null`, the same as one never set (see
+   * `multiple`), so the required check judges emptiness: `null` and `[]` both
+   * fail it. The describe is form help in Studio and carries the rule, not the
+   * ruling date (#22093).
    */
   required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
@@ -1354,21 +1355,29 @@ export const FieldSchema = lazySchema(() => {
     + 'is the whole search set and this flag is not read (ADR-0061).',
   ),
   /**
-   * Multi-value empty representation (#9447, maintainer ruling 2026-08-18):
-   * an emptied multi-value lookup reads back as `[]`, never `null`. This
-   * binds the field's empty representation for EVERY writer — cascade repair
-   * (`set_null` member removal), form clears, API writes — not as a
-   * cascade-only convention: an array field always reads as an array, so
-   * readers (generated code, formula/filter predicates) never need a null
-   * branch. Same ruling: `required` on a multi-value lookup means non-empty
-   * array (see `required` above).
+   * Multi-value empty representation (ruling A on #29343, record 6591577985,
+   * amending #9447, maintainer ruling 2026-08-18): a cleared OPTIONAL
+   * multi-value field — every type `isMultiValueField` answers true for:
+   * multiselect, checkboxes, tags, and select / lookup / user / file / image
+   * with `multiple: true` — is stored as `null` by the write door, the same as
+   * one never set, unique-covered or not: `[]` and `''` written to it store
+   * `null`. This binds the field's empty representation for EVERY writer —
+   * cascade repair (`set_null` member removal), form clears, API writes — not
+   * as a cascade-only convention. It reverses #9447's "an emptied multi-value
+   * lookup reads back as `[]`, never `null`" for optional columns: readers
+   * (generated code, formula/filter predicates) meet `null` for an empty set,
+   * and read `null` and `[]` alike as empty, since a row stored before the
+   * rule can still hold `[]`. The `$empty` table's `multi_value` row
+   * (`filter-empty-operator.ts`) is unchanged: `null` and `[]` both read as
+   * empty. #9447's other half stands: `required` on a multi-value field means
+   * non-empty list (see `required` above).
    *
    * Declarability: `multiple: true` outside the multi-capable types is refused
    * at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower
    * 2026-08-22 ruling. The rulings and their dates live in these comments; the
    * describe is form help in Studio and carries only the rule (#22093).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair.'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. A cleared optional multi-value field is stored as `null`, the same as one never set: an empty list `[]` or an empty string written to it stores `null`, and the rule binds every writer (cascade repair, form clears, API writes). Read `null` and `[]` alike as empty, as the `is_empty` filter (`$empty`) does, since a row stored before this rule can still hold `[]`. On a `required` multi-value field the empty list is refused: `required` means a non-empty list.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
@@ -1845,9 +1854,12 @@ export const FieldSchema = lazySchema(() => {
    * it per the #9689 idempotent-materialization ruling). On every other type
    * the key was inert by construction — the engine's referential delete walk
    * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
-   * `reference` (the family predicate `statesDeleteSemantics` in
+   * `reference`, and on a `user` field that declares a `deleteBehavior` (the
+   * family predicate `statesDeleteSemantics` in
    * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
-   * object, written by the object's parse when the author leaves it out) — yet
+   * object, written by the object's parse when the author leaves it out; a
+   * `user` field's target is `sys_user`, fixed by the type, and #29253 made its
+   * authored value take effect) — yet
    * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
@@ -2760,8 +2772,10 @@ export const FieldSchema = lazySchema(() => {
   // No ADR-0087 conversion carries it (the D3 entry
   // `user-field-foreign-reference-refused` says why): rewriting the field to a
   // `lookup` would add it to the referential delete walk with
-  // `deleteBehavior: 'set_null'`, which a `user` field never joined, and
-  // `deleteBehavior` has no value meaning "leave it", so the author decides.
+  // `deleteBehavior: 'set_null'`, while a `user` field that declares no
+  // `deleteBehavior` stays out of that walk (#29253: one that declares a value
+  // joins it), and `deleteBehavior` has no value meaning "leave it", so the
+  // author decides.
   if (
     field.type === 'user'
     && field.reference !== undefined
@@ -2776,7 +2790,8 @@ export const FieldSchema = lazySchema(() => {
         `\`reference: '${field.reference}'\`. To link records of \`${field.reference}\`, declare a ` +
         `\`lookup\`: \`{ type: 'lookup', reference: '${field.reference}' }\` (\`Field.lookup('${field.reference}', …)\`), ` +
         "and choose its `deleteBehavior` (a `lookup` defaults to `'set_null'` when the target record is " +
-        'deleted; a `user` field never did). If a person was meant, drop `reference`.',
+        'deleted; a `user` field has no default and keeps the id unless it declares one). If a person was ' +
+        'meant, drop `reference`.',
     });
   }
 
@@ -3324,9 +3339,12 @@ export const FieldSchema = lazySchema(() => {
     // stay legal. `tree` (hierarchical reference) keeps materializing with
     // `lookup`: it is in the relational family, where the key states delete
     // semantics, and the delete walk reads it there (#22957). `user` is
-    // stored identically to `lookup` but sits outside the delete walk's family
-    // (`master_detail`, `lookup`, `tree`) exactly like `text` does, so it takes
-    // the non-reference side; an authored value there still round-trips.
+    // stored identically to `lookup` but takes the non-reference side: it
+    // joins the delete walk only when its author DECLARES a `deleteBehavior`
+    // (#29253, `statesDeleteSemantics`), so a materialized value here would be
+    // a delete outcome nobody chose. A bare `user` field therefore parses with
+    // no key and keeps the deleted user's id; an authored value round-trips
+    // and takes effect.
     if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
       patch.deleteBehavior = 'set_null';
     }

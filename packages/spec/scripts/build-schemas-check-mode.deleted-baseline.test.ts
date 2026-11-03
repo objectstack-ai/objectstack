@@ -95,13 +95,17 @@ const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
 
 /** #17356's pin. A def whose ONLY root is an UNREGISTERED KIND — `connector`,
  *  bound in `UNREGISTERED_KIND_SCHEMAS` by #6245 and deliberately absent from
- *  `listMetadataTypeSchemaTypes()`. `integration/RetryConfig` sits two hops
- *  from that root (`connector.retryConfig`, unwrapped once through `optional`),
- *  and `stack.connectors[]` / `PUT /api/v1/meta/connector/:name` both parse a
- *  real metadata document through it. (The def was `integration/DataSyncConfig`,
- *  the measured specimen below, until protocol 18 retired it whole with
- *  `connector.syncConfig` — ADR-0049; `RetryConfig` is the connector's other
- *  open block on the same root at the same depth.)
+ *  `listMetadataTypeSchemaTypes()`. `integration/DeclarativeConnectorEntry` is
+ *  that root's own def — the schema `stack.connectors[]` and
+ *  `PUT /api/v1/meta/connector/:name` parse a real metadata document against —
+ *  so the eager graph reaches it by identity. (The def was
+ *  `integration/DataSyncConfig`, the measured specimen below, until protocol 18
+ *  retired it whole with `connector.syncConfig` — ADR-0049; then
+ *  `integration/RetryConfig`, two hops down at `connector.retryConfig`, until the
+ *  authored entry parsed that block through its own closed twin. The twin shares
+ *  `RetryConfig`'s field instances, so the gate still reaches the open def, but
+ *  through its derived-clone bridge — a different reading from the root-graph
+ *  hit this pin asserts in the eager regime.)
  *
  *  Until #17356 the gate built its roots from `listMetadataTypeSchemaTypes()`
  *  alone, so this def read `null` and check (c) proof 2 WAIVED a bare deletion
@@ -115,7 +119,7 @@ const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
  *  ever sees a key the build STOPPED emitting, and the def is judged by its
  *  DEF half (`key.slice(0, key.indexOf(':'))`), so a synthetic leaf under the
  *  real def runs the identical code path as the real deletion did. */
-const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/RetryConfig';
+const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/DeclarativeConnectorEntry';
 
 const DELETED_VIA_UNREGISTERED_KIND = `${DELETED_VIA_UNREGISTERED_KIND_DEF}:zzOnlyRootIsAnUnregisteredKind17356`;
 
@@ -491,7 +495,8 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       // `listMetadataTypeSchemaTypes()`, which per #6245 deliberately does not
       // enumerate `UNREGISTERED_KIND_SCHEMAS`. `connector` lives there, so the
       // BFS never started from it, `integration/DataSyncConfig` (then this
-      // fixture's def; `integration/RetryConfig` since protocol 18) read `null`,
+      // fixture's def; `integration/DeclarativeConnectorEntry`, the connector
+      // root's own def, since the entry closed its nested blocks) read `null`,
       // and a bare deletion of one of its baseline lines was waived as
       // over-collection — for a def `stack.connectors[]` parses on every boot.
       // The gate now enumerates its own reachability root union; the KIND

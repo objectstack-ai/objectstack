@@ -4523,7 +4523,7 @@ class Svc {
   const { seamFiles } = audit();
   expect('the seam scan discovers seams in the real tree', seamFiles.length > 0);
   expect('discovery reaches protocol.updateData/deleteData — the seam #8194 names',
-    seamFiles.some((f) => f.file === 'packages/metadata-protocol/src/protocol.ts'
+    seamFiles.some((f) => f.file === 'packages/metadata-protocol/src/protocol-data-writes.ts'
       && f.seams.some((x) => x.fn === 'updateData') && f.seams.some((x) => x.fn === 'deleteData')));
 
   // ── The ratchet-remedy authority convention (#8435) ────────────────────────

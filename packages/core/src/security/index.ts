@@ -201,6 +201,20 @@ export {
   type RequestAdmission,
 } from './request-execution-context.js';
 
+// The ONE own-row delete door (`DELETE <route>` removes one row, only the
+// caller's own): read as the caller, check the owner column, remove as the
+// system attributed to the caller. Each object supplies its door descriptor.
+export {
+  ownRowDeleteCallerResolver,
+  registerOwnRowDeleteRoute,
+  removeOwnRow,
+  type OwnRowDeleteCallerSources,
+  type OwnRowDeleteDoor,
+  type OwnRowDeleteEngine,
+  type OwnRowDeleteRoutesDeps,
+  type OwnRowDeleteWords,
+} from './own-row-delete-routes.js';
+
 // [commit 6a180e42d] The LOUD failure an unreachable permission store raises, and the
 // brand predicate a fail-closed `catch` uses to re-raise it instead of
 // degrading an outage into a capability denial. Ruled 2026-08-30.

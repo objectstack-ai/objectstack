@@ -14,13 +14,13 @@
       "seams": 1
     },
     {
-      "file": "packages/metadata-protocol/src/protocol.ts",
+      "file": "packages/metadata-protocol/src/protocol-data-writes.ts",
       "fn": "deleteData",
       "verb": "delete",
       "seams": 1
     },
     {
-      "file": "packages/metadata-protocol/src/protocol.ts",
+      "file": "packages/metadata-protocol/src/protocol-data-writes.ts",
       "fn": "updateData",
       "verb": "update",
       "seams": 1

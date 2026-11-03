@@ -49,6 +49,8 @@
  * protocol's own `getMetaItem` — never a payload.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';

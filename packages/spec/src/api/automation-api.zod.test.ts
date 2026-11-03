@@ -14,6 +14,7 @@ import {
   TriggerFlowResponseSchema,
   ToggleFlowRequestSchema,
   ToggleFlowResponseSchema,
+  CloneFlowResponseSchema,
   ListRunsRequestSchema,
   ListRunsResponseSchema,
   GetRunRequestSchema,
@@ -707,6 +708,58 @@ describe('ToggleFlowResponseSchema', () => {
       data: { name: 'my_flow', enabled: true },
     });
     expect(result.data.enabled).toBe(true);
+  });
+});
+
+// ==========================================
+// Clone Flow
+// ==========================================
+
+describe('CloneFlowResponseSchema — `data.noticeCode` names the `notice` sentence', () => {
+  const cloneAnswer = (data: Record<string, unknown>) => ({
+    success: true,
+    data: {
+      flow: {
+        name: 'acme_lead_followup',
+        label: 'Lead Follow-up (ACME)',
+        type: 'autolaunched',
+        status: 'obsolete',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      },
+      packageId: 'crm.custom',
+      notice: 'The copy is switched off until someone switches it on; its references are not re-pointed.',
+      ...data,
+    },
+  });
+
+  it('accepts a string `noticeCode` beside `notice` and keeps it', () => {
+    const result = CloneFlowResponseSchema.safeParse(cloneAnswer({ noticeCode: 'FLOW_CLONE_DISABLED_COPY' }));
+    expect(result.success).toBe(true);
+    expect(result.data?.data.noticeCode).toBe('FLOW_CLONE_DISABLED_COPY');
+  });
+
+  it('still parses an answer without `noticeCode` (an older server sends none)', () => {
+    const result = CloneFlowResponseSchema.safeParse(cloneAnswer({}));
+    expect(result.success).toBe(true);
+    expect(result.data?.data.noticeCode).toBeUndefined();
+  });
+
+  it('still requires `notice`, the English fallback', () => {
+    const answer = cloneAnswer({ noticeCode: 'FLOW_CLONE_DISABLED_COPY' });
+    delete (answer.data as Record<string, unknown>).notice;
+    const result = CloneFlowResponseSchema.safeParse(answer);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_type', 'data.notice']]);
+  });
+
+  it('refuses a non-string `noticeCode`, located on the key', () => {
+    const result = CloneFlowResponseSchema.safeParse(cloneAnswer({ noticeCode: 42 }));
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_type', 'data.noticeCode']]);
   });
 });
 

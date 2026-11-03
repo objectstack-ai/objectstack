@@ -55,6 +55,8 @@
 //       this helper calling `syncObjectSchema` with the folded
 //       spelling, rather than passing for want of an assertion)
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
 // `@objectstack/metadata-core` and NOT from `@objectstack/objectql`: objectql

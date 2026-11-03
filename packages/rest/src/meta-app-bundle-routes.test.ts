@@ -20,7 +20,7 @@ import { PerfTiming, runWithPerfTiming } from '@objectstack/observability';
 import { representationEtag } from '@objectstack/types';
 // Explicit `.js` extension: NodeNext resolution (see the sibling meta tests).
 import { RestServer } from './rest-server.js';
-import { appNavigationReach, inboundRelationObjects, META_APP_BUNDLE_PARAMS } from './meta-app-bundle-routes.js';
+import { appNavigationReach, inboundRelationObjects, inObjectListOrder, META_APP_BUNDLE_PARAMS } from './meta-app-bundle-routes.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -176,6 +176,12 @@ describe('[#27627] which items an app reaches', () => {
         expect(inboundRelationObjects(OBJECTS, [])).toEqual([]);
     });
 
+    it('[#29680] orders names as the object list does, names it does not list after, in their own order', () => {
+        expect(inObjectListOrder(OBJECTS, ['secret_deal', 'contact', 'account', 'note'])).toEqual(['account', 'contact', 'secret_deal', 'note']);
+        expect(inObjectListOrder(OBJECTS, ['ghost', 'contact', 'phantom', 'account'])).toEqual(['account', 'contact', 'ghost', 'phantom']);
+        expect(inObjectListOrder(OBJECTS, [])).toEqual([]);
+    });
+
     it('declares an EMPTY closed query set', () => {
         expect(META_APP_BUNDLE_PARAMS).toEqual([]);
     });
@@ -184,12 +190,12 @@ describe('[#27627] which items an app reaches', () => {
 // ── The bundle ────────────────────────────────────────────────────────────────
 
 describe('[#27627] one request answers the app, its reached objects, views, pages and dashboards', () => {
-    it('admin: every reached member, in derivation order, the body parsing against the declared shape', async () => {
+    it('admin: every reached member, objects in the object list\'s order (#29680), the body parsing against the declared shape', async () => {
         const { res } = await bundle('admin');
         expect(res.statusCode).toBe(200);
         expect(AppMetadataBundleResponseSchema.safeParse(res.body).success).toBe(true);
         expect(res.body.app.name).toBe('crm');
-        expect(namesOf(res.body.objects)).toEqual(['account', 'secret_deal', 'contact', 'note', 'task', 'deal_line']);
+        expect(namesOf(res.body.objects)).toEqual(['account', 'contact', 'secret_deal', 'note', 'task', 'deal_line']);
         expect(namesOf(res.body.views)).toEqual(['account.all', 'account.legal', 'contact.mine']);
         expect(namesOf(res.body.pages)).toEqual(['home_page', 'account_record']);
         expect(namesOf(res.body.dashboards)).toEqual(['pipeline', 'legal_board']);
@@ -237,6 +243,53 @@ describe('[#27627] one request answers the app, its reached objects, views, page
         const timing = new PerfTiming();
         await runWithPerfTiming(timing, () => bundle('admin'));
         expect(timing.marks().map((m) => m.name)).toContain('meta');
+    });
+});
+
+// ── [#29680] The objects, in the object list's order ──────────────────────────
+
+describe('[#29680] the bundle serves its objects in the object list\'s order, not navigation-reach first', () => {
+    // `contact` references `account`; the navigation names `contact` first.
+    const REVERSED_APP = {
+        name: 'service',
+        label: 'Service',
+        navigation: [
+            { id: 'nav_contacts', type: 'object', objectName: 'contact' },
+            { id: 'nav_accounts', type: 'object', objectName: 'account' },
+        ],
+    };
+    // CONTROL: the navigation already follows the object list, so reach-first and list order agree.
+    const IN_ORDER_APP = {
+        name: 'accounts',
+        label: 'Accounts',
+        navigation: [{ id: 'nav_accounts', type: 'object', objectName: 'account' }],
+    };
+    const data = () => ({ ...store(), app: [...store().app, REVERSED_APP, IN_ORDER_APP] });
+    /** The order the bundle served before #29680: navigation reach, then inbound relations. */
+    const reachFirst = (app: unknown) => {
+        const reach = appNavigationReach(app).objects;
+        return [...reach, ...inboundRelationObjects(OBJECTS, reach)];
+    };
+
+    it('two navigation objects where one references the other come back in object-list order', async () => {
+        const { res } = await bundle('admin', 'service', { data: data() });
+        expect(res.statusCode).toBe(200);
+        expect(AppMetadataBundleResponseSchema.safeParse(res.body).success).toBe(true);
+        expect(reachFirst(REVERSED_APP)).toEqual(['contact', 'account', 'note', 'task']);
+        expect(namesOf(res.body.objects)).toEqual(['account', 'contact', 'note', 'task']);
+        // The same set, and only the order moved: views and pages derive from that set.
+        expect(namesOf(res.body.views)).toEqual(['account.all', 'account.legal', 'contact.mine']);
+        expect(namesOf(res.body.pages)).toEqual(['account_record']);
+    });
+
+    it('CONTROL: a bundle whose navigation already follows the list serves exactly the reach-first body', async () => {
+        const { res } = await bundle('admin', 'accounts', { data: data() });
+        expect(res.statusCode).toBe(200);
+        const expected = reachFirst(IN_ORDER_APP);
+        expect(expected).toEqual(['account', 'contact', 'note']);
+        expect(namesOf(res.body.objects)).toEqual(expected);
+        const singles = await Promise.all(expected.map(async (name) => (await item('admin', 'object', name)).body));
+        expect(JSON.stringify(res.body.objects)).toBe(JSON.stringify(singles));
     });
 });
 
@@ -290,7 +343,7 @@ describe('[#27627] a per-caller validator: ETag, private, no-cache, and 304', ()
         expect(res.statusCode).toBe(200);
         expect(res.headers['Cache-Control']).toBe('private, no-store');
         expect(res.headers.ETag).toBeUndefined();
-        expect(namesOf(res.body.objects)).toEqual(['account', 'secret_deal', 'contact', 'note', 'task', 'deal_line']);
+        expect(namesOf(res.body.objects)).toEqual(['account', 'contact', 'secret_deal', 'note', 'task', 'deal_line']);
     });
 
     it('`metadata.enableCache: false` sends no validator and answers a matching If-None-Match in full, as the item reads do', async () => {
@@ -302,7 +355,7 @@ describe('[#27627] a per-caller validator: ETag, private, no-cache, and 304', ()
         expect(res.statusCode).toBe(200);
         expect(res.headers.ETag).toBeUndefined();
         expect(res.headers['Cache-Control']).toBeUndefined();
-        expect(namesOf(res.body.objects)).toEqual(['account', 'secret_deal', 'contact', 'note', 'task', 'deal_line']);
+        expect(namesOf(res.body.objects)).toEqual(['account', 'contact', 'secret_deal', 'note', 'task', 'deal_line']);
     });
 });
 

@@ -32,8 +32,8 @@ import {
   type CalendarVisibleRange,
   type CalendarWindow,
 } from './calendarWindow';
-import { SchemaRenderer, useNavigationOverlay, classifyLoadError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
-import type { LoadErrorKind } from '@object-ui/react';
+import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFailure, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
+import type { LoadErrorKind, AnsweredLoadFailure } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
@@ -2050,6 +2050,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // shows the server's own sentence, which names the object and the remedies,
   // instead of the generic "query was rejected" copy.
   const [loadErrorIsSearchRefusal, setLoadErrorIsSearchRefusal] = React.useState(false);
+  // objectstack#29704 — the server's code and sentence when it ANSWERED the
+  // failed read (a 404 `OBJECT_NOT_FOUND`, a 500 it explained). A `network`
+  // kind with an answer shows them instead of "check your connection", which
+  // is only true of a request that got no answer. `null` = no answer.
+  const [loadErrorAnswer, setLoadErrorAnswer] = React.useState<AnsweredLoadFailure | null>(null);
   // Start in loading state when we will fetch from a dataSource so the empty
   // state doesn't flash before the first effect runs. Inline data (schema.data
   // as an array or a `value` provider) starts as not-loading.
@@ -3165,6 +3170,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       setLoading(true);
       setLoadError(null);
       setLoadErrorIsSearchRefusal(false);
+      setLoadErrorAnswer(null);
       // [objectui#10384] Set when this result clamps the pager (see below).
       // The window it moves to is already being fetched, so loading stays on:
       // settling it here would paint the empty window — and with it the
@@ -3728,6 +3734,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           setData([]);
           setLoadError((err as any)?.message ? String((err as any).message) : String(err ?? 'Unknown error'));
           setLoadErrorKind(classifyLoadError(err));
+          setLoadErrorAnswer(answeredLoadFailure(err));
           setLoadErrorIsSearchRefusal(
             // `searchTerm` is what put `$search` on this request's params.
             !!searchTerm && (err as { code?: unknown } | null)?.code === 'INVALID_FIELD',
@@ -6835,7 +6842,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // A refused search term shows the server's sentence: it names the
             // object and the two remedies, and clearing the term (the toolbar
             // box stays) is the reader's way out (objectui#12966).
-            message={loadErrorIsSearchRefusal ? loadError : t(
+            // A server that answered a plain failure (kind `network`: no special
+            // verdict) is quoted, with its code below — the network sentence is
+            // only for a request that got no answer (objectstack#29704).
+            message={loadErrorIsSearchRefusal ? loadError
+              : loadErrorKind === 'network' && loadErrorAnswer ? loadErrorAnswer.message
+              : t(
               loadErrorKind === 'api-disabled' ? 'list.loadErrorApiDisabledMessage'
                 : loadErrorKind === 'forbidden' ? 'list.loadErrorForbiddenMessage'
                   : loadErrorKind === 'unauthorized' ? 'list.loadErrorUnauthorizedMessage'
@@ -6849,6 +6861,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 the empty state. `DataErrorState` grew three icon props for this
                 migration and no fourth — an `action` prop would be a second
                 spelling of an affordance it already has. */}
+            {loadErrorKind === 'network' && loadErrorAnswer?.code ? (
+              <code
+                data-testid="list-error-code"
+                className="mb-3 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+              >
+                {loadErrorAnswer.code}
+              </code>
+            ) : null}
             {loadErrorKind === 'api-disabled' || loadErrorKind === 'forbidden' ? null : (
               // No Retry for an `enable`-block denial or a permission refusal
               // (403). Neither verdict is one a retry can change (the first is

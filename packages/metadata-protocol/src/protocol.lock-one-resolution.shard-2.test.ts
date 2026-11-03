@@ -6,6 +6,8 @@
  * its call and nothing else; the shard it is comes from its own name, and
  * `protocol.lock-one-resolution.kit.test.ts` pins that the four files exist.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { registerRowShard } from './protocol.lock-one-resolution.kit.test.js';
 
 registerRowShard();
