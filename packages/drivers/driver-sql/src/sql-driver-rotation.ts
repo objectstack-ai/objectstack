@@ -3,8 +3,7 @@
 /**
  * [#29520 codemod] The "Data-lifecycle rotation (ADR-0057 P2)" section of
  * `SqlDriver`: the bodies of `computeTenantField`,
- * `registerManagedObjectMetadata`, `migrateMysqlDatetimeColumns`,
- * `migrateMysqlTimeColumns` moved out of `sql-driver.ts` whole by
+ * `registerManagedObjectMetadata` moved out of `sql-driver.ts` whole by
  * `scripts/codemod-split-sql-driver.mjs`.
  *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
@@ -30,8 +29,7 @@ import type { AutonumberToken } from '@objectstack/spec/data';
 import { aggregandColumnClass } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import {
-  AUDIT_TIMESTAMP_COLUMNS, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, declaredValueShapes,
-  isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
+  AUDIT_TIMESTAMP_COLUMNS, NUMERIC_SCALAR_TYPES, declaredValueShapes, isMultiValuedColumn,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
@@ -49,20 +47,13 @@ export interface RotationHost {
   readonly datetimeFields: SqlDriver['datetimeFields'];
   readonly fractionalNumericFields: SqlDriver['fractionalNumericFields'];
   isJsonField: SqlDriver['isJsonField'];
-  readonly isMysql: SqlDriver['isMysql'];
   readonly jsonFields: SqlDriver['jsonFields'];
-  legacyMysqlTimeColumns: SqlDriver['legacyMysqlTimeColumns'];
-  legacyMysqlTimestampColumns: SqlDriver['legacyMysqlTimestampColumns'];
-  logDurabilityFailure: SqlDriver['logDurabilityFailure'];
-  readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
   readonly managedObjectIndexes: SqlDriver['managedObjectIndexes'];
   readonly mediaFields: SqlDriver['mediaFields'];
-  nowColumnDefault: SqlDriver['nowColumnDefault'];
   readonly numericFields: SqlDriver['numericFields'];
   readonly numericValueFields: SqlDriver['numericValueFields'];
   readonly physicalKeyIndexes: SqlDriver['physicalKeyIndexes'];
-  runWideningAlters: SqlDriver['runWideningAlters'];
   readonly tenantFieldByTable: SqlDriver['tenantFieldByTable'];
   readonly timeFields: SqlDriver['timeFields'];
   readonly undeclaredAuditTimestampFields: SqlDriver['undeclaredAuditTimestampFields'];
@@ -200,106 +191,4 @@ export function registerManagedObjectMetadata(this: Pick<RotationHost, 'autoNumb
       this.updatedAtColumnState.set(tableName, 'presumed');
     }
     return { tableName, tenantField };
-  }
-
-/** The body of `SqlDriver#migrateMysqlDatetimeColumns`; the method's docblock there is its contract. */
-export async function migrateMysqlDatetimeColumns(this: Pick<RotationHost, 'isMysql' | 'legacyMysqlTimestampColumns' | 'logDurabilityFailure' | 'logger' | 'nowColumnDefault' | 'runWideningAlters'>, table: string, fields: Record<string, any>): Promise<void> {
-    if (!this.isMysql) return;
-    try {
-      const legacy = await this.legacyMysqlTimestampColumns(table, fields);
-      if (legacy.length === 0) return;
-
-      // #9354: built as a list, then run as one unit, so the whole widening of a
-      // table shares the ONE pinned session the bounded lock wait needs.
-      const statements = legacy.map((col) => {
-        // The default is re-stated because MySQL drops a column's DEFAULT when
-        // MODIFY does not repeat it, and an audit column without
-        // `CURRENT_TIMESTAMP(3)` would start inserting NULL.
-        //
-        // A declared `defaultValue: 'NOW()'` column is the same case (#21241),
-        // and the TIME twin ({@link migrateMysqlTimeColumns}) already restates
-        // it. Measured on MySQL 8.0.46 before this line: a legacy
-        // `timestamp null default current_timestamp` NOW() column came out of
-        // the widening as `datetime(3)` with NO default, and an insert omitting
-        // it answered `null`. Both take the expression a fresh column gets,
-        // from {@link nowColumnDefault}, so the widening cannot spell a third.
-        const isAudit = (AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(col.name);
-        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
-        const nullClause = col.nullable ? 'null' : 'not null';
-        const defaultClause = isAudit || isNowDefault ? ` default ${this.nowColumnDefault('datetime').toString()}` : '';
-        return {
-          sql: `alter table ?? modify column ?? datetime(${MYSQL_DATETIME_PRECISION}) ${nullClause}${defaultClause}`,
-          bindings: [table, col.name] as unknown[],
-        };
-      });
-      await this.runWideningAlters(table, statements);
-      this.logger.info?.(
-        `[sql-driver] widened MySQL TIMESTAMP → DATETIME(3) on ${table}: TIMESTAMP ends at 2038-01-19, ` +
-          `keeps no milliseconds and converts through the session timezone`,
-        { columns: legacy.map((c) => c.name) },
-      );
-    } catch (err) {
-      // #9354: the ONE failure that must not be swallowed. Everything else on
-      // this path keeps the policy the doc comment above describes; a metadata
-      // lock wait that the flush bounded is the operator's answer to a command
-      // they ran, and dropping it would report success for work not done.
-      if (isDeferredDdlLockWaitRefusal(err)) throw err;
-      this.logDurabilityFailure(
-        `[sql-driver] FAILED to widen MySQL datetime columns on ${table} — the DDL did not run and boot ` +
-        `continued: the columns are still legacy TIMESTAMP, so every write to them keeps truncating ` +
-        `milliseconds and keeps the 2038 ceiling, while reads return exactly what was stored and nothing ` +
-        `else reports the table as un-widened. Fix: identify the metadata-lock holder with ` +
-        '`SHOW PROCESSLIST` or `performance_schema.metadata_locks` (or resolve the error in this ' +
-        'record\'s meta), end it, then re-run `os migrate apply` or restart — the widening is ' +
-        're-detected from `information_schema` and is idempotent, so re-running is safe.',
-        { error: err instanceof Error ? err.message : String(err) },
-      );
-    }
-  }
-
-/** The body of `SqlDriver#migrateMysqlTimeColumns`; the method's docblock there is its contract. */
-export async function migrateMysqlTimeColumns(this: Pick<RotationHost, 'isMysql' | 'legacyMysqlTimeColumns' | 'logDurabilityFailure' | 'logger' | 'runWideningAlters'>, table: string, fields: Record<string, any>): Promise<void> {
-    if (!this.isMysql) return;
-    try {
-      const legacy = await this.legacyMysqlTimeColumns(table, fields);
-      if (legacy.length === 0) return;
-
-      // #9354: the datetime twin's seam, for the same reason — this ALTER takes
-      // the same exclusive metadata lock and blocks on the same holder.
-      const statements = legacy.map((col) => {
-        // MODIFY drops a default it does not restate. A `defaultValue: 'NOW()'`
-        // column gets the canonical UTC expression default (`nowColumnDefault`);
-        // its legacy `current_timestamp()` default read the SESSION's zone, so
-        // dropping-and-replacing it is a fix, not collateral.
-        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
-        const defaultClause = isNowDefault ? ' default (cast(utc_timestamp(3) as time(3)))' : '';
-        return {
-          sql: `alter table ?? modify column ?? time(3) ${col.nullable ? 'null' : 'not null'}${defaultClause}`,
-          bindings: [table, col.name] as unknown[],
-        };
-      });
-      await this.runWideningAlters(table, statements);
-      this.logger.info?.(
-        `[sql-driver] widened MySQL TIME → TIME(3) on ${table}: a zero-precision TIME rounds the ` +
-          `canonical milliseconds to the nearest second, changing the stored wall clock`,
-        { columns: legacy.map((c) => c.name) },
-      );
-    } catch (err) {
-      // #9354: the ONE failure that must not be swallowed. Everything else on
-      // this path keeps the policy the doc comment above describes; a metadata
-      // lock wait that the flush bounded is the operator's answer to a command
-      // they ran, and dropping it would report success for work not done.
-      if (isDeferredDdlLockWaitRefusal(err)) throw err;
-      this.logDurabilityFailure(
-        `[sql-driver] FAILED to widen MySQL time columns on ${table} — the DDL did not run and boot ` +
-        `continued: the columns are still zero-precision TIME, so every fractional-second write to them ` +
-        `keeps being ROUNDED to whole seconds — the stored wall clock is not the one that was asked for — ` +
-        `while reads return exactly what was stored and nothing else reports the table as un-widened. ` +
-        'Fix: identify the metadata-lock holder with `SHOW PROCESSLIST` or ' +
-        '`performance_schema.metadata_locks` (or resolve the error in this record\'s meta), end it, then ' +
-        're-run `os migrate apply` or restart — the widening is re-detected from `information_schema` ' +
-        'and is idempotent, so re-running is safe.',
-        { error: err instanceof Error ? err.message : String(err) },
-      );
-    }
   }
