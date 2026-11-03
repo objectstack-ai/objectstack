@@ -2857,6 +2857,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           publishing={publishing}
           posture={changesPosture}
           renderEntryNote={renderPublishRefusal}
+          // ADR-0146 D3 — reviewing the pair's drafts, the sheet names the
+          // base they are saved for.
+          customizationOf={pairId !== null ? baseLabel : undefined}
         />
 
         <CreateItemDialog

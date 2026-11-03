@@ -3953,6 +3953,8 @@ const en = {
     changes: {
       title: 'Pending changes',
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
+      // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
+      savedToCustomization: 'Saved to {{package}}’s customizations',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',
