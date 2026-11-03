@@ -94,7 +94,7 @@ Flows are built from **built-in node types** (plugins register more):
 | Node | Purpose |
 |:-----|:--------|
 | `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: a credential means a declared connector called via `connector_action` |
-| `notify` | Send a notification through the messaging service (inbox by default) |
+| `notify` | Send a notification through the messaging service |
 | `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`: `registerFlow` and `os validate` refuse a `{…}` token at `connectorConfig.input.<key>`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable), nothing sent; `os validate` does not judge the `inputSchema` fit yet |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
 | `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused; never hand-roll a button label or step counter into `fields` |
@@ -195,7 +195,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 ### Filter operands (`config.filter`)
 
 - **Each operand is a value slot** — a literal or a CEL envelope evaluated
-  before the query (`filter: { id: { dialect: 'cel', source: 'record.id' } }`).
+  before the query.
   A whole-string **query placeholder** (`{current_user_id}`, `{today}`,
   `{current_year_start}`) passes through verbatim for the query engine; a flow
   variable never shadows it, and only `filter` gets this hand-off.
@@ -206,6 +206,11 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
   literal `null`. A relation hop (`record.owner.email`) needs the start node's
   `config.expand` to list the field — else the fault names the missing hop, not
   the remedy.
+- **A computed operand is a value, never a query operator**: a string, number,
+  bigint, boolean or date, or at an `$in` / `$nin` / `$between` comparand a list
+  of them with no empty entry. Anything else fails the node as a guard before the
+  query runs. Make the expression evaluate to the compared value (for a record,
+  its `id`), and write conditions in the filter itself.
 
 ---
 
@@ -226,7 +231,6 @@ write them right the first time:
      CEL refuses an absent key where the template wrote nothing, so nothing /
      `null` / a default is now YOUR call; `'{record.tags.0}'` → `'record.tags[0]'`;
      a deep path guards each step: `has(vars.source) && has(vars.source.id) ? vars.source.id : null`
-   - dates and money: the legacy → CEL table in **objectstack-formula**
    - run user: `{$User.Id}` → `current_user.id`; a flow that can run without a
      user guards it, `current_user != null ? current_user.id : null`.
      `current_user` holds `id`, `positions`, `organizationId`, `isPlatformAdmin`
@@ -279,10 +283,6 @@ write them right the first time:
      'billing.sync': { handler: syncBilling, effect: 'writes' },    // declared writer
    } });
    ```
-
-4. **Conditions are bare CEL; only the stdlib (`CEL_STDLIB_FUNCTIONS`,
-   **objectstack-formula**) is callable bare.** An unknown function (`PRIOR()`, a
-   typo) and a `{…}`-wrapped field ref both **fail the build** — write `record.x`.
 
 ---
 
