@@ -29,10 +29,11 @@ Which items the bundle holds is derived on the server, from the app the
 caller is served (navigation already pruned to that caller):
 
 - `objects` — every object an `object` navigation entry names (top-level
-  `navigation`, each area's `navigation`, and `children` at any depth), in
-  navigation order; then every object with a `lookup` or `master_detail`
-  field whose `reference` is one of those, in registry order. One hop: an
-  object related only to a related object is not included.
+  `navigation`, each area's `navigation`, and `children` at any depth), and
+  every object with a `lookup` or `master_detail` field whose `reference` is
+  one of those, all in the object list's order; a name the object list does
+  not hold follows the listed ones, in navigation order. One hop: an object
+  related only to a related object is not included.
 - `views` — every view a navigation entry names by `viewName`, and every view
   bound to an object in `objects`.
 - `pages` — every page a `page` navigation entry names, and every page bound
@@ -73,7 +74,7 @@ const result = AppMetadataBundleResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **app** | `{ type: string; name: string; item: any; sortability?: object; … }` | ✅ | The app, as `GET /meta/app/{appId}` answers it to this caller (its navigation pruned to what the caller may open). |
-| **objects** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The objects the app's navigation reaches, then the objects whose relationship fields reference them, each as `GET /meta/object/{name}` answers it. An object the caller may not read is absent. |
+| **objects** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The objects the app's navigation reaches and the objects whose relationship fields reference them, in the object list's order, each as `GET /meta/object/{name}` answers it. An object the caller may not read is absent. |
 | **views** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The views the navigation names and the views bound to the bundled objects, each as `GET /meta/view/{name}` answers it. A view the caller may not read is absent. |
 | **pages** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The pages the navigation names and the pages bound to the bundled objects, each as `GET /meta/page/{name}` answers it. A page the caller may not read is absent. |
 | **dashboards** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The dashboards the navigation names, each as `GET /meta/dashboard/{name}` answers it. A dashboard the caller may not read is absent. |
