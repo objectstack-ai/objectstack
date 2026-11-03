@@ -108,6 +108,14 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
       },
       {
+        // [#29041] `notify-push-delivery.integration.test.ts` delivers a
+        // `notify` node through the real APNs and FCM transports of
+        // `@objectstack/service-push` against local mock endpoints. Read from
+        // source for the reason the entries above give. Same anchored-regex rule.
+        find: /^@objectstack\/service-push$/,
+        replacement: path.resolve(__dirname, '../service-push/src/index.ts'),
+      },
+      {
         // The same suite reads the `sys_audit_log` rows the post-decision writes
         // leave (`AuditPlugin`'s writers), so the attribution it pins is the
         // audit trail's own, not only the row's `updated_by`. Read from source

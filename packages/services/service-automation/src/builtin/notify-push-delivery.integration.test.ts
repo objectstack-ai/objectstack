@@ -22,6 +22,12 @@ import http2 from 'node:http2';
 import { generateKeyPairSync } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { MessagingService, createInboxChannel, createPushChannel } from '@objectstack/service-messaging';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+    type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 import { ApnsPushTransport, FcmPushTransport, PushService } from '@objectstack/service-push';
 import { AutomationEngine } from '../engine.js';
 import { registerNotifyNode } from './notify-node.js';
@@ -50,18 +56,22 @@ function memoryEngine() {
             (tables[object] ??= []).push(stored);
             return { ...stored };
         },
-        async find(object: string, q: { where?: Record<string, unknown> } = {}) {
-            return (tables[object] ?? []).filter((r) => matches(r, q.where)).map((r) => ({ ...r }));
+        async find(object: string, q: { where?: Record<string, unknown>; limit?: number } = {}) {
+            const rows = (tables[object] ?? []).filter((r) => matches(r, q.where));
+            return (typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows).map((r) => ({ ...r }));
         },
         async findOne(object: string, q: { where?: Record<string, unknown> } = {}) {
+            assertEngineFindOnePredicate(object, q as EngineFindOneQueryInput);
             const hit = (tables[object] ?? []).find((r) => matches(r, q.where));
             return hit ? { ...hit } : null;
         },
         async update(object: string, values: Record<string, unknown>, opts: { where?: Record<string, unknown> }) {
+            assertEngineUpdateDispatch(values as never, opts as never);
             for (const r of tables[object] ?? []) if (matches(r, opts.where)) Object.assign(r, values);
             return {};
         },
         async delete(object: string, opts: { where?: Record<string, unknown> }) {
+            assertEngineDeleteDispatch(opts as never);
             tables[object] = (tables[object] ?? []).filter((r) => !matches(r, opts.where));
             return {};
         },

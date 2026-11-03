@@ -5052,6 +5052,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/notify-written-address-channels.integration.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -5274,6 +5289,21 @@
     {
       "file": "packages/services/service-messaging/src/preference-resolver.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

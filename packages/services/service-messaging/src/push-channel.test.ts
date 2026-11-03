@@ -14,6 +14,12 @@ import { createPushChannel, deliveryData, truncateUtf8, type PushSenderSurface }
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import type { MessagingService } from './messaging-service.js';
 import type { Delivery } from './channel.js';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+    type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 
 const ctx = { logger: { info() {}, warn() {}, error() {} } };
 
@@ -215,12 +221,15 @@ describe('MessagingServicePlugin mounts the push channel while a push service is
         services.set('manifest', { register() {} });
         services.set('data', {
             async insert(_o: string, row: Record<string, unknown>) { return { id: 'evt_1', ...row }; },
-            async find(object: string, q: { where?: Record<string, unknown> } = {}) {
-                return object === 'sys_user_device' ? devices.filter((d) => d.user_id === q.where?.user_id) : [];
+            async find(object: string, q: { where?: Record<string, unknown>; limit?: number } = {}) {
+                if (object !== 'sys_user_device') return [];
+                const rows = devices.filter((d) => Object.entries(q.where ?? {})
+                    .every(([k, v]) => (d as Record<string, unknown>)[k] === v));
+                return typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows;
             },
-            async findOne() { return null; },
-            async update() { return {}; },
-            async delete() { return {}; },
+            async findOne(object: string, q?: EngineFindOneQueryInput) { assertEngineFindOnePredicate(object, q); return null; },
+            async update(_o: string, values: unknown, opts: unknown) { assertEngineUpdateDispatch(values as never, opts as never); return {}; },
+            async delete(_o: string, opts: unknown) { assertEngineDeleteDispatch(opts as never); return {}; },
         });
         const logger: Record<string, unknown> = { info() {}, warn() {}, error() {}, debug() {} };
         logger.child = () => logger;
