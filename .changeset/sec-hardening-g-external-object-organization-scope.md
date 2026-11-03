@@ -21,4 +21,4 @@ Metadata-protocol: narrowed
 - **`@objectstack/core`.** `TenantLayer0Input` gains the optional `externalOrganizationScopeUndeclared`; set, the verdict is `deny` under a walled posture, ahead of the platform-admin crossing. Omitted, every existing caller reads as before.
 - **`@objectstack/spec`.** The ADR-0087 D3 entry `external-object-organization-scope-declared` tells an upgrading operator what to declare.
 
-Skills-docs: follow-up owed — `content/docs/data-modeling/virtual-objects.mdx` (a multi-organization section), `skills/objectstack-data/rules/datasources.md` (the three declarations), `docs/adr/0015-external-datasource-federation.md` (the §10 and D7 amendment); carried by the sibling docs PR on `claude/sec-hardening-g-docs`, which is governed and lands by the maintainer's hand.
+Skills-docs: follow-up #29866 — `content/docs/data-modeling/virtual-objects.mdx` (a multi-organization section), `skills/objectstack-data/rules/datasources.md` (the three declarations), `docs/adr/0015-external-datasource-federation.md` (the §10 and D7 amendment); the sibling docs PR on `claude/sec-hardening-g-docs`, governed (Tier H), landed by the maintainer's hand.
