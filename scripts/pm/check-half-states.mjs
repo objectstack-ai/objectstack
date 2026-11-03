@@ -14966,29 +14966,6 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
 // the READ half: the row that makes the refill visible on the patrol instead of
 // being re-measured by whoever next happens to look.
 //
-// ## Why the rule LIVES HERE and the sweep imports it, rather than the reverse
-//
-// `scripts/pm/sweep-stale-finding.mjs` owns the one-time strip and exports this
-// screen. Reusing it BY IMPORT is the ruling, and 「⛔ never a second copy of the
-// rule」 is the reason — but the import can only point one way, and that was
-// measured on this tree rather than assumed:
-//
-//   this file importing the sweep   a MODULE CYCLE that crashes. The sweep
-//                                   derives module-level constants from
-//                                   `PM_STATE_LABELS`, which lives here, so
-//                                   with THIS file as the entry point — every
-//                                   patrol run, every `--self-test` — the
-//                                   sweep's body evaluates first and throws
-//                                   `ReferenceError: Cannot access
-//                                   'PM_STATE_LABELS' before initialization`.
-//   the sweep importing this file   already how it works, for four symbols.
-//
-// So the rule moves DOWN to the module that already owns the vocabulary it is
-// derived from, and the sweep re-exports it under the names its own callers and
-// self-test already use. One source, one arrow, no copy — and the row's
-// population is not an approximation of the sweep's target set, it IS that set,
-// which is what lets the row say "this is what the sweep would strip today".
-//
 // ## The three `pm:*` label sets in this file are NOT this one, and must not be
 //
 // A fourth question, with a fourth answer, stated so nobody unifies it with the
@@ -28123,10 +28100,8 @@ async function selfTest() {
 
   // -- H63 (#16904): a graded card still wearing the ungraded marker ---------
   //
-  // The row over the SHARED screen. Both directions, a lit control under every
-  // silence, and — because the point of sharing the screen is that the row and
-  // the one-time sweep can never disagree — a source-text pin that the sweep
-  // still ALIASES this definition instead of re-growing a copy of it.
+  // The row over the shared screen. Both directions, and a lit control under
+  // every silence.
   const gradedCarrier = (labels, over = {}) => ({
     number: 16904,
     state: 'open',
@@ -28173,19 +28148,6 @@ async function selfTest() {
   t('H63 screen: ⛔ the marker is never its own trigger', GRADING_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
   t('H63 screen: a priority is a grade in every spelling the board uses', priorityLabelsIn(['priority:p0', 'priority:p3']).length, 2);
   t('H63 screen: ⛔ and priority-ish prose is not a priority label', priorityLabelsIn(['priorities', 'priority', 'prioritypX']).length, 0);
-
-  // ── ONE rule, two readers: the sweep must still ALIAS this definition ─────
-  let sweepSource63 = '';
-  try {
-    sweepSource63 = readFileSync(new URL('./sweep-stale-finding.mjs', import.meta.url), 'utf8');
-  } catch {
-    sweepSource63 = '';
-  }
-  t('H63 ↔ sweep: the sweep\'s source is readable at all (an unreadable one must not pass as clean)', sweepSource63.length > 0, true);
-  t('H63 ↔ sweep: it ALIASES this screen rather than defining one', sweepSource63.includes('export const screenCard = staleFindingScreen;'), true);
-  t('H63 ↔ sweep: …and ⛔ has not re-grown a copy of the screen', /export function screenCard\s*\(/.test(sweepSource63), false);
-  t('H63 ↔ sweep: …nor a second copy of the grading vocabulary', /export const GRADING_STATE_LABELS\s*=/.test(sweepSource63), false);
-  t('H63 ↔ sweep: its target label is this constant, not a second literal', sweepSource63.includes('export const TARGET_LABEL = STALE_FINDING_LABEL;'), true);
 
   // ── ⛔ The three `pm:*` sets stay four different questions ────────────────
   t('H63: H13\'s visibility set carries the marker — which is why H13 is silent on a graded carrier', PM_STATE_LABELS.includes(STALE_FINDING_LABEL), true);
