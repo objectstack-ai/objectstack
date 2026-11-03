@@ -257,6 +257,11 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
  * it is simply absent from the answer, as an unknown `?id=` narrows to the
  * empty list. A minimum, not a refinement, so the published JSON Schema
  * states it.
+ *
+ * **Declared ahead of its producer.** No list door reads `names` yet, so its
+ * describe opens `[PLANNED — not yet served]`; the server PR on #29236 drops
+ * the marker in the change that serves the member (the pin is in
+ * `protocol.test.ts`).
  */
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
@@ -265,11 +270,12 @@ export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
     .min(1, 'Name at least one item, or leave `names` out to list every item')
     .optional()
     .describe(
-      'Item names to narrow the list to: only the named items of the type are answered, among those '
-      + 'the list would answer without it. Sent over HTTP as one comma-separated value '
-      + '(`?names=a,b,c`). A name that matches no item is simply absent from the answer (no 404). An '
-      + 'empty value is refused with 400 rather than read as every item; leave the key out to list '
-      + 'every item.',
+      '[PLANNED — not yet served] Item names to narrow the list to: only the named items of the type '
+      + 'are answered, among those the list would answer without it. Sent over HTTP as one '
+      + 'comma-separated value (`?names=a,b,c`). A name that matches no item is simply absent from the '
+      + 'answer (no 404). An empty value is refused with 400 rather than read as every item; leave the '
+      + 'key out to list every item. No list door reads it yet: until one does, a request carrying it '
+      + 'is answered as if it were absent.',
     ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
