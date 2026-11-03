@@ -202,6 +202,27 @@ describe('createPushChannel — no transport', () => {
     });
 });
 
+describe('createPushChannel — the sending server (origin)', () => {
+    it('copies each device row\'s origin into that device\'s data, and sends none for a row without one', async () => {
+        const { push, sent } = pushDouble();
+        const reg = registry([
+            device({ deviceId: 'd1', token: 'tok-a', origin: 'https://crm.example.com' }),
+            device({ deviceId: 'd2', token: 'tok-b', origin: 'http://localhost:3000' }),
+            device({ deviceId: 'd3', token: 'tok-c' }),
+            device({ deviceId: 'd4', token: 'tok-d', origin: 'https://crm.example.com/path' }),
+        ]);
+        const channel = createPushChannel({ getPush: () => push, devices: reg.devices });
+        expect((await channel.send(ctx, delivery())).ok).toBe(true);
+        const byToken = Object.fromEntries(sent.map((m) => [m.token, m.data]));
+        expect(byToken['tok-a']).toEqual({ notificationId: 'ntf_1', route: '/opportunity/123', origin: 'https://crm.example.com' });
+        expect(byToken['tok-b']).toEqual({ notificationId: 'ntf_1', route: '/opportunity/123', origin: 'http://localhost:3000' });
+        // No stored origin, or one the schema refuses: the data goes without it.
+        expect(byToken['tok-c']).toEqual({ notificationId: 'ntf_1', route: '/opportunity/123' });
+        expect(byToken['tok-d']).toEqual({ notificationId: 'ntf_1', route: '/opportunity/123' });
+        for (const m of sent) expect(PushDeliveryDataSchema.safeParse(m.data).success).toBe(true);
+    });
+});
+
 describe('deliveryData / truncateUtf8', () => {
     it('admits both inbox actionUrl shapes as route', () => {
         expect(deliveryData('n', '/opportunity/1')).toEqual({ notificationId: 'n', route: '/opportunity/1' });

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { PushRouteSchema } from '@objectstack/spec/api';
+import { PushDeliveryDataSchema, PushRouteSchema } from '@objectstack/spec/api';
 import type { UserDevice } from '@objectstack/spec/system';
 import type {
     ChannelAvailability,
@@ -85,8 +85,9 @@ const ROUTE_MAX_BYTES = 1024;
  * enabled ones whose vendor the push service has a transport for, and send
  * each one the notification's title and body (already in the recipient's
  * language: fan-out renders keyed text per recipient) plus its delivery data
- * (`PushDeliveryDataSchema`): the notification id and, when it passes
- * `PushRouteSchema`, its `actionUrl` as `route`. An `actionUrl` that is not a
+ * (`PushDeliveryDataSchema`): the notification id, when it passes
+ * `PushRouteSchema` its `actionUrl` as `route`, and the device row's `origin`
+ * when it holds one. An `actionUrl` that is not a
  * same-server path is left out, never sent; the delivery is not failed for it.
  *
  * **Dead tokens are retired here.** A device the vendor answers `invalid_token`
@@ -161,7 +162,13 @@ export function createPushChannel(opts: PushChannelOptions): MessagingChannel {
             const dead: string[] = [];
             const failures: Array<{ error: string; retryable: boolean }> = [];
             for (const device of reachable) {
-                const result = await push.send({ vendor: device.vendor, token: device.token, title, body, data });
+                const result = await push.send({
+                    vendor: device.vendor,
+                    token: device.token,
+                    title,
+                    body,
+                    data: withOrigin(data, device.origin),
+                });
                 if (result.status === 'sent') {
                     sent.push(result.messageId ?? '');
                 } else if (result.status === 'invalid_token') {
@@ -226,6 +233,17 @@ export function deliveryData(notificationId: string | undefined, actionUrl: stri
         data.route = actionUrl;
     }
     return data;
+}
+
+/**
+ * The device's `origin` added to the delivery data (`PushDeliveryDataSchema.origin`),
+ * when the row holds one the schema admits: the server the Console registered
+ * from, so a shell with several saved servers opens the tap on this one. A row
+ * without one, or with one the schema refuses, sends the data as is.
+ */
+export function withOrigin(data: Record<string, string>, origin: string | undefined): Record<string, string> {
+    if (!origin || !PushDeliveryDataSchema.shape.origin.safeParse(origin).success) return data;
+    return { ...data, origin };
 }
 
 /** Collapse whitespace runs: a push shows one plain line of text per member. */
