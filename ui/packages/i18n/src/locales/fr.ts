@@ -3059,6 +3059,12 @@ const fr = {
       saved: "Préférence de langue mise à jour.",
       readOnly: "La langue de votre compte est gérée par votre administrateur.",
     },
+    appLock: {
+      title: "Verrouillage de l'app",
+      off: "Désactivé",
+      onImmediately: "Activé, se verrouille dès que vous quittez l'app",
+      onAfter: "Activé, se verrouille {{duration}} après avoir quitté l'app",
+    },
     password: {
       changeTitle: "Changer le mot de passe",
       setTitle: "Définir un mot de passe local",
