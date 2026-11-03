@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 256 |
+| Write call sites | 254 |
 | Object name statically decidable | 177 |
-| Object name chosen at run time | 79 |
+| Object name chosen at run time | 77 |
 | Against a tenancy-enabled object | 176 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 197 |
+| Threading a tenant context | 195 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 146 |
+| Threading a decidably elevated context | 144 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-02 at `ac273cf07`.
+Measured on 2026-11-03 at `c5ec5fbc9`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 852 |
-| engine-shaped types recognised | 99 |
+| tracked non-test sources scanned | 854 |
+| engine-shaped types recognised | 98 |
 | declared objects in the registry | 125 |
-| same-named calls subtracted as non-engine | 227 |
+| same-named calls subtracted as non-engine | 225 |
 
 ## Every site
 
@@ -120,7 +120,6 @@ Measured on 2026-11-02 at `ac273cf07`.
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/comment-reaction-routes.ts` | `delete` | `COMMENT_REACTION_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/read-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
@@ -166,7 +165,6 @@ Measured on 2026-11-02 at `ac273cf07`.
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/personal-view-routes.ts` | `delete` | `PERSONAL_VIEW_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
