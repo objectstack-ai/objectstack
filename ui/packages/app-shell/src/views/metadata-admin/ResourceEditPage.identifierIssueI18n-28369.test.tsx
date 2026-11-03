@@ -4,8 +4,9 @@
  * objectstack#28369 — the create form's summary banner states Name's identifier
  * errors in the reader's locale, and wraps them instead of cutting them.
  *
- * A zh-CN administrator who types an all-Chinese label into a new permission
- * set leaves Name empty, and `SnakeCaseIdentifierSchema` refuses it twice
+ * A zh-CN administrator who types a label that derives no identifier into a
+ * new permission set (a Japanese one: since objectstack#29690 a Chinese label
+ * derives its name by pinyin) leaves Name empty, and `SnakeCaseIdentifierSchema` refuses it twice
  * (`.min(2)` and `.regex`). Those messages are the spec's, in English, and stay
  * so; the Console picks the reader's-locale text by the issue's code and
  * pattern, never by reading the English:
@@ -116,15 +117,15 @@ afterEach(() => {
   cleanup();
 });
 
-/** Opens a new permission set and types an all-Chinese label; Name stays empty. */
-async function bannerLinesForChineseLabel(): Promise<HTMLElement[]> {
+/** Opens a new permission set and types a Japanese label; Name stays empty. */
+async function bannerLinesForUnderivableLabel(): Promise<HTMLElement[]> {
   render(
     <MemoryRouter initialEntries={['/metadata/permission/new']}>
       <MetadataResourceEditPage type="permission" name="" createMode />
     </MemoryRouter>,
   );
   const labelBox = (await screen.findByRole('textbox', { name: /^(Label|标签)/ }, { timeout: 8000 })) as HTMLInputElement;
-  fireEvent.change(labelBox, { target: { value: '销售运营' } });
+  fireEvent.change(labelBox, { target: { value: 'セールス' } });
   const banner = await screen.findByTestId('metadata-validation-banner', {}, { timeout: 8000 });
   await waitFor(() => expect(banner.querySelectorAll('[data-testid="metadata-diagnostics-item"]').length).toBeGreaterThanOrEqual(2));
   return Array.from(banner.querySelectorAll<HTMLElement>('[data-testid="metadata-diagnostics-item"]'));
@@ -139,7 +140,7 @@ describe('the create banner states identifier issues in the reader’s locale (o
   });
 
   it('(a) zh-CN: both Name lines are Chinese, and no line carries the spec’s English', async () => {
-    const lines = (await bannerLinesForChineseLabel()).map((li) => li.textContent ?? '');
+    const lines = (await bannerLinesForUnderivableLabel()).map((li) => li.textContent ?? '');
     expect(lines.some((l) => l.includes(ZH_TOO_SHORT))).toBe(true);
     expect(lines.some((l) => l.includes(ZH_SNAKE))).toBe(true);
     for (const en of SNAKE_EN) expect(lines.some((l) => l.includes(en))).toBe(false);
@@ -147,13 +148,13 @@ describe('the create banner states identifier issues in the reader’s locale (o
 
   it('(b) CONTROL en-US: the banner shows the spec’s own sentences', async () => {
     localeFixture = 'en-US';
-    const lines = (await bannerLinesForChineseLabel()).map((li) => li.textContent ?? '');
+    const lines = (await bannerLinesForUnderivableLabel()).map((li) => li.textContent ?? '');
     for (const en of SNAKE_EN) expect(lines.some((l) => l.includes(en))).toBe(true);
     expect(lines.some((l) => l.includes(ZH_SNAKE))).toBe(false);
   });
 
   it('(c) the banner lines wrap instead of cutting the message', async () => {
-    const lines = await bannerLinesForChineseLabel();
+    const lines = await bannerLinesForUnderivableLabel();
     for (const li of lines) {
       expect(li.className.split(/\s+/)).not.toContain('truncate');
       expect(li.className.split(/\s+/)).toContain('whitespace-normal');

@@ -3948,6 +3948,9 @@ importers:
       lucide-react:
         specifier: ^1.43.0
         version: 1.43.0(react@19.3.0)
+      pinyin-pro:
+        specifier: ^3.29.4
+        version: 3.29.4
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
