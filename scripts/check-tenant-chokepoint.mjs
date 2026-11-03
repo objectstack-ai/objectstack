@@ -175,11 +175,8 @@ import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
-/** The directory whose `sql-driver-*.ts` seam modules carry `SqlDriver`'s moved bodies. */
-const SEAM_DIR = join('packages', 'drivers', 'driver-sql', 'src');
-
 /**
- * Which basenames of {@link SEAM_DIR} are seam modules this gate reads:
+ * Which basenames of `driver-sql/src` are seam modules this gate reads:
  * `sql-driver-<anything>.ts`, never a test or spec file. A pure function of
  * the listing, so the self-test can drive it without the repo.
  */
@@ -187,6 +184,11 @@ export function seamModulesOf(basenames) {
   return basenames
     .filter((n) => /^sql-driver-.+\.ts$/.test(n) && !/\.(test|spec)\.ts$/.test(n) && !n.endsWith('.d.ts'))
     .sort();
+}
+
+/** A directory's basenames, or none when it is absent (main() then refuses on the driver file). */
+function listing(rel) {
+  return existsSync(join(ROOT, rel)) ? readdirSync(join(ROOT, rel)) : [];
 }
 
 /**
@@ -203,7 +205,8 @@ const SCAN_FILES = [
   join('packages', 'drivers', 'driver-sql', 'src', 'sql-driver.ts'),
   join('packages', 'drivers', 'driver-sqlite-wasm', 'src', 'sqlite-wasm-driver.ts'),
   join('packages', 'drivers', 'driver-turso', 'src', 'turso-driver.ts'),
-  ...seamModulesOf(existsSync(join(ROOT, SEAM_DIR)) ? readdirSync(join(ROOT, SEAM_DIR)) : []).map((n) => join(SEAM_DIR, n)),
+  ...seamModulesOf(listing(join('packages', 'drivers', 'driver-sql', 'src')))
+    .map((n) => join('packages', 'drivers', 'driver-sql', 'src', n)),
 ];
 
 /**
