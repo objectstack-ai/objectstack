@@ -18,7 +18,8 @@ changeset's own summary with its commit and pull request; the CHANGELOG entry
 under that commit carries the before, the after and the fix. The 760 other
 fixes are counted by area and left to the CHANGELOGs. The areas are a reading
 of each summary, for finding your way, and an entry that spans two areas is
-listed once. Each package's Release also carries an `Updated dependencies`
+listed once. Four lines say "membership tier" for better-auth's word for it,
+as ADR-0090 D3 asks. Each package's Release also carries an `Updated dependencies`
 bullet under 其他修复, which this page does not count. The
 [upgrade checklist](#upgrade-checklist) is compiled from the changesets and
 has not been walked.
@@ -432,13 +433,13 @@ to meet.
 - A share link whose `redactFields` names a field the object does not have is refused at mint, instead of being issued with a redaction that hides nothing (`3ff32c4`, #29293)
 - Copy Invite Link is no longer offered or answered for a pending invitation whose expiry has passed (`aa46d14`, #28529)
 - An approval decision whose output does not match its declaration is refused before anything is recorded — a single value where `multiple: true` declares a list, a list where it does not (a bare-key or `text` output included), a list naming one entry twice, or a picker value that resolves to no user, department, team or held position (`d3175d5`, #29372)
-- A role or membership tier held by more than 10,000 members reaches every holder in sharing and approvals, and a membership read that fails is refused loudly instead of answered with an empty set (`2789ba7`, #29497)
-- Team and position recipients reach every holder past 10,000 rows in sharing and approvals, and a team, position or role holder read that fails is refused loudly instead of answered with nobody (`9bdfe37`, #29602)
+- A membership tier held by more than 10,000 members reaches every holder in sharing and approvals, and a membership read that fails is refused loudly instead of answered with an empty set (`2789ba7`, #29497)
+- Team and position recipients reach every holder past 10,000 rows in sharing and approvals, and a team, position or membership-tier holder read that fails is refused loudly instead of answered with nobody (`9bdfe37`, #29602)
 - Business-unit recipients and approvers reach every member past 10,000 rows, a failed business-unit member read is refused loudly instead of answered with nobody, and a failed `resolveAs` expansion says so (`e0187d0`, #29647)
 - A failed `sys_business_unit` read refuses instead of answering nobody, and a business unit with more than 1,000 child units keeps every child (`4898162`, #29703)
 - A comment's display name is stamped from the caller's session, like its author id (`6d1c659`, #29737)
 - The set-user-manager depth cap counts the whole chain a link creates, including the reports already below the edited user, so a chain linked bottom-up cannot pass `MAX_MANAGER_CHAIN_DEPTH` (for #26775) (`b29a88c`, #26868)
-- `invite-member` refuses a blank role 400 `ROLE_NOT_FOUND`, the way it refuses an unknown one, and writes no invitation (for #29158) (`a2fcede`, #29296)
+- `invite-member` refuses a blank membership tier 400 `ROLE_NOT_FOUND`, the way it refuses an unknown one, and writes no invitation (for #29158) (`a2fcede`, #29296)
 - A user preference's owner is fixed when the preference is saved (`2ea6042`, #29685)
 - A forced password change now requires a password different from the current one (`6bc7643`, #27440)
 - Security explain refuses a `userId` that no `sys_user` record has with `404 RECORD_NOT_FOUND`, naming the id, instead of explaining the baseline principal the resolver builds for any id (`6279efe`, #26801)
@@ -845,7 +846,7 @@ are graded `minor`, because they add to the metadata protocol.
 - The HTTP MCP runtime bridges a host-injected authoring `ToolRegistry` behind a new `metadata:write` OAuth scope, with door provenance on every call (`9bf6598`, #26550)
 - An action on a `sys_*` object whose author exposed it to AI is listed and run over MCP, behind every gate the action already has (`bc496bf`, #27940)
 - The stored-metadata healing pass re-saves a draft-only permission set that grants on an object which exists nowhere now, instead of reporting it `failed` (`f2f6bf0`, #29350)
-- A role change that grants an org-admin permission set says which set it granted (for #27862) (`5954705`, #28086)
+- A membership-tier change that grants an org-admin permission set says which set it granted (for #27862) (`5954705`, #28086)
 - The approvals get serves a request's own route, and both approval step lines draw it (`9fab076`, #26976)
 - A `demoStaff` entry names its line manager, and the development boot writes it (`13e85be`, #26763)
 - A session stores its client address in RFC 5952 text, and is born with `last_activity_at` (`cb8988e`, #27003)
