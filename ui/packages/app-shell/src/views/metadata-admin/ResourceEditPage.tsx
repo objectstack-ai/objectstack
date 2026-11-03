@@ -2841,6 +2841,11 @@ function MetadataResourceEditPageImpl({
           saving={saving}
           isDirty={isDirty}
           autoSaveEnabled={autoSaveEnabled}
+          // The same two terms that return the auto-save effect early and
+          // disable Save: while either holds, no save is coming, so the chip
+          // must not promise one. Read, never recomputed.
+          held={inspectorBlocking > 0 || refusalBlocking > 0}
+          heldReason={saveTitle}
           lastSavedAt={lastSavedAt}
           createMode={!!createMode}
           locale={locale}
@@ -3927,17 +3932,26 @@ function MetadataResourceEditPageImpl({
 /**
  * SaveStatusIndicator — small inline label next to the Save icon that
  * communicates auto-save state so the icon-only button is not a black
- * box. Five states:
- *   - saving      → "Saving…" with spinner
- *   - dirty + on  → "Auto-saving in 1.5s" (subtle, amber)
- *   - dirty + off → "Unsaved" (amber)
- *   - clean + ts  → "Saved 14:32" (muted)
- *   - createMode  → hidden until first save
+ * box. Six states, each stamped on `data-state`:
+ *   - saving        → "Saving…" with spinner
+ *   - dirty + held  → "Not saved" (destructive): a save door is shut — the
+ *                     server refused this draft or the inspector holds a
+ *                     fault — so neither the timer nor the button will save
+ *                     it; the reason rides on the chip's title
+ *   - dirty + on    → "Auto-saving…" (subtle, amber)
+ *   - dirty + off   → "Unsaved" (amber)
+ *   - clean + ts    → "Saved 14:32" (muted)
+ *   - createMode    → hidden until first save
+ *
+ * `held` outranks the auto-save promise: the auto-save effect returns early on
+ * the same terms, so "Auto-saving…" there would promise a save that never comes.
  */
 function SaveStatusIndicator({
   saving,
   isDirty,
   autoSaveEnabled,
+  held,
+  heldReason,
   lastSavedAt,
   createMode,
   locale,
@@ -3945,6 +3959,10 @@ function SaveStatusIndicator({
   saving: boolean;
   isDirty: boolean;
   autoSaveEnabled: boolean;
+  /** A save door is shut on this draft (server refusal or inspector fault). */
+  held: boolean;
+  /** Why it is shut — the Save button's own explanation. */
+  heldReason: string;
   lastSavedAt: Date | null;
   createMode: boolean;
   locale: 'en-US' | 'zh-CN' | string;
@@ -3960,7 +3978,7 @@ function SaveStatusIndicator({
 
   if (saving) {
     return (
-      <span className="text-xs text-muted-foreground hidden md:inline-flex items-center gap-1">
+      <span data-testid="save-status" data-state="saving" className="text-xs text-muted-foreground hidden md:inline-flex items-center gap-1">
         <Loader2 className="h-3 w-3 animate-spin" />
         {t('engine.edit.saving', locale)}
       </span>
@@ -3968,8 +3986,25 @@ function SaveStatusIndicator({
   }
   if (isDirty) {
     if (createMode) return null;
+    if (held) {
+      return (
+        <span
+          data-testid="save-status"
+          data-state="held"
+          title={heldReason}
+          className="text-xs text-destructive hidden md:inline-flex items-center gap-1"
+        >
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-destructive" />
+          {t('engine.edit.notSavedHeld', locale)}
+        </span>
+      );
+    }
     return (
-      <span className="text-xs text-amber-600 dark:text-amber-300 hidden md:inline-flex items-center gap-1">
+      <span
+        data-testid="save-status"
+        data-state={autoSaveEnabled ? 'autosave-pending' : 'unsaved'}
+        className="text-xs text-amber-600 dark:text-amber-300 hidden md:inline-flex items-center gap-1"
+      >
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
         {autoSaveEnabled
           ? t('engine.edit.autoSavingShortly', locale)
@@ -3981,7 +4016,7 @@ function SaveStatusIndicator({
     const hh = String(lastSavedAt.getHours()).padStart(2, '0');
     const mm = String(lastSavedAt.getMinutes()).padStart(2, '0');
     return (
-      <span className="text-xs text-muted-foreground hidden md:inline-flex items-center gap-1">
+      <span data-testid="save-status" data-state="saved" className="text-xs text-muted-foreground hidden md:inline-flex items-center gap-1">
         {tFormat('engine.edit.savedAt', locale, { time: `${hh}:${mm}` })}
       </span>
     );
