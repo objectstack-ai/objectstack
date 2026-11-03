@@ -16,6 +16,8 @@
  * authored hooks use (`registerMiddleware`, `registerHook`), so what they pin
  * is that the write reaches them carrying the caller's context.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';

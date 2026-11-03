@@ -14,10 +14,13 @@
  *    platform-prefixed name (`sys_` / `cloud_` / `ai_`) to the runtime, and the
  *    text says so. The old text promised a refusal with no boundary.
  *  - [#27312] `relatedList: 'primary'` and `enable.trackHistory` describe the
- *    v3 synthesized record page: a primary list is a body table in the details
- *    column (inside the Details tab when tabbed), and field changes join the
- *    record's one timeline stream. Neither key gets a tab of its own, so the
- *    v2 phrases ("its own tab", "History tab") must not come back.
+ *    synthesized record page: a primary list is a full-width table in the
+ *    record's detail body, and field changes join the record's one timeline
+ *    stream. Neither key gets a tab of its own, so the v2 phrases ("its own
+ *    tab", "History tab") must not come back.
+ *  - [#28888] `relatedList` states the relationship's role (hidden, auxiliary
+ *    panel, full-width table) and names no tab or column of the page: the
+ *    layout is ADR-0085's, and naming its chrome went stale once already.
  *
  * Phrases are pinned, not whole sentences, so a later rewording that keeps the
  * contract stays green.
@@ -99,9 +102,17 @@ describe('[#27311] fieldGroups[i].relatedList is judged as a relatedLists entry 
 describe('[#27312] relatedList: \'primary\' describes the v3 body table', () => {
   const text = descriptionAt(fieldRoot, ['relatedList']);
 
-  it('places a primary list in the details column, inside the Details tab when tabbed', () => {
-    expect(text).toContain('the details column, after its first field section');
-    expect(text).toContain('inside the Details tab on the tabbed page, with no tab of its own');
+  it('states each value\'s role on the record page and cites ADR-0085 for the layout', () => {
+    expect(text).toContain('false = the child object is not shown on the parent record page');
+    expect(text).toContain('true/absent = shown as an auxiliary panel on the record page');
+    expect(text).toContain('shown as a full-width table in the record\'s detail body');
+    expect(text).toContain('The page layout is defined by ADR-0085');
+  });
+
+  it('[#28888] names no tab or column of the page', () => {
+    for (const phrase of [/\btabs?\b/i, /\bcolumn\b/i, /"Related"/, /Details/, /side card/i]) {
+      expect(text).not.toMatch(phrase);
+    }
   });
 
   it('carries no v2 tab phrase', () => {

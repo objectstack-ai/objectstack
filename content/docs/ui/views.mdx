@@ -400,6 +400,15 @@ The split pane beside an open record keeps the same switcher.
 - **☆ Star** puts a view in the sidebar's **Favorites** section of the app, where the user can
   drag it into place. A view your app's navigation already opens (an `object` entry with that
   `viewName`) is in the menu already, so its star is disabled.
+- **My views** are each user's own. **Save as my view**, at the end of the dropdown, saves the
+  list on screen under a name the user gives it: the open view with the user's filter, sort,
+  grouping, column order, hidden columns and density laid over it. The search term and the
+  filter chips are not saved. The views appear in their own **My views** section, where each
+  row can be renamed or deleted, and **📌 Pin** on one makes it that user's default. Nobody else
+  sees them, and an administrator's **Manage views** does not list them. They are rows of the
+  `sys_personal_view` object, not view metadata, so a package never carries them. A user the
+  server grants that object nothing (an external member, today) is offered neither the section
+  nor the save.
 
 ## Form View
 

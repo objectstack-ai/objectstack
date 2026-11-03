@@ -73,7 +73,9 @@ describe('the refused-shape list — registered against the migration chain', ()
       'visibility-predicate-has-argument-refused',
       'object-duplicate-action-name-refused',
       'ui-dashboard-global-filter-duplicate-name-refused',
+      'ui-dashboard-global-filter-reserved-date-range-refused',
       'object-extension-field-patch-key-grammar-refused',
+      'object-extension-field-key-grammar-refused',
     ]);
   });
 
@@ -855,6 +857,89 @@ describe('#29212 — a stored dashboard that declares one global filter key twic
   });
 });
 
+// ── #29541 (the #29213 refusal) ───────────────────────────────────────────
+
+/** A dashboard that declares the built-in `dateRange`, unless `declared` is false. */
+const dateRangeBoard = (globalFilters: unknown[], declared = true) => ({
+  ...dupBoard(globalFilters),
+  ...(declared ? { dateRange: { field: 'close_date' } } : {}),
+});
+/** The dashboard parse's reserved-`dateRange` issues, as paths. */
+const reservedFilterIssuePaths = (row: unknown) => {
+  const parsed = DashboardSchema.safeParse(row);
+  return parsed.success
+    ? []
+    : parsed.error.issues
+      .filter((i) => i.path[0] === 'globalFilters' && /the reserved name of the built-in date range/.test(i.message))
+      .map((i) => i.path);
+};
+
+describe('#29541 — a stored dashboard whose globalFilters entry is keyed dateRange beside a declared dateRange is listed', () => {
+  it('one TODO at the entry\'s name, naming the reserved word and the built-in date range; the row is not rewritten', () => {
+    const row = dateRangeBoard([{ name: 'dateRange', field: 'region', type: 'text' }]);
+    const { item, todos } = storedTodos('dashboard', row);
+    expect(item).toEqual(row);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('ui-dashboard-global-filter-reserved-date-range-refused');
+    expect(todo.path).toBe('dashboards[0].globalFilters[0].name');
+    expect(todo.reason).toMatch(/^No lossless rewrite: whether the entry was meant to be the date range/);
+    expect(todo.reason).toContain(
+      "globalFilters[0] is keyed 'dateRange', the reserved name of the built-in date range this dashboard "
+        + 'declares in `dateRange`.',
+    );
+    expect(todo.reason).not.toMatch(/#\d{3,}/);
+    expect(JSON.parse(todo.from)).toEqual({ name: 'dateRange', index: 0 });
+    // The listing and the parse refuse ONE set: the stored row still fails the parse, at the same site.
+    expect(reservedFilterIssuePaths(item)).toEqual([['globalFilters', 0, 'name']]);
+  });
+
+  it('an entry with no `name` keyed by its `field` is listed at that field, as the parse locates it', () => {
+    const row = dateRangeBoard([
+      { name: 'region', field: 'region', type: 'text' },
+      { field: 'dateRange', type: 'date' },
+    ]);
+    const { todos } = storedTodos('dashboard', row);
+    expect(todos).toHaveLength(1);
+    expect(todos[0]!.path).toBe('dashboards[0].globalFilters[1].field');
+    expect(JSON.parse(todos[0]!.from)).toEqual({ name: 'dateRange', index: 1 });
+    expect(todos[0]!.reason).toContain('(a filter with no `name` is keyed by its `field`)');
+    expect(reservedFilterIssuePaths(row)).toEqual([['globalFilters', 1, 'field']]);
+  });
+
+  it('a key both repeated and reserved is listed under each refusal, as the parse refuses it under each', () => {
+    const row = dateRangeBoard([
+      { name: 'dateRange', field: 'region', type: 'text' },
+      { name: 'dateRange', field: 'status', type: 'text' },
+    ]);
+    const { todos } = storedTodos('dashboard', row);
+    expect(todos.map((t) => `${t.conversionId} @ ${t.path}`)).toEqual([
+      'ui-dashboard-global-filter-duplicate-name-refused @ dashboards[0].globalFilters[1].name',
+      'ui-dashboard-global-filter-reserved-date-range-refused @ dashboards[0].globalFilters[0].name',
+      'ui-dashboard-global-filter-reserved-date-range-refused @ dashboards[0].globalFilters[1].name',
+    ]);
+    expect(reservedFilterIssuePaths(row)).toEqual([['globalFilters', 0, 'name'], ['globalFilters', 1, 'name']]);
+    expect(dupFilterIssue(row)?.path).toEqual(['globalFilters', 1, 'name']);
+  });
+
+  it('CONTROL: with no dateRange declared, an entry keyed dateRange is not listed — and the parse accepts it', () => {
+    for (const filters of [
+      [{ name: 'dateRange', field: 'close_date', type: 'date' }],
+      [{ field: 'dateRange', type: 'date' }],
+    ]) {
+      const row = dateRangeBoard(filters, false);
+      expect(storedTodos('dashboard', row).todos).toEqual([]);
+      expect(DashboardSchema.safeParse(row).success).toBe(true);
+    }
+  });
+
+  it('CONTROL: beside a declared dateRange, a named entry over the field dateRange is not listed — and parses', () => {
+    const row = dateRangeBoard([{ name: 'when', field: 'dateRange', type: 'date' }]);
+    expect(storedTodos('dashboard', row).todos).toEqual([]);
+    expect(DashboardSchema.safeParse(row).success).toBe(true);
+  });
+});
+
 // ── #29554 (the #29366 refusal) ───────────────────────────────────────────
 
 const patchRow = (fieldPatches: Record<string, unknown>) => ({ extend: 'crm_account', fieldPatches });
@@ -907,5 +992,63 @@ describe('#29554 — a stored object extension whose fieldPatches key cannot be 
     const row = patchRow({ region__c: { label: 'Territory' } });
     expect(storedTodos('object_extension', row).todos).toEqual([]);
     expect(patchKeyIssues(row)).toEqual([]);
+  });
+});
+
+// ── #29523 (the extension `fields` key grammar) ───────────────────────────
+
+const fieldRow = (fields: Record<string, unknown>) => ({ extend: 'crm_account', fields });
+/** The `invalid_key` issues the extension parse locates at `fields.KEY`, as `[path, message]`. */
+const fieldKeyIssues = (row: unknown) => {
+  const parsed = ObjectExtensionSchema.safeParse(row);
+  return parsed.success
+    ? []
+    : parsed.error.issues
+      .filter((i) => i.code === 'invalid_key' && i.path[0] === 'fields')
+      .map((i) => [i.path.join('.'), i.message]);
+};
+
+describe('#29523 — a stored object extension whose fields key cannot be a field name is listed by extension', () => {
+  it('one TODO per refused key, at fields.KEY, naming the target; the row is not rewritten', () => {
+    const row = fieldRow({
+      'Region Code': { type: 'text', label: 'Region' },
+      'region-tier': { type: 'number', label: 'Tier' },
+      region_owner: { type: 'text', label: 'Owner' },
+    });
+    const { item, todos } = storedTodos('object_extension', row);
+    expect(item).toEqual(row);
+    expect(todos.map((t) => [t.code, t.conversionId, t.path])).toEqual([
+      [CONVERSION_TODO_CODE, 'object-extension-field-key-grammar-refused', 'objectExtensions[0].fields.Region Code'],
+      [CONVERSION_TODO_CODE, 'object-extension-field-key-grammar-refused', 'objectExtensions[0].fields.region-tier'],
+    ]);
+    const todo = todos[0]!;
+    expect(todo.reason).toMatch(/^The extension of `crm_account` adds a field under `Region Code`\. No lossless rewrite:/);
+    expect(todo.reason).not.toMatch(/#\d{3,}/);
+    expect(JSON.parse(todo.from)).toEqual({ 'Region Code': { type: 'text' } });
+  });
+
+  it('agrees with the refusing door: each listed key is one the extension parse refuses as a key, and no other', () => {
+    const row = fieldRow({ RegionCode: { type: 'text', label: 'R' }, '2nd_phone': { type: 'phone', label: 'P' }, region: { type: 'text', label: 'R' } });
+    const { todos } = storedTodos('object_extension', row);
+    const issues = fieldKeyIssues(row);
+    expect(issues.map(([path]) => path)).toEqual(['fields.RegionCode', 'fields.2nd_phone']);
+    expect(todos.map((t) => t.path)).toEqual(issues.map(([path]) => `objectExtensions[0].${path}`));
+    // The door's own message closes each reason, so the listing says what the parse says.
+    todos.forEach((t, i) => expect(t.reason.endsWith(issues[i]![1]!)).toBe(true));
+  });
+
+  it('snake_case keys, `__c` ones included, are not listed, and the parse accepts them', () => {
+    const row = fieldRow({ region_code: { type: 'text', label: 'Region' }, region_code__c: { type: 'text', label: 'Region' } });
+    expect(storedTodos('object_extension', row).todos).toEqual([]);
+    expect(ObjectExtensionSchema.safeParse(row).success).toBe(true);
+  });
+
+  it('each record is listed by its own detector: a refused fieldPatches key is not listed as a field, nor the reverse', () => {
+    const row = { extend: 'crm_account', fields: { 'Region Code': { type: 'text', label: 'R' } }, fieldPatches: { Industry: { label: 'Sector' } } };
+    const { todos } = storedTodos('object_extension', row);
+    expect(todos.map((t) => [t.conversionId, t.path])).toEqual([
+      ['object-extension-field-patch-key-grammar-refused', 'objectExtensions[0].fieldPatches.Industry'],
+      ['object-extension-field-key-grammar-refused', 'objectExtensions[0].fields.Region Code'],
+    ]);
   });
 });

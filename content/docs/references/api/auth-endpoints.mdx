@@ -22,8 +22,8 @@ the canonical API contract.
 ## TypeScript Usage
 
 ```typescript
-import { AuthEndpointSchema, AuthFeaturesConfigSchema, AuthProviderInfoSchema, DeviceRequestResponseSchema, DeviceTokenResponseSchema, EmailPasswordConfigPublicSchema, GetAuthConfigResponseSchema } from '@objectstack/spec/api';
-import type { AuthEndpoint, AuthFeaturesConfig, AuthProviderInfo, DeviceRequestResponse, DeviceTokenResponse, EmailPasswordConfigPublic, GetAuthConfigResponse } from '@objectstack/spec/api';
+import { AuthEndpointSchema, AuthFeaturesConfigSchema, AuthProviderInfoSchema, DeviceRequestResponseSchema, DeviceTokenResponseSchema, EmailPasswordConfigPublicSchema, GetAuthConfigResponseSchema, OneTimeTokenHandoffQuerySchema, OneTimeTokenVerifyRequestSchema, OneTimeTokenVerifyResponseSchema } from '@objectstack/spec/api';
+import type { AuthEndpoint, AuthFeaturesConfig, AuthProviderInfo, DeviceRequestResponse, DeviceTokenResponse, EmailPasswordConfigPublic, GetAuthConfigResponse, OneTimeTokenHandoffQuery, OneTimeTokenVerifyRequest, OneTimeTokenVerifyResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AuthEndpointSchema.parse(data);
@@ -211,6 +211,59 @@ This schema accepts one of the following structures:
 | **admin** | `boolean` | optional | Admin plugin wired (forced on whenever SCIM is enabled), so user administration (creating, banning, unlocking and impersonating users, setting their passwords) is available; the console shows those actions only when it is true. Absent means not wired |
 | **termsUrl** | `string` | optional | Terms-of-service link shown beneath the login and register cards: the trimmed OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty or blank (whitespace-only) value to suppress the link |
 | **privacyUrl** | `string` | optional | Privacy-policy link shown beneath the login and register cards: the trimmed OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty or blank (whitespace-only) value to suppress the link |
+
+
+---
+
+## OneTimeTokenHandoffQuery
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **redirect_uri** | `string` | ✅ | Where to send the token: an absolute URI whose scheme is registered in AuthConfig.trustedAppSchemes (e.g. com.example.app://auth/callback); any other scheme is refused with 400 and no redirect |
+| **code_challenge** | `string` | ✅ | RFC 7636 S256 code challenge: the unpadded base64url SHA-256 of the verifier the app keeps (43 characters) |
+| **code_challenge_method** | `'S256'` | optional | RFC 7636 challenge method; only S256 is accepted (plain is refused), and absent means S256 |
+
+
+---
+
+## OneTimeTokenVerifyRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **token** | `string` | ✅ | The hand-off token, a dot, then the RFC 7636 code verifier (43-128 characters) whose S256 challenge was sent to the hand-off |
+
+
+---
+
+## OneTimeTokenVerifyResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **session** | `{ id: string; expiresAt: string; token?: string; ipAddress?: string; … }` | ✅ | The session the token was minted from |
+| **user** | `{ id: string; email: string; emailVerified?: boolean; name: string; … }` | ✅ | The signed-in user |
+
+### Nested Shape: `OneTimeTokenVerifyResponse.user`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | User ID |
+| **email** | `string` | ✅ | Email address |
+| **emailVerified** | `boolean` | optional (default: `false`) | Is email verified? |
+| **name** | `string` | ✅ | Display name |
+| **image** | `string \| null` | optional | Avatar URL |
+| **username** | `string` | optional | Username (optional) |
+| **roles** | `string[]` | optional (default: `[]`) | Assigned role IDs |
+| **tenantId** | `string` | optional | Current tenant ID |
+| **language** | `never` | optional | [REMOVED] `SessionUser.language` was removed in @objectstack/spec 17.4.0 (ADR-0049 enforce-or-remove) — it was declared with a permanent default of `'en'` and never produced by any session endpoint nor read by any client, so a reader keying on it saw a constant, not the user's language. Delete the key. Read the signed-in user's language from `GET /auth/me/localization` (`locale`: the user's own `sys_user.locale` when set → the request's `Accept-Language` → the deployment default). |
+| **timezone** | `string` | optional | Preferred timezone |
+| **createdAt** | `string` | optional |  |
+| **updatedAt** | `string` | optional |  |
 
 
 ---

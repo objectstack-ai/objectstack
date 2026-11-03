@@ -1313,11 +1313,12 @@ export const FieldSchema = lazySchema(() => {
    *
    * On a multi-value lookup (`multiple: true`), `required` means NON-EMPTY
    * array: an emptied required set fails validation loudly — `[]` does not
-   * satisfy `required` (#9447, maintainer ruling 2026-08-18). The empty set is
-   * always representable (it reads back as `[]`, never `null` — see
-   * `multiple`), so the required check judges emptiness, not absence. The
-   * describe is form help in Studio and carries the rule, not the ruling date
-   * (#22093).
+   * satisfy `required` (#9447, maintainer ruling 2026-08-18; this half stands
+   * under ruling A on #29343, record 6591577985). An emptied OPTIONAL
+   * multi-value field is stored as `null`, the same as one never set (see
+   * `multiple`), so the required check judges emptiness: `null` and `[]` both
+   * fail it. The describe is form help in Studio and carries the rule, not the
+   * ruling date (#22093).
    */
   required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
@@ -1354,21 +1355,29 @@ export const FieldSchema = lazySchema(() => {
     + 'is the whole search set and this flag is not read (ADR-0061).',
   ),
   /**
-   * Multi-value empty representation (#9447, maintainer ruling 2026-08-18):
-   * an emptied multi-value lookup reads back as `[]`, never `null`. This
-   * binds the field's empty representation for EVERY writer — cascade repair
-   * (`set_null` member removal), form clears, API writes — not as a
-   * cascade-only convention: an array field always reads as an array, so
-   * readers (generated code, formula/filter predicates) never need a null
-   * branch. Same ruling: `required` on a multi-value lookup means non-empty
-   * array (see `required` above).
+   * Multi-value empty representation (ruling A on #29343, record 6591577985,
+   * amending #9447, maintainer ruling 2026-08-18): a cleared OPTIONAL
+   * multi-value field — every type `isMultiValueField` answers true for:
+   * multiselect, checkboxes, tags, and select / lookup / user / file / image
+   * with `multiple: true` — is stored as `null` by the write door, the same as
+   * one never set, unique-covered or not: `[]` and `''` written to it store
+   * `null`. This binds the field's empty representation for EVERY writer —
+   * cascade repair (`set_null` member removal), form clears, API writes — not
+   * as a cascade-only convention. It reverses #9447's "an emptied multi-value
+   * lookup reads back as `[]`, never `null`" for optional columns: readers
+   * (generated code, formula/filter predicates) meet `null` for an empty set,
+   * and read `null` and `[]` alike as empty, since a row stored before the
+   * rule can still hold `[]`. The `$empty` table's `multi_value` row
+   * (`filter-empty-operator.ts`) is unchanged: `null` and `[]` both read as
+   * empty. #9447's other half stands: `required` on a multi-value field means
+   * non-empty list (see `required` above).
    *
    * Declarability: `multiple: true` outside the multi-capable types is refused
    * at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower
    * 2026-08-22 ruling. The rulings and their dates live in these comments; the
    * describe is form help in Studio and carries only the rule (#22093).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair.'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. A cleared optional multi-value field is stored as `null`, the same as one never set: an empty list `[]` or an empty string written to it stores `null`, and the rule binds every writer (cascade repair, form clears, API writes). Read `null` and `[]` alike as empty, as the `is_empty` filter (`$empty`) does, since a row stored before this rule can still hold `[]`. On a `required` multi-value field the empty list is refused: `required` means a non-empty list.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
@@ -1733,19 +1742,28 @@ export const FieldSchema = lazySchema(() => {
    * Declared per referencing field by the application author, never on the
    * target object: the application decides whose names its own pages reveal.
    * `true` declares that a principal who can read the record carrying this
-   * field MAY see, for the record this field points at, its display name (the
-   * target object's `nameField` value, ADR-0079) and its id, even when that
-   * principal cannot read the target record. Nothing else of the target:
+   * field MAY see, for the record this field points at, its display name and
+   * its id, even when that principal cannot read the target record. The name
+   * is the ADR-0079 D4 display name `resolveRecordDisplayName` answers: the
+   * target object's `nameField`, else its `displayNameField`, else the derived
+   * title field. The served value is `ReferenceNameOnlyValueSchema`
+   * (`field-value.zod.ts`). Nothing else of the target:
    * `$expand` on this field MUST return the same name and id only, the field's
    * own `displayField` MUST NOT widen what is shown, and the renderer shows the
    * name as text with no link to the target record. A principal who can read
    * the target is served exactly what it is served without the key.
    *
    * The key lifts the RECORD-level refusal only. A field-level rule on the
-   * name field itself still holds: when the reader's field-level security
-   * keeps that field from it, the field declares a `maskingRule`, or it is a
-   * formula reading through another reference, the name served is the
-   * ADR-0079 floor (`Record #` and the id).
+   * name field itself still holds, and the engine reads that field only where
+   * it computes nothing the security layer owns. The name served is the
+   * ADR-0079 floor (`Record #` and the id) in five cases (objectql's
+   * `servableNameField`): the reader's field-level security keeps
+   * that field from it; the field declares a `maskingRule`; it is a formula
+   * reading through another reference; an explicit `nameField` (or
+   * `displayNameField`) points at a column that is neither title-typed nor
+   * `autonumber`; or no field-level answer can be had for the reader. A
+   * target with no resolvable or no non-empty name reads as the same floor,
+   * as it does for every reader.
    *
    * Absent or `false` keeps the restricted-reference posture: a lookup whose
    * target the reader cannot read shows no name. Valid on `lookup` and on
@@ -1755,14 +1773,19 @@ export const FieldSchema = lazySchema(() => {
   referenceNameVisible: z.boolean().optional().describe(
     'Declared name exposure (`lookup` and `user` fields only). TRUE declares that a principal who can '
     + 'read the record carrying this field may see the referenced record\'s display name (the target '
-    + 'object\'s `nameField` value) and id even when that principal cannot read the referenced record. '
-    + 'Served on `$expand`: a target the reader is refused (the object\'s read gate or its row scope) '
-    + 'answers `{ id, name, readRefused: true }`, per element on a multi-value field; an unexpanded read '
+    + 'object\'s `nameField`, else its `displayNameField`, else the derived title field) and id even when '
+    + 'that principal cannot read the referenced record. Served on `$expand`: a target the reader is refused '
+    + '(the object\'s read gate or its row scope) answers `{ id, name, readRefused: true }` '
+    + '(`ReferenceNameOnlyValueSchema`), per element on a multi-value field; an unexpanded read '
     + 'answers the stored id, as for every reader. Nothing else of the target: `$expand` on this field '
     + 'returns the same name and id only, the field\'s `displayField` does not widen it, and the name '
-    + 'renders as text with no link to the target. A field-level rule on the name field still holds: '
-    + 'when the reader may not read that field, it is masked, or it is a formula reading through another '
-    + 'reference, the name is the `Record #` floor with the id. A principal who can read the target is '
+    + 'renders as text with no link to the target. A field-level rule on the name field still holds, and '
+    + 'the name field is read only where nothing the security layer owns must be computed: the name is the '
+    + '`Record #` floor with the id when the reader may not read that field, it declares a `maskingRule`, '
+    + 'it is a formula reading through another reference, an explicit `nameField` (or its `displayNameField` '
+    + 'alias) points at a column that is neither title-typed nor autonumber, or no field-level answer can be '
+    + 'had for the reader. A target '
+    + 'with no resolvable or no non-empty name reads as the same floor. A principal who can read the target is '
     + 'served exactly what it is served without the key. Absent or false keeps the restricted-reference '
     + 'posture for a target the reader cannot read. Declared on the referencing field only; there is no '
     + 'target-object switch. Refused on any other type.'
@@ -1831,9 +1854,12 @@ export const FieldSchema = lazySchema(() => {
    * it per the #9689 idempotent-materialization ruling). On every other type
    * the key was inert by construction — the engine's referential delete walk
    * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
-   * `reference` (the family predicate `statesDeleteSemantics` in
+   * `reference`, and on a `user` field that declares a `deleteBehavior` (the
+   * family predicate `statesDeleteSemantics` in
    * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
-   * object, written by the object's parse when the author leaves it out) — yet
+   * object, written by the object's parse when the author leaves it out; a
+   * `user` field's target is `sys_user`, fixed by the type, and #29253 made its
+   * authored value take effect) — yet
    * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
@@ -1891,25 +1917,24 @@ export const FieldSchema = lazySchema(() => {
    * Tri-state (ADR-0085 semantic-role style — a statement about the
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
-   *   - `true` / absent  → shown as a supporting list: a side card in the
-   *                       record's related column (under the tabbed page, the
-   *                       shared "Related" tab). There is no count-based
-   *                       auto-split.
-   *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): drawn in
-   *                       the record's body — the details column, after its
-   *                       first field section — as a full-width table, not as
-   *                       a side card (under the tabbed page, inside the
-   *                       Details tab: a primary list gets no tab of its
-   *                       own). A field group's `relatedList` can place it
-   *                       among the field sections instead. `'primary'` no
-   *                       longer ORDERS lists: the parent's
-   *                       `ObjectSchema.relatedLists` does, among the body
-   *                       tables and among the side cards alike.
+   *   - `true` / absent  → shown as an auxiliary panel on the parent's record
+   *                       page. There is no count-based auto-split.
+   *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): shown as
+   *                       a full-width table in the record's detail body, not
+   *                       as an auxiliary panel. A field group's `relatedList`
+   *                       can place it among the field sections instead.
+   *                       `'primary'` no longer ORDERS lists: the parent's
+   *                       `ObjectSchema.relatedLists` does, among the
+   *                       full-width tables and among the auxiliary panels
+   *                       alike.
+   *
+   * How the record page lays these out is ADR-0085's to define; this key states
+   * the relationship's role, not the page's chrome.
    *
    * Absent on a `master_detail` field that sets `inlineEdit`, the list is
    * `'primary'` by default: line items edited inside the parent's form are part
    * of its main content (a quote's lines belong under the quote, not beside
-   * it). Write `relatedList: true` to keep such a list a side card.
+   * it). Write `relatedList: true` to keep such a list an auxiliary panel.
    *
    * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
    * run): a derived related list (`relatedList: 'primary'`) inherits its row
@@ -1922,7 +1947,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown as a supporting list, a side card in the record\'s related column (the shared "Related" tab on the tabbed page); \'primary\' = part of the record\'s main content, drawn in the record\'s body (the details column, after its first field section) as a full-width table (inside the Details tab on the tabbed page, with no tab of its own). Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it a side card. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the body tables and the side cards (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; \'primary\' = part of the record\'s main content, shown as a full-width table in the record\'s detail body. Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
@@ -2746,8 +2771,10 @@ export const FieldSchema = lazySchema(() => {
   // No ADR-0087 conversion carries it (the D3 entry
   // `user-field-foreign-reference-refused` says why): rewriting the field to a
   // `lookup` would add it to the referential delete walk with
-  // `deleteBehavior: 'set_null'`, which a `user` field never joined, and
-  // `deleteBehavior` has no value meaning "leave it", so the author decides.
+  // `deleteBehavior: 'set_null'`, while a `user` field that declares no
+  // `deleteBehavior` stays out of that walk (#29253: one that declares a value
+  // joins it), and `deleteBehavior` has no value meaning "leave it", so the
+  // author decides.
   if (
     field.type === 'user'
     && field.reference !== undefined
@@ -2762,7 +2789,8 @@ export const FieldSchema = lazySchema(() => {
         `\`reference: '${field.reference}'\`. To link records of \`${field.reference}\`, declare a ` +
         `\`lookup\`: \`{ type: 'lookup', reference: '${field.reference}' }\` (\`Field.lookup('${field.reference}', …)\`), ` +
         "and choose its `deleteBehavior` (a `lookup` defaults to `'set_null'` when the target record is " +
-        'deleted; a `user` field never did). If a person was meant, drop `reference`.',
+        'deleted; a `user` field has no default and keeps the id unless it declares one). If a person was ' +
+        'meant, drop `reference`.',
     });
   }
 
@@ -3310,9 +3338,12 @@ export const FieldSchema = lazySchema(() => {
     // stay legal. `tree` (hierarchical reference) keeps materializing with
     // `lookup`: it is in the relational family, where the key states delete
     // semantics, and the delete walk reads it there (#22957). `user` is
-    // stored identically to `lookup` but sits outside the delete walk's family
-    // (`master_detail`, `lookup`, `tree`) exactly like `text` does, so it takes
-    // the non-reference side; an authored value there still round-trips.
+    // stored identically to `lookup` but takes the non-reference side: it
+    // joins the delete walk only when its author DECLARES a `deleteBehavior`
+    // (#29253, `statesDeleteSemantics`), so a materialized value here would be
+    // a delete outcome nobody chose. A bare `user` field therefore parses with
+    // no key and keeps the deleted user's id; an authored value round-trips
+    // and takes effect.
     if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
       patch.deleteBehavior = 'set_null';
     }

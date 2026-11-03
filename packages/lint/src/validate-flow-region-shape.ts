@@ -3,6 +3,10 @@
 /**
  * `flow-region-shape-invalid` — a flow the automation engine refuses to
  * register for its ADR-0031 region shape, refused at every authoring command.
+ * The runtime authoring gate reads it too, at the save of an active flow and
+ * at both publish doors (the per-item publish and the package publish), and
+ * judges the body the engine registers: the flow in its ADR-0087 D2-converted
+ * spelling (#21982, #29557).
  *
  * ## What it reports
  *
@@ -12,6 +16,13 @@
  * branches. The engine's `registerFlow` refuses such a flow: it logs
  * `[Automation] failed to register flow` and the boot goes on without it, so
  * its trigger never fires.
+ *
+ * The finding is anchored on the container the refusal names (#29558): the
+ * engine throws a `FlowRegionShapeError` carrying the container's node id and
+ * its path inside the flow, and the finding's `path` and `where` are read off
+ * it, never off the sentence. The engine throws once, at a flow's first
+ * malformed region, so there is one container per finding and one finding per
+ * flow. Anything else it throws names no container; the flow stays the anchor.
  *
  * ## ⛔ The verdict is the engine's — nothing here restates the region rules
  *
@@ -45,7 +56,7 @@
  * exported; region bodies ARE cycle-checked, by `validateControlFlow`.
  */
 
-import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
+import { FlowRegionShapeError, FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
 
 type AnyRec = Record<string, unknown>;
 
@@ -59,9 +70,15 @@ export interface FlowRegionShapeFinding {
   severity: 'error';
   /** Diagnostic rule id. */
   rule: string;
-  /** Human-readable location, e.g. `flow 'lead_time'`. */
+  /**
+   * Human-readable location: `flow 'lead_time' › node 'guard'` when the
+   * engine's refusal names the container at fault, else `flow 'lead_time'`.
+   */
   where: string;
-  /** Config path of the flow, e.g. `flows[0]`. */
+  /**
+   * Config path of the container at fault inside the flow, e.g.
+   * `flows[0].nodes[1].config.try.nodes[0]`, else of the flow, `flows[0]`.
+   */
   path: string;
   /** `Flow '<name>' would be refused at registration: ` and the engine's refusal. */
   message: string;
@@ -75,6 +92,20 @@ const HINT =
 
 const SCHEMA_HINT =
   'Fix the flow so the flow schema accepts it (`os validate` names each issue); its regions are judged then.';
+
+/**
+ * The container the engine's refusal names, read off the refusal itself:
+ * `validateControlFlow` throws `FlowRegionShapeError`, carrying the
+ * container's node id and its path inside the flow. Anything else it throws
+ * names no container, and the flow stays the anchor.
+ */
+function containerAtFault(err: unknown): { nodeId: string; path: readonly (string | number)[] } | undefined {
+  return err instanceof FlowRegionShapeError ? { nodeId: err.nodeId, path: err.path } : undefined;
+}
+
+/** `['nodes', 1, 'config', 'try']` → `.nodes[1].config.try`, the lint path spelling. */
+const spellPath = (segments: readonly (string | number)[]): string =>
+  segments.map((s) => (typeof s === 'number' ? `[${s}]` : `.${s}`)).join('');
 
 /**
  * Every flow of `stack.flows` the automation engine would refuse to register
@@ -108,11 +139,12 @@ export function validateFlowRegionShape(stack: AnyRec): FlowRegionShapeFinding[]
       validateControlFlow(result.data);
     } catch (err) {
       const name = result.data.name;
+      const container = containerAtFault(err);
       findings.push({
         severity: 'error',
         rule: FLOW_REGION_SHAPE_INVALID,
-        where: `flow '${name}'`,
-        path,
+        where: container ? `flow '${name}' › node '${container.nodeId}'` : `flow '${name}'`,
+        path: container ? `${path}${spellPath(container.path)}` : path,
         message: `Flow '${name}' would be refused at registration: ${err instanceof Error ? err.message : String(err)}`,
         hint: HINT,
       });

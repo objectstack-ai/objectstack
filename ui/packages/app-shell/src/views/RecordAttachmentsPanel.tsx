@@ -24,6 +24,14 @@ import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useObjectTranslation, isPermissionError, classifyLoadError } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { resolveAffordance, type ConfirmationHandler } from '@object-ui/core';
+import {
+  NATIVE_FILE_MAX_BYTES,
+  getNativeHost,
+  nativeFileFromBlob,
+  nativeHostCan,
+  nativeOpenFile,
+  type NativeFile,
+} from '@object-ui/mobile';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './recordPagePayload.js';
 
@@ -125,6 +133,42 @@ function formatSize(bytes?: number | null): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+/**
+ * Inside the ObjectStack mobile shell, when it announces `openFile`: fetch the
+ * attachment's bytes from the signed URL this panel already fetched with the
+ * Console's own session, and hand the BYTES to the shell, which previews or
+ * opens them with the OS (objectstack-ai/mobile `docs/HYBRID-SHELL.md`,
+ * "Files"; the shell never downloads a URL or reads the session). Answers
+ * whether the shell took the file.
+ *
+ * `false` keeps the browser path (`window.open` on the signed URL), exactly as
+ * outside the shell: no shell or an older one, a file over the bridge's
+ * `NATIVE_FILE_MAX_BYTES` (judged on the row's size before any byte is
+ * fetched, and on the fetched size), a fetch that fails (a cross-origin
+ * storage URL without CORS), and the shell refusing (`bad_args`) or failing
+ * the call. ⛔ The signed URL is a credential: only bytes cross the
+ * bridge, never the URL.
+ */
+async function openInNativeShell(target: string, row: AttachmentRow): Promise<boolean> {
+  if (!nativeHostCan(getNativeHost(), 'openFile')) return false;
+  if (typeof row.size === 'number' && row.size > NATIVE_FILE_MAX_BYTES) return false;
+  let file: NativeFile;
+  try {
+    const res = await fetch(target);
+    if (!res.ok) return false;
+    let blob = await res.blob();
+    if (blob.size > NATIVE_FILE_MAX_BYTES) return false;
+    if (!blob.type && row.mime_type) blob = new Blob([blob], { type: row.mime_type });
+    file = await nativeFileFromBlob(blob, row.file_name || row.file_id);
+  } catch {
+    return false;
+  }
+  // Anything but `ok` (the shell refusing the file with `bad_args`, or failing
+  // it) takes the browser path, so a tap is never answered worse than before.
+  return (await nativeOpenFile(file)).status === 'ok';
 }
 
 export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
@@ -465,6 +509,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         const url: string | undefined = body?.url ?? body?.data?.url;
         if (!url) throw new Error('Download URL missing from response');
         const target = /^https?:/i.test(url) ? url : `${baseUrl}${url}`;
+        if (await openInNativeShell(target, row)) return;
         window.open(target, '_blank', 'noopener,noreferrer');
       } catch (err: any) {
         setError(friendlyError(err));

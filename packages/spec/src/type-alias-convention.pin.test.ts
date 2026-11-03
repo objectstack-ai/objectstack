@@ -289,7 +289,7 @@ import type * as M197 from './api/push-delivery.zod.js';
 import type * as M198 from './system/push-device.zod.js';
 
 // ---------------------------------------------------------------------------
-// 818 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 822 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -429,6 +429,8 @@ export type Iso_api_analytics__GetAnalyticsMetaRequestSchema = Assert<Eq< z.inpu
 export type Iso_api_authEndpoints__AuthEndpointSchema = Assert<Eq< z.input< typeof M12.AuthEndpointSchema >, z.infer< typeof M12.AuthEndpointSchema > >>;
 export type Iso_api_authEndpoints__DeviceTokenResponseSchema = Assert<Eq< z.input< typeof M12.DeviceTokenResponseSchema >, z.infer< typeof M12.DeviceTokenResponseSchema > >>;
 export type Iso_api_authEndpoints__EmailPasswordConfigPublicSchema = Assert<Eq< z.input< typeof M12.EmailPasswordConfigPublicSchema >, z.infer< typeof M12.EmailPasswordConfigPublicSchema > >>;
+export type Iso_api_authEndpoints__OneTimeTokenHandoffQuerySchema = Assert<Eq< z.input< typeof M12.OneTimeTokenHandoffQuerySchema >, z.infer< typeof M12.OneTimeTokenHandoffQuerySchema > >>;
+export type Iso_api_authEndpoints__OneTimeTokenVerifyRequestSchema = Assert<Eq< z.input< typeof M12.OneTimeTokenVerifyRequestSchema >, z.infer< typeof M12.OneTimeTokenVerifyRequestSchema > >>;
 
 // api/auth.zod.ts
 export type Iso_api_auth__AuthProvider = Assert<Eq< z.input< typeof M13.AuthProvider >, z.infer< typeof M13.AuthProvider > >>;
@@ -885,6 +887,7 @@ export type Iso_data_fieldValue__FileValueSchema = Assert<Eq< z.input< typeof M1
 export type Iso_data_fieldValue__InstantValueSchema = Assert<Eq< z.input< typeof M178.InstantValueSchema >, z.infer< typeof M178.InstantValueSchema > >>;
 export type Iso_data_fieldValue__LocationValueSchema = Assert<Eq< z.input< typeof M178.LocationValueSchema >, z.infer< typeof M178.LocationValueSchema > >>;
 export type Iso_data_fieldValue__ReferenceIdValueSchema = Assert<Eq< z.input< typeof M178.ReferenceIdValueSchema >, z.infer< typeof M178.ReferenceIdValueSchema > >>;
+export type Iso_data_fieldValue__ReferenceNameOnlyValueSchema = Assert<Eq< z.input< typeof M178.ReferenceNameOnlyValueSchema >, z.infer< typeof M178.ReferenceNameOnlyValueSchema > >>;
 
 // data/field.zod.ts
 // #8993 partial masking (`FieldMaskingKeepSchema`): keepHead/keepTail are plain
@@ -1274,6 +1277,7 @@ export type Iso_system_authConfig__AuthProviderConfigSchema = Assert<Eq< z.input
 export type Iso_system_authConfig__EmailVerificationConfigSchema = Assert<Eq< z.input< typeof M120.EmailVerificationConfigSchema >, z.infer< typeof M120.EmailVerificationConfigSchema > >>;
 export type Iso_system_authConfig__OidcProviderConfigSchema = Assert<Eq< z.input< typeof M120.OidcProviderConfigSchema >, z.infer< typeof M120.OidcProviderConfigSchema > >>;
 export type Iso_system_authConfig__OidcProvidersConfigSchema = Assert<Eq< z.input< typeof M120.OidcProvidersConfigSchema >, z.infer< typeof M120.OidcProvidersConfigSchema > >>;
+export type Iso_system_authConfig__TrustedAppSchemeSchema = Assert<Eq< z.input< typeof M120.TrustedAppSchemeSchema >, z.infer< typeof M120.TrustedAppSchemeSchema > >>;
 
 // system/cache.zod.ts
 export type Iso_system_cache__CacheConsistencySchema = Assert<Eq< z.input< typeof M121.CacheConsistencySchema >, z.infer< typeof M121.CacheConsistencySchema > >>;
@@ -1762,7 +1766,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 818 isomorphic pins', () => {
+  it('still declares all 822 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2752,7 +2756,21 @@ describe('ADR-0122 type-alias convention', () => {
     // required and optional strings, enums, a boolean and ISO instants, no
     // default and no transform (Iso_system_pushDevice__UserDeviceSchema).
     // +1 added.
-    expect(pins).toHaveLength(818);
+    // 818 -> 819 is #29579: the new exported `ReferenceNameOnlyValueSchema`
+    // (the expanded read form a reader refused the target of a
+    // `referenceNameVisible` field is served) is a closed
+    // `{ id, name, readRefused: true }` with no default and no transform in
+    // its tree, so it is pinned here
+    // (Iso_data_fieldValue__ReferenceNameOnlyValueSchema) rather than given a
+    // `ReferenceNameOnlyValueParsed` synonym. +1 added.
+    // 819 -> 822 is the mobile sign-in hand-off: the hand-off query
+    // (`api/auth-endpoints.zod.ts`, a strict object of strings, a regex and
+    // an optional literal), the verify body (one regex string) and one
+    // registered app scheme (`system/auth-config.zod.ts`, a regex string),
+    // no default and no transform in any of them
+    // (Iso_api_authEndpoints__OneTimeToken*, Iso_system_authConfig__TrustedAppSchemeSchema).
+    // +3 added.
+    expect(pins).toHaveLength(822);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

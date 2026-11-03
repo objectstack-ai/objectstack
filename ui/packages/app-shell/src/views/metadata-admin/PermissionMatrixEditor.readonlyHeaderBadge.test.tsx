@@ -133,9 +133,9 @@ async function renderMatrix(props?: { readOnly?: boolean }) {
 /**
  * The header badge, addressed structurally rather than by text. The identity
  * strip below the header carries its own read-only badge ("Read-only", the
- * Studio package wording) and the header carries the metadata-admin badge-slot
- * wording ("read-only"); matching on text alone would silently pass by finding
- * the wrong one the day either string moves.
+ * Studio package wording) and, since objectstack#29705, the header's badge slot
+ * draws the same word; matching on text alone would find the wrong one, so the
+ * header badge is addressed by its slot.
  */
 function headerBadgeTexts(): string[] {
   const header = document.querySelector('.border-b.bg-background');
@@ -150,25 +150,26 @@ describe('PermissionMatrixEditPage — header writability badge vs the package g
 
     // The defect, stated directly: an overlay-allowed TYPE inside a read-only
     // PACKAGE must not advertise writability anywhere on the screen.
-    expect(headerBadgeTexts()).not.toContain('writable');
-    expect(screen.queryByText('writable', { exact: true })).toBeNull();
+    expect(headerBadgeTexts()).not.toContain('Writable');
+    expect(screen.queryByText('Writable', { exact: true })).toBeNull();
   });
 
   it('read-only package: the header reports read-only, naming the package as the reason', async () => {
     await renderMatrix({ readOnly: true });
 
-    expect(headerBadgeTexts()).toContain('read-only');
+    expect(headerBadgeTexts()).toContain('Read-only');
     // Reuses the wording the Studio top bar and the identity strip already use
     // for this gate, so the screen gives one reason, not two.
-    const badge = screen.getByText('read-only', { exact: true });
+    const badge = Array.from(document.querySelectorAll('[data-state-word="readOnly"]'))[0] as HTMLElement;
+    expect(badge).toHaveTextContent('Read-only');
     expect(badge).toHaveAttribute('title', expect.stringContaining('Read-only package'));
   });
 
   it('CONTROL — writable package: the header still reports writable', async () => {
     await renderMatrix();
 
-    expect(headerBadgeTexts()).toContain('writable');
-    expect(screen.queryByText('read-only', { exact: true })).toBeNull();
+    expect(headerBadgeTexts()).toContain('Writable');
+    expect(document.querySelector('[data-state-word="readOnly"]')).toBeNull();
   });
 
   it('CONTROL — gating is untouched: read-only still disables every control and hides Save', async () => {
@@ -238,7 +239,7 @@ describe('PermissionMatrixEditPage — badge and controls read ONE predicate (#4
       const readBox = screen.getByLabelText('a_account Read');
 
       // BADGE side — the header slot, addressed structurally (see above).
-      const badgeSaysReadOnly = headerBadgeTexts().includes('read-only');
+      const badgeSaysReadOnly = headerBadgeTexts().includes('Read-only');
 
       if (c.expectWritable) {
         // objectui#11787 — the package door autosaves: no Save button; the live controls are the writability read.
