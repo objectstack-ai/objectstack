@@ -98,10 +98,10 @@ describe("behind the organization wall, a delegated administrator's refused assi
     return idOf(await ql.insert('sys_business_unit', { name, code, organization_id: organizationId }, inOrg(organizationId)));
   };
 
-  /** A position assignment of `organizationId`, written by the system. */
-  const assignment = async (organizationId: string, user: string, position: string, businessUnitId: string): Promise<string> =>
+  /** A position assignment of `organizationId`, written by the system — owned by `owner` when one is named. */
+  const assignment = async (organizationId: string, user: string, position: string, businessUnitId: string, owner?: string): Promise<string> =>
     idOf(await ql.insert('sys_user_position',
-      { user_id: user, position, business_unit_id: businessUnitId, organization_id: organizationId },
+      { user_id: user, position, business_unit_id: businessUnitId, organization_id: organizationId, ...(owner ? { owner_id: owner } : {}) },
       inOrg(organizationId)));
 
   beforeAll(async () => {
@@ -133,7 +133,9 @@ describe("behind the organization wall, a delegated administrator's refused assi
 
     const ownerB = await userId(OWNER_B);
     positionB = await assignment(orgB, ownerB, 'contributor', unitB);
-    inScopeA = await assignment(orgA, ownerA, 'contributor', scopeUnitA);
+    // Owned by the delegate, so the record-level write rules after the gate
+    // admit its edit too, and what is measured is the gate's verdict.
+    inScopeA = await assignment(orgA, ownerA, 'contributor', scopeUnitA, delegate);
     outOfScopeA = await assignment(orgA, delegate, 'contributor', outsideUnitA);
     expect(delegate && ownerA && positionB && inScopeA && outOfScopeA, 'every row carries an id').toBeTruthy();
   }, 300_000);
