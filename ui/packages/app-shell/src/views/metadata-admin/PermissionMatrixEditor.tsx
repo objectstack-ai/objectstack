@@ -114,6 +114,7 @@ import {
   translateValidationMessage,
   useMetadataLocale,
 } from './i18n.js';
+import { isStudioCatalogueLoaded } from '@object-ui/i18n/namespaces/studio';
 import { MatrixScrollPane } from './MatrixScrollPane.js';
 import { PermissionAdvancedFacets, rlsClauseFindingCount } from './PermissionAdvancedFacets.js';
 import { CelPredicateField } from './CelPredicateField.js';
@@ -465,25 +466,45 @@ function ScopePicker({
  * (`@objectstack/spec` `security/high-privilege.ts`, the opt-in export axis),
  * so only its own checkbox grants or clears it — "None" excepted, which
  * empties the whole row.
+ *
+ * objectstack#29729 — `short` is the column header, per locale (`perm.col.*`):
+ * en abbreviates (C, R, U … VA, MA: the words do not fit the column), zh
+ * spells the action word, so a zh header needs no legend to be read.
  */
 function getObjectActions(
   locale: string,
 ): Array<{ key: ObjectPermFlag; short: string; tip: string; optIn?: true }> {
   return [
-    { key: 'allowCreate', short: 'C', tip: translate('perm.action.create', locale) },
-    { key: 'allowRead', short: 'R', tip: translate('perm.action.read', locale) },
-    { key: 'allowEdit', short: 'U', tip: translate('perm.action.edit', locale) },
-    { key: 'allowDelete', short: 'D', tip: translate('perm.action.delete', locale) },
-    { key: 'allowExport', short: 'E', tip: translate('perm.action.export', locale), optIn: true },
-    { key: 'allowTransfer', short: 'Tr', tip: translate('perm.action.transfer', locale) },
+    { key: 'allowCreate', short: translate('perm.col.create', locale), tip: translate('perm.action.create', locale) },
+    { key: 'allowRead', short: translate('perm.col.read', locale), tip: translate('perm.action.read', locale) },
+    { key: 'allowEdit', short: translate('perm.col.edit', locale), tip: translate('perm.action.edit', locale) },
+    { key: 'allowDelete', short: translate('perm.col.delete', locale), tip: translate('perm.action.delete', locale) },
+    {
+      key: 'allowExport',
+      short: translate('perm.col.export', locale),
+      tip: translate('perm.action.export', locale),
+      optIn: true,
+    },
+    { key: 'allowTransfer', short: translate('perm.col.transfer', locale), tip: translate('perm.action.transfer', locale) },
     // No `Re` (allowRestore) / `Pu` (allowPurge) columns: both keys are retired
     // (objectui#6595 — see the tombstone on `ObjectPerm` in `permission-slice`
     // for the full account and the M2 return path on objectstack#1883). They
     // gated ObjectQL operations that have never existed, so every tick was a
     // grant no runtime read. `allowTransfer` is enforced upstream and stays.
-    { key: 'viewAllRecords', short: 'VA', tip: translate('perm.action.viewAll', locale) },
-    { key: 'modifyAllRecords', short: 'MA', tip: translate('perm.action.modifyAll', locale) },
+    { key: 'viewAllRecords', short: translate('perm.col.viewAll', locale), tip: translate('perm.action.viewAll', locale) },
+    { key: 'modifyAllRecords', short: translate('perm.col.modifyAll', locale), tip: translate('perm.action.modifyAll', locale) },
   ];
+}
+
+/**
+ * objectstack#29729 — whether the column headers are abbreviations a reader
+ * needs the legend line for (en's C, R, U …), or the action words themselves
+ * (zh), which the legend would only repeat.
+ */
+function headersAbbreviate(actions: ReturnType<typeof getObjectActions>, locale: string): boolean {
+  return actions.some(
+    (a) => a.short.replace(/\s+/g, '') !== translate(STUDIO_LEGEND_KEYS[a.key] ?? '', locale).replace(/\s+/g, ''),
+  );
 }
 
 /**
@@ -777,7 +798,16 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const lockedByArtifactTier = artifactTierApplies && !artifactArmOpen && typeTierOpen && canAuthor && !walled;
   const locale = useMetadataLocale();
   const t = React.useCallback((k: string) => translate(k, locale), [locale]);
-  const OBJECT_ACTIONS = React.useMemo(() => getObjectActions(locale), [locale]);
+  // objectstack#29729 — the headers, tooltips and legend read the lazily
+  // fetched `studio` catalogue. Keyed on the locale alone, this kept the `en`
+  // answer of a first render that ran before the zh catalogue was resident:
+  // Setup's legend line and every header tooltip read English in zh-CN.
+  const catalogueResident = isStudioCatalogueLoaded(locale);
+  const OBJECT_ACTIONS = React.useMemo(
+    () => getObjectActions(locale),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the residency flag is the dependency: the columns read the catalogue through `translate`
+    [locale, catalogueResident],
+  );
 
   const [draft, setDraft] = React.useState<PermissionSetDraft>({
     name,
@@ -2499,13 +2529,18 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             `title` tooltip per column, but a hover-only affordance on
             unfamiliar two-letter abbreviations (Tr/VA/MA) is easy to
             miss. Spell them out once, up front. */}
-        <div className="px-6 py-2 border-b flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          {OBJECT_ACTIONS.map((a) => (
-            <span key={a.key as string} className="whitespace-nowrap">
-              <span className="font-medium text-foreground">{a.short}</span> {a.tip}
-            </span>
-          ))}
-        </div>
+        {headersAbbreviate(OBJECT_ACTIONS, locale) && (
+          <div
+            className="px-6 py-2 border-b flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"
+            data-testid="perm-column-legend"
+          >
+            {OBJECT_ACTIONS.map((a) => (
+              <span key={a.key as string} className="whitespace-nowrap">
+                <span className="font-medium text-foreground">{a.short}</span> {a.tip}
+              </span>
+            ))}
+          </div>
+        )}
         {objectInheritedLegendEl}
 
         {/* Matrix */}
@@ -2637,6 +2672,7 @@ function PermissionTable({
   onFieldWhenLint,
   onOpenOwd,
 }: PermissionTableProps) {
+  const locale = useMetadataLocale();
   return (
     // objectui#2600 B3 — the fixed columns (object + 7 CRUD + bulk) need ~960px;
     // a min-width makes the enclosing overflow-auto container scroll instead of
@@ -2655,7 +2691,7 @@ function PermissionTable({
               className="px-2 py-2 font-medium text-center w-14"
               title={a.tip}
             >
-              {a.short}
+              <span className="break-keep">{a.short}</span>
             </th>
           ))}
           {SCOPE_AXES.map((s) => (
@@ -2743,7 +2779,7 @@ function PermissionTable({
                         }
                       : {})}
                   >
-                    {`OWD ${o.owd ? owdLabel(t, o.owd) : t('perm.owd.defaultPrivate')}`}
+                    {tFormat('perm.owd.chip', locale, { value: o.owd ? owdLabel(t, o.owd) : t('perm.owd.defaultPrivate') })}
                   </Badge>
                 </td>
                 {objectActions.map((a) => (
@@ -2899,14 +2935,19 @@ function StudioObjectsToolbar({
           {t('perm.filter.onlyGranted')}
         </Label>
       </div>
-      <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        {legend.map((a) => (
-          <span key={a.key as string} className="whitespace-nowrap" title={a.tip}>
-            <span className="font-semibold text-foreground">{a.short}</span>{' '}
-            {t(STUDIO_LEGEND_KEYS[a.key] ?? '') || a.tip}
-          </span>
-        ))}
-      </div>
+      {headersAbbreviate(legend, locale) && (
+        <div
+          className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+          data-testid="perm-column-legend"
+        >
+          {legend.map((a) => (
+            <span key={a.key as string} className="whitespace-nowrap" title={a.tip}>
+              <span className="font-semibold text-foreground">{a.short}</span>{' '}
+              {t(STUDIO_LEGEND_KEYS[a.key] ?? '') || a.tip}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2953,7 +2994,7 @@ function StudioObjectMatrix({
           <th className="w-28 px-3 text-left font-medium">{t('engine.studio.access.colOwd')}</th>
           {objectActions.map((a, i) => (
             <th key={a.key as string} title={a.tip} className={cn('w-[52px] px-1 text-center font-medium', divider(i))}>
-              {a.short}
+              <span className="break-keep">{a.short}</span>
             </th>
           ))}
           {SCOPE_AXES.map((s, i) => (
