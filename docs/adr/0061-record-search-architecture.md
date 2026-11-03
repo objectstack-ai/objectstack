@@ -55,7 +55,9 @@ The default contract is `$search: string` (plus existing `$filter`/scope). **Fie
   > (`packages/spec/src/data/search-fields.ts#resolveSearchFieldResolution`). The `$searchFields` ingress allow-list is
   > this same resolution (`packages/metadata-protocol/src/protocol-query-validation.ts#assertSearchFieldsAreSearchable`),
   > so naming a flagged field is accepted as a D1 override, and a flagged field of a hard-excluded type is still refused
-  > `400 INVALID_FIELD`. The key defaults to `false`, and `false` removes nothing the type-based default already scans:
+  > `400 INVALID_FIELD`; a field declared `internal: true` (#22646 — ADR-0100's third credential channel, an
+  > auth-subsystem one-way hash on a `text` column) is refused at that door before the resolver runs, flag or no flag.
+  > The key defaults to `false`, and `false` removes nothing the type-based default already scans:
   > the flag widens the auto-default and never narrows it. The "Default behaviour (normative)" table's field-resolution
   > row is read with its `auto` arm widened the same way — `auto (name + short-text + every field marked searchable: true
   > outside the hard exclusions)`; the row itself is left as written. **D5 re-read:** "Secret / encrypted / PII fields are
@@ -63,8 +65,12 @@ The default contract is `$search: string` (plus existing `$filter`/scope). **Fie
   > are what keep it so: `SEARCH_FLAG_EXCLUDED_TYPES` covers every masked-on-read credential type
   > (`packages/spec/src/data/masked-field-types.ts#MASKED_ON_READ_FIELD_TYPES` — `secret` and `password`; `encrypted` is
   > not a `FieldType`), so such a column marked `searchable: true` is neither scanned nor accepted as an override. The
-  > resolver reads no PII marker, before or after this ruling, and the flag changes which fields resolve, not how a search
-  > executes: it still runs through the gated `find()` pipeline, so the rest of D5 is untouched.
+  > third channel, an `internal: true` column, holds by the pre-existing withhold rather than by
+  > `SEARCH_FLAG_EXCLUDED_TYPES`: the engine strips `internal: true` and credential fields from the field map before it
+  > resolves the set (`packages/objectql/src/engine.ts#scanFields`, #22646), and the door refuses an explicit override
+  > naming one before the resolver runs (above), so the flag never reaches it. The resolver reads no PII marker, before or
+  > after this ruling, and the flag changes which fields resolve, not how a search executes: it still runs through the
+  > gated `find()` pipeline, so the rest of D5 is untouched.
 
 ### D3 — Two-tier executor behind one `$search` API
 - **Tier 1 (this phase)**: the engine expands `$search` into a cross-field predicate pushed to the driver — `driver-sql` reuses existing `$or` + `$contains` (ILIKE, wildcard-escaped); `driver-memory` does in-memory `contains`. New driver capability `textSearch: true`. Matching is **case-insensitive; terms AND-ed, fields OR-ed** (each term must hit some field) — i.e. `FullTextSearchSchema.operator` default. Default is **contains** (not prefix). When a driver lacks `textSearch`, the **engine applies a bounded in-memory fallback** (degraded scale, logged) so search works everywhere.
@@ -96,7 +102,7 @@ All surfaces converge on `$search` (+ validated `$searchFields`); client-side fi
 | Security | over RLS + ADR-0045 visibility; secret/PII never searchable; override subset-validated |
 | Execution | Tier 1 driver `contains` + engine in-memory fallback; Tier 2 trigram/FTS/external |
 
-> **Amended (2026-11-02, #29008 — ruling record 6573569376, letter A).** The `auto` arm of the field-resolution row above also includes every field marked `searchable: true` outside the hard exclusions `secret` / `password` / `vector`; the row is left as written and the reading is set out in the amendment note under D2.
+> **Amended (2026-11-02, [#29008](https://github.com/objectstack-ai/objectstack/issues/29008) — ruling record [6573569376](https://github.com/objectstack-ai/objectstack/issues/29008#issuecomment-6573569376), letter A).** The `auto` arm of the field-resolution row above also includes every field marked `searchable: true` outside the hard exclusions `secret` / `password` / `vector`; the row is left as written and the reading is set out in the amendment note under D2.
 
 ### Conformance (ADR-0060 alignment)
 `$search` is **"landed" iff** a driver executes it **and** a dogfood proof asserts a multi-field match over the real HTTP API — e.g. searching `"retail"` returns an account matched by `industry`, not `name`. Add a `search-conformance` ledger entry; CI fails if `$search` is declared but no proof resolves (closing the declared-but-unenforced loop).
