@@ -68,6 +68,7 @@ import {
 import { vendorClientAddressOptions } from './client-address-vendor.js';
 import { PLATFORM_IDP_PROVIDER_ID, refuseImplicitAccountLink } from './implicit-account-linking.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -392,10 +393,17 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // (`runInBackgroundOrAwait`) and still answers `{ status: true }`, so a
       // failed send can never reach the identity import that asked for it.
       // `settleImportResetDelivery` settles the import's own delivery receipt
-      // with the outcome (and re-raises it unchanged); a call that carries a
-      // `Request` — the public door — is handed straight through.
+      // with the outcome (and re-raises it unchanged).
       // `account-invitation-marker.ts` holds the legs that keep it server-only.
-      sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => settleImportResetDelivery(user.email, request, async () => {
+      //
+      // A reset request answers the same way, in the same time, for any
+      // address: a call that carries a `Request` — the public door — answers
+      // at once, and the mail is built and sent after the response
+      // (`sendAfterResponseOnPublicDoor`); what the send does is logged on
+      // the server and never reaches the caller. The identity import's own
+      // server-side call (no `Request`) still awaits its send, because it
+      // reads the delivery receipt the send settles.
+      sendResetPassword: sendAfterResponseOnPublicDoor(async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => settleImportResetDelivery(user.email, request, async () => {
         // #2766 V1.5 — placeholder addresses (phone-only users) are never
         // real recipients. Refuse loudly instead of "sending" into the void;
         // the reset path for these users is phone sign-in / an admin
@@ -491,7 +499,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
             `${invitation ? 'Account-invitation' : 'Password-reset'} email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
           );
         }
-      }),
+      }), (error) => logAfterResponseSendFailure(this.config.logger, 'password-reset', error)),
       // [#25060, ruling 1B on #25040] The mail half of "a sign-up for an
       // address that already has an account answers like a success". The
       // vendor calls this only when the address already has a row AND its
