@@ -69,6 +69,7 @@ import {
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
+import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
@@ -1870,6 +1871,12 @@ export class AuthPlugin implements Plugin {
         // a ListView for the row's own object. See personal-view-hooks.ts.
         registerPersonalViewHooks(engine, {
           packageId: 'com.objectstack.plugin-auth.personal-view',
+          logger: ctx.logger,
+        });
+        // A user's own preferences: the owner (user_id) is fixed when the row
+        // is saved, for every caller but the system. See user-preference-hooks.ts.
+        registerUserPreferenceHooks(engine, {
+          packageId: 'com.objectstack.plugin-auth.user-preference',
           logger: ctx.logger,
         });
         // [cloud ADR-0024 D5.2] Break-glass — the same identity write
