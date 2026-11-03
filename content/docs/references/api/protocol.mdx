@@ -2775,6 +2775,7 @@ Register or refresh a push device for the signed-in user
 | **vendor** | `Enum<'apns' \| 'fcm'>` | optional | Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused |
 | **appId** | `string` | optional | App the token was issued to: the iOS bundle ID or the Android application ID |
 | **locale** | `string` | optional | Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in |
+| **origin** | `string` | optional | [PLANNED — not yet stored] The origin the Console was loaded from (window.location.origin, for example https://crm.example.com): the address the mobile shell saved for this server. The Console writes it; the server stores it on the device row and every push to the device carries it back, so a shell with several saved servers opens the push on the one that sent it. http or https, a lowercase host and an optional port; a path, another scheme or a bare host is refused |
 
 
 ---

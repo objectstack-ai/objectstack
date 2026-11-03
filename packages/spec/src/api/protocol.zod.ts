@@ -31,6 +31,7 @@ import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { ServedTranslationDataSchema, LocaleSchema } from '../system/translation.zod';
 import { PushVendorSchema } from '../system/push-config.zod';
 import { PUSH_DEVICE_PLATFORMS } from '../system/push-device-platform';
+import { PUSH_SERVER_ORIGIN_MESSAGE, PUSH_SERVER_ORIGIN_PATTERN } from '../system/push-server-origin';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -3584,6 +3585,13 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
   locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
+    '[PLANNED — not yet stored] The origin the Console was loaded from (window.location.origin, for example '
+    + 'https://crm.example.com): the address the mobile shell saved for this server. The Console writes it; the server '
+    + 'stores it on the device row and every push to the device carries it back, so a shell with several saved servers '
+    + 'opens the push on the one that sent it. http or https, a lowercase host and an optional port; a path, another '
+    + 'scheme or a bare host is refused',
+  ),
 }).describe('Register or refresh a push device for the signed-in user'));
 
 export const RegisterDeviceResponseSchema = lazySchema(() => z.object({

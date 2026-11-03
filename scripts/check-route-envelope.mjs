@@ -275,16 +275,20 @@ const MODULES = {
   'packages/services/service-print/src/print-routes.ts': { responses: 0, ok: 0, err: 0 },
 
   // The unreact door (`DELETE /api/v1/comments/reactions/:id`), mounted by
-  // `AuditPlugin` straight on `IHttpServer`. Every body it answers is written by the
-  // shared pair (`sendOk` / `sendError` / `sendServerFault`), so it builds none
-  // itself. Declared in the same PR that created the module.
+  // `AuditPlugin` straight on `IHttpServer`. It supplies its part of the shared
+  // own-row delete door below and answers nothing itself, so it builds no body.
   'packages/plugins/plugin-audit/src/comment-reaction-routes.ts': { responses: 0, ok: 0, err: 0 },
 
   // The owner's delete door for a personal view (`DELETE /api/v1/personal-views/:id`),
-  // mounted by `AuthPlugin` straight on `IHttpServer`. Every body it answers is
-  // written by the shared pair (`sendOk` / `sendError` / `sendServerFault`), so it
-  // builds none itself. Declared in the same PR that created the module.
+  // mounted by `AuthPlugin` straight on `IHttpServer`. It supplies its part of the
+  // shared own-row delete door below and answers nothing itself, so it builds no body.
   'packages/plugins/plugin-auth/src/personal-view-routes.ts': { responses: 0, ok: 0, err: 0 },
+
+  // The shared own-row delete door both of the above are served by
+  // (`registerOwnRowDeleteRoute`). Every body it answers is written by the shared
+  // pair (`sendOk` / `sendError` / `sendServerFault`), so it builds none itself.
+  // Declared in the same PR that created the module.
+  'packages/core/src/security/own-row-delete-routes.ts': { responses: 0, ok: 0, err: 0 },
 
   // ── Exempt ──────────────────────────────────────────────────────────────
 

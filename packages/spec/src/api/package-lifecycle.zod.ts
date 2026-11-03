@@ -38,12 +38,12 @@
  * `RollbackToPackageCommitResponseSchema` below is the true contract,
  * authored after that retirement per the ruling's sequencing (3A).
  *
- * Two members are not transcriptions but DECLARED AHEAD OF THEIR PRODUCER
- * (ADR-0049), each describe opening `[PLANNED — not yet served]` until the
- * change that serves it drops the marker: the `nav` arm of
- * `GetPackageCustomizationsResponseSchema.contributions` (#27928) and
+ * Two declarations are not transcriptions but DECLARED AHEAD OF THEIR
+ * PRODUCER (ADR-0049), each describe opening `[PLANNED — not yet served]`
+ * until the change that serves it drops the marker:
  * `PackageExportManifestSchema.withheldMaps` (#28640 ruling ③A, served by
- * #29342). Their own docblocks say what is not served yet.
+ * #29342) and `PackageExportBundleSchema` (`GET /packages/export`, #28914).
+ * Their own docblocks say what is not served yet.
  */
 
 import { z } from 'zod';
@@ -264,34 +264,27 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
  * packages, in one read (#28914): the exit right that
  * {@link PackageExportManifestSchema}'s route grants one package at a time.
  *
- * ⚠️ DECLARED AHEAD OF ITS PRODUCER (ADR-0049). No runtime serves
- * `GET /packages/export` yet: no handler mounts it, so a call today is not
- * answered with this shape. This declaration is the contract the server slice
- * of #28914 must meet (Clause-②, widening): it mounts the route on the runtime
- * dispatcher, enveloped like its lifecycle siblings (`{ success, data }`), and
- * answers this schema as the `data`. Until it does, the describe carries
- * `[PLANNED — not yet served]`. The house has no other planned channel for an
- * API response: the liveness ledgers are per metadata type, and the runtime
- * route ledger records only what the dispatcher serves. So the change that
- * mounts the route drops the marker, adds the route's ledger row and flips the
- * test that pins the marker.
- *
- * Everything below is what that door MUST do. None of it is served today.
+ * Served by the runtime dispatcher (`packages/runtime/src/domains/packages.ts`,
+ * `assemblePackageExportBundle`), enveloped like its lifecycle siblings
+ * (`{ success, data }`), with this schema as the `data`; the route's ledger row
+ * names it. It was declared ahead of its producer (ADR-0049) and carried
+ * `[PLANNED — not yet served]` until the change that mounted the route, which
+ * dropped the marker and flipped the test that pinned it.
  *
  * ## One producer
  *
- * Each entry must be exactly what `GET /packages/:id/export` (served today)
- * answers for that package. The bundle composes the per-package export and
- * must never assemble, clean or redact an item a second way, so the two reads
- * cannot disagree about a package. Two consequences follow on purpose:
+ * Each entry is exactly what `GET /packages/:id/export` answers for that
+ * package. The bundle composes the per-package export and never assembles,
+ * cleans or redacts an item a second way, so the two reads cannot disagree
+ * about a package. Two consequences follow on purpose:
  *
  * - **A `.custom` pair is its own entry**, carrying its overriding items with
  *   their `overrides` blocks (ADR-0146 D8 item 3), and its base's entry carries
  *   the base unchanged. Environment-scope customizations stay where the
  *   per-package export already places them: under the package that owns them.
  * - **No credential value leaves.** The per-package export already withholds
- *   credential positions, as every served metadata read does. The bundle must
- *   add no rule of its own: a `credentialRef` stays the reference it is.
+ *   credential positions, as every served metadata read does. The bundle adds
+ *   no rule of its own: a `credentialRef` stays the reference it is.
  *
  * ## Which packages, in which order
  *
@@ -313,7 +306,7 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
  * switched off comes back on, and the consumer disables it again if it wants it
  * off.
  *
- * The order must be ADR-0141 D5's, the order a boot hydrates installed
+ * The order is ADR-0141 D5's, the order a boot hydrates installed
  * packages in: dependencies first. An entry comes after every entry its
  * package's `manifest.dependencies` names, so a pair comes after its base.
  * Installing the entries in the order listed is the whole consumption rule: a
@@ -322,15 +315,15 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
  *
  * ## The door
  *
- * The read gate must be the per-package export's: `studio.access` or
+ * The read gate is the per-package export's: `studio.access` or
  * `setup.access`, or a system context, asked before anything is read. The
- * query set must be CLOSED and empty: the door refuses a query parameter
+ * query set is CLOSED and empty: the door refuses a query parameter
  * `400 VALIDATION_ERROR`, naming it. No request schema is declared, because
  * the door reads no path id, no body and no parameter. `export` can never be a
  * package id (one has at least two dot-separated segments,
  * `MANIFEST_ID_PATTERN`), so the path never shadows `GET /packages/:id`.
  *
- * The answer must be whole or absent: a package whose export cannot be
+ * The answer is whole or absent: a package whose export cannot be
  * assembled fails the read, naming that package. ⛔ Never a bundle that
  * silently lacks a package. Strict at the top level: a member the door starts
  * serving is a change to this declaration first. Each entry stays open, as
@@ -345,16 +338,11 @@ export const PackageExportBundleSchema = lazySchema(() => z.object({
     + 'state, so every entry installs enabled. Empty when every package of the deployment is registered by its '
     + 'own code.',
   ),
-  // Declared before it is served (ADR-0049): the marker comes off when the
-  // server slice of #28914 mounts `GET /packages/export`, in the same change
-  // as the route's ledger row.
 }).strict().describe(
-  '[PLANNED — not yet served] Whole-deployment export: every installed package the deployment\'s own code does '
-  + 'not register (registry `source` other than `code`), as installable packages in dependency order. Carries no '
-  + 'credential value and no enabled state. Declared ahead of its producer '
-  + '(ADR-0049): no runtime serves `GET /packages/export` yet. The server half of the whole-deployment package '
-  + 'export mounts it, together with a future CLI command that calls it; until then this is the contract that '
-  + 'door must answer, not a read a client can make.',
+  'Whole-deployment export, the answer of `GET /packages/export` (`os package export`): every installed package '
+  + 'the deployment\'s own code does not register (registry `source` other than `code`), as installable packages '
+  + 'in dependency order. Carries no credential value and no enabled state. A package whose export cannot be '
+  + 'assembled fails the whole read, naming it.',
 ));
 
 /**
@@ -530,16 +518,12 @@ export const GetPackageCustomizationsRequestSchema = lazySchema(() => z.object({
  * `overrides`, the pair's extension members are in `extensions`, and any other
  * pair flow is in no list of this answer.
  *
- * [#27928, ruling 6566915346 letter E] DECLARED AHEAD OF ITS PRODUCER
- * (ADR-0049): the `nav` kind is declared before the runtime serves it. Until
- * the server slice of #28722 (Wanted 3) reads the navigation-contribution
- * registry, this read lists no `nav` entry; the `nav` arm's describe opens
- * `[PLANNED — not yet served]`, and that slice drops the marker in the change
- * that serves the kind. When served, a `nav` entry MUST be read from the same
- * `appNavContributions` registry the served app's navigation fold reads
- * (ADR-0029 D7), never joined by name; a disabled package's contributions
- * MUST NOT be listed, as the fold drops them; and the served app's
- * `navigation` stays as declared: no nav item carries a contributor key.
+ * [#27928, ruling 6566915346 letter E; served by #28722] A `nav` entry MUST be
+ * read from the same `appNavContributions` registry the served app's
+ * navigation fold reads (ADR-0029 D7), never joined by name; a disabled
+ * package's contributions MUST NOT be listed, as the fold drops them; and the
+ * served app's `navigation` stays as declared: no nav item carries a
+ * contributor key.
  */
 export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object({
   packageId: z.string().describe('The base package the customizations are of (the request\'s id).'),
@@ -602,9 +586,6 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
         + 'under. Never the base and never its `<base>.custom` pair.',
       ),
     }).strict().describe('A field or flow another package contributes to one of the base\'s objects.'),
-    // Declared ahead of its producer: the server slice of #28722 (Wanted 3)
-    // serves this arm and drops the `[PLANNED — not yet served]` marker in the
-    // same change (the pin is in `package-lifecycle.test.ts`).
     z.object({
       kind: z.literal('nav').describe(
         'What is contributed: `nav`, a navigation item another package\'s `navigationContributions` entry adds '
@@ -622,8 +603,7 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
         + 'the base and never its `<base>.custom` pair.',
       ),
     }).strict().describe(
-      '[PLANNED — not yet served] Declared ahead of its producer (ADR-0049): the read lists no `nav` entry yet. '
-      + 'A navigation item another installed package contributes to an app the base owns, one entry per item of '
+      'A navigation item another installed package contributes to an app the base owns, one entry per item of '
       + 'the contribution\'s `items` (a contributed group\'s children ride inside it and are not entries of their '
       + 'own), read from the same contribution registry the served app\'s navigation fold reads (ADR-0029 D7). '
       + 'An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry. '
@@ -633,8 +613,8 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
     'Every field, flow and navigation item another installed package contributes to the base, one entry per '
     + 'item and contributing package: the fields of every object extension of an object the base owns, from any '
     + 'package but the base and its pair; every flow registered under such a package whose trigger object the '
-    + 'base owns (a flow of a disabled package is not served, so not listed); and, declared ahead of its producer '
-    + 'and not yet served, every navigation item such a package contributes to an app the base owns. The entry '
+    + 'base owns (a flow of a disabled package is not served, so not listed); and every navigation item such a '
+    + 'package contributes to an app the base owns (a disabled package\'s are not listed). The entry '
     + 'shape is per `kind`: `object` for `field` and `flow`, `app` and an optional `group` for `nav`. Ordered: '
     + 'the `field` and `flow` entries first, by object, kind, name and package; then the `nav` entries, by app, '
     + 'group (an entry with no group first), name and package.',
@@ -647,7 +627,7 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
   }).strict().describe('Each list\'s length, derived from the lists in this same answer.'),
 }).strict().describe(
   'Per-package customization read: overrides, extensions and switched-off items of one installed base, and the '
-  + 'fields, flows and (not yet served) navigation items other packages contribute to it.',
+  + 'fields, flows and navigation items other packages contribute to it.',
 ));
 
 /**
