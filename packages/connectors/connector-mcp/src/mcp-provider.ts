@@ -79,8 +79,9 @@ function isStringRecord(v: unknown): v is Record<string, string> {
  * Fold the resolved instance `auth` into an MCP **http** transport's headers
  * (ADR-0024 keeps MCP credentials with the transport). `credentialRef` has
  * already been resolved upstream, so this only maps the static credential to the
- * right header. Not applied to stdio transports — a stdio server receives its
- * credentials through `transport.env`.
+ * right header. Not applied to stdio transports — a stdio server receives the
+ * instance's credential in its environment, under the variable
+ * `transport.credentialEnv` names (see {@link credentialEnvOf}).
  */
 function applyAuthToHeaders(
   auth: ResolvedConnectorAuth | undefined,
@@ -101,11 +102,85 @@ function applyAuthToHeaders(
   }
 }
 
-/** Validate + normalize `providerConfig.transport`, injecting resolved auth for http. */
+/** An environment variable name as POSIX shells spell one. */
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * The secret of a resolved static credential — what a stdio server is handed
+ * in its environment: a `bearer` token, an `api-key` key, a `basic` password.
+ * An `api-key`'s `headerName` / `paramName` place the key on an http request
+ * and are not read here; a `basic` username is not a secret, and a server that
+ * needs it takes it from `transport.env`.
+ */
+function secretOf(auth: Exclude<ResolvedConnectorAuth, { type: 'none' }>): string {
+  switch (auth.type) {
+    case 'bearer':
+      return auth.token;
+    case 'api-key':
+      return auth.key;
+    case 'basic':
+      return auth.password;
+  }
+}
+
+/**
+ * `transport.credentialEnv` of a stdio transport, judged — the route a stdio
+ * server's credential takes out of metadata (ADR-0097 §3 at ADR-0024 §3's
+ * process boundary). The instance's `auth.credentialRef` is resolved by the
+ * host like any other instance's (the environment, the stored credential, the
+ * host's resolver; a reference nothing answers degrades the instance naming it
+ * before this factory runs), and the resolved secret is put into the child's
+ * environment under the variable `credentialEnv` names. The value is never
+ * stored, logged, put on the connector `def` or carried in a message: it
+ * exists only in the environment handed to the spawn.
+ *
+ * Refused plain (configuration faults), each naming the key and never a value:
+ * a `credentialEnv` that is not a variable name; one with no static `auth` to
+ * place (a grant-bearing kind is refused by the credential-handle check, with
+ * this route named); one naming a variable `transport.env` also sets, which
+ * would give that variable two values. `undefined` when the transport names
+ * none: then `auth` is not applied to the stdio server at all, as before.
+ */
+function credentialEnvOf(
+  t: Record<string, unknown>,
+  env: Record<string, string> | undefined,
+  connectorName: string,
+  auth: ResolvedConnectorAuth | undefined,
+  borrowsCredential: boolean,
+): { name: string; value: string } | undefined {
+  const name = t.credentialEnv;
+  if (name === undefined) return undefined;
+  if (typeof name !== 'string' || !ENV_NAME_RE.test(name)) {
+    throw new Error(
+      `connector-mcp provider: connector '${connectorName}' providerConfig.transport.credentialEnv must be the name of ` +
+        `an environment variable (letters, digits and '_', not starting with a digit): the variable the stdio server ` +
+        `reads the instance's credential from.`,
+    );
+  }
+  if (borrowsCredential) return undefined;
+  if (!auth || auth.type === 'none') {
+    throw new Error(
+      `connector-mcp provider: connector '${connectorName}' names providerConfig.transport.credentialEnv '${name}' but ` +
+        `declares no credential to place there. Give the entry auth: { type: 'bearer', credentialRef } (or 'api-key' / ` +
+        `'basic'): the provider passes the resolved credential to the server in '${name}'.`,
+    );
+  }
+  if (env && Object.prototype.hasOwnProperty.call(env, name)) {
+    throw new Error(
+      `connector-mcp provider: connector '${connectorName}' sets environment variable '${name}' twice: in ` +
+        `providerConfig.transport.env and as providerConfig.transport.credentialEnv. Drop the env entry: the provider ` +
+        `passes the resolved credential to the server in '${name}' itself.`,
+    );
+  }
+  return { name, value: secretOf(auth) };
+}
+
+/** Validate + normalize `providerConfig.transport`, injecting resolved auth (http headers, stdio `credentialEnv`). */
 function normalizeTransport(
   raw: unknown,
   connectorName: string,
   auth: ResolvedConnectorAuth | undefined,
+  borrowsCredential: boolean,
 ): McpTransport {
   if (!raw || typeof raw !== 'object') {
     throw new Error(
@@ -120,14 +195,23 @@ function normalizeTransport(
         `connector-mcp provider: connector '${connectorName}' stdio transport requires a 'command' string.`,
       );
     }
+    const env = isStringRecord(t.env) ? t.env : undefined;
+    const credential = credentialEnvOf(t, env, connectorName, auth, borrowsCredential);
     return {
       kind: 'stdio',
       command: t.command,
       args: Array.isArray(t.args) ? t.args.map((a) => String(a)) : undefined,
-      env: isStringRecord(t.env) ? t.env : undefined,
+      env: credential ? { ...env, [credential.name]: credential.value } : env,
     };
   }
   if (t.kind === 'http') {
+    if (t.credentialEnv !== undefined) {
+      throw new Error(
+        `connector-mcp provider: connector '${connectorName}' names providerConfig.transport.credentialEnv on an http ` +
+          `transport. credentialEnv places the instance's credential in a stdio server's environment; over http the ` +
+          `provider sends the resolved auth as a request header itself. Delete the key.`,
+      );
+    }
     if (typeof t.url !== 'string' || t.url.length === 0) {
       throw new Error(
         `connector-mcp provider: connector '${connectorName}' http transport requires a 'url' string.`,
@@ -281,6 +365,13 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * directory. The policy check runs first and is unchanged: it judges the
  * `command` string exactly as written.
  *
+ * A declarative stdio server's credential stays out of metadata the way an
+ * http one's does: the entry declares `auth: { type, credentialRef }`, the host
+ * resolves the reference, and `providerConfig.transport.credentialEnv` names
+ * the environment variable the provider hands the resolved secret to the child
+ * in (see {@link credentialEnvOf}). A stdio transport naming no
+ * `credentialEnv` does not apply `auth` at all.
+ *
  * The connection is opened at materialization. Faults are classified (#3017):
  * an invalid transport shape is a *configuration* fault and throws plain —
  * fatal at boot per the ADR-0097 fail-loud contract — while a connect /
@@ -342,7 +433,7 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
 export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorProviderFactory {
   return async (ctx) => {
     const cfg = (ctx.providerConfig ?? {}) as McpProviderConfig;
-    let transport = normalizeTransport(cfg.transport, ctx.name, ctx.auth);
+    let transport = normalizeTransport(cfg.transport, ctx.name, ctx.auth, ctx.credentialHandle !== undefined);
     if (transport.kind === 'stdio') {
       assertDeclarativeStdioAllowed(deps.declarativeStdio, transport.command, ctx.name);
       // One anchor for the app's relative paths (#22423). A resolver that
@@ -370,15 +461,17 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     }
     // ADR-0143 D4 — a grant-bearing instance (`oauth2`, `app-credential`)
     // borrows its credential per request. Only an http transport carries one
-    // (a stdio server takes its credentials in `transport.env`), and a
-    // request is authenticated one way.
+    // (a stdio server is handed a static credential once, at spawn, in the
+    // variable `transport.credentialEnv` names), and a request is
+    // authenticated one way.
     const handle = ctx.credentialHandle;
     if (handle) {
       if (transport.kind !== 'http') {
         throw new Error(
           `connector-mcp provider: connector '${ctx.name}' borrows its credential per request (a grant-bearing auth kind), ` +
-            `which only an http transport can carry: a stdio server takes its credentials in transport.env. Declare an ` +
-            `http transport, or a static credential for the stdio one.`,
+            `which only an http transport can carry: a stdio server is handed its credential once, at spawn. Declare an ` +
+            `http transport, or a static credential for the stdio one (auth: { type: 'bearer', credentialRef }) with ` +
+            `providerConfig.transport.credentialEnv naming the variable the server reads it from.`,
         );
       }
       const ways = [
@@ -504,7 +597,9 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     }
     // [#27237] The handshake carried the instance's credential only over
     // http, and only as a header (an api-key `paramName` is not sent): then
-    // the server's answer was given to that credential.
+    // the server's answer was given to that credential. A stdio server handed
+    // the credential in `credentialEnv` is not counted: nothing in a stdio
+    // handshake says the server used, let alone accepted, its environment.
     //
     // A grant-bearing instance's borrowed token (`ctx.credentialHandle`)
     // reaches the server too, and is deliberately not counted here. A 403 the

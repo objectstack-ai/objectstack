@@ -419,6 +419,81 @@ describe('the connector redactor — purity and the untouched remainder', () => 
   });
 });
 
+// [#28640 ②B, ruling 6566912252] Which withheld positions a save does NOT carry
+// forward: the undeclared `auth` keys, and nothing else.
+describe('the connector redactor — withheld and not carried forward', () => {
+  it('names every undeclared `auth` key in `notCarriedForwardKeys` as well as in `redactedKeys`', () => {
+    const { item: served, redactedKeys, notCarriedForwardKeys } = redactConnectorItem({
+      ...base, auth: { type: 'basic', username: 'svc', credentialRef: 'PW', password: P(70), token: P(71) },
+    });
+    expect(redactedKeys).toEqual(['auth.password', 'auth.token']);
+    expect(notCarriedForwardKeys).toEqual(['auth.password', 'auth.token']);
+    expect(served.auth).toEqual({ type: 'basic', username: 'svc', credentialRef: 'PW' });
+  });
+
+  it('a `type` that names no kind: every key but `type` is undeclared, so none is carried forward', () => {
+    const { redactedKeys, notCarriedForwardKeys } = redactConnectorItem({ ...base, auth: { type: 'digest', credentialRef: 'X', secret: P(72) } });
+    expect(notCarriedForwardKeys).toEqual(redactedKeys);
+  });
+
+  it.each([
+    ['a null', null],
+    ['an empty string', ''],
+    ['an empty map', {}],
+  ] as const)('withholds a cleared undeclared `auth` key (%s) too, so the served form passes the closed entry', (_what, value) => {
+    const item = {
+      name: 'vendor', label: 'Vendor', type: 'api', provider: 'rest',
+      providerConfig: { baseUrl: 'https://v.example' },
+      auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: value },
+    };
+    // The reason: the strict instance-auth shape refuses the key whatever it holds.
+    expect(DeclarativeConnectorEntrySchema.safeParse(item).success).toBe(false);
+    const { item: served, redactedKeys, notCarriedForwardKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(['auth.token']);
+    expect(notCarriedForwardKeys).toEqual(['auth.token']);
+    expect(DeclarativeConnectorEntrySchema.safeParse(served).success).toBe(true);
+  });
+
+  it('CONTROL: every other withheld position stays carried forward — the member is absent', () => {
+    const result = redactConnectorItem({
+      ...base,
+      apiKey: P(73),
+      authentication: { type: 'api-key', key: P(74) },
+      retryConfig: { strategy: 'exponential_backoff', secret: P(75) },
+      actions: [{ key: 'get_invoice', label: 'Get invoice', token: P(76) }],
+      providerConfig: {
+        baseUrl: `https://u:${P(77)}@v.example`,
+        headers: { Authorization: P(78) },
+        defaultHeaders: { Accept: 'application/json' },
+        transport: { kind: 'http', url: 'https://mcp.example.com', headers: { Cookie: P(79) }, env: { TOKEN: P(80) } },
+      },
+      auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN' },
+    });
+    expect(result.redactedKeys).toEqual([
+      'actions.0.token', 'apiKey', 'authentication.key', 'providerConfig.baseUrl', 'providerConfig.defaultHeaders',
+      'providerConfig.headers', 'providerConfig.transport.env', 'providerConfig.transport.headers', 'retryConfig.secret',
+    ]);
+    expect(result).not.toHaveProperty('notCarriedForwardKeys');
+  });
+
+  it('CONTROL: `auth` that is not an object is withheld whole and still carried forward', () => {
+    const result = redactConnectorItem({ ...base, auth: P(81) });
+    expect(result.redactedKeys).toEqual(['auth']);
+    expect(result).not.toHaveProperty('notCarriedForwardKeys');
+  });
+
+  it('beside the other positions, only the undeclared `auth` key is marked', () => {
+    const { redactedKeys, notCarriedForwardKeys } = redactConnectorItem({
+      ...base,
+      apiKey: P(82),
+      auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: P(83) },
+      providerConfig: { headers: { Authorization: P(84) } },
+    });
+    expect(redactedKeys).toEqual(['apiKey', 'auth.token', 'providerConfig.headers']);
+    expect(notCarriedForwardKeys).toEqual(['auth.token']);
+  });
+});
+
 /**
  * Fail-closed census: the redactor serves every key an instance-auth kind
  * DECLARES, so a secret that became a declared key would be served. Every key

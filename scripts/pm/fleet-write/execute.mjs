@@ -192,8 +192,9 @@
  *
  * ## The four advisory rows — fenced on the ADVISORY, printing none of its text
  *
- * `ops.mjs`'s header section "The three rows that touch a security advisory"
- * is the authority; this is where its fences and landings are measured.
+ * `ops.mjs`'s header section "The four rows that touch a security advisory"
+ * is the authority, and its "The one row that READS an advisory" for the read
+ * below; this is where their fences and landings are measured.
  *
  *   - `advisory_report` is ONE POST of the row's body to the private-report
  *     endpoint, and nothing is read first. It LANDS on a 2xx whose answer
@@ -258,9 +259,9 @@
  * FAILED action with `ADVISORY_READ_UNREACHED` and the row status
  * `not reached` — no HTTP status, no grant remedy, ⛔ never the exception's
  * message. On an answer, the executor judges `ADVISORY_READ_FENCES` on it — a 200 advisory, the
- * one the action names, and a sender the row's `senderGate` admits (the
- * default, `collaborator`: the sender on the advisory's own
- * `collaborating_users`; `ops.mjs` records the ruling the maintainer owes) —
+ * one the action names, and a row whose `senderGate` the table knows
+ * (`target-write`, by the maintainer's ruling `ops.mjs` records: the sender
+ * gate this stroke already passed before the GET; any other value closed) —
  * and on any failure seals nothing and emits nothing: a FAILED action, exit 5,
  * whose row names the fences and the status alone. Otherwise it seals
  * `ADVISORY_READ_FIELDS` of the answer to the action's `public_key`
@@ -1025,15 +1026,15 @@ export function confirmAdvisory(req, answer, pre) {
  * the row's text; `why` the failure's. ⛔ No string it returns carries the id, the state or any field of the answer:
  * the fences speak through `advisoryReadFenceText`, a refusal's message through `advisoryPlatformText`, a failed seal
  * through `ADVISORY_READ_SEAL_FAILED` — never the exception. `seal` and `senderGate` are the self-test's doors (a seal
- * that throws, the other gate); the CLI passes neither. Never throws.
+ * that throws, a gate the table does not know); the CLI passes neither. Never throws.
  */
-export async function advisoryReadAction(req, { payload, index, sender, api, t, seal = sealAdvisoryRead, senderGate = OPS.advisory_read.senderGate }) {
+export async function advisoryReadAction(req, { payload, index, api, t, seal = sealAdvisoryRead, senderGate = OPS.advisory_read.senderGate }) {
   const { ghsaId, publicKey } = req.advisoryRead;
   const r = await rest(api, req.path, { method: 'GET' }, t);
   // Status 0 is `rest`'s word for a call that threw before any answer: the platform judged nothing, so the row names no
   // HTTP status and no grant remedy — and ⛔ never the exception's message, which can carry the path and so the id.
   if (r.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, why: ADVISORY_READ_UNREACHED, notes: [] };
-  const failures = advisoryReadFenceFailures({ ghsaId, answer: r, sender, gate: senderGate });
+  const failures = advisoryReadFenceFailures({ ghsaId, answer: r, gate: senderGate });
   if (failures.length) {
     const refused = !(r.status >= 200 && r.status < 300);
     const why = `REFUSED at the relay's fence on the advisory the action names, nothing sealed or emitted — ${advisoryReadFenceText(failures)}${refused ? `${advisoryPlatformText(r.detail)}; ${ADVISORY_READ_ACCESS_REMEDY}` : ''}`;
@@ -1427,7 +1428,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       // of it printed, the id included: its row's call is the path with the id left out.
       if (req.advisoryRead) {
         const call = advisoryReadCall(payload.repo);
-        const read = await advisoryReadAction(req, { payload, index: i + 1, sender, api, t, ...(deps.advisoryRead ?? {}) });
+        const read = await advisoryReadAction(req, { payload, index: i + 1, api, t, ...(deps.advisoryRead ?? {}) });
         rows.push({ action: i + 1, op: action.op, call, status: read.status, result: read.ok ? scrub(read.result, [token]) : `FAILED: ${scrub(read.why, [token])}` });
         if (!read.ok) {
           stoppedAt = { action: i + 1, op: action.op, why: scrub(read.why, [token]) };
@@ -1561,7 +1562,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
   "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 32,
-  "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — collaborator by default, target-write by switch, an unknown gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 17,
+  "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's: one battery, one row.
@@ -2599,7 +2600,7 @@ export async function selfTest() {
     }
 
     // ── advisory_read ───────────────────────────────────────────────────────
-    battery("advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — collaborator by default, target-write by switch, an unknown gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker");
+    battery("advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker");
     {
       const { generateKeyPairSync } = await import('node:crypto');
       // Made-up ids: the fixture names no real advisory.
@@ -2617,7 +2618,7 @@ export async function selfTest() {
       const SEAT = pair();
       const read = (extra = {}) => ({ op: 'advisory_read', ghsa_id: GHSA, public_key: SEAT.spki, ...extra });
       // An advisory answer carrying the marker in its summary, description and vulnerabilities and in every other field
-      // but its id and its state — the sender on its collaborators, so the default gate admits the read.
+      // but its id and its state — the default sender on its collaborators, which the gate (target-write) never reads.
       const advisory = (extra = {}, status = 200) => ({
         status,
         json: {
@@ -2671,14 +2672,17 @@ export async function selfTest() {
       const long = advisory({ description: `${MARKER} ${'the long description, line by line.\n'.repeat(600)}` });
       const many = await readRun([read()], { ...allowed, [A_GET]: long });
       t('a long answer is cut into its parts, in order, each part numbered k/n with one n, every message inside the cut, and still opens byte for byte', [many.exit, many.annotations.length > 1, many.annotations.map((n) => `${n.part}/${n.of}`).join(' ') === many.annotations.map((_, k) => `${k + 1}/${many.annotations.length}`).join(' '), notices(many).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), opens(many) === picked(long.json)], [EXIT_OK, true, true, true, true]);
-      // ⛔ The sender gate.
+      // ⚖ The sender gate: target-write, by the maintainer's ruling — judged on the stroke before the GET, nothing more after it.
       const PERM_B = `GET /repos/${REPO}/collaborators/os-dev-b/permission`;
       const writerB = { [PERM_B]: { status: 200, json: { permission: 'write', role_name: 'write', user: { login: 'os-dev-b' } } } };
-      const stranger = await readRun([read()], { ...writerB, [A_GET]: advisory() }, { sender: 'os-dev-b' });
-      t('⛔ the default gate is collaborator: a sender with write on the target who is NOT on the advisory\'s collaborating_users is refused after the ONE GET — nothing sealed, no part, exit 5, the row naming the sender fence', [stranger.exit, stranger.seen.map((s) => s.call), stranger.annotations.length, notices(stranger).length, stranger.rows[0]?.status, stranger.rows[0]?.result], [EXIT_ACTION_FAILED, [PERM_B, A_GET], 0, 0, 200, "FAILED: REFUSED at the relay's fence on the advisory the action names, nothing sealed or emitted — fence `sender`: os-dev-b is not a collaborator on it, and the relay seals only for a sender the advisory's own collaborating_users lists"]);
-      const switched = await readRun([read()], { ...writerB, [A_GET]: advisory() }, { sender: 'os-dev-b', advisoryRead: { senderGate: 'target-write' } });
+      const outsider = await readRun([read()], { ...writerB, [A_GET]: advisory() }, { sender: 'os-dev-b' });
+      t("⚖ the gate is target-write, by the maintainer's ruling: a sender with write on the target who is NOT on the advisory's collaborating_users is sealed for — the ONE GET after the sender gate, exit 0, and the parts open byte for byte for the seat's key", [OPS.advisory_read.senderGate, advisory().json.collaborating_users.some((u) => u.login.toLowerCase() === 'os-dev-b'), outsider.exit, outsider.seen.map((s) => s.call), outsider.annotations.length > 0, outsider.rows[0]?.status, opens(outsider) === picked(advisory().json)], ['target-write', false, EXIT_OK, [PERM_B, A_GET], true, 200, true]);
+      const triageB = { [PERM_B]: { status: 200, json: { permission: 'read', role_name: 'triage', user: { login: 'os-dev-b' } } } };
+      const reader = await readRun([read()], { ...triageB, [A_GET]: advisory({ collaborating_users: [{ login: 'os-dev-b' }] }) }, { sender: 'os-dev-b' });
+      t("⛔ …so the stroke's gate is the read's whole gate: a sender with triage on the target is refused BEFORE the advisory's GET, even one the advisory lists as a collaborator — exit 4, the permission read alone, no row, nothing sealed, no part", [reader.exit, reader.seen.map((s) => s.call), reader.rows.length, (reader.annotations ?? []).length, notices(reader).length], [EXIT_SENDER_REFUSED, [PERM_B], 0, 0, 0]);
       const unknown = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { senderGate: 'anyone' } });
-      t('⚖ switched to target-write — the other setting the maintainer may rule for — the same sender is sealed for; an unknown setting fails CLOSED, refusing even a collaborator', [switched.exit, switched.annotations.length > 0, unknown.exit, unknown.annotations.length, unknown.rows[0]?.result.includes('fence `sender`: the row names no sender gate the table knows')], [EXIT_OK, true, EXIT_ACTION_FAILED, 0, true]);
+      const retired = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { senderGate: 'collaborator' } });
+      t('⛔ any other setting fails CLOSED after the GET, a made-up one and the retired collaborator alike, refusing even a sender with write whom the advisory lists — exit 5, nothing sealed, no part, the row naming the sender fence', [unknown, retired].map((r) => [r.exit, r.annotations.length, notices(r).length, r.rows[0]?.result.includes('fence `sender`: the row names no sender gate the table knows')]), [unknown, retired].map(() => [EXIT_ACTION_FAILED, 0, 0, true]));
       // ⛔ The read and advisory fences.
       const forbidden = await readRun([read()], { ...allowed, [A_GET]: { status: 403, json: { message: 'Resource not accessible by integration', documentation_url: MARKER } } });
       const missing = await readRun([read()], { ...allowed, [A_GET]: { status: 404, json: { message: MARKER } } });
@@ -2705,7 +2709,7 @@ export async function selfTest() {
       // ⛔ The sweep: every run above, every channel this file emits on — no marker, and no advisory id.
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
-      t('⛔ THE MARKER TEST: across every run of this battery — landed, long, refused at the sender, read and advisory fences, the switched and unknown gates, a GET that never reached the platform, a seal that throws, one that does not seal, one too large, refused payloads — the marker served in the summary, the description and the vulnerabilities (and every other field) reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [19, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      t('⛔ THE MARKER TEST: across every run of this battery — landed, long, a sender outside the collaborators, one refused at the stroke\'s sender gate, the unknown and retired gates, read and advisory fences, a GET that never reached the platform, a seal that throws, one that does not seal, one too large, refused payloads — the marker served in the summary, the description and the vulnerabilities (and every other field) reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [20, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
       const named = emitted.map((text, i) => ([GHSA, OTHER].some((id) => text.includes(id)) ? i : null)).filter((i) => i !== null);
       t("⛔ …and NO advisory id: neither the one asked for nor the one answered appears on any line, row, summary or annotation of any run — the call's placeholder stands where every other row prints its path", named, [], named.map((i) => emitted[i].split('\n').find((l) => l.includes(GHSA) || l.includes(OTHER))).join(' | '));
       t('…positive control: every answer served carried the marker and the id, the request carried the id to the platform — where it belongs — and the generic row printer, given the same answer, WOULD print both', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') && JSON.stringify(answers).includes(GHSA)), landed.seen.some((s) => s.call === A_GET), resultOf({}, served.json).includes('ADVISORY MARKER') && resultOf({}, served.json).includes(GHSA)], [true, true, true]);
@@ -2806,7 +2810,7 @@ export async function selfTest() {
       "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, " +
       "the payload read from the event file, four advisory rows — a report landed on the id it was given, a draft on its id reading state draft, collaborators and a state fenced on the advisory's own read and landed on the PATCH answer — " +
       'whose marker in a summary, a description and a vulnerability reached no log line, row, summary or annotation, ' +
-      "an advisory read fenced on its GET — the sender a collaborator by default — and sealed to the seat's one-time key, its notice parts opening byte for byte " +
+      "an advisory read fenced on its GET — its sender held to write on the target, by the maintainer's ruling — and sealed to the seat's one-time key, its notice parts opening byte for byte " +
       'for that key and read alone, no part on a failed seal, the marker and the id on no public surface and the marker not in the sealed answer, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +

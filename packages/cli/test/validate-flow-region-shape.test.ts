@@ -31,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 import Compile from '../src/commands/compile';
 import Lint from '../src/commands/lint';
 import Validate from '../src/commands/validate';
+import { undeclaredFlowCycleMessage } from '@objectstack/metadata-core';
+import { FLOW_CYCLE_CORPUS } from '@objectstack/metadata-core/testing';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
@@ -151,6 +153,10 @@ const CASES: Record<string, { stack: Record<string, unknown>; refusal?: string }
     stack: assembledWith(flow('rgn_ok', guard(fanOut(true))), flow('rgn_ops_lead_time', guard(fanOut(false)))),
     refusal: "try_catch 'guard' catch: region must be single-exit but has 3: x, y, z",
   },
+  // [#29051] The flow-cycle judge's whole corpus in one stack, and the cases it
+  // must pass on their own.
+  cycles: { stack: stackWith(FLOW_CYCLE_CORPUS.map((c) => c.flow)) },
+  cyclesDeclared: { stack: stackWith(FLOW_CYCLE_CORPUS.filter((c) => c.cycle === null).map((c) => c.flow)) },
 };
 
 let root = '';
@@ -249,5 +255,50 @@ describe('[#28893] validate, build and lint refuse a flow region the engine refu
     const linted = await lint('joined');
     const issues = json(linted, 'lint joined').issues as Array<Record<string, unknown>>;
     expect(issues.filter((i) => i.rule === RULE)).toEqual([]);
+  }, 60_000);
+});
+
+/**
+ * [#29051] A flow whose TOP-LEVEL graph closes a cycle with no `type: 'back'`
+ * edge (ADR-0044). The engine refuses it at registration with
+ * `findUndeclaredFlowCycle` (`@objectstack/metadata-core`); before this,
+ * `os validate` and `os build` passed it with exit 0 and the flow never ran.
+ * Driven from the judge's own corpus, so the doors refuse exactly the cases
+ * the engine and the publish gate refuse, each at its own flow, in the
+ * engine's sentence.
+ */
+describe('[#29051] validate and build refuse an undeclared top-level flow cycle, with the engine\'s sentence', () => {
+  const refused = FLOW_CYCLE_CORPUS
+    .map((c, i) => ({ c, i }))
+    .filter(({ c }) => c.cycle !== null)
+    .map(({ c, i }) => ({ path: `flows[${i}]`, code: 'VALIDATION_ERROR', flow: c.flow.name, cycle: undeclaredFlowCycleMessage(c.cycle!) }));
+  const rowsOf = (errors: Array<Record<string, unknown>>) =>
+    errors.filter((r) => String(r.message).includes('Flow contains a cycle'));
+  const expectRefused = (errors: Array<Record<string, unknown>>) => {
+    const rows = rowsOf(errors);
+    expect(rows.map(({ path, code, flow }) => ({ path, code, flow })), JSON.stringify(errors, null, 2))
+      .toEqual(refused.map(({ path, code, flow }) => ({ path, code, flow })));
+    rows.forEach((row, k) => expect(String(row.message)).toContain(refused[k]!.cycle));
+  };
+
+  it('validate exits 1 with one row per refused corpus flow; build refuses the same and writes nothing', async () => {
+    const validated = await validate('cycles', '--json');
+    expect(validated.code, validated.stdout).toBe(1);
+    expectRefused(json(validated, 'validate cycles').errors as Array<Record<string, unknown>>);
+
+    const built = await build('cycles', '--json');
+    expect(built.code, built.stdout).toBe(1);
+    const payload = json(built, 'build cycles');
+    expect(payload.success).toBe(false);
+    expectRefused(payload.errors as Array<Record<string, unknown>>);
+    expect(existsSync(fixtures.cycles.dist)).toBe(false);
+  }, 60_000);
+
+  it('CONTROL: the corpus flows whose loops are declared back (and the acyclic ones) validate and build', async () => {
+    const validated = await validate('cyclesDeclared', '--json');
+    expect(validated.code, validated.stdout).toBe(0);
+    const built = await build('cyclesDeclared', '--json');
+    expect(json(built, 'build cyclesDeclared').success, built.stdout).toBe(true);
+    expect(built.code).toBe(0);
   }, 60_000);
 });

@@ -37,6 +37,13 @@
  * declared a VERSION rollback against the live COMMIT-rollback path;
  * `RollbackToPackageCommitResponseSchema` below is the true contract,
  * authored after that retirement per the ruling's sequencing (3A).
+ *
+ * Two members are not transcriptions but DECLARED AHEAD OF THEIR PRODUCER
+ * (ADR-0049), each describe opening `[PLANNED — not yet served]` until the
+ * change that serves it drops the marker: the `nav` arm of
+ * `GetPackageCustomizationsResponseSchema.contributions` (#27928) and
+ * `PackageExportManifestSchema.withheldMaps` (#28640 ruling ③A, served by
+ * #29342). Their own docblocks say what is not served yet.
  */
 
 import { z } from 'zod';
@@ -175,16 +182,56 @@ export const RollbackToPackageCommitResponseSchema = lazySchema(() => z.object({
  * (`runtime/src/domains/packages.ts`) builds the key set DYNAMICALLY from the
  * metadata type registry — one plural key per type present
  * (`manifest[plural] = items.map(clean)`), partitioning `views` per #5320 —
- * plus the four fixed keys below. Only the fixed keys are pinnable;
+ * plus the five fixed keys below. Only the fixed keys are pinnable;
  * enumerating the registry here would freeze this contract against future
  * metadata types, so everything else deliberately falls to the open
  * catch-all. Freezes nothing.
+ *
+ * `withheldMaps` (#28640 ruling ③A) names each map position the export
+ * withheld whole. The export reads SERVED items, so the connector redactor
+ * (`CONNECTOR_CREDENTIAL_MAP_PATHS`, `integration/connector-credential-redaction.ts`)
+ * has already dropped each of its four header / env maps, and the item is
+ * written with the map simply absent; this list is how an import tells an
+ * incomplete map from one that was never written. Positions only — never a
+ * header or variable name — so the credential heuristic stays the
+ * redactor's, not a contract of the export. The path vocabulary is the
+ * redactor's own `redactedKeys` spelling of those four positions, and
+ * `package-lifecycle.test.ts` holds the two equal.
+ *
+ * DECLARED AHEAD OF ITS PRODUCER (ADR-0049): `withheldMaps` is declared
+ * before any export writes it and before any install door reads it. Until the
+ * server half (#29342) makes `assemblePackageManifest` write the list and both
+ * install doors name each incomplete map, no export carries it; its describe
+ * opens `[PLANNED — not yet served]`, and #29342 drops the marker in the change
+ * that serves it (the pin is in `package-lifecycle.test.ts`). Its `door` row in
+ * `UNMANAGED_INSTALL_KEY_DISPOSITIONS` is live today: it keeps the unmanaged
+ * import from refusing an export that carries the key.
  */
 export const PackageExportManifestSchema = lazySchema(() => z.object({
   id: z.string().describe('The exported package\'s id.'),
   name: z.string().describe('The exported package\'s machine name.'),
   version: z.string().describe('The exported package\'s version.'),
   label: z.string().optional().describe('Display label, when the package declares one.'),
+  // Declared ahead of its producer: #29342 writes and reads it, and drops the
+  // `[PLANNED — not yet served]` marker in that change.
+  withheldMaps: z.array(z.object({
+    type: z.literal('connector').describe('Metadata type of the item whose map was withheld.'),
+    name: z.string().describe('Name of the item whose map was withheld.'),
+    path: z.enum([
+      'providerConfig.headers',
+      'providerConfig.defaultHeaders',
+      'providerConfig.transport.headers',
+      'providerConfig.transport.env',
+    ]).describe('Dot path of the withheld map inside the item.'),
+  }).strict()).optional().describe(
+    '[PLANNED — not yet served] Declared ahead of its producer (ADR-0049): no export writes this list '
+    + 'yet and no install door reads it yet. Every map the export withheld WHOLE because a served read '
+    + 'never carries it: a connector\'s header and environment-variable maps. The item is written with '
+    + 'that map absent, so once served an import reads this list to tell an incomplete map from one the '
+    + 'package never had, and names each one for an operator to re-enter. Positions only: no header or '
+    + 'variable name is listed. Absence says nothing about what was withheld when the exporter predates '
+    + 'this key; from an exporter that writes it, absence means nothing was withheld.',
+  ),
 }).catchall(z.unknown().describe(
   'One key per metadata type present in the package (plural spelling, e.g. '
   + '`objects`, `views`), each an array of cleaned item bodies. The key set '

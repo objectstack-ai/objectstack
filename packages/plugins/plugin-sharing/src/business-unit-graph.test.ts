@@ -60,15 +60,21 @@ interface UnitRow {
   active?: boolean;
   manager_user_id?: string | null;
 }
-interface MemberRow { business_unit_id: string; user_id: string; organization_id?: string | null }
+interface MemberRow { id?: string; business_unit_id: string; user_id: string; organization_id?: string | null }
 
 /**
  * Minimal engine over `sys_business_unit` + `sys_business_unit_member`.
  * Mirrors the real filter surface the service uses: plain equality, `$ne`,
  * `$in`, and `$or` (so a widened predicate would actually be exercised here
  * rather than silently ignored by the stub).
+ *
+ * [#29606] The member reads are a keyset walk (`id > cursor`, ordered by `id`,
+ * a page `limit`), so the member side also models `$and`, `$gt`, `orderBy`
+ * and `limit`, and every member row carries the `id` a stored row has —
+ * stamped here when a fixture names none.
  */
 function makeEngine(units: UnitRow[], members: MemberRow[]) {
+  const memberRows = members.map((m, i) => ({ id: `bum_${String(i).padStart(4, '0')}`, ...m }));
   const matches = (row: any, filter: any): boolean => {
     if (!filter || typeof filter !== 'object') return true;
     for (const [k, v] of Object.entries(filter)) {
@@ -76,8 +82,16 @@ function makeEngine(units: UnitRow[], members: MemberRow[]) {
         if (!(v as any[]).some((sub) => matches(row, sub))) return false;
         continue;
       }
+      if (k === '$and') {
+        if (!(v as any[]).every((sub) => matches(row, sub))) return false;
+        continue;
+      }
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const rv = row[k];
+      if (v && typeof v === 'object' && '$gt' in (v as any)) {
+        if (!(String(rv) > String((v as any).$gt))) return false;
+        continue;
+      }
       if (v && typeof v === 'object' && '$ne' in (v as any)) {
         if (rv === (v as any).$ne) return false;
         continue;
@@ -101,7 +115,11 @@ function makeEngine(units: UnitRow[], members: MemberRow[]) {
     async find(object: string, options: any) {
       const filter = options?.where ?? options?.filter ?? {};
       if (object === 'sys_business_unit') return units.filter((u) => matches(u, filter));
-      if (object === 'sys_business_unit_member') return members.filter((m) => matches(m, filter));
+      if (object === 'sys_business_unit_member') {
+        const rows = memberRows.filter((m) => matches(m, filter));
+        if (options?.orderBy?.[0]?.field === 'id') rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
+      }
       return [];
     },
   } as any;

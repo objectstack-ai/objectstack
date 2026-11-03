@@ -6,13 +6,15 @@
  * authoring refusal and by the install door's import planner
  * (`@objectstack/metadata-protocol`).
  *
- * Held TOTAL here, beside both schemas a package body is read with, so the PR
- * that adds a key to `ManifestSchema` or to the stack definition is the PR that
- * reddens — not a later install that refuses the key with no reason on record.
+ * Held TOTAL here, beside the three schemas a package body is read with, so the
+ * PR that adds a key to `ManifestSchema`, to the stack definition or to the
+ * package export's fixed keys is the PR that reddens — not a later install that
+ * refuses the key with no reason on record.
  */
 import { describe, expect, it } from 'vitest';
 import { ManifestSchema } from './manifest.zod';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
+import { PackageExportManifestSchema } from '../api/package-lifecycle.zod';
 import { PLURAL_TO_SINGULAR } from '../meta-spelling/manifest-collection-spelling';
 import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod';
 import {
@@ -27,8 +29,10 @@ const collections = new Set([...Object.keys(PLURAL_TO_SINGULAR), ASSEMBLED_VIEW_
 const tombstoned = (schema: unknown) =>
   /^\[REMOVED\]/.test(String((schema as { description?: unknown } | undefined)?.description ?? ''));
 const stackShape = (ObjectStackDefinitionSchema as unknown as { shape: Record<string, unknown> }).shape;
+/** The export's FIXED keys — its open catch-all carries the collections, judged by the registry. */
+const exportShape = PackageExportManifestSchema.shape;
 
-describe('the unmanaged-install key classification is total against both schemas a package body is read with', () => {
+describe('the unmanaged-install key classification is total against the three schemas a package body is read with', () => {
   it('classifies every live ManifestSchema key', () => {
     const missing = Object.entries(ManifestSchema.shape)
       .filter(([key, schema]) => !collections.has(key) && !tombstoned(schema) && !(key in UNMANAGED_INSTALL_KEY_DISPOSITIONS))
@@ -41,8 +45,13 @@ describe('the unmanaged-install key classification is total against both schemas
     expect(missing).toEqual([]);
   });
 
-  it('classifies nothing neither schema declares — a stale row is a lie about a key', () => {
-    const declared = new Set([...Object.keys(ManifestSchema.shape), ...Object.keys(stackShape)]);
+  it('classifies every fixed key of the package export — the body an import elsewhere is handed', () => {
+    const missing = Object.keys(exportShape).filter((key) => !(key in UNMANAGED_INSTALL_KEY_DISPOSITIONS));
+    expect(missing).toEqual([]);
+  });
+
+  it('classifies nothing no schema declares — a stale row is a lie about a key', () => {
+    const declared = new Set([...Object.keys(ManifestSchema.shape), ...Object.keys(stackShape), ...Object.keys(exportShape)]);
     expect(Object.keys(UNMANAGED_INSTALL_KEY_DISPOSITIONS).filter((key) => !declared.has(key))).toEqual([]);
   });
 
@@ -53,6 +62,14 @@ describe('the unmanaged-install key classification is total against both schemas
   it('copies `translations` (converted), and leaves `data` to the door', () => {
     expect(UNMANAGED_INSTALL_KEY_DISPOSITIONS.translations).toBe('converted');
     expect(UNMANAGED_INSTALL_KEY_DISPOSITIONS.data).toBe('door');
+  });
+
+  it('leaves the export\'s `withheldMaps` and `label` to the door — an export is importable as written', () => {
+    // `withheldMaps` (#28640 ruling ③A) is read by the door to name each incomplete map; the
+    // export's `label` has no slot on the base's closed install manifest. Either one left
+    // unclassified refuses every export that carries it as an unrecognised key.
+    expect(UNMANAGED_INSTALL_KEY_DISPOSITIONS.withheldMaps).toBe('door');
+    expect(UNMANAGED_INSTALL_KEY_DISPOSITIONS.label).toBe('door');
   });
 
   it('refuses exactly code, uncopyable content and an artifact envelope', () => {

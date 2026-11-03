@@ -4386,10 +4386,19 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * conservative edges. `?layers=true` stays untranslated and diagnostic,
  * unchanged.
  *
- * The ruling covers the three SCALARS. A field's `label` stays a flat
- * `catalog ?? document`: `fields` is a key-keyed spread whose per-field labels
- * have their own (per-field) catalog keys, and no read has been measured to
- * diverge on them. The embedded `listViews` follow the VIEW translator's
+ * The ruling covers the three SCALARS, and a field's `label` and its options'
+ * labels follow it too, judged per field against the same field in the
+ * packaged base (and per option against that field's option of the same
+ * `value`) by {@link valueOverridesPackagedBase}: an object extension's
+ * `fieldPatches` label (ADR-0146 D10) and a tenant's field rename are authored
+ * on top of the declaration the catalog translates, and the served read kept
+ * the shipped label while only `/layers` showed the patch. A picklist-bound
+ * field's options are the list's, resolved on every read and absent from the
+ * packaged field, so they have no field-level baseline and the catalog
+ * (field-level, then `picklists.<name>`) applies to them as before. A field the
+ * base does not declare counts as diverged on every slot, as below; the
+ * built-in system-field labels apply only where the catalog may.
+ * The embedded `listViews` follow the VIEW translator's
  * application of the same rule (ADR-0029 D9.2a, as {@link translateView}
  * applies it), judged per view against the packaged object's own `listViews` —
  * see {@link translateObjectListViews}.
@@ -4477,17 +4486,22 @@ export function translateObject<T extends ObjectLike>(
 
   const translateField = (name: string, def: ObjectFieldLike): ObjectFieldLike => {
     const next: ObjectFieldLike = { ...def };
-    const translatedLabel =
-      lookupObjectFieldAttr(bundle, objectName, name, 'label', opts) ??
-      builtinSystemFieldLabel(name, def.label, opts);
-    if (translatedLabel) next.label = translatedLabel;
+    const packagedField = packagedObjectField(packagedObject, name);
+    // The field `label` keeps a value that diverged from the packaged field's
+    // — an extension's `fieldPatches` label, a tenant's rename — under the one
+    // comparison its sibling slots use (ADR-0029 D9.2a; see the docblock).
+    if (!valueOverridesPackagedBase(packagedField, 'label', def.label)) {
+      const translatedLabel =
+        lookupObjectFieldAttr(bundle, objectName, name, 'label', opts) ??
+        builtinSystemFieldLabel(name, def.label, opts);
+      if (translatedLabel) next.label = translatedLabel;
+    }
     // The bundle's field `help` entry is served on the slot the extractor
     // seeded it from: the field's own `inlineHelpText` when it authors one —
     // the slot the console draws first — and `description` only when neither
     // the served nor the packaged field authors one; never on an undeclared
     // `help`. The slot keeps a value that diverged from the packaged field's
     // (ADR-0029 D9.2a; see the docblock).
-    const packagedField = packagedObjectField(packagedObject, name);
     const translatedHelp = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
     if (translatedHelp) {
       const servedInlineHelp = authorsInlineHelpText(def);
@@ -4516,8 +4530,20 @@ export function translateObject<T extends ObjectLike>(
       // labels (`picklists.<name>.options.<value>`); a field-level entry, when
       // one exists, is the more specific and wins.
       const picklist = typeof def.picklist === 'string' ? def.picklist : undefined;
+      // An option label that diverged from the packaged field's option of the
+      // same value keeps its text, under the same comparison. A picklist-bound
+      // field's options are the LIST's, resolved onto the served field on every
+      // read and never on the packaged declaration, so no field-level baseline
+      // exists for them and the catalog applies as before.
+      const packagedOptionsOwner = picklist === undefined ? packagedField : undefined;
       next.options = def.options.map((opt) => {
         if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
+        const packagedOption = packagedPart(
+          packagedOptionsOwner,
+          'options',
+          (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(opt.value),
+        );
+        if (valueOverridesPackagedBase(packagedOption, 'label', opt.label)) return opt;
         const translated =
           lookupObjectFieldOption(bundle, objectName, name, opt.value, opts) ??
           (picklist !== undefined ? lookupPicklistOption(bundle, picklist, opt.value, opts) : undefined);

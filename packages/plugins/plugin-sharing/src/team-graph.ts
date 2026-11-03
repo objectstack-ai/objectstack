@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { ITeamGraphService } from '@objectstack/spec/contracts';
-import { isMissingTableError, keysetWalk } from '@objectstack/types';
+import { isObjectAbsentError, keysetWalk } from '@objectstack/types';
 import type { SharingEngine } from './sharing-service.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -130,79 +130,137 @@ function roleHolderPredicate(roleName: string, org: string | null | undefined): 
 }
 
 /**
- * [#29362] Rows per page of the role-holder read — the bound the read always
- * carried, so a role held by fewer people issues the one read it always did.
+ * [#29362, #29503] Rows per page of a membership read — the bound each read
+ * always carried, so a recipient held by fewer people issues the one read it
+ * always did, and one held by more is read in further pages rather than cut.
  */
-const ROLE_HOLDER_PAGE_ROWS = 10000;
+const MEMBERSHIP_PAGE_ROWS = 10000;
 
 /**
- * [#29362] Every holder of `roleName` (in `org`, when given), read to
- * completion — or a refusal, never a shortened or an invented empty set.
+ * [#29503] Why a holder read refused, as one sentence family: what could not
+ * be read, the reason, and why the answer is a refusal rather than "nobody".
+ * The driver's error rides along as `cause`.
+ */
+function holderReadRefusal(subject: string, reason: string, cause: unknown, kind: 'expansion' | 'check'): Error {
+  const consequence = kind === 'expansion'
+    ? 'A shortened or empty holder set would withhold or revoke the grants it confers, so the expansion refuses instead.'
+    : 'Answering "not a holder" would revoke the grants the holding confers, so the check refuses instead.';
+  return Object.assign(
+    new Error(`[sharing] ${subject} could not be read: ${reason}. ${consequence}`),
+    cause === undefined ? {} : { cause },
+  );
+}
+
+/** The reason text for a keyset walk that could not vouch for completion. */
+const WALK_INCOMPLETE = 'the read by id could not continue past a page (a row without an id, or a page that repeated the cursor)';
+
+/**
+ * [#29362, #29503] Every row of `object` matching `where`, read to completion —
+ * or a refusal, never a shortened or an invented empty set; `null` when the
+ * object does not exist on this stack.
  *
- * Pages of {@link ROLE_HOLDER_PAGE_ROWS} through the platform's one keyset
- * walk (`keysetWalk`, `@objectstack/types`): ordered by `id`, each page
- * resuming after the last id the one before it returned, so a role held past
- * the bound is read whole rather than cut at an arbitrary 10,000 rows.
+ * Pages of {@link MEMBERSHIP_PAGE_ROWS} (or `pageRows`) through the platform's
+ * one keyset walk (`keysetWalk`, `@objectstack/types`): ordered by `id`, each
+ * page resuming after the last id the one before it returned, so a recipient
+ * held past the bound is read whole rather than cut at an arbitrary row.
  *
- * Loud, never short. The set feeds sharing GRANTS, and the reconcilers diff the
- * grants a rule already holds against it — an answer missing a holder revokes
- * that holder's access, and an invented `[]` revokes everyone's. So:
+ * Loud, never short. These sets feed sharing GRANTS, and the reconcilers diff
+ * the grants a rule already holds against them — an answer missing a holder
+ * revokes that holder's access, and an invented `[]` revokes everyone's. So:
  *
  *   - a read that fails throws, carrying the driver's error as `cause`;
  *   - a walk that cannot vouch for completion (a row without an `id` to resume
  *     after, a page the driver returned without honouring the cursor) throws;
  *   - a membership object that does not exist is the one failure that IS an
- *     answer — a stack that never materialises `sys_member` has no role
- *     holders — and answers `[]` as it always did; see
- *     {@link membershipObjectAbsent}.
+ *     answer — a stack that never materialises it has no holders through it —
+ *     and answers `null`, so each caller says what absence means for it
+ *     (`isObjectAbsentError`, `@objectstack/types`).
+ *
+ * ⛔ Not exported from the package index — the one walk the team, role,
+ * position and business-unit member reads share (#29606), not a public
+ * affordance.
  */
-/**
- * [#29362] Did the role read fail because this stack has no `sys_member` at
- * all — the one failure whose empty answer is the truth? Two spellings of the
- * same absence, each attributed to `sys_member` so a failure about another
- * object is not evidence about this one: the driver's missing-table refusal
- * (the shared `isMissingTableError`, the table registered but never created),
- * and the engine's `OBJECT_NOT_FOUND` (a composition that never registers the
- * object, refused before any driver is asked — the reading
- * `sys-metadata-repository.ts` gives its own history object). Anything else
- * is an outage and stays loud.
- */
-function membershipObjectAbsent(err: unknown): boolean {
-  if (isMissingTableError(err, 'sys_member')) return true;
-  const refused = err as { code?: unknown; object?: unknown } | null | undefined;
-  return refused?.code === 'OBJECT_NOT_FOUND' && refused.object === 'sys_member';
+export async function readMembershipToCompletion(
+  engine: SharingEngine,
+  read: {
+    object: string;
+    where: Record<string, unknown>;
+    fields: readonly string[];
+    subject: string;
+    pageRows?: number;
+    /** A user-scoped holder check words its refusal as a check, not an expansion. */
+    kind?: 'expansion' | 'check';
+  },
+): Promise<Record<string, unknown>[] | null> {
+  const rows: Record<string, unknown>[] = [];
+  const walk = keysetWalk<Record<string, unknown>>(
+    (page) => engine.find(read.object, { ...page, fields: ['id', ...read.fields], context: SYSTEM_CTX }),
+    { where: read.where, pageSize: read.pageRows ?? MEMBERSHIP_PAGE_ROWS },
+  );
+  try {
+    for await (const page of walk.pages()) rows.push(...page);
+  } catch (err) {
+    if (isObjectAbsentError(err, read.object)) return null;
+    throw holderReadRefusal(read.subject, err instanceof Error ? err.message : String(err), err, read.kind ?? 'expansion');
+  }
+  if (walk.truncated) throw holderReadRefusal(read.subject, WALK_INCOMPLETE, undefined, read.kind ?? 'expansion');
+  return rows;
 }
 
+/**
+ * [#29503] One user-scoped holder probe (`limit: 1`): does any row of `object`
+ * match `where`? A one-row existence probe is not cut by its bound, so only its
+ * failure answer changed: absence of the object answers `false` (no holders
+ * through it), and every other failure refuses — "not a holder" on an outage is
+ * what made the per-user recompute revoke a holder's grants.
+ *
+ * ⛔ Not exported from the package index.
+ */
+export async function probeMembership(
+  engine: SharingEngine,
+  probe: { object: string; filter: Record<string, unknown>; fields: readonly string[]; subject: string; limit?: number },
+): Promise<Record<string, unknown>[]> {
+  try {
+    const rows = await engine.find(probe.object, {
+      filter: probe.filter,
+      fields: [...probe.fields],
+      limit: probe.limit ?? 1,
+      context: SYSTEM_CTX,
+    });
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    if (isObjectAbsentError(err, probe.object)) return [];
+    throw holderReadRefusal(probe.subject, err instanceof Error ? err.message : String(err), err, 'check');
+  }
+}
+
+/** The user ids `rows` carry, de-duplicated, in first-seen order. */
+function userIdsOf(rows: readonly Record<string, unknown>[]): string[] {
+  const users = new Set<string>();
+  for (const row of rows) {
+    const uid = String(row?.user_id ?? '');
+    if (uid) users.add(uid);
+  }
+  return Array.from(users);
+}
+
+/**
+ * [#29362] Every holder of `roleName` (in `org`, when given), read to
+ * completion through {@link readMembershipToCompletion}. A stack with no
+ * `sys_member` has no role holders and answers `[]` as it always did.
+ */
 async function readRoleHoldersToCompletion(
   engine: SharingEngine,
   roleName: string,
   org: string | null | undefined,
 ): Promise<string[]> {
-  const refusal = (reason: string, cause?: unknown) => Object.assign(new Error(
-    `[sharing] the holders of role '${roleName}'${org ? ` in organization '${org}'` : ''} could not be read: `
-      + `${reason}. A shortened or empty holder set would withhold or revoke the grants it confers, so the `
-      + 'expansion refuses instead.',
-  ), cause === undefined ? {} : { cause });
-  const users = new Set<string>();
-  const walk = keysetWalk<Record<string, unknown>>(
-    (page) => engine.find('sys_member', { ...page, fields: ['id', 'user_id'], context: SYSTEM_CTX }),
-    { where: roleHolderPredicate(roleName, org), pageSize: ROLE_HOLDER_PAGE_ROWS },
-  );
-  try {
-    for await (const page of walk.pages()) {
-      for (const row of page) {
-        const uid = String(row?.user_id ?? '');
-        if (uid) users.add(uid);
-      }
-    }
-  } catch (err) {
-    if (membershipObjectAbsent(err)) return [];
-    throw refusal(err instanceof Error ? err.message : String(err), err);
-  }
-  if (walk.truncated) {
-    throw refusal('the read by id could not continue past a page (a row without an id, or a page that repeated the cursor)');
-  }
-  return Array.from(users);
+  const rows = await readMembershipToCompletion(engine, {
+    object: 'sys_member',
+    where: roleHolderPredicate(roleName, org),
+    fields: ['user_id'],
+    subject: `the holders of role '${roleName}'${org ? ` in organization '${org}'` : ''}`,
+  });
+  return rows ? userIdsOf(rows) : [];
 }
 
 /**
@@ -214,25 +272,23 @@ async function readRoleHoldersToCompletion(
  * Exists for the recipient-membership recompute (`recipient-membership-recompute.ts`),
  * which re-evaluates a team rule for the ONE user whose membership row was
  * written — a write path, where reading every member of the team per written
- * row would make a bulk membership import quadratic. A failed read answers
- * `false`, exactly as the expansion answers `[]`.
+ * row would make a bulk membership import quadratic. [#29503] A failed read
+ * refuses, exactly as the expansion does: the recompute's per-user catch then
+ * logs and the user's grants stay, where a `false` revoked them on an outage.
+ * A stack with no `sys_team_member` answers `false`.
  *
  * ⛔ Not exported from the package index — an internal seam, not a public
  * affordance of {@link TeamGraphService}.
  */
 export async function teamHasMember(engine: SharingEngine, teamId: string, userId: string): Promise<boolean> {
   if (!teamId || !userId) return false;
-  try {
-    const rows = await engine.find('sys_team_member', {
-      where: { ...teamMemberPredicate(teamId), user_id: userId },
-      fields: ['user_id'],
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    return (rows ?? []).some((r: any) => String(r?.user_id ?? '') === userId);
-  } catch {
-    return false;
-  }
+  const rows = await probeMembership(engine, {
+    object: 'sys_team_member',
+    filter: { ...teamMemberPredicate(teamId), user_id: userId },
+    fields: ['user_id'],
+    subject: `whether user '${userId}' is a member of team '${teamId}'`,
+  });
+  return rows.some((r: any) => String(r?.user_id ?? '') === userId);
 }
 
 /**
@@ -251,17 +307,13 @@ export async function holdsRole(
   organizationId?: string | null,
 ): Promise<boolean> {
   if (!roleName || !userId) return false;
-  try {
-    const rows = await engine.find('sys_member', {
-      filter: { ...roleHolderPredicate(roleName, organizationId), user_id: userId },
-      fields: ['user_id'],
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    return (rows ?? []).some((r: any) => String(r?.user_id ?? '') === userId);
-  } catch {
-    return false;
-  }
+  const rows = await probeMembership(engine, {
+    object: 'sys_member',
+    filter: { ...roleHolderPredicate(roleName, organizationId), user_id: userId },
+    fields: ['user_id'],
+    subject: `whether user '${userId}' holds role '${roleName}'${organizationId ? ` in organization '${organizationId}'` : ''}`,
+  });
+  return rows.some((r: any) => String(r?.user_id ?? '') === userId);
 }
 
 export class TeamGraphService implements ITeamGraphService {
@@ -283,18 +335,16 @@ export class TeamGraphService implements ITeamGraphService {
     const cached = this.cache.expandUsers!.get(teamId);
     if (cached) return cached;
 
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_team_member', {
-        where: teamMemberPredicate(teamId),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      });
-    } catch {
-      rows = [];
-    }
-    const users = Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // [#29503] Read to completion, and a failed read throws — so nothing is
+    // cached for it, and the next caller reads again. A stack with no
+    // `sys_team_member` has no team members.
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_team_member',
+      where: teamMemberPredicate(teamId),
+      fields: ['user_id'],
+      subject: `the members of team '${teamId}'`,
+    });
+    const users = rows ? userIdsOf(rows) : [];
     this.cache.expandUsers!.set(teamId, users);
     return users;
   }

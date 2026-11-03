@@ -25,6 +25,7 @@ import {
   GetPackageCustomizationsResponseSchema,
 } from './package-lifecycle.zod';
 import { PackagePublishResultSchema as SystemPackagePublishResultSchema } from '../system/metadata-persistence.zod';
+import { CONNECTOR_CREDENTIAL_MAP_PATHS, redactConnectorItem } from '../integration/connector-credential-redaction';
 import { InstalledPackageSourceSchema } from '../kernel/package-registry.zod';
 
 describe('the ruled re-export of PackagePublishResultSchema into the `/api` namespace', () => {
@@ -197,7 +198,7 @@ describe('RollbackToPackageCommitResponseSchema declares the COMMIT-rollback bod
   });
 });
 
-describe('PackageExportManifestSchema declares the four fixed keys and stays open', () => {
+describe('PackageExportManifestSchema declares the five fixed keys and stays open', () => {
   /** A verbatim-shaped capture of a real `assemblePackageManifest` return. */
   const realResponse = {
     id: 'com.example.crm',
@@ -214,13 +215,64 @@ describe('PackageExportManifestSchema declares the four fixed keys and stays ope
     if (result.success) expect(result.data).toEqual(realResponse);
   });
 
-  it('requires exactly the four fixed keys — a manifest with no items still parses', () => {
+  it('requires only the three identity keys — a manifest with no items still parses', () => {
     const bare = { id: 'com.example.empty', name: 'empty', version: '1.0.0' };
     expect(PackageExportManifestSchema.safeParse(bare).success).toBe(true);
   });
 
   it('refuses a manifest missing its identity — the fixed keys are genuinely pinned', () => {
     expect(PackageExportManifestSchema.safeParse({ objects: [] }).success).toBe(false);
+  });
+});
+
+describe('PackageExportManifestSchema.withheldMaps names each map the export withheld whole (#28640 ruling ③A)', () => {
+  const identity = { id: 'com.example.crm', name: 'example-crm', version: '2.1.0' };
+  /** The connector item as the export writes it: served, so its header map is already absent. */
+  const servedConnector = { name: 'stripe', label: 'Stripe', type: 'api', provider: 'rest', providerConfig: { baseUrl: 'https://api.stripe.example' } };
+
+  it('parses an export that lists a withheld map and PRESERVES it — the item body stays as served', () => {
+    const manifest = {
+      ...identity,
+      connectors: [servedConnector],
+      withheldMaps: [{ type: 'connector', name: 'stripe', path: 'providerConfig.headers' }],
+    };
+    const result = PackageExportManifestSchema.safeParse(manifest);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(manifest);
+  });
+
+  it('is declared ahead of its producer: the describe opens with the planned marker and names the ADR, never a tracker id', () => {
+    const description = PackageExportManifestSchema.shape.withheldMaps.description ?? '';
+    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(description).toContain('ADR-0049');
+    expect(description).not.toMatch(/#\d{3,}/);
+  });
+
+  it('is optional — an export that withheld nothing, or one from before the key, still parses', () => {
+    expect(PackageExportManifestSchema.safeParse(identity).success).toBe(true);
+  });
+
+  it('spells each position exactly as the connector redactor reports it — the same four maps, nothing else', () => {
+    const declared = [...PackageExportManifestSchema.shape.withheldMaps.unwrap().element.shape.path.options];
+    // The redactor's own list of the maps it withholds whole …
+    expect(declared).toEqual(CONNECTOR_CREDENTIAL_MAP_PATHS.map((p) => p.join('.')));
+    // … and the spelling its `redactedKeys` names them by, read off a real redaction.
+    const map = { Authorization: 'x' };
+    const { redactedKeys } = redactConnectorItem({
+      ...servedConnector,
+      providerConfig: { headers: map, defaultHeaders: map, transport: { headers: map, env: { TOKEN: 'x' } } },
+    });
+    expect([...redactedKeys].sort()).toEqual([...declared].sort());
+  });
+
+  it.each([
+    ['a position outside the four', { type: 'connector', name: 'stripe', path: 'auth.token' }],
+    ['a position spelled without its providerConfig root', { type: 'connector', name: 'stripe', path: 'defaultHeaders' }],
+    ['a type no export withholds a map of yet', { type: 'webhook', name: 'hook', path: 'providerConfig.headers' }],
+    ['a list of the withheld header names — maps are withheld whole', { type: 'connector', name: 'stripe', path: 'providerConfig.headers', keys: ['Authorization'] }],
+    ['an entry with no item name', { type: 'connector', path: 'providerConfig.headers' }],
+  ])('refuses %s', (_label, entry) => {
+    expect(PackageExportManifestSchema.safeParse({ ...identity, withheldMaps: [entry] }).success).toBe(false);
   });
 });
 

@@ -98,9 +98,10 @@ describe('PageSchema.apps — the key', () => {
     expect(issues.map((i) => i.path)).toEqual(['isDefault', 'apps']);
   });
 
-  it('the describe carries the planned marker and no tracker number', () => {
+  it('the describe carries no planned marker (the console reads the key) and no tracker number', () => {
     const description = PageSchema.shape.apps.description ?? '';
-    expect(description).toMatch(/^\[PLANNED — not yet rendered\] /);
+    expect(description).toMatch(/^The apps whose routes open this record page /);
+    expect(description).not.toMatch(/PLANNED|not yet rendered|until the console reads it/i);
     expect(description).not.toMatch(/#\d{3,}/);
   });
 });

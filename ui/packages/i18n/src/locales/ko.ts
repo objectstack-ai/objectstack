@@ -1135,7 +1135,6 @@ const ko = {
     undo: "실행 취소",
     redo: "다시 실행",
     canvasMinimap: "캔버스 미니맵",
-    versionHistory: "버전 기록",
   },
   detail: {
     editInlineHint: "더블클릭하여 편집",

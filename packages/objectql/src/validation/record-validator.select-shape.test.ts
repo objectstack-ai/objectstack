@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { validateRecord, validateRecordInScope, ValidationError } from './record-validator.js';
+import { validateRecord, validateRecordInScope, normalizeNumericStringValues, ValidationError } from './record-validator.js';
 import { ObjectQL } from '../engine.js';
 
 const schema = {
@@ -117,10 +117,11 @@ describe('#29244 — a multi-value option field refuses an element that is a pla
 describe('#29244 — what the rule leaves alone', () => {
   it('a scalar on a single-value select is judged as before', () => {
     expect(errorsOf({ free: 'anything', free_radio: 'x', decl: 'a' })).toEqual([]);
-    // Present behaviour, not the contract: the spec's stored element for a
-    // free-form select is a string, and #29562 is meant to move this pin (a
-    // number or boolean on a single-value select).
+    // [#29562] A number is judged by its string reading, and the write door
+    // stores that string: `3` is admitted on a free select as the code `"3"`
+    // (the door half is pinned in `record-validator.option-scalar-value.test.ts`).
     expect(errorsOf({ free: 3 })).toEqual([]);
+    expect(normalizeNumericStringValues(schema, { free: 3 })).toEqual({ free: '3' });
     expect(errorsOf({ decl: 'z' }).map((e) => e.code)).toEqual(['invalid_option']);
   });
 

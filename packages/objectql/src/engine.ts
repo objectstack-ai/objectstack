@@ -390,7 +390,10 @@ import {
   PLATFORM_PROVISIONED_COLUMNS,
   declaredColumnSet,
   rowsWithDeclaredColumnsOnly,
+  rowsWithSelectedColumnsAnswered,
+  selectedStoredColumns,
   withDeclaredColumnsOnly,
+  withSelectedColumnsAnswered,
 } from './declared-read-columns.js';
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
 // [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
@@ -14702,6 +14705,13 @@ export class ObjectQL implements IObjectQLEngine {
           // declared record. See `declared-read-columns.ts`.
           if (Array.isArray(result)) {
             result = rowsWithDeclaredColumnsOnly(result, declaredColumnSet(_findSchema));
+            // [#29408] …and answered on every stored declared column the read
+            // SELECTED: one the driver returned no key for (a driver that
+            // stores only written columns) is `null`, as driver-sql's column
+            // answers — the row's persisted state is in hand. Unselected,
+            // formula and FLS-refused columns stay absent; see
+            // `selectedStoredColumns`.
+            result = rowsWithSelectedColumnsAnswered(result, selectedStoredColumns(_findSchema, driverAst?.fields));
           }
 
           // Post-process: evaluate formula virtual fields against the raw rows.
@@ -15002,6 +15012,8 @@ export class ObjectQL implements IObjectQLEngine {
       // [#21571] Same default projection as `find`, same position: the
       // declared field set, applied to the row as the driver returned it.
       result = withDeclaredColumnsOnly(result, declaredColumnSet(_findOneSchema));
+      // [#29408] Same answer on the selected stored columns as `find`.
+      result = withSelectedColumnsAnswered(result, selectedStoredColumns(_findOneSchema, driverAst?.fields));
 
       // Post-process: evaluate formula virtual fields against the raw row
       // ([#20082] with the caller's permission map when a formula calls `can`).

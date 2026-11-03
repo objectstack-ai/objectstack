@@ -1135,7 +1135,6 @@ const ja = {
     undo: "元に戻す",
     redo: "やり直す",
     canvasMinimap: "キャンバスのミニマップ",
-    versionHistory: "バージョン履歴",
   },
   detail: {
     editInlineHint: "ダブルクリックで編集",

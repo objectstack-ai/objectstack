@@ -3331,6 +3331,17 @@ function readBaseContributions(
         || a.packageId.localeCompare(b.packageId));
 }
 
+/**
+ * [#29563] Whether an item declares that it overrides `packageId`
+ * (`overrides.package`, ADR-0146 D2). A package's own document never does: the
+ * declaration names the base an item of the base's `.custom` pair replaces.
+ */
+function declaresOverrideOf(item: unknown, packageId: string): boolean {
+    const overrides = (item as { overrides?: unknown } | null | undefined)?.overrides;
+    return typeof overrides === 'object' && overrides !== null
+        && (overrides as { package?: unknown }).package === packageId;
+}
+
 async function assemblePackageManifest(
 deps: DomainHandlerDeps,
 packageId: string,
@@ -3377,6 +3388,7 @@ context: HttpProtocolContext,
 
     const manifest: Record<string, any> = {};
     let total = 0;
+    const perPackageLayer = typeof protocol.getMetaItemsPerPackage === 'function';
     for (const plural of [...exportPluralKeys, EXTENSIONS_KEY]) {
         const singular = singularOf(plural);
         let items: any[] = [];
@@ -3398,6 +3410,17 @@ context: HttpProtocolContext,
             // Unknown/unsupported type for this runtime — skip.
             continue;
         }
+        // [#29563, ADR-0146 D8 item 3] …and, from that layer, never an item
+        // that declares it overrides THIS package: that is the pair's
+        // override, not one of the package's own documents. The layer can list
+        // one under the base: a published `.custom` row is registered in the
+        // registry's bare slot wearing the base's envelope (`_packageId` = the
+        // base's), and for every type but `view` (#22057) that copy is listed
+        // beside the base's own item. Measured for `dashboard` and `report`:
+        // the base's export carried both, the second with the edited label and
+        // the `overrides` block. A protocol with no per-package layer is read
+        // as before.
+        if (perPackageLayer) items = items.filter((it) => !declaresOverrideOf(it, packageId));
         if (items.length === 0) continue;
         // [#5320] `views` is partitioned rather than dumped: the registry's
         // ADR-0017 dual-read returns the container AND its expanded per-view

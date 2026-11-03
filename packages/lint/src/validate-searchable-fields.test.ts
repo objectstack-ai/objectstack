@@ -216,9 +216,12 @@ describe('validateSearchableFields — what it deliberately does not flag', () =
   });
 
   it('does not flag a field that exists but is an odd search target', () => {
-    // An explicit `searchableFields` is authoritative — the engine scans
+    // An explicit `searchableFields` is authoritative — the runtime admits
     // exactly what it names — so declaring a json column is a choice, not
-    // drift. This rule answers existence only.
+    // drift. It is admitted but contributes no clause to the `$search`
+    // expansion (its declared type can never hold a string). This rule
+    // answers existence only: flagging it would reject metadata the runtime
+    // accepts (ADR-0072 D1).
     const findings = validateSearchableFields({
       objects: [
         {
@@ -536,9 +539,11 @@ describe('validateSearchableFields — list views that narrow the set', () => {
 
   it('passes a view entry of odd type once the object declares it searchable', () => {
     // The runtime's declared branch filters by EXISTENCE, never by type: a
-    // json/lookup column declared on the OBJECT is honored by the engine and
-    // admitted by the gate, so the view echoing it must stay green — flagging
-    // it would reject metadata the runtime accepts.
+    // json/lookup column declared on the OBJECT is admitted to the resolved
+    // set and by the gate (a json column contributes no clause to the
+    // `$search` expansion; a single lookup becomes an `$icontains` over the
+    // stored foreign key), so the view echoing it must stay green — flagging
+    // it would reject metadata the runtime accepts (ADR-0072 D1).
     const findings = validateSearchableFields({
       objects: [
         {
@@ -962,11 +967,13 @@ describe('[#6674] validateSearchableFields — a virtual formula entry', () => {
 
   it('CONTROL — a json or lookup entry on the OBJECT\'s own set stays clean', () => {
     // The carve-out #4830 wrote down, deliberately preserved: the runtime's
-    // declared branch executes those (a `$contains` over the stored JSON text /
-    // the stored foreign key). Narrow and rarely useful, but a scan that CAN
-    // match — flagging it would reject metadata the runtime accepts (ADR-0072
-    // D1). If this control ever goes red, #6674 has quietly become "the declared
-    // branch is type-filtered", which it is not.
+    // declared branch admits those. A json column contributes no clause to the
+    // `$search` expansion (its declared type can never hold a string); a single
+    // lookup becomes an `$icontains` over the stored foreign key, narrow and
+    // rarely useful but a scan that CAN match. Either way, flagging it would
+    // reject metadata the runtime accepts (ADR-0072 D1). If this control ever
+    // goes red, #6674 has quietly become "the declared branch is
+    // type-filtered", which it is not.
     expect(
       validateSearchableFields({
         objects: [

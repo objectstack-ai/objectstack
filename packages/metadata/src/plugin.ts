@@ -135,6 +135,13 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     pages: 'page',
     dashboards: 'dashboard',
     reports: 'report',
+    // [ADR-0021, ADR-0130 D4] The analytics datasets a dashboard or report names.
+    // Mapped so the residual rule walks them too: without this entry a
+    // `packages[]` stack's top-level dataset that no body declared was neither
+    // registered nor refused, and the dashboard naming it failed at run time.
+    // Not the seed `data:` collection, which stays unmapped (see the end of
+    // this map).
+    datasets: 'dataset',
     actions: 'action',
     // `themes: 'theme'` removed by commit 35ad101bc (ADR-0049): the carrier key is
     // retired, so a parsed artifact can no longer carry the field — and the
