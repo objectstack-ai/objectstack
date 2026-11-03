@@ -63,8 +63,12 @@
  * edit and is kept, and a field the source does not declare has nothing to
  * be compared with.
  *
- * Pure: no store, no service. The caller hands in the source row and the
- * bundle.
+ * The source is translated with the read's own options, the packaged base
+ * included: a slot the read serves untranslated (an overlay that diverged
+ * from the packaged text) is no translation's source.
+ *
+ * Pure: no store, no service. The caller hands in the source row, the
+ * bundle and the packaged base.
  */
 
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
@@ -153,12 +157,24 @@ interface TranslatedSource {
     reads: Array<{ doc: Rec; fields: Map<string, Rec> }>;
 }
 
-function translatedSource(doc: Rec, locales: readonly string[], bundle: TranslationBundle | undefined): TranslatedSource {
+function translatedSource(
+    doc: Rec,
+    locales: readonly string[],
+    bundle: TranslationBundle | undefined,
+    packagedBase: unknown,
+): TranslatedSource {
     return {
         doc,
         fields: fieldMap(doc),
         reads: locales.map((locale) => {
-            const read = translateObject(doc as unknown as ObjectLike, bundle, { locale }) as unknown as Rec;
+            // The read's own options: with the packaged base, a slot that
+            // diverged from the packaged text is served untranslated in every
+            // locale (ADR-0029 D9.2a), so it is no translation's source here
+            // either.
+            const read = translateObject(doc as unknown as ObjectLike, bundle, {
+                locale,
+                ...(packagedBase !== undefined && packagedBase !== null ? { packagedBase } : {}),
+            }) as unknown as Rec;
             return { doc: read, fields: fieldMap(read) };
         }),
     };
@@ -177,7 +193,20 @@ function translatedSource(doc: Rec, locales: readonly string[], bundle: Translat
  */
 export function restoreTranslatedEchoes<T>(
     item: T,
-    args: { source: unknown; bundle: TranslationBundle | undefined },
+    args: {
+        source: unknown;
+        bundle: TranslationBundle | undefined;
+        /**
+         * The packaged base the `/meta` read translates against (the code
+         * layer of a packaged object), passed through as `translateObject`'s
+         * `packagedBase`. Without it, a stored overlay slot that diverged from
+         * the packaged text (`Title` renamed `Subject`) would read as
+         * translated to the catalog's entry for the packaged text (`标题`), and
+         * an author typing exactly that would be put back to `Subject`. Absent
+         * for an object no package ships.
+         */
+        packagedBase?: unknown;
+    },
 ): { item: T; restored: RestoredTranslatedSlot[] } {
     const restored: RestoredTranslatedSlot[] = [];
     if (!isRec(item) || typeof item.name !== 'string') return { item, restored };
@@ -201,7 +230,7 @@ export function restoreTranslatedEchoes<T>(
     }
     const sources = [storedDoc, injectedDoc]
         .filter((doc) => Object.keys(doc.fields as Rec).length > 0 || Object.keys(doc).length > 2)
-        .map((doc) => translatedSource(doc, locales, args.bundle));
+        .map((doc) => translatedSource(doc, locales, args.bundle, args.packagedBase));
     if (sources.length === 0) return { item, restored };
 
     /**

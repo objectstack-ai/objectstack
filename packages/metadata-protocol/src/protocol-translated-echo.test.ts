@@ -109,4 +109,26 @@ describe('[#29673] restoreTranslatedEchoes', () => {
         expect(same.item).toBe(untouched);
         expect(same.restored).toEqual([]);
     });
+
+    it('a packaged object\'s overlay slot that diverged from the packaged text is no translation\'s source: the catalog string an author types is kept', () => {
+        // The packaged base ships `amount: Amount`; the catalog translates that
+        // packaged text. The tenant's overlay renamed it `Total`, which the read
+        // serves untranslated in every locale (ADR-0029 D9.2a).
+        const packagedBase = stored();
+        const overlay: any = stored();
+        overlay.fields.amount = { ...overlay.fields.amount, label: 'Total' };
+        // The precondition: the read, with the packaged base, serves `Total` in zh-CN.
+        expect((translateObject(overlay, bundle, { locale: 'zh-CN', packagedBase }) as any).fields.amount.label).toBe('Total');
+
+        const typed: any = stored();
+        typed.fields.amount = { ...typed.fields.amount, label: '金额' };
+        const kept = restoreTranslatedEchoes(typed, { source: overlay, bundle, packagedBase });
+        expect(kept.item.fields.amount.label).toBe('金额');
+        expect(kept.restored).toEqual([]);
+
+        // Control: the same typed string over a slot that still equals the
+        // packaged text IS the read's translation, and is put back.
+        const echoed = restoreTranslatedEchoes(typed, { source: packagedBase, bundle, packagedBase });
+        expect(echoed.item.fields.amount.label).toBe('Amount');
+    });
 });
