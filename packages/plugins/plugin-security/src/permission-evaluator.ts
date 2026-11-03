@@ -35,6 +35,18 @@ export interface ConditionedFieldEntry {
   when: string;
   /** The entry's edit vote on a matching row. */
   editable: boolean;
+  /**
+   * [#29610 / ruling of record 6573563853, letter A] The sets whose Modify All
+   * vote supersedes the entry — empty when none does. Read from
+   * `superuserFieldVote` (`@objectstack/core`), the vote
+   * {@link PermissionEvaluator.getFieldPermissions} applies after the
+   * per-entry votes under every `when` verdict: when it votes `editable`, every
+   * field of the object is readable and editable on every row, so the entry's
+   * lock binds on no row for this principal. A View All vote supersedes
+   * nothing here: it votes only the read bit, which a conditioned entry already
+   * casts (the spec refuses `readable: false` beside a `when`).
+   */
+  supersededBy: string[];
 }
 
 /**
@@ -525,13 +537,20 @@ export class PermissionEvaluator {
    * [#25866] The row-conditioned entries the sets declare on `objectName`,
    * for a reader that holds no row (`os explain`): each is reported AS a
    * row-conditioned lock — judged per row by the write gate, applied as its
-   * lock everywhere else — rather than folded silently into the mask.
+   * lock everywhere else — rather than folded silently into the mask. Each
+   * entry names the sets whose Modify All vote supersedes it (`supersededBy`,
+   * #29610), so the report never calls a lock binding that the merge overrides.
    */
   conditionedFieldEntries(
     objectName: string,
     permissionSets: PermissionSet[],
   ): ConditionedFieldEntry[] {
     const out: ConditionedFieldEntry[] = [];
+    // [#29610] The same super-user vote `getFieldPermissions` applies — never a
+    // second reading of the bits. An `editable` vote overrides every entry.
+    const supersededBy = superuserFieldVote(permissionSets, objectName)?.editable
+      ? this.superuserBypassSets(objectName, permissionSets, { bit: 'modify' })
+      : [];
     for (const ps of permissionSets) {
       if (!ps.fields) continue;
       for (const [key, perm] of Object.entries(ps.fields)) {
@@ -543,6 +562,7 @@ export class PermissionEvaluator {
           set: ps.name,
           when,
           editable: perm.editable === true,
+          supersededBy: [...supersededBy],
         });
       }
     }

@@ -2959,18 +2959,35 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   // stored row before an update); this report holds no row, so each such entry
   // is reported AS a row-conditioned lock — which is also how every row-blind
   // reader applies it — rather than folded silently into the mask above.
+  //
+  // [#29610 / ruling of record 6573563853, letter A] …unless the principal's
+  // Modify All vote supersedes it: `getFieldPermissions` applies that vote after
+  // the per-entry votes under every `when` verdict, so such an entry's lock
+  // binds on no row. The evaluator names the superseding sets from the SAME
+  // vote (`ConditionedFieldEntry.supersededBy`); this layer only words it, in
+  // the "Superseded by …" form the sharing attribution already uses. Each
+  // principal's entries are judged against its own sets: under D10 the masks
+  // intersect, so a delegator's lock still binds when only the agent holds the
+  // vote.
   const conditioned = [
     ...deps.evaluator.conditionedFieldEntries(object, sets),
     ...(delegatorSets ? deps.evaluator.conditionedFieldEntries(object, delegatorSets) : []),
   ];
+  const describeConditioned = (e: (typeof conditioned)[number]): string =>
+    `${e.field} (${e.editable ? 'editable' : 'locked'} when ${e.when}, set "${e.set}")`;
+  const binding = conditioned.filter((e) => e.supersededBy.length === 0);
+  const superseded = conditioned.filter((e) => e.supersededBy.length > 0);
+  const supersedingSets = [...new Set(superseded.flatMap((e) => e.supersededBy))];
   const conditionedSentence =
-    conditioned.length > 0
-      ? ` ${conditioned.length} field permission(s) carry a row condition — judged per row by the write gate, ` +
-        `applied as the lock everywhere else: ${listFields(
-          conditioned.map((e) => `${e.field} (${e.editable ? 'editable' : 'locked'} when ${e.when}, set "${e.set}")`),
-          (f) => f,
-        )}.`
-      : '';
+    (binding.length > 0
+      ? ` ${binding.length} field permission(s) carry a row condition — judged per row by the write gate, ` +
+        `applied as the lock everywhere else: ${listFields(binding.map(describeConditioned), (f) => f)}.`
+      : '') +
+    (superseded.length > 0
+      ? ` ${superseded.length} row-conditioned field permission(s) are superseded by the Modify All Data field vote ` +
+        `[${supersedingSets.join(', ')}], which votes every field editable on every row, so the lock binds on no row: ` +
+        `${listFields(superseded.map(describeConditioned), (f) => f)}.`
+      : '');
   layers.push({
     layer: 'fls',
     verdict: maskNarrows ? 'narrows' : 'not_applicable',
