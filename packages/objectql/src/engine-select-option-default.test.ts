@@ -74,7 +74,7 @@ const sys = { context: { isSystem: true } } as any;
 
 /** The row as the stub driver stored it — what the write persisted, before any engine shaping. */
 const storedRow = (engine: ObjectQL, object: string, id: unknown) =>
-  engine.getDriverForObject(object)!.findOne(object, { object, where: { id } });
+  engine.getDriverForObject(object)!.findOne(object, { where: { id } });
 
 describe('[#7246] the option marked `default: true` is the field default', () => {
   let engine: ObjectQL;
