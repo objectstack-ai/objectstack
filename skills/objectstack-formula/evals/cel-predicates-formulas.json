@@ -80,6 +80,16 @@
         "must_contain": ["currency:@"],
         "must_not_contain": ["currency:currency_code", "currency:USD", "currency:CNY", "| currency }}"]
       }
+    },
+    {
+      "id": 9,
+      "prompt": "A record-change flow on `project` (start `triggerType: 'record-after-update'`, `objectName: 'project'`) escalates when the budget passes 200000. `budget` is a currency field with no `required` and no `defaultValue`. Write the edge condition from the decision node to the escalation branch.",
+      "expected_output": "`record.budget != null && record.budget > 200000`. The run binds every declared field of the trigger record, `null` when empty, and CEL has no `>` overload for null, so `os validate` and the runtime publish gate refuse the unguarded edge; at runtime the run would fail at that edge while the write that fired it still lands. A bare `budget > 200000` is the same field, and `os validate` refuses it too; and `has(record.budget)` is not a guard: a declared field holding null is still present.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["record.budget != null", "record.budget > 200000"],
+        "must_not_contain": ["has(record.budget) && record.budget >", "{record."]
+      }
     }
   ]
 }
