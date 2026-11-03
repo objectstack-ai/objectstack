@@ -197,6 +197,7 @@ import { aggregateBackendFault, backendStatementFault, distinctBackendFault, unr
 // methods of the same names below hand each body what it reads (`PredicateEmitterHost`). The declarations
 // imported as types are named by docblocks here.
 import { applyEmptyOperator, applyJsonMembership, applyLike, applyLikePattern, applyNormalizedComparison, applyNullSafeNegative, type emptyJsonListPredicate, type emptyListUnsupportedDialectError, type likePatternPredicate, type textMatchPredicate, type undeclaredEmptyOperatorFieldError } from './sql-driver-predicate-emitters.js';
+import { emitBalancedGroup } from './sql-driver-balanced-group.js';
 // [#25521 cut 20] Date bucketing (`buildDateBucketExpr`); the method of the same name below hands the body what
 // it reads (`DateBucketHost`).
 import { buildDateBucketExpr } from './sql-driver-date-bucket.js';
@@ -9158,12 +9159,12 @@ export class SqlDriver implements IDataDriver {
         // 'and' and no branch propagates 'or' any more), but leaving one of the
         // four combinators deaf to the flag is how the rules drift apart again.
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
+        // [#29888] A large group is regrouped into balanced halves, so the
+        // expression tree it parses to stays shallow (sql-driver-balanced-group.ts).
         (builder as any)[method]((qb: any) => {
-          for (const sub of branches) {
-            qb.where((subQb: any) => {
-              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
-            });
-          }
+          emitBalancedGroup(qb, branches, 'where', (subQb: any, sub) => {
+            this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
+          });
         });
       } else if (key === '$or' && Array.isArray(value)) {
         // #5134 — one TRUE disjunct makes the whole `$or` TRUE, so `{$or:[{a},{}]}`
@@ -9176,19 +9177,22 @@ export class SqlDriver implements IDataDriver {
         );
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
         (builder as any)[method]((qb: any) => {
-          for (const sub of branches) {
-            // The `orWhere` on THIS line is what OR-s the branches together.
-            // The branch body is still compiled with 'and', because every key
-            // inside one filter object is AND-ed at every depth (Filter
-            // Protocol / Mongo). Passing 'or' down instead made a branch's own
-            // field keys OR each other, so `{$or:[{a,b}]}` compiled to
-            // `a = ? OR b = ?`. That widens the result set, so an RLS/sharing
-            // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
-            // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
-            qb.orWhere((subQb: any) => {
-              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
-            });
-          }
+          // The `'orWhere'` attach is what OR-s the branches together.
+          // The branch body is still compiled with 'and', because every key
+          // inside one filter object is AND-ed at every depth (Filter
+          // Protocol / Mongo). Passing 'or' down instead made a branch's own
+          // field keys OR each other, so `{$or:[{a,b}]}` compiled to
+          // `a = ? OR b = ?`. That widens the result set, so an RLS/sharing
+          // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
+          // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
+          // [#29888] A large group is regrouped into balanced halves, so the
+          // expression tree it parses to stays shallow: the parent-record read
+          // gates OR one branch per registered parent object, and a flat chain
+          // of them passed SQLite's expression-depth limit on hosted libSQL
+          // (sql-driver-balanced-group.ts).
+          emitBalancedGroup(qb, branches, 'orWhere', (subQb: any, sub) => {
+            this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
+          });
         });
       } else if (key === '$not') {
         // Spec LOGICAL_OPERATORS declares `$not` alongside `$and`/`$or`; both

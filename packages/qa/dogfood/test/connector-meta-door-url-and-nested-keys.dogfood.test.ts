@@ -28,6 +28,13 @@
 //    same row is kept (CONTROL). A `retryConfig` the author leaves out is
 //    removed with its stored keys, as before (CONTROL), and one stored as a
 //    non-object is still kept at rest by a save that leaves it out (CONTROL).
+//  - ONE VALUE-LEVEL RULE: a URL is judged after trimming its leading and
+//    trailing C0 control characters and spaces, where a URL parser reads it,
+//    and a credential query parameter is refused in any string under
+//    `providerConfig` and `auth`, scheme or none. The read rewrites exactly
+//    that, at the position the write door judged, and a save of the served
+//    form keeps the stored values; a credential-free URL with surrounding
+//    whitespace saves and dispatches (CONTROL).
 //
 // Every credential below is an obviously-fake placeholder, and every assertion
 // on one is its absence from what a door served or stored, or its presence at
@@ -410,6 +417,113 @@ describe('connector metadata doors: an authored connector keeps no credential in
       const atRest = bodyOf((await stored(RETRY_MALFORMED))[0]);
       expect(atRest.label).toBe('CUN retry malformed (edited)');
       expect(atRest.retryConfig).toBe(PLACEHOLDERS.nested);
+    });
+  });
+
+  describe('one value-level rule: a URL is judged after trimming surrounding whitespace; a credential query parameter is refused in any string', () => {
+    const TAB = String.fromCharCode(0x09);
+    const LF = String.fromCharCode(0x0a);
+    const TRIM_ROW = 'cun_trim_stored';
+    const TRIM_CONTROL = 'cun_trim_control';
+    const storedTokenUrl = () => ` https://cun:${PLACEHOLDERS.authEndpoint}@auth.vendor.example.com/token${LF}`;
+    const storedNote = () => `sandbox ?region=eu&token=${PLACEHOLDERS.urlQuery}`;
+
+    beforeAll(async () => {
+      // A row stored before the refusal: a clean save, then the system context
+      // writes the credential parts over it.
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${TRIM_ROW}`, oauth2(TRIM_ROW));
+      expect(res.status, await res.clone().text()).toBe(200);
+      const [row] = await stored(TRIM_ROW);
+      const seeded = {
+        ...oauth2(TRIM_ROW, { tokenUrl: storedTokenUrl() }),
+        providerConfig: { baseUrl: `${upstreamUrl}/v1`, note: storedNote() },
+      };
+      await ql.update('sys_metadata', { id: row.id, metadata: JSON.stringify(seeded) }, { context: SYSTEM });
+    });
+
+    describe('WRITE: refused at the string, and nothing is stored', () => {
+      const cases: Array<[label: string, name: string, body: () => Record<string, unknown>, at: string]> = [
+        ['a userinfo password in `providerConfig.baseUrl` behind a leading space', 'cun_t_userinfo',
+          () => instance('cun_t_userinfo', { providerConfig: { baseUrl: ` https://u:${PLACEHOLDERS.urlPassword}@api.vendor.example.com/v1` } }), 'providerConfig.baseUrl'],
+        ['`api_key` in the `providerConfig.baseUrl` query behind a leading tab', 'cun_t_api_key',
+          () => instance('cun_t_api_key', { providerConfig: { baseUrl: `${TAB}${upstreamUrl}/v1?api_key=${PLACEHOLDERS.urlQuery}` } }), 'providerConfig.baseUrl'],
+        ['`token` in the query of a `providerConfig.baseUrl` with no scheme', 'cun_t_no_scheme',
+          () => instance('cun_t_no_scheme', { providerConfig: { baseUrl: `api.vendor.example.com/v1?token=${PLACEHOLDERS.urlQuery}` } }), 'providerConfig.baseUrl'],
+        ['a credential query parameter in a `providerConfig` string that is not a URL', 'cun_t_note',
+          () => instance('cun_t_note', { providerConfig: { baseUrl: `${upstreamUrl}/v1`, note: `sandbox ?token=${PLACEHOLDERS.urlQuery}` } }), 'providerConfig.note'],
+        ['a userinfo in `auth.tokenUrl` behind a leading space', 'cun_t_token_url',
+          () => oauth2('cun_t_token_url', { tokenUrl: ` https://c:${PLACEHOLDERS.authEndpoint}@auth.vendor.example.com/token` }), 'auth.tokenUrl'],
+        ['`api_key` in the `providerConfig.baseUrl` query, a tab inside its name', 'cun_t_key_tab',
+          () => instance('cun_t_key_tab', { providerConfig: { baseUrl: `${upstreamUrl}/v1?api${TAB}_key=${PLACEHOLDERS.urlQuery}` } }), 'providerConfig.baseUrl'],
+        ['a userinfo in `providerConfig.baseUrl`, a tab inside its scheme', 'cun_t_scheme_tab',
+          () => instance('cun_t_scheme_tab', { providerConfig: { baseUrl: `ht${TAB}tps://u:${PLACEHOLDERS.urlPassword}@api.vendor.example.com/v1` } }), 'providerConfig.baseUrl'],
+        ['a userinfo in a scheme-relative `providerConfig.baseUrl`', 'cun_t_scheme_relative',
+          () => instance('cun_t_scheme_relative', { providerConfig: { baseUrl: `//u:${PLACEHOLDERS.urlPassword}@api.vendor.example.com/v1` } }), 'providerConfig.baseUrl'],
+      ];
+
+      it.each(cases)('%s', async (_label, name, body, at) => {
+        await expectRefused(name, body(), at);
+        expect(await stored(name), `${name}: nothing stored`).toEqual([]);
+      });
+    });
+
+    it('CONTROL: a credential-free URL behind a leading space, and a string that is not a URL holding none, save; the instance materializes ready and dispatches', async () => {
+      const put = await stack.apiAs(admin, 'PUT', `/meta/connector/${TRIM_CONTROL}`, instance(TRIM_CONTROL, {
+        providerConfig: { baseUrl: ` ${upstreamUrl}/v1?region=eu`, note: 'sandbox ?region=eu&token=' },
+      }));
+      expect(put.status, await put.clone().text()).toBe(200);
+      await waitReady(TRIM_CONTROL);
+      const handler = automation.resolveConnectorAction(TRIM_CONTROL, 'request');
+      expect(handler, `${TRIM_CONTROL} is materialized with its request action`).toBeTypeOf('function');
+      const before = received.length;
+      const out = await handler({ method: 'GET', path: '/probe' }, {});
+      expect(out?.status, JSON.stringify(out)).toBe(200);
+      expect(received.length).toBe(before + 1);
+      expect(received[received.length - 1]).toBe('/v1/probe?region=eu');
+    });
+
+    it('CONTROL: an ordinary query parameter with a tab inside its name saves and dispatches as a URL parser reads it; a scheme-relative URL with no userinfo saves', async () => {
+      const name = 'cun_trim_tab_control';
+      const put = await stack.apiAs(admin, 'PUT', `/meta/connector/${name}`, instance(name, {
+        providerConfig: { baseUrl: `${upstreamUrl}/v1?reg${TAB}ion=eu` },
+      }));
+      expect(put.status, await put.clone().text()).toBe(200);
+      await waitReady(name);
+      const handler = automation.resolveConnectorAction(name, 'request');
+      expect(handler, `${name} is materialized with its request action`).toBeTypeOf('function');
+      const before = received.length;
+      const out = await handler({ method: 'GET', path: '/probe' }, {});
+      expect(out?.status, JSON.stringify(out)).toBe(200);
+      expect(received.length).toBe(before + 1);
+      expect(received[received.length - 1]).toBe('/v1/probe?region=eu');
+      // Saved disabled: the pin is the door's answer, not a materialization.
+      const relative = await stack.apiAs(admin, 'PUT', '/meta/connector/cun_trim_relative_control', instance('cun_trim_relative_control', {
+        enabled: false,
+        providerConfig: { baseUrl: '//api.vendor.example.com/v1' },
+      }));
+      expect(relative.status, await relative.clone().text()).toBe(200);
+    });
+
+    it('READ: the stored row is served with each credential part removed at the position the write door judged, every other character as stored', async () => {
+      for (const token of [member, admin]) {
+        const { text, item } = await read(token, TRIM_ROW);
+        expect(holdsAPlaceholder(text)).toBe(false);
+        expect(item.auth.tokenUrl).toBe(` https://auth.vendor.example.com/token${LF}`);
+        expect(item.providerConfig.note).toBe('sandbox ?region=eu');
+      }
+      const atRest = bodyOf((await stored(TRIM_ROW))[0]);
+      expect(atRest.auth.tokenUrl, 'the stored row is never redacted').toBe(storedTokenUrl());
+      expect(atRest.providerConfig.note).toBe(storedNote());
+    });
+
+    it('CARRY-FORWARD: a save of the served form keeps each stored value', async () => {
+      const served = authorable((await read(admin, TRIM_ROW)).item);
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${TRIM_ROW}`, { ...served, label: 'CUN trim (edited)' });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const atRest = bodyOf((await stored(TRIM_ROW))[0]);
+      expect(atRest.label).toBe('CUN trim (edited)');
+      expect(atRest.auth.tokenUrl).toBe(storedTokenUrl());
+      expect(atRest.providerConfig.note).toBe(storedNote());
     });
   });
 });

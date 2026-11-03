@@ -339,6 +339,82 @@ export function namedBaseOverlayWriteRefusal(
     return closedOverlayWriteError(message);
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-0146 D1, D11 — "the fix the close names can be taken": one predicate
+// ─────────────────────────────────────────────────────────────────────────
+
+/** The pair an overlay-write close sends the write into, and the `basedOn` its declaration records. */
+export interface OverlayPairFix {
+    readonly base: string;
+    readonly pair: string;
+    readonly basedOn: string;
+}
+
+/**
+ * [ADR-0146 D1, D11] The registry half of whether the fix both overlay-write
+ * closes name — write it into `base`'s pair, declaring the override — can be
+ * taken, or `null` when it cannot: read from the steps that write takes.
+ *
+ *  - the base has a pair id (`customizationPackageId`; an id ending in
+ *    `.custom` has none);
+ *  - the ensure door would answer or create the pair
+ *    ({@link customizationPairEnsureRefusal});
+ *  - the base records a version (`basedOn`, its `manifest.version`, the value
+ *    the ceremony records too).
+ *
+ * The other half is {@link overlayPairFixAdmits}, the override write gate on
+ * the declared body. Two halves of one predicate so that a close may read its
+ * own subject between them — the package-less close reads the item's stored
+ * rows only for a name the registry has not already left open — and ⛔ each
+ * close keeps only its own difference: which base it judges, and which body.
+ * {@link namedBaseCloseSubject} and `packagelessCloseSubject`
+ * (`protocol-packageless-overlay-migration.ts`) ask both. Registry reads only.
+ */
+export function overlayPairFixOf(
+    host: { readonly engine: ObjectStackProtocolImplementation['engine'] },
+    base: string,
+): OverlayPairFix | null {
+    const pairId = customizationPackageId(base);
+    if (!pairId.ok) return null; // no pair to name (the census's `no_pair`)
+    const pair = pairId.value;
+    const registry = (host.engine as { registry?: PairRegistry } | undefined)?.registry;
+    if (!registry || typeof registry.getPackage !== 'function') return null;
+    if (customizationPairEnsureRefusal(host.engine, registry, base, pair) !== undefined) return null; // the ensure door would refuse
+    const basedOn = registry.getPackage(base)?.manifest?.version;
+    if (typeof basedOn !== 'string' || basedOn === '') return null; // no `basedOn` to declare
+    return { base, pair, basedOn };
+}
+
+/**
+ * [ADR-0146 D1, D2, D11] The gate half of {@link overlayPairFixOf}: whether
+ * the override write gate admits the body the fix writes into the pair — the
+ * close's `body` (a save's, or the stored row's), else the item's bare
+ * identity at `member`, declaring `overrides: { package: base, basedOn }`. An
+ * `email_template` member at a locale the base does not ship is refused
+ * there, so its write stays open.
+ */
+export function overlayPairFixAdmits(
+    host: { readonly overrideWriteVerdict: (request: OverrideWriteSubject) => OverrideWriteVerdict },
+    fix: OverlayPairFix,
+    subject: {
+        /** The singular type. */
+        readonly type: string;
+        readonly name: string;
+        readonly body: Record<string, unknown> | undefined;
+        /** The bundle member, as `OVERLAY_MEMBER_COLUMN` holds it. */
+        readonly member: string | null | undefined;
+    },
+): boolean {
+    const { type, name, body, member } = subject;
+    const disc = member === undefined ? undefined : overlayMemberField(type);
+    const declaredBody = {
+        ...(body ?? { name, ...(disc && member !== null ? { [disc]: member } : {}) }),
+        overrides: { package: fix.base, basedOn: fix.basedOn },
+    };
+    const verdict = host.overrideWriteVerdict({ type, name, packageId: fix.pair, item: declaredBody });
+    return verdict.verdict !== 'refuse';
+}
+
 /** The class members {@link namedBaseCloseSubject} reads, typed as the class declares them. */
 export interface NamedBaseCloseHost {
     readonly engine: ObjectStackProtocolImplementation['engine'];
@@ -367,16 +443,15 @@ export interface NamedBaseWriteSubject {
  * overlay types — the package-less close's reading of "packaged"
  * (`overlayBaseShippers`, the reading `os migrate packageless-overlays`
  * classifies by), with the named package among the shippers — and where the
- * fix the refusal names can be taken, read from the steps that write takes:
+ * fix the refusal names can be taken: {@link overlayPairFixOf} and
+ * {@link overlayPairFixAdmits}, the predicate the package-less close asks too
+ * (a pair id, the ensure door, a base version, the override write gate
+ * admitting the declared body — an `email_template` member at a locale the
+ * base does not ship stays open, as the package-less one does).
  *
- *  - the base has a pair id (`customizationPackageId`);
- *  - the ensure door would answer or create the pair
- *    ({@link customizationPairEnsureRefusal});
- *  - the base records a version (`basedOn`, its `manifest.version`, the value
- *    the ceremony records too);
- *  - the override write gate admits the declared body into the pair (an
- *    `email_template` member at a locale the base does not ship is refused
- *    there, so its write stays open, as the package-less one does).
+ * This close's own difference: it reads no row (the declared body is the
+ * save's, else the item's identity), and the named package may be one of
+ * several shippers.
  *
  * A body carrying `overrides` is not judged here: the D2 gate answers a
  * declaration outside the pair, the schema gate a malformed one, as before.
@@ -398,14 +473,8 @@ export function namedBaseCloseSubject(
     // a malformed one (`422 INVALID_METADATA`).
     if (isPlainRecord(request.item) && 'overrides' in request.item) return null;
     if (!this.overlayBaseShippers(request.type, request.name).includes(base)) return null;
-    const pairId = customizationPackageId(base);
-    if (!pairId.ok) return null; // no pair to name
-    const pair = pairId.value;
-    const registry = (this.engine as { registry?: PairRegistry } | undefined)?.registry;
-    if (!registry || typeof registry.getPackage !== 'function') return null;
-    if (customizationPairEnsureRefusal(this.engine, registry, base, pair) !== undefined) return null;
-    const basedOn = registry.getPackage(base)?.manifest?.version;
-    if (typeof basedOn !== 'string' || basedOn === '') return null; // no `basedOn` to declare
+    const fix = overlayPairFixOf(this, base);
+    if (fix === null) return null;
 
     // The gate's verdict on the declared body, written into the pair.
     const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
@@ -413,14 +482,8 @@ export function namedBaseCloseSubject(
     const member = written !== undefined && request.member === undefined
         ? overlayMemberOfBody(type, written)
         : overlayMemberValue(type, request.member);
-    const disc = member === undefined ? undefined : overlayMemberField(type);
-    const declaredBody = {
-        ...(written ?? { name: request.name, ...(disc && member !== null ? { [disc]: member } : {}) }),
-        overrides: { package: base, basedOn },
-    };
-    const verdict = this.overrideWriteVerdict({ type, name: request.name, packageId: pair, item: declaredBody });
-    if (verdict.verdict === 'refuse') return null;
-    return { base, pair };
+    if (!overlayPairFixAdmits(this, fix, { type, name: request.name, body: written, member })) return null;
+    return { base, pair: fix.pair };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
