@@ -684,6 +684,7 @@ a rotating refresh token is never spent twice.
   it holds.
 
   ```http
+  GET  /api/v1/automation/connectors/:name/connection     → { status, …, redirectUri }
   POST /api/v1/automation/connectors/:name/connection     → { authorizationUrl, expiresAt }
   GET  /api/v1/automation/connectors/oauth/callback?code=…&state=…   (the vendor redirects here)
   DELETE /api/v1/automation/connectors/:name/connection   → revoke
@@ -692,13 +693,20 @@ a rotating refresh token is never spent twice.
   An instance declaring `clientSource: 'installer'` takes its client in the
   connect's body, `{ "clientId": "…", "clientSecret": "…" }` (omit
   `clientSecret` for a public client). Register that client with the vendor
-  first, with the redirect URI `<origin>/api/v1/automation/connectors/oauth/callback`.
-  The authorization request, the code exchange and every refresh of that
-  organization's connection then go out as that client, and a reconnect may
-  bring a new one. The connection keeps it encrypted; the status read shows
-  `client: { source: 'installer', clientId, hasSecret }`, never the secret. A
-  connect of such an instance without a client, a client offered to any other
-  instance, and any other body key are refused `400 VALIDATION_ERROR`.
+  first, with the redirect URI `<origin>/api/v1/automation/connectors/oauth/callback`:
+  the status read answers that exact URI as `redirectUri` before any client
+  exists. That is the one place a client, the Console included, reads it
+  from, never the browser's own origin (wrong behind a proxy, or when
+  `OS_AUTH_URL` / `OS_BASE_URL` name another origin). The authorization request, the code exchange and every
+  refresh of that organization's connection then go out as that client. A
+  reconnect keeps the stored client unless it brings a new one: a connect
+  that names no client reuses the one the organization's connection keeps
+  (the secret is never read back, so it need not be entered again), and one
+  that names a client replaces it. The connection keeps it encrypted; the
+  status read shows `client: { source: 'installer', clientId, hasSecret }`,
+  never the secret. A first connect of such an instance without a client (or
+  one after a revoke, which removes the kept client), a client offered to any
+  other instance, and any other body key are refused `400 VALIDATION_ERROR`.
 
   **In the Console**, **Setup → Integrations → Connector Connections** drives
   these calls; the entry is shown to holders of `manage_connector_connections`.
@@ -710,7 +718,11 @@ a rotating refresh token is never spent twice.
   revokes after a confirmation.
 
   `GET …/:name/connection` answers the organization's status
-  (`not_connected`, `connected`, `reconnect_required`), never a token. The
+  (`not_connected`, `connected`, `reconnect_required`), never a token, and,
+  whatever the status, `redirectUri`: the deployment's redirect URI to
+  register with the vendor. It is absent when the deployment has no base to
+  derive it from (the read still answers; a connect is then refused `503`),
+  never guessed from the request. The
   `state` and the PKCE verifier are bound to the user and organization that
   began the connect and are used once; a callback from anyone else is refused
   before its code is exchanged. While the connect waits (ten minutes at most)
