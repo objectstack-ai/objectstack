@@ -1556,6 +1556,7 @@ const ar = {
     owner: "المالك",
     relatedCardMenu: "المزيد لـ {{title}}",
     relatedCardEnlarge: "تكبير",
+    relatedCardAllColumns: "كل الأعمدة",
     relatedCardExpand: "توسيع",
     relatedCardHide: "إخفاء",
     relatedCardNew: "جديد",

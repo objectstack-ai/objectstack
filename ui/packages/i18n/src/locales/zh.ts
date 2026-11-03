@@ -1308,6 +1308,7 @@ const zh = {
     owner: '负责人',
     relatedCardMenu: '{{title}}的更多操作',
     relatedCardEnlarge: '放大',
+    relatedCardAllColumns: '全部列',
     relatedCardExpand: '展开',
     relatedCardHide: '隐藏',
     relatedCardNew: '新',

@@ -1430,6 +1430,7 @@ const fr = {
     owner: "Propriétaire",
     relatedCardMenu: "Plus pour {{title}}",
     relatedCardEnlarge: "Agrandir",
+    relatedCardAllColumns: "Toutes les colonnes",
     relatedCardExpand: "Déplier",
     relatedCardHide: "Masquer",
     relatedCardNew: "Nouveau",

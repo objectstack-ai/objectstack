@@ -1582,6 +1582,7 @@ const en = {
     owner: 'Owner',
     relatedCardMenu: 'More for {{title}}',
     relatedCardEnlarge: 'Enlarge',
+    relatedCardAllColumns: 'All columns',
     relatedCardExpand: 'Expand',
     relatedCardHide: 'Hide',
     relatedCardNew: 'New',
