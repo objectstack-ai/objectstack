@@ -417,5 +417,69 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "Pending"
       }
     }
+  },
+  sys_user_device: {
+    label: "ユーザーデバイス",
+    pluralLabel: "ユーザーデバイス",
+    description: "ユーザーのプッシュ通知デバイス：アプリのインストールごとに 1 行で、ベンダーのプッシュトークンを保持します。",
+    fields: {
+      id: {
+        label: "行 ID"
+      },
+      device_id: {
+        label: "デバイス ID",
+        help: "クライアントが保持するデバイス ID。アプリのインストールごとに不変で、ユーザー内で一意です。"
+      },
+      user_id: {
+        label: "ユーザー",
+        help: "デバイスの所有ユーザー：デバイスを登録したサインイン中のユーザーです。"
+      },
+      vendor: {
+        label: "ベンダー",
+        help: "トークンが属するプッシュベンダー。",
+        options: {
+          apns: "APNs",
+          fcm: "FCM"
+        }
+      },
+      token: {
+        label: "プッシュトークン",
+        help: "ベンダーのプッシュトークン。同時に保持できるのは 1 台のデバイスのみです。"
+      },
+      platform: {
+        label: "プラットフォーム",
+        options: {
+          ios: "iOS",
+          android: "Android",
+          web: "Web"
+        }
+      },
+      app_id: {
+        label: "アプリ ID",
+        help: "トークンの発行先である iOS のバンドル ID または Android のアプリケーション ID。"
+      },
+      locale: {
+        label: "ロケール",
+        help: "このデバイスへのプッシュ通知の表示に使うデバイスのロケール。"
+      },
+      name: {
+        label: "デバイス名"
+      },
+      enabled: {
+        label: "有効",
+        help: "ベンダーがトークンの無効を報告すると false になります。無効なデバイスには何も配信されません。"
+      },
+      invalidated_at: {
+        label: "無効化日時",
+        help: "ベンダーがトークンの無効を報告した日時。デバイスを再度有効にする登録でクリアされます。"
+      },
+      last_seen_at: {
+        label: "最終確認日時",
+        help: "デバイスが最後に登録または更新された日時。"
+      },
+      created_at: {
+        label: "作成日時"
+      }
+    }
   }
 };
