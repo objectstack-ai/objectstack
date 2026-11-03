@@ -18,20 +18,27 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import type { IEmailService } from '@objectstack/spec/contracts';
 import { RestServer } from './rest-server';
 import { EMAIL_SEND_CAPABILITY } from './email-routes';
 
 const ADMIN = { userId: 'usr_admin', systemPermissions: ['setup.access', EMAIL_SEND_CAPABILITY] };
 
-/** The slice of ObjectQL the plugin's `sys_email` persistence touches. */
+/**
+ * The slice of ObjectQL the plugin's `sys_email` persistence touches. `update`
+ * routes through `assertEngineUpdateDispatch`, so the double cannot accept a
+ * dispatch the real engine would refuse.
+ */
 function fakeEngine() {
   const rows: Array<{ object: string; row: any }> = [];
   return {
     rows,
     async insert(object: string, row: any) { rows.push({ object, row }); return { id: row.id }; },
-    async update(object: string, data: any) {
-      const target = rows.find((r) => r.object === object && r.row.id === data?.id);
+    async update(object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      if (dispatch.kind !== 'by-id') throw new Error(`unexpected update dispatch: ${dispatch.kind}`);
+      const target = rows.find((r) => r.object === object && r.row.id === dispatch.id);
       if (target) Object.assign(target.row, data);
       return { affected: target ? 1 : 0 };
     },
