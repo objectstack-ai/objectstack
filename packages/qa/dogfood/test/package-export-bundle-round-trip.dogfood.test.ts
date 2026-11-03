@@ -40,6 +40,14 @@
 // runtime that installs both entries serves the object with the field and the
 // pair's label, and the base's own export there carries neither.
 //
+// [#29872] The extending package of the first describe is installed through
+// install-local, which registers its `objectExtensions` with no
+// `object_extension` item. Its export carries the entry on the source and,
+// installed from that export, on the target (the second hop), and the base's
+// entry carries its object without the extender's field on both; the third
+// describe's pair, installed on the target from its entry the same way,
+// re-exports its extension there.
+//
 // Boots fixture stacks of its own (the install-local plugin mounted on both),
 // so it stays out of `SHARED_SHOWCASE`. Every credential below is an
 // obviously-fake placeholder, and every assertion on one is its absence.
@@ -138,6 +146,16 @@ function inventory(entry: Record<string, any>): Record<string, unknown> {
 }
 
 const ids = (bundle: any): string[] => (bundle?.packages ?? []).map((p: any) => p.id);
+
+/** [#29872] The `objectExtensions` targets of one bundle entry, and whether the entry's own `OBJECT` carries `field`. */
+function extensionReading(bundle: any, id: string, field: string): { extends: string[]; objectCarries: boolean } {
+  const entry = (bundle?.packages ?? []).find((p: any) => p.id === id);
+  const object = (entry?.objects ?? []).find((o: any) => o?.name === OBJECT);
+  return {
+    extends: (entry?.objectExtensions ?? []).map((e: any) => e?.extend),
+    objectCarries: Object.keys(object?.fields ?? {}).includes(field),
+  };
+}
 
 describe('dogfood: the whole-deployment export round-trips onto a fresh runtime, and carries no secret', () => {
   let previousRef: string | undefined;
@@ -241,6 +259,19 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
     expect(targetBundle.packages.map(inventory)).toEqual(sourceBundle.packages.map(inventory));
     const pair = targetBundle.packages.find((p: any) => p.id === PAIR);
     expect((pair?.dashboards ?? []).map((d: any) => [d.name, d.label, d.overrides?.package])).toEqual([[DASHBOARD, EDITED, BASE]]);
+  });
+
+  it('[#29872] the install-local extender carries its `objectExtensions` on both hops, and the base\'s object never carries its field', () => {
+    const field = Object.keys(EXT_INSTALL.manifest.objectExtensions[0].fields)[0];
+    for (const [hop, bundle] of [['source', sourceBundle], ['target', targetBundle]] as const) {
+      expect(extensionReading(bundle, EXT, field), `${hop}: ${EXT}`).toEqual({ extends: [OBJECT], objectCarries: false });
+      expect(extensionReading(bundle, BASE, field), `${hop}: ${BASE}`).toEqual({ extends: [], objectCarries: false });
+      // CONTROL: the base's entry still carries its object, with its own field.
+      const base = bundle.packages.find((p: any) => p.id === BASE);
+      expect(Object.keys((base?.objects ?? []).find((o: any) => o?.name === OBJECT)?.fields ?? {}), `${hop}: the base's object`).toContain('title');
+      const ext = bundle.packages.find((p: any) => p.id === EXT);
+      expect(ext.objectExtensions, `${hop}: the extender's entry`).toEqual(EXT_INSTALL.manifest.objectExtensions);
+    }
   });
 });
 
@@ -382,6 +413,7 @@ describe('[#29903] dogfood: the pair\'s object extension travels in the pair\'s 
       }
       answers.targetServed = await call(target, token, 'GET', `/meta/object/${XOBJECT}`);
       answers.targetBase = await call(target, token, 'GET', `/packages/${XBASE}/export`);
+      answers.targetPair = await call(target, token, 'GET', `/packages/${XPAIR}/export`);
     } finally {
       await target.stop();
     }
@@ -434,5 +466,10 @@ describe('[#29903] dogfood: the pair\'s object extension travels in the pair\'s 
     const object = exportedObject(answers.targetBase.body?.data);
     expect(Object.keys(object?.fields ?? {}), JSON.stringify(object)).not.toContain(REGION);
     expect(object?.fields?.title?.label).toBe('Title');
+  });
+
+  it('[#29872] target: the pair installed from its entry re-exports its extension (the second hop)', () => {
+    expect(answers.targetPair?.status, JSON.stringify(answers.targetPair?.body)).toBe(200);
+    expect(answers.targetPair.body?.data?.objectExtensions).toEqual([EXTENSION]);
   });
 });
