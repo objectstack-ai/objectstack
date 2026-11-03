@@ -100,7 +100,11 @@ vi.mock('../AppContent', () => ({
   ConsolePermissionsRequest: () => null,
 }));
 vi.mock('../components/ProtectedRoute', () => ({ ProtectedRoute: passthrough }));
-vi.mock('../components/RootLandingRedirect', () => ({ RootLandingRedirect: stub('root-landing') }));
+// objectstack#29750: the catch-all reads `isAppListConclusive` from here.
+vi.mock('../components/RootLandingRedirect', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  RootLandingRedirect: stub('root-landing'),
+}));
 vi.mock('../components/SetupRoute', () => ({ SetupRoute: stub('setup-route') }));
 vi.mock('../components/FormPage', () => ({ FormPage: stub('form-page') }));
 vi.mock('../components/InternalFormRoute', () => ({ InternalFormRoute: stub('internal-form-route') }));
