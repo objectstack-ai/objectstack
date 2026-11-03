@@ -542,6 +542,28 @@ export const AdvancedAuthConfigSchema = lazySchema(() => z.object({
   cookiePrefix: z.string().optional().describe('Prefix for auth cookie names'),
 }).optional().describe('Advanced / low-level Better-Auth options'));
 
+/**
+ * One registered native-app URI scheme for the mobile sign-in hand-off
+ * (`GET /api/v1/auth/one-time-token/handoff`, see `OneTimeTokenHandoffQuerySchema`).
+ *
+ * Strict, never normalised: a lowercase RFC 3986 scheme written bare (no `:` or
+ * `://` suffix) that contains at least one dot. The dot is RFC 8252 section 7.1's
+ * rule that a private-use scheme be a reverse domain name the app's owner
+ * controls (`com.example.app`), which is also what keeps two apps on one device
+ * from claiming the same scheme and intercepting the token. The rule refuses, by
+ * construction, every scheme the hand-off must never redirect to (`http`,
+ * `https`, `ws`, `wss`, `javascript`, `data`, `file`, `blob`, `about`,
+ * `vbscript`): none contains a dot.
+ */
+export const TrustedAppSchemeSchema = lazySchema(() => z.string().regex(/^[a-z][a-z0-9+-]*(\.[a-z0-9+-]+)+$/, {
+  message:
+    'An app scheme is a lowercase reverse-domain URI scheme written bare, e.g. "com.example.app": '
+    + 'no ":" or "://" suffix, no uppercase, and at least one dot (RFC 8252 section 7.1). '
+    + 'http, https and other web schemes are never app schemes.',
+}).describe(
+  'A registered native-app URI scheme: lowercase, reverse-domain with at least one dot, written bare (e.g. com.example.app)',
+));
+
 export const AuthConfigSchema = lazySchema(() => z.object({
   secret: z.string().optional().describe('Encryption secret'),
   baseUrl: z.string().optional().describe('Base URL for auth routes'),
@@ -572,6 +594,25 @@ export const AuthConfigSchema = lazySchema(() => z.object({
   trustedOrigins: z.array(z.string()).optional().describe(
     'Trusted origins for CSRF protection. Supports wildcards (e.g. "https://*.example.com"). ' +
     'The baseUrl origin is always trusted implicitly.'
+  ),
+  /**
+   * Native-app URI schemes the mobile sign-in hand-off may redirect a
+   * one-time token to (`GET /api/v1/auth/one-time-token/handoff`). Each entry
+   * is a {@link TrustedAppSchemeSchema}; an entry that is not is refused, never
+   * dropped or rewritten.
+   *
+   * Absent or empty: no app scheme is registered and the hand-off is not
+   * offered. A hand-off whose `redirect_uri` scheme is not on this list
+   * (compared case-insensitively) is refused with `400 VALIDATION_ERROR` and
+   * NO redirect, so an unregistered scheme never receives a token.
+   *
+   * Separate from `trustedOrigins` on purpose: an origin listed there is
+   * trusted for every redirect better-auth makes, while a scheme listed here
+   * is trusted only as the hand-off's destination.
+   */
+  trustedAppSchemes: z.array(TrustedAppSchemeSchema).optional().describe(
+    'Native-app URI schemes the mobile sign-in hand-off may redirect a one-time token to (e.g. ["com.example.app"]). '
+    + 'A hand-off to any other scheme is refused with 400 VALIDATION_ERROR and no redirect; absent or empty means the hand-off is not offered',
   ),
   socialProviders: SocialProviderConfigSchema,
   oidcProviders: OidcProvidersConfigSchema,
