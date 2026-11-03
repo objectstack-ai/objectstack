@@ -106,7 +106,11 @@ export function railCustomizationsOf(
   };
 }
 
-/** A row's mark in the rail's trailing slot, or nothing. */
+/**
+ * A row's mark in the rail's trailing slot, or nothing. objectstack#29693 —
+ * compact (its glyph, the text in its name and tooltip), so it never takes the
+ * row's label.
+ */
 export function RailCustomizationMark({
   row,
   marks,
@@ -125,6 +129,7 @@ export function RailCustomizationMark({
       pairId={marks.pairId}
       locale={locale}
       className="ml-1"
+      compact
     />
   );
 }

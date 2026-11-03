@@ -398,6 +398,25 @@ describe('the Interfaces rail lists a base and its pair as one list (objectstack
   });
 });
 
+describe('the rail mark never takes the row’s name (objectstack#29693)', () => {
+  it('is its glyph alone: the row prints only its label, and the mark’s text is its name and leads its tooltip', async () => {
+    renderAt(`/studio/${BASE}/interfaces`);
+    await interfacesReady();
+    const row = rowOf(ifRail(), 'dashboard', 'pipeline')!;
+    await waitFor(() => expect(markOf(row)).toBe('customized'), { timeout: 8000 });
+    const mark = within(row).getByTestId('customization-mark');
+    const label = tFormat('engine.customizationMark.customized', 'en', { baseName: 'HotCRM' });
+    expect(mark).toHaveAttribute('data-compact');
+    expect(mark).toHaveAccessibleName(label);
+    expect(mark.getAttribute('title')?.split('\n')[0]).toBe(label);
+    expect(mark.textContent).toBe('');
+    expect(within(row).queryByText(label)).toBeNull();
+    const added = within(rowOf(ifRail(), 'dashboard', 'wins')!).getByTestId('customization-mark');
+    expect(added).toHaveAccessibleName(t('engine.customizationMark.added', 'en'));
+    expect(added.textContent).toBe('');
+  });
+});
+
 describe('the Data rail lists the pair’s objects with the base’s (objectstack#28572)', () => {
   it('marks the pair’s object "added"; the base’s objects carry no mark; opening it names the pair', async () => {
     renderAt(`/studio/${BASE}/data`);

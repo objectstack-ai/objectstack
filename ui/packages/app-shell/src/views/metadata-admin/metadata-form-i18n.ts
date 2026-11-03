@@ -83,7 +83,10 @@
 
 import { resolveMetadataFormLabels } from '@objectstack/spec/system';
 import type { TranslationBundle } from '@objectstack/spec/system';
-import { isZhLocale, type SupportedLocale } from './i18n.js';
+// The zh test from the import-free leaf, not `./i18n.ts`: the Pending changes
+// sheet reads this overlay from the console's eager graph (`preview/changeKeyLabels.ts`).
+import { isZhLocale } from './schema-field-label.js';
+import type { SupportedLocale } from './i18n.js';
 import { hasSourceLabel, stampSourceLabel } from './field-source-label.js';
 
 /**

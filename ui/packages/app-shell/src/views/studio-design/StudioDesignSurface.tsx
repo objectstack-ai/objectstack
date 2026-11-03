@@ -56,6 +56,7 @@ import {
 } from '../../layout/chatDockState.js';
 import { AppMark, type AppMarkApp } from '../../layout/AppMark.js';
 import {
+  STUDIO_FOLD_LABEL,
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
@@ -68,6 +69,7 @@ import { StudioInspector } from './StudioInspector.js';
 import { agentDraftMarkOf, DraftChip, DraftSourceLine } from './StudioDraftMark.js';
 import {
   StudioItemHeader,
+  StudioItemHeaderFoldedItems,
   StudioStatusChip,
   StudioTab,
   useStudioTabRowFold,
@@ -6076,7 +6078,10 @@ export function InterfacesPillar({
         }
       >
         <Pencil className="h-3 w-3" aria-hidden="true" />
-        {t('engine.studio.if.modeDesign', locale)}
+        {/* objectstack#29693 — on a narrow header the modes keep their glyphs; the words stay their names. */}
+        <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+          {t('engine.studio.if.modeDesign', locale)}
+        </span>
       </button>
       <button
         type="button"
@@ -6090,7 +6095,9 @@ export function InterfacesPillar({
         }
       >
         <Play className="h-3 w-3" aria-hidden="true" />
-        {t('engine.studio.if.modeRun', locale)}
+        <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+          {t('engine.studio.if.modeRun', locale)}
+        </span>
       </button>
     </div>
   );
@@ -6306,7 +6313,9 @@ export function InterfacesPillar({
             <MoreHorizontal className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuContent align="end" className="w-52">
+          {/* objectstack#29693 — what the title row folded away, on a narrow row. */}
+          <StudioItemHeaderFoldedItems />
           <DropdownMenuItem data-testid="if-item-view-definition" onSelect={() => setDefinitionOpen(true)}>
             <Code2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
             {t('engine.studio.if.viewDefinition', locale)}
@@ -6368,6 +6377,9 @@ export function InterfacesPillar({
   const ifHeaderEl = (
     <StudioItemHeader
       testId="if-item-header"
+      // objectstack#29693 — on a narrow row the chips and the item tools fold
+      // into the ⋯ menu before the title drops below its readable width.
+      foldMenu={itemMoreEl ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'if-item-header-more' }}
       leading={
         <button
           type="button"
@@ -9035,6 +9047,9 @@ export function DataPillar({
               over the thing it names, instead of spanning the rail. */}
           <StudioItemHeader
             testId="data-object-header"
+            // objectstack#29693 — the header has no ⋯ of its own (objectui#12511),
+            // so on a narrow row it draws one for the chips and the item tools.
+            foldMenu={{ label: t('engine.studio.if.more', locale), testId: 'data-object-header-more' }}
             leading={
               <button
                 type="button"
@@ -11050,7 +11065,10 @@ export function AutomationsPillar({
                 <span className={'inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ' + (flowEnabled ? 'translate-x-[18px]' : 'translate-x-0.5')} />
               </span>
               {readOnly && <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />}
-              {flowEnabled ? t('engine.studio.auto.enabled', locale) : t('engine.studio.auto.disabled', locale)}
+              {/* objectstack#29693 — on a narrow header the switch keeps its track; the word stays its name. */}
+              <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+                {flowEnabled ? t('engine.studio.auto.enabled', locale) : t('engine.studio.auto.disabled', locale)}
+              </span>
             </button>
           );
           const defaultOffLine = <span className="sr-only">{defaultOff}</span>;
@@ -11191,6 +11209,8 @@ export function AutomationsPillar({
     editLocked && packageId !== null ? (
       <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
     ) : null;
+  /** The flow's ⋯ menu is drawn (objectstack#28567): the header folds into it (objectstack#29693). */
+  const flowMoreShown = !!current && flowLoaded && packageId !== null;
   const flowTabsEl =
     flowOpen ? (
       <>
@@ -11369,6 +11389,11 @@ export function AutomationsPillar({
               label that resolves to nothing falls back to the name. */}
           <StudioItemHeader
             testId="auto-flow-header"
+            // objectstack#29693 — the chips and the item tools fold into the
+            // flow's ⋯ menu (or the header's own, where the flow has none).
+            foldMenu={
+              flowMoreShown ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'auto-flow-header-more' }
+            }
             leading={
               <button
                 type="button"
@@ -11468,7 +11493,7 @@ export function AutomationsPillar({
                     a read-only base; a writable package is the target);
                     Delete on a writable package's flow only. The
                     package-less scope has no pair and no package to name. */}
-                {current && flowLoaded && packageId !== null && (
+                {flowMoreShown && current && (
                   <FlowItemMoreMenu
                     name={current.name}
                     label={current.label}

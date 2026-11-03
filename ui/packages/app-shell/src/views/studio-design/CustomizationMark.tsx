@@ -15,6 +15,7 @@
  */
 
 import * as React from 'react';
+import { Layers3, PencilRuler, Plus } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { t, tFormat } from '../metadata-admin/i18n.js';
@@ -35,12 +36,26 @@ const KIND_CLASS: Record<CustomizationMarkChipKind, string> = {
   customizationOf: 'bg-muted text-muted-foreground',
 };
 
+/** objectstack#29693 — the glyph the compact mark draws in place of its text. */
+const KIND_ICON: Record<CustomizationMarkChipKind, React.ElementType> = {
+  customized: PencilRuler,
+  added: Plus,
+  customizationOf: Layers3,
+};
+
+/**
+ * objectstack#29693 — `compact` (the pillar rails): the mark is its glyph
+ * alone, so it never takes a row's name ("已定制（ObjectStack Showcase）" left a
+ * selected flow row no room for its label). Its text is its accessible name
+ * and leads its tooltip, before the sentence naming the pair.
+ */
 export function CustomizationMark({
   kind,
   baseName,
   pairId,
   locale,
   className,
+  compact = false,
 }: {
   kind: CustomizationMarkChipKind;
   /** The base's display name ("customized (HotCRM)"); needed by `customized` and `customizationOf`. */
@@ -49,6 +64,8 @@ export function CustomizationMark({
   pairId?: string;
   locale: string;
   className?: string;
+  /** Draw the glyph alone, the text in its accessible name and tooltip. */
+  compact?: boolean;
 }): React.ReactElement {
   const base = baseName ?? '';
   const label =
@@ -58,6 +75,22 @@ export function CustomizationMark({
   const title = pairId
     ? tFormat(`engine.customizationMark.${kind}Title`, locale, { baseName: base, pair: pairId })
     : undefined;
+  if (compact) {
+    const Icon = KIND_ICON[kind];
+    return (
+      <span
+        data-testid="customization-mark"
+        data-kind={kind}
+        data-compact=""
+        role="img"
+        aria-label={label}
+        title={title ? `${label}\n${title}` : label}
+        className={cn('inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px]', KIND_CLASS[kind], className)}
+      >
+        <Icon className="h-3 w-3" aria-hidden="true" />
+      </span>
+    );
+  }
   return (
     <span
       data-testid="customization-mark"

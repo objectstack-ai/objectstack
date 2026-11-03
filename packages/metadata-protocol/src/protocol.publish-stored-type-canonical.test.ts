@@ -75,6 +75,8 @@
 // a blanket rule here would break ordinary publishing, and a refusal pin with
 // no control cannot show the rule is selective.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
 // `@objectstack/metadata-core` and NOT from `@objectstack/objectql`: objectql

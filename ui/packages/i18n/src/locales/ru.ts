@@ -4154,25 +4154,12 @@ const ru = {
     buyCredits: "Купить пакет кредитов",
     upgradePlan: "Повысить тариф",
   },
-  planTier: {
-    teamAndUp: "Тариф Team и выше",
-  },
   environment: {
     setUpProduction: "Настройте продакшн-окружение",
-    addDevelopment: "Добавить окружение разработки",
-    developmentLocked: "Окружения разработки · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "У вас уже есть продакшн-окружение",
       productionLimitBody: "Каждая организация включает ровно одно продакшн-окружение. Создайте отдельную организацию для ещё одного или свяжитесь с нами по поводу условий Enterprise.",
-      planLockedTitle: "Окружения разработки — платная возможность",
-      planLockedBody: "{{plan}} включает одно продакшн-окружение. Перейдите на платный тариф, чтобы добавить окружения разработки: создавайте в разработке, затем публикуйте в продакшн.",
-      limitTitle: "Достигнут лимит окружений разработки",
-      limitBody: "Лимит растёт вместе с числом AI-мест. Добавьте AI-место или заархивируйте неиспользуемое окружение разработки, чтобы освободить место.",
-      limitBodyWithCount: "Используется {{used}} из {{limit}} окружений разработки. Лимит растёт вместе с числом AI-мест — добавьте AI-место или заархивируйте неиспользуемое окружение разработки.",
-      freePlan: "Бесплатный тариф",
-      namedPlan: "Тариф {{plan}}",
-      upgradeCta: "Сменить тариф",
       contactSalesCta: "Связаться с отделом продаж",
     },
   },
@@ -4715,6 +4702,7 @@ const ru = {
       draftedByMcp: 'Включает изменения, подготовленные MCP-клиентом',
       detailChangedKeys: 'Также изменено:',
       detailNewKeys: 'Включает:',
+      detailNewItem: 'Публикация добавит этот элемент.',
       generatedGroup: 'Создано платформой ({{n}})',
       confirmNote: 'Публикация выпускает все {{count}} ожидающих черновиков этого пакета вместе: либо публикуются все, либо ни один.',
       confirmNote_one: 'Публикация выпускает {{count}} ожидающий черновик этого пакета: он публикуется, либо ничего не меняется.',
@@ -4793,6 +4781,11 @@ const ru = {
         email_template_few: 'Шаблоны писем: {{count}}',
         email_template_many: 'Шаблоны писем: {{count}}',
         email_template_other: 'Шаблоны писем: {{count}}',
+        object_extension: 'Расширения объектов: {{count}}',
+        object_extension_one: 'Расширение объекта: {{count}}',
+        object_extension_few: 'Расширения объектов: {{count}}',
+        object_extension_many: 'Расширения объектов: {{count}}',
+        object_extension_other: 'Расширения объектов: {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

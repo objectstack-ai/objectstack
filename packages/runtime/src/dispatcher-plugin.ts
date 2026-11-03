@@ -1650,6 +1650,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 mountPackagesRoute('get', '', () => '');
                 mountPackagesRoute('post', '', () => '');
+                // [#28914] The whole-deployment export, registered ahead of
+                // `/:id` so the literal segment wins; `export` is never a
+                // package id (two dot-separated segments at least).
+                mountPackagesRoute('get', '/export', () => '/export');
                 mountPackagesRoute('get', '/:id/export', (req) => `/${req.params.id}/export`);
                 // ADR-0146 D8 item 4 — what this deployment changed on an
                 // installed base (overrides, extensions, switched-off items).

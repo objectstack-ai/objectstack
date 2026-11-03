@@ -28,6 +28,8 @@
  * upgrade only when a consumer needs a field) — so the cases here assert it is
  * carried through unstripped, never its inner shape.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';

@@ -3979,25 +3979,12 @@ const de = {
     buyCredits: "Credit-Paket kaufen",
     upgradePlan: "Tarif upgraden",
   },
-  planTier: {
-    teamAndUp: "Ab Tarif Team",
-  },
   environment: {
     setUpProduction: "Produktionsumgebung einrichten",
-    addDevelopment: "Entwicklungsumgebung hinzufügen",
-    developmentLocked: "Entwicklungsumgebungen · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "Sie haben bereits Ihre Produktionsumgebung",
       productionLimitBody: "Jede Organisation enthält genau eine Produktionsumgebung. Erstellen Sie für eine weitere eine separate Organisation, oder sprechen Sie uns auf eine Enterprise-Vereinbarung an.",
-      planLockedTitle: "Entwicklungsumgebungen sind eine kostenpflichtige Funktion",
-      planLockedBody: "Ihr {{plan}} enthält eine Produktionsumgebung. Führen Sie ein Upgrade durch, um Entwicklungsumgebungen hinzuzufügen — entwickeln Sie in der Entwicklungsumgebung und veröffentlichen Sie dann in der Produktion.",
-      limitTitle: "Limit für Entwicklungsumgebungen erreicht",
-      limitBody: "Die Kapazität wächst mit den KI-Lizenzen. Fügen Sie eine KI-Lizenz hinzu oder archivieren Sie eine ungenutzte Entwicklungsumgebung, um Platz zu schaffen.",
-      limitBodyWithCount: "Sie nutzen {{used}} von {{limit}} Entwicklungsumgebungen. Die Kapazität wächst mit den KI-Lizenzen — fügen Sie eine KI-Lizenz hinzu oder archivieren Sie eine ungenutzte Entwicklungsumgebung.",
-      freePlan: "kostenloser Tarif",
-      namedPlan: "Tarif {{plan}}",
-      upgradeCta: "Tarif upgraden",
       contactSalesCta: "Vertrieb kontaktieren",
     },
   },
@@ -4506,6 +4493,7 @@ const de = {
       draftedByMcp: 'Enthält Änderungen, die ein MCP-Client entworfen hat',
       detailChangedKeys: 'Ebenfalls geändert:',
       detailNewKeys: 'Enthält:',
+      detailNewItem: 'Beim Veröffentlichen wird dieses Element hinzugefügt.',
       generatedGroup: 'Von der Plattform erzeugt ({{n}})',
       confirmNote: 'Beim Veröffentlichen werden alle {{count}} ausstehenden Entwürfe dieses Pakets gemeinsam freigegeben: Entweder gehen alle live oder keiner.',
       confirmNote_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf dieses Pakets freigegeben: Er geht live, oder nichts ändert sich.',
@@ -4556,6 +4544,9 @@ const de = {
         email_template: '{{count}} E-Mail-Vorlagen',
         email_template_one: '{{count}} E-Mail-Vorlage',
         email_template_other: '{{count}} E-Mail-Vorlagen',
+        object_extension: '{{count}} Objekterweiterungen',
+        object_extension_one: '{{count}} Objekterweiterung',
+        object_extension_other: '{{count}} Objekterweiterungen',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
