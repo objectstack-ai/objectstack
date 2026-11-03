@@ -400,17 +400,30 @@ import {
 } from './packages-io.js';
 import { usePackageCustomizations, type PackageCustomizationsState } from './CustomizationMark.js';
 import {
+  ContributedRailRow,
   RailCustomizationFilter,
   RailCustomizationMark,
   StudioPairItemChip,
+  contributedItemTitle,
   customizationPairBaseOf,
   foldCustomizationPairs,
   railCustomizationsOf,
   useDeepLinkFallback,
+  useOpenContributor,
   useRailCustomizationsOnly,
   withPairItems,
   type RailCustomizations,
 } from './StudioRailCustomizations.js';
+import {
+  baseContributionsOf,
+  contributedFieldsOf,
+  placeNavContributions,
+  placesAnyNav,
+  withContributedFlowGroups,
+  type ContributedOnObject,
+  type NavContributionPlacement,
+  type TopLevelContributedNav,
+} from './contributionRows.js';
 import {
   StudioCustomizeButton,
   StudioOverrideChip,
@@ -3001,6 +3014,11 @@ function NavTreeGroup({
   const locale = useMetadataLocale();
   const targetLabel = useNavTargetLabel();
   const children = node.children ?? [];
+  // objectstack#29786 — a declared group (`type: 'group'`) also holds the
+  // entries other packages contribute to it; a group with only those is no
+  // longer empty.
+  const placement = React.useContext(InterfacesNavContributionsContext);
+  const contributed = node.type === 'group' && typeof node.id === 'string' ? (placement.byGroup.get(node.id) ?? []) : [];
   const holdsActive = navTreeHoldsActive(children, active, locale, targetLabel);
   const [open, setOpen] = React.useState(() => {
     if (holdsActive) return true;
@@ -3017,12 +3035,19 @@ function NavTreeGroup({
   }
   return (
     <StudioRailGroup label={labelText} collapsed={!open} onToggle={() => setOpen((v) => !v)}>
-      {children.length === 0 ? (
+      {children.length === 0 && contributed.length === 0 ? (
         <p className="flex h-7 items-center pl-[22px] text-xs text-muted-foreground">
           {t('engine.studio.if.emptyGroup', locale)}
         </p>
       ) : (
-        <NavTree nodes={children} active={active} onPick={onPick} objectIcons={objectIcons} depth={depth + 1} />
+        <>
+          {children.length > 0 && (
+            <NavTree nodes={children} active={active} onPick={onPick} objectIcons={objectIcons} depth={depth + 1} />
+          )}
+          {/* objectstack#29786 — what other packages add to this group, after
+              the group's own entries, as the served navigation appends them. */}
+          <ContributedNavRows rows={contributed.map((entry) => ({ entry, undeclaredGroup: null }))} indent />
+        </>
       )}
     </StudioRailGroup>
   );
@@ -3054,6 +3079,46 @@ function NavTreeGroup({
  * package with nothing to mark.
  */
 const InterfacesRailMarksContext = React.createContext<RailCustomizations | null>(null);
+
+/**
+ * objectstack#29786 — where the open app's contributed nav entries go
+ * (`placeNavContributions`), read by the tree's groups and its top level.
+ * Empty on a package with none.
+ */
+const InterfacesNavContributionsContext = React.createContext<NavContributionPlacement>({ byGroup: new Map(), top: [] });
+
+/**
+ * objectstack#29786 — contributed nav entries as rail rows: greyed, with the
+ * contributing package, and opening that package's Interfaces pillar. Not
+ * nav entries of this app: never in its edit buffer, never dragged, renamed
+ * or deleted here.
+ */
+function ContributedNavRows({
+  rows,
+  indent = false,
+}: {
+  rows: readonly TopLevelContributedNav[];
+  indent?: boolean;
+}): React.ReactElement | null {
+  const locale = useMetadataLocale();
+  const openContributor = useOpenContributor();
+  if (rows.length === 0) return null;
+  return (
+    <>
+      {rows.map(({ entry, undeclaredGroup }) => (
+        <ContributedRailRow
+          key={`${entry.packageId}:${entry.name}`}
+          item={entry}
+          indent={indent}
+          icon={<Puzzle className="h-4 w-4 shrink-0" />}
+          title={contributedItemTitle(entry, locale, undeclaredGroup)}
+          onOpen={() => openContributor(`/studio/${encodeURIComponent(entry.packageId)}/interfaces`)}
+          locale={locale}
+        />
+      ))}
+    </>
+  );
+}
 
 function NavTree({
   nodes,
@@ -4419,6 +4484,15 @@ export function InterfacesPillar({
   const [servedNav, setServedNav] = React.useState<ServedNavText | null>(null);
   const railTree = React.useMemo(() => displayNavTree(navTree, servedNav), [navTree, servedNav]);
   const railAppLabel = displayAppLabel(appLabel, servedNav);
+  // objectstack#29786 — what other packages add to this app's navigation,
+  // from the base's one customization read (`customization.marks`), placed
+  // in the tree the rail draws.
+  const customizationMarks = customization?.marks;
+  const contributions = React.useMemo(() => baseContributionsOf(customizationMarks), [customizationMarks]);
+  const navPlacement = React.useMemo(
+    () => placeNavContributions(contributions, appName, railTree),
+    [contributions, appName, railTree],
+  );
   // nav editing — drag-drop reorder / rename / add / remove via AppNavCanvas
   const [editNav, setEditNav] = React.useState(false);
   const [navSel, setNavSel] = React.useState<{ kind: string; id: string } | null>(null);
@@ -7060,6 +7134,7 @@ export function InterfacesPillar({
           open={railOpen}
         >
           <InterfacesRailMarksContext.Provider value={railMarks}>
+          <InterfacesNavContributionsContext.Provider value={navPlacement}>
           {editNav && (
               <div className="mt-1.5 flex items-center gap-1.5">
                 {navHasDraft && (
@@ -7100,7 +7175,7 @@ export function InterfacesPillar({
                 onSelectionChange={(s) => setNavSel(s ? { kind: s.kind, id: s.id } : null)}
                 onRenamePendingChange={setNavRenamePending}
               />
-            ) : navTree.length === 0 ? (
+            ) : navTree.length === 0 && !(appStatus === 'ready' && placesAnyNav(navPlacement)) ? (
               <p className="px-2 py-3 text-[11px] text-muted-foreground">
                 {error
                   ? t('engine.studio.loadFailed', locale)
@@ -7109,7 +7184,13 @@ export function InterfacesPillar({
                     : t('engine.studio.if.noNavItems', locale)}
               </p>
             ) : (
-              <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
+              <>
+                <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
+                {/* objectstack#29786 — contributed entries the app's top level
+                    holds: those naming no group, and those naming a group the
+                    app does not declare (the served navigation appends both). */}
+                <ContributedNavRows rows={navPlacement.top} />
+              </>
             )}
             {/* objectstack#26889 — under the tree (or the no-app notice), the
                 items no entry opens. Not while nav editing: the rail is the
@@ -7122,6 +7203,7 @@ export function InterfacesPillar({
                 onlyCustomized={listOnlyCustomized}
               />
             )}
+          </InterfacesNavContributionsContext.Provider>
           </InterfacesRailMarksContext.Provider>
         </StudioRail>
 
@@ -8687,9 +8769,24 @@ export function DataPillar({
   // the inspector's display-property mode. The rail's read-only reason wrapper
   // is then not drawn: the inspector describes each control it locks there
   // (objectstack#28986).
-  const fieldRailReadOnly = readOnly && !(extWritable && fieldSel?.kind === 'field');
+  // objectstack#29786 — the open base object's fields another package
+  // contributes (the base's one customization read): greyed in the Form
+  // layout, and read-only in this rail whatever the pair could write, since
+  // neither the base nor its pair owns them.
+  const customizationMarks = customization?.marks;
+  const contributedFields = React.useMemo(
+    () => contributedFieldsOf(baseContributionsOf(customizationMarks), current?.name),
+    [customizationMarks, current?.name],
+  );
+  const selectedContributedField =
+    fieldSel?.kind === 'field' ? (contributedFields.get(String(fieldSel.id)) ?? null) : null;
+  const fieldRailReadOnly = (readOnly && !(extWritable && fieldSel?.kind === 'field')) || selectedContributedField !== null;
   const selectedBaseField =
-    extWritable && fieldSel?.kind === 'field' && baseOwnedFields !== null && baseOwnedFields.has(String(fieldSel.id));
+    extWritable &&
+    fieldSel?.kind === 'field' &&
+    selectedContributedField === null &&
+    baseOwnedFields !== null &&
+    baseOwnedFields.has(String(fieldSel.id));
   const addFieldWalledId = React.useId();
 
   // objectui#12725 — the field rail is up exactly when the render below draws
@@ -9279,6 +9376,7 @@ export function DataPillar({
                   onAddField={canAddFields ? addField : undefined}
                   readOnly={readOnly}
                   modeControl={formToolbarLeading}
+                  contributedFields={contributedFields}
                 />
               ) : (
               <>
@@ -9494,7 +9592,9 @@ export function DataPillar({
                 // focus, and Tab skipped the whole rail). One trigger for the
                 // rail rather than one per control: the reason is the same for
                 // all of them, and the controls are the shared inspector's.
-                const reason = t('engine.studio.pkg.readonlyHint', locale);
+                const reason = selectedContributedField
+                  ? contributedItemTitle(selectedContributedField, locale)
+                  : t('engine.studio.pkg.readonlyHint', locale);
                 return (
                   <TooltipProvider delayDuration={200}>
                     <Tooltip>
@@ -11002,6 +11102,24 @@ export function AutomationsPillar({
       }),
     [flows, liveFlowDefinitions, objectLabels, objectOrder, locale],
   );
+  // objectstack#29786 — the flows other packages ship on the base's objects,
+  // from the base's one customization read, each in its object's group.
+  const customizationMarks = customization?.marks;
+  const contributedFlows = React.useMemo(() => baseContributionsOf(customizationMarks), [customizationMarks]);
+  const railGroupsShown = React.useMemo(
+    () =>
+      withContributedFlowGroups(railGroups, contributedFlows, (object) => ({
+        key: object,
+        objectName: object,
+        label: objectLabels.get(object) || object,
+        items: [] as Surface[],
+      })),
+    [railGroups, contributedFlows, objectLabels],
+  );
+  const openContributor = useOpenContributor();
+  const contributedFlowShown = (f: ContributedOnObject) =>
+    !onlyCustomized &&
+    (!railNeedle || f.name.toLowerCase().includes(railNeedle) || f.packageName.toLowerCase().includes(railNeedle));
 
   // The legend under the rail: the four trigger glyphs and the dots. Off and
   // Refused are named only while some flow in the rail reads so.
@@ -11160,16 +11278,17 @@ export function AutomationsPillar({
               line (the row's title holds it whole, with its trigger kind and
               status words — the redesign trades objectui#11794's wrap for the
               32 px row), and its status dot. */}
-          {railGroups.map((group) => {
+          {railGroupsShown.map(({ group, contributed: contributedAll }) => {
             const items = railNeedle || onlyCustomized ? group.items.filter(flowShown) : group.items;
-            if (items.length === 0) return null;
+            const contributed = contributedAll.filter(contributedFlowShown);
+            if (items.length === 0 && contributed.length === 0) return null;
             const groupKey = group.key || NO_OBJECT_GROUP_KEY;
             return (
               <StudioRailGroup
                 key={groupKey}
                 testId={`auto-rail-group-${group.key || 'none'}`}
                 label={group.label}
-                count={items.length}
+                count={items.length + contributed.length}
                 collapsed={!railNeedle && !onlyCustomized && foldedGroups.has(groupKey)}
                 onToggle={() =>
                   setFoldedGroups((folded) => {
@@ -11211,10 +11330,25 @@ export function AutomationsPillar({
                     </StudioRailRow>
                   );
                 })}
+                {/* objectstack#29786 — the flows another package ships on this
+                    object: greyed, with the package, opening it there. */}
+                {contributed.map((f) => (
+                  <ContributedRailRow
+                    key={`${f.packageId}:${f.name}`}
+                    item={f}
+                    indent
+                    icon={<Workflow aria-hidden className="h-3.5 w-3.5 shrink-0" />}
+                    title={contributedItemTitle(f, locale)}
+                    onOpen={() =>
+                      openContributor(studioPillarItemPath(f.packageId, 'automations', { type: 'flow', name: f.name }))
+                    }
+                    locale={locale}
+                  />
+                ))}
               </StudioRailGroup>
             );
           })}
-          {flows.length === 0 && !creating && (error || !listed || openCreateFlow) && (
+          {flows.length === 0 && (contributedFlows?.flows.length ?? 0) === 0 && !creating && (error || !listed || openCreateFlow) && (
             <p className="px-2 py-3 text-[11px] text-muted-foreground">
               {error
                 ? t('engine.studio.loadFailed', locale)

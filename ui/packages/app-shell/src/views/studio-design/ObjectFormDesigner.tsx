@@ -59,6 +59,8 @@ import { formDndAccessibility, type FormDndLookups, type FormDndSlot } from './f
 import { AddFieldPopover } from './AddFieldPopover.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import { fieldTypeName } from '../metadata-admin/previews/fieldTypeName.js';
+import { ContributionMark, contributedItemTitle } from './StudioRailCustomizations.js';
+import type { ContributedOnObject } from './contributionRows.js';
 
 const UNGROUPED = '__ungrouped__';
 
@@ -311,7 +313,17 @@ export interface ObjectFormDesignerProps {
    * toolbar so the Form tab keeps one toolbar row (objectui#12451).
    */
   modeControl?: React.ReactNode;
+  /**
+   * objectstack#29786 — the object's fields another package contributes, by
+   * name (`contributedFieldsOf`): their cards are greyed, name the package, and
+   * are never dragged. A click still selects (the inspector shows them
+   * read-only).
+   */
+  contributedFields?: ReadonlyMap<string, ContributedOnObject>;
 }
+
+const NO_CONTRIBUTED_FIELDS: ReadonlyMap<string, ContributedOnObject> = new Map();
+const ContributedFieldsContext = React.createContext<ReadonlyMap<string, ContributedOnObject>>(NO_CONTRIBUTED_FIELDS);
 
 /**
  * The Form tab's one toolbar row (objectui#12451): the host's mode control and
@@ -415,13 +427,18 @@ function SortableField({
   readOnly?: boolean;
 }): React.ReactElement {
   const locale = useMetadataLocale();
+  // objectstack#29786 — a field another package contributes reads as a
+  // read-only card on any surface, and names its package.
+  const contributed = React.useContext(ContributedFieldsContext).get(entry.name) ?? null;
+  const locked = readOnly || contributed !== null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: fid(entry.name),
+    disabled: contributed !== null,
     // objectui#11872 — the role a screen reader announces for the card, in the
     // author's locale; left unset, dnd-kit writes its English `sortable`. A
     // read-only card is not draggable, so it gets none: ARIA does not expose a
     // blank `aria-roledescription`, and the card reads as the button it is.
-    attributes: { roleDescription: readOnly ? '' : t('engine.studio.designer.fieldRole', locale) },
+    attributes: { roleDescription: locked ? '' : t('engine.studio.designer.fieldRole', locale) },
   });
   const type = String(entry.def.type ?? 'text');
   const required = !!entry.def.required;
@@ -446,22 +463,31 @@ function SortableField({
       // canvas's drag instructions, and `useSortable` cannot take it away
       // (`disabled` keeps it and adds `aria-disabled`, though a click still
       // selects). A read-only card cannot be dragged, so it names none.
-      aria-describedby={readOnly ? undefined : attributes['aria-describedby']}
+      aria-describedby={locked ? undefined : attributes['aria-describedby']}
       aria-label={
-        readOnly
+        locked
           ? tFormat('engine.studio.designer.fieldAriaReadOnly', locale, { label })
           : tFormat('engine.studio.designer.fieldAria', locale, { label })
       }
       // objectui#12453 — what a click still does on a read-only package, the
       // half of the retired toolbar hint that was not "read-only".
-      title={readOnly ? t('engine.studio.designer.fieldTitleReadOnly', locale) : undefined}
+      title={
+        contributed
+          ? contributedItemTitle(contributed, locale)
+          : readOnly
+            ? t('engine.studio.designer.fieldTitleReadOnly', locale)
+            : undefined
+      }
+      data-contributed={contributed ? 'field' : undefined}
+      data-package={contributed?.packageId}
       // objectui#12451 — a field card: a transparent border that turns muted on
       // hover; selected, a primary border with a soft primary ring, and the
       // type tag turns primary.
       className={cn(
         'flex touch-none select-none flex-col gap-2 rounded-md border px-3 py-2.5',
-        readOnly ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
+        locked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
         spanFull && 'col-span-full',
+        contributed && 'text-muted-foreground opacity-70',
         selected ? 'border-primary bg-background ring-[3px] ring-primary/10' : 'border-transparent hover:border-border',
         isDragging && 'opacity-40',
       )}
@@ -471,6 +497,9 @@ function SortableField({
           <span className="truncate">{label}</span>
           {required && <span className="text-destructive">*</span>}
         </span>
+        {contributed && (
+          <ContributionMark packageName={contributed.packageName} packageId={contributed.packageId} locale={locale} />
+        )}
         <span
           className={cn(
             'shrink-0 text-[10px] font-semibold uppercase tracking-wider',
@@ -672,6 +701,7 @@ export function ObjectFormDesigner({
   onSelectGroup,
   readOnly = false,
   modeControl,
+  contributedFields = NO_CONTRIBUTED_FIELDS,
 }: ObjectFormDesignerProps): React.ReactElement {
   const locale = useMetadataLocale();
   const view = React.useMemo(() => readFields(draft.fields), [draft.fields]);
@@ -893,6 +923,7 @@ export function ObjectFormDesigner({
   const activeEntry = activeId && !activeId.startsWith('g:') ? entryByName.get(unFid(activeId)) : null;
 
   return (
+    <ContributedFieldsContext.Provider value={contributedFields}>
     <div className="flex min-h-0 flex-1 flex-col">
       <FormToolbar
         leading={modeControl}
@@ -991,5 +1022,6 @@ export function ObjectFormDesigner({
         </DndContext>
       </div>
     </div>
+    </ContributedFieldsContext.Provider>
   );
 }

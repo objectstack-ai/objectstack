@@ -2863,6 +2863,12 @@ const STUDIO_ZH: Record<string, string> = {
   // objectstack#28572 — 只读基础包与其定制包合为一个界面。
   'engine.studio.customize.addedIn': '位于 {pair}',
   'engine.studio.customize.addedInTitle': '此项由本部署的定制包 {pair} 新增，并保存在其中。',
+  // objectstack#29786 — items another package contributes to a read-only base.
+  'engine.studio.contributed.from': '来自 {package}',
+  'engine.studio.contributed.navTitle': '导航项 {name}，由 {package} 加入此应用。在这里只读：要修改，请打开 {package}。',
+  'engine.studio.contributed.fieldTitle': '字段 {name}，由 {package} 加入此对象。在这里只读：要修改，请打开 {package}。',
+  'engine.studio.contributed.flowTitle': '流程 {name}，在此对象上触发，由 {package} 提供。在这里只读：要修改，请打开 {package}。',
+  'engine.studio.contributed.undeclaredGroup': '它指向的分组「{group}」在此应用中没有声明，因此显示在顶层。',
   'engine.studio.pkg.withPair': '含 {pair}',
   'engine.studio.if.addInPairTitle': '新建到 {baseName} 的定制',
   'engine.studio.interfaces.create.descriptionInPair': '存为本部署对 {baseName} 定制的草稿，并在画布上打开。{baseName} 的导航保持安装时的样子。',
