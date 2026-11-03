@@ -35,7 +35,7 @@ metadata:
 
 ## Quick Reference — Detailed Rules
 
-For comprehensive documentation with incorrect/correct examples:
+Detailed rules, with incorrect/correct examples:
 
 - **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
 - **[Field Types](./rules/field-types.md)** — All field types and configs
@@ -85,7 +85,7 @@ the publish door rejects it before that:
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
 | `namespace` | — | **Not a schema key** — `ObjectSchema.create()` rejects unknown keys, so authoring it is a build error. Embed the prefix directly in `name` instead (e.g. `name: 'crm_account'`) |
 | `datasource` | `'default'` | Target datasource ID for virtualized data |
-| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`, computed and stored on write); a text formula is display-only |
+| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
 | `displayNameField` | — | **Deprecated** alias for `nameField` (still honored as a fallback) |
 | `titleFormat` | — | **Deprecated, not removed (ADR-0079)** — render-only: the server can't return or query it. Use `nameField` (it wins); a composite title follows the `nameField` row |
 | `enable` | — | Capability flags (trackHistory, searchable, apiEnabled, etc.) |
@@ -114,8 +114,10 @@ Toggle system behaviours per object:
 `searchableFields` on the object is the canonical set `$search` scans (ADR-0061).
 Leave it unset and search auto-defaults to the `nameField` plus the object's
 short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
-`textarea` / `markdown` / `select` / `status`); declare it to pin the set
-explicitly. Views may narrow it, never widen it.
+`textarea` / `markdown` / `select`) plus every field marked `searchable: true`,
+of any type except `secret` / `password` / `vector`. `searchable: false`, the
+default, never removes a field the type default scans; declare
+`searchableFields` to choose the set. Views may narrow it, never widen it.
 
 ### ⛔ Searching by a related record's title — mirror the value, always
 
@@ -154,12 +156,8 @@ a `formula` entry in any `searchableFields` is refused — `os validate`
 **Mirror maintenance is the trade-off** — a mirror is only as fresh as whatever
 writes it. Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
 stamps `project_name` from the incoming `project_id`'s parent; an `afterUpdate`
-hook on `project` re-stamps its tasks when it is renamed. Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
+hook on `project` re-stamps its tasks when it is renamed. Rows written past the hooks (bulk import, direct SQL) need a
 one-off backfill. See [Lifecycle Hooks](./references/data-hooks.md).
-
----
-
-→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Field Groups (MVP).
 
 ---
 
