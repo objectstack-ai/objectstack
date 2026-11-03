@@ -53,6 +53,9 @@ describe('reference-integrity suite — membership', () => {
       // same dataset's date dimensions — placed beside the chart member that
       // resolves the rest of that report's bindings.
       'validateReportDateRange',
+      // [#29900] The same report's `runtimeFilter` keys, resolved on the same
+      // dataset's object graph by the dashboard twin's judgement.
+      'validateReportRuntimeFilters',
       // [#14105] The dataset's OWN references, one level below the two binding
       // rules above it — the conscious edit this written-out list exists to
       // force, placed so the family reports top-down.

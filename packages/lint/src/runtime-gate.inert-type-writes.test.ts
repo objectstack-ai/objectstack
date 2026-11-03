@@ -527,6 +527,73 @@ describe('#26548 — the `report` door judges a date range against the dataset i
   });
 });
 
+describe('#29900 — the `report` door resolves `runtimeFilter` keys as the dashboard twin does', () => {
+  // The card's shape at the door's own snapshot: a summary report over a
+  // dataset of `acme_invoice`, its dimension `state` named apart from the field
+  // `status` it reads so that "a dimension key is accepted" is not the same
+  // fact as "a field key is accepted".
+  const FILTERED = {
+    objects: OBJECTS,
+    datasets: [
+      ...DATASETS,
+      {
+        name: 'acme_invoice_states',
+        label: 'Invoice States',
+        object: 'acme_invoice',
+        dimensions: [{ name: 'state', label: 'State', field: 'status', type: 'string' }],
+        measures: [{ name: 'total_sum', label: 'Total', aggregate: 'sum', field: 'total' }],
+      },
+    ],
+  };
+  const report = (over: Record<string, unknown>) => ({
+    name: 'acme_filtered_report',
+    label: 'Open Invoices',
+    type: 'summary',
+    dataset: 'acme_invoice_states',
+    rows: ['state'],
+    values: ['total_sum'],
+    ...over,
+  });
+
+  it('⭐ LIT — the card\'s repro: a key the object lacks is REFUSED at its path', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'report',
+      item: report({ runtimeFilter: { no_such_field: 'x' } }),
+      context: FILTERED,
+    });
+    expect(result.rulesRun).toContain('validateReferenceIntegrity');
+    expect(ruleIds(result.errors), dump(result)).toEqual(['report-filter-field-unknown']);
+    expect(result.errors[0].path).toBe('reports[0].runtimeFilter.no_such_field');
+  });
+
+  it('⭐ LIT — a joined block\'s own key, and a container key a block\'s object lacks', () => {
+    const joined = {
+      name: 'acme_joined_report',
+      label: 'Joined',
+      type: 'joined',
+      runtimeFilter: { nope: 1 },
+      blocks: [{ name: 'b1', type: 'summary', dataset: 'acme_invoice_states', rows: ['state'], values: ['total_sum'], runtimeFilter: { also_nope: 1 } }],
+    };
+    const result = runRuntimeAuthoringRules({ type: 'report', item: joined, context: FILTERED });
+    expect(result.errors.map((f) => [f.rule, f.path]), dump(result)).toEqual([
+      ['report-filter-field-unknown', 'reports[0].runtimeFilter.nope'],
+      ['report-filter-field-unknown', 'reports[0].blocks[0].runtimeFilter.also_nope'],
+    ]);
+  });
+
+  it('⭐ CONTROL — a field key, a dimension key, a system column and `$` operators publish clean', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'report',
+      item: report({
+        runtimeFilter: { $and: [{ status: 'open' }, { state: { $ne: 'void' } }, { created_at: { $gte: '{today}' } }] },
+      }),
+      context: FILTERED,
+    });
+    expect(result.errors, dump(result)).toEqual([]);
+    expect(result.advisories, dump(result)).toEqual([]);
+  });
+});
+
 // ─── Group A · `skill` — outside the door BY DESIGN, and these pins hold it ──
 
 describe('#19527 — `skill` stays outside the door by design: tool references are a whole-stack verdict', () => {
@@ -928,7 +995,7 @@ describe('#19542 — DARK: what the five crossings did NOT widen', () => {
     }
   });
 
-  it('a `report` write reaches exactly TWO suite members, and a `skill` write none', () => {
+  it('a `report` write reaches exactly THREE suite members, and a `skill` write none', () => {
     // The entry-level `runtimeTypes` says which WRITES dispatch the suite; the
     // per-member `runtimeTypes` says which MEMBERS judge that snapshot. Asked
     // against the real table so a member widened without this file noticing
@@ -936,7 +1003,11 @@ describe('#19542 — DARK: what the five crossings did NOT widen', () => {
     const membersFor = (type: string) =>
       REFERENCE_INTEGRITY_RULES.filter((m) => (m.runtimeTypes ?? ['flow']).includes(type)).map((m) => m.name);
 
-    expect(membersFor('report')).toEqual(['validateChartBindings', 'validateReportDateRange']);
+    expect(membersFor('report')).toEqual([
+      'validateChartBindings',
+      'validateReportDateRange',
+      'validateReportRuntimeFilters',
+    ]);
     // Outside the door by design (ruling `5791822697`) — the entry does not
     // dispatch a skill write and no member claims one, so the two halves
     // agree. See the `skill` block above.
