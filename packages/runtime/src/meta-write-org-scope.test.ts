@@ -82,6 +82,20 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 // quantified over the CONTRACT rather than over a hand-copied specimen list
 // (Prime Directive #8): a future spelling limb arrives inside the quantifier.
 import { META_URL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
+// [#29603] Pay the first load of `@objectstack/lint` at MODULE LOAD, never
+// inside a clocked case. A served VIEW read adds the lint's form-layout
+// warnings to `_diagnostics` (`withFormLayoutWarnings`), and the protocol
+// imports that package root lazily, on the first view read of the process
+// (`loadFormLayoutLint`, packages/metadata-protocol/src/metadata-diagnostics.ts).
+// Under vitest that first import is a cold transform of the lint package's
+// whole module graph: measured 1.2 s p50 / 1.7 s max idle, all of it inside the
+// GET of the ⭐ D6 case below, the first view read in this file. A shard under
+// load stretched it past the 5000 ms `testTimeout` once. The protocol's later
+// `import()` gets this same module instance back, so with it paid here the
+// case times the write and the read, not the compiler (the clocked-window rule,
+// `scripts/check-test-source-alias.mjs`; that gate cannot see this load,
+// because it happens in another package's code). The read still runs the rule.
+import '@objectstack/lint';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpDispatcherResult } from './http-dispatcher.js';
 

@@ -295,11 +295,14 @@ function closedOverlayWriteError(message: string): Error {
 
 /**
  * The writes {@link namedBaseOverlayWriteRefusal} judges: the three that land
- * a row bound to the base. ⛔ Not `delete`: removing a row bound to the base
- * writes nothing, and it is the one way to clear such a row stored before the
- * close — `os migrate packageless-overlays` reads package-less rows only, so
- * it never moves one. The removal serves the base's own document again, or
- * the pair's declared override where one exists (it is served over the row).
+ * a row bound to the base. `rollback` is every restore of a stored version:
+ * the per-item rollback and [#29390] a commit revert's restore limb (and the
+ * package rollback through it), one sentence for both. ⛔ Not `delete`:
+ * removing a row bound to the base writes nothing, and it is the one way to
+ * clear such a row stored before the close — `os migrate packageless-overlays`
+ * reads package-less rows only, so it never moves one. The removal serves the
+ * base's own document again, or the pair's declared override where one exists
+ * (it is served over the row).
  */
 export type NamedBaseWriteOperation = Exclude<PackagelessWriteOperation, 'delete'>;
 
