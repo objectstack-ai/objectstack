@@ -431,7 +431,12 @@ from **one** resolution:
    **outside** X's closure is not a candidate for X's address at all; it is that package's own item, served under its
    own address (ADR-0048 §3.3's qualified reference).
 3. **Export carries the declaration.** `GET /packages/hotcrm.custom/export` carries the overriding item with its
-   `overrides` block; `GET /packages/hotcrm/export` carries the base unchanged. The epic's two-minute check, verbatim:
+   `overrides` block; `GET /packages/hotcrm/export` carries the base unchanged. The whole-deployment export
+   `GET /packages/export` (#28914) composes those per-package exports unchanged — every installed package the
+   deployment's own code does not register, each entry exactly what its own `GET /packages/:id/export` answers, in
+   ADR-0141 D5's hydrate order, so a `.custom` pair comes after its base — and adds no reading of its own
+   (`packages/runtime/src/domains/packages.ts#assemblePackageExportBundle`,
+   `packages/spec/src/api/package-lifecycle.zod.ts#PackageExportBundleSchema`). The epic's two-minute check, verbatim:
    「HotCRM 视图「定制」→ 三处读取同一列集、导出带声明、「恢复包原版」回原样」.
 4. **A per-package customization read** (N-15) answers, for a base, its overrides, its extensions and its switched-off
    items — served rows and ledger rows, nothing computed — and the landing's counts and Studio's "only customizations"
@@ -706,7 +711,10 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
   S13–S15 are folded into this rewrite); PR [#28045](https://github.com/objectstack-ai/objectstack/pull/28045) (the
   Proposed draft this rewrite replaces, hand-merged 2026-10-30); card [#29601](https://github.com/objectstack-ai/objectstack/issues/29601)
   and PR [#29791](https://github.com/objectstack-ai/objectstack/pull/29791) (2026-11-03, wording only: [D8](#d8) item 2 names
-  the pair's export and scopes its lead; *Decided here* #5 scoped with it).
+  the pair's export and scopes its lead; *Decided here* #5 scoped with it); card [#29802](https://github.com/objectstack-ai/objectstack/issues/29802)
+  (2026-11-03, wording only: [D8](#d8) item 3 names the whole-deployment export `GET /packages/export`, landed for
+  [#28914](https://github.com/objectstack-ai/objectstack/issues/28914) by PR [#29755](https://github.com/objectstack-ai/objectstack/pull/29755),
+  as composing the per-package exports unchanged, the pair after its base).
 - [#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 13, 14, 19, 20, 21 and their landed
   PRs #27376, #27927, #28076.
 - ADR-0005, ADR-0009, ADR-0010, ADR-0029, ADR-0048 (and its 2026-10-08 addendum), ADR-0070, ADR-0126, ADR-0131,
