@@ -61,6 +61,7 @@ import { SchemaForm, type SchemaFormIssue } from './SchemaForm.js';
 import type { FormFieldSpec, FormViewSpec } from './form-spec.js';
 import { getPackageSchema, getPackageForm } from './package-schema.js';
 import { PackageDependenciesEditor, type DependencyMap } from './PackageDependenciesEditor.js';
+import { romanizeHan, romanizerPending, useHanRomanizer } from './romanizeHan.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 
 const API = '/api/v1/packages';
@@ -223,9 +224,13 @@ function toIdSegment(raw: string): string {
  * The candidate is checked against the spec before it is offered, so a
  * derivation never puts an id in the field that the dialog itself refuses.
  * `null` when the name yields no segment at all.
+ *
+ * A Chinese name derives through its pinyin (`romanizeHan`): `维修中心` gives
+ * the segment `weixiu-zhongxin`, so `com.<org>.weixiu-zhongxin`, and the
+ * namespace follows that id as it follows any other.
  */
 function deriveCreatePackageId(name: string, orgSlug: string | null | undefined): string | null {
-  const nameSegment = toIdSegment(name);
+  const nameSegment = toIdSegment(romanizeHan(name));
   if (!nameSegment) return null;
   const orgSegment = orgSlug ? toIdSegment(orgSlug) : '';
   const candidate = ['com', orgSegment, nameSegment].filter(Boolean).join('.');
@@ -491,9 +496,13 @@ export function PackageFormDialog({
     });
   }, []);
 
+  // The pinyin dictionary a Chinese name derives through loads on first use;
+  // the version it hands back moves when it lands, re-deriving below.
+  const romanizerVersion = useHanRomanizer(String(draft.name ?? ''));
+
   // The active organization can arrive after the author has typed the name
-  // (the session's organization list loads on its own schedule); an id still
-  // following the name picks the segment up then.
+  // (the session's organization list loads on its own schedule), and so can
+  // the pinyin dictionary; an id still following the name picks either up then.
   React.useEffect(() => {
     if (!open || !createMode) return;
     setForm((prev) => {
@@ -505,7 +514,7 @@ export function PackageFormDialog({
       const namespace = t.namespace ? was.namespace : (deriveNamespaceFromPackageId(id) ?? '');
       return { draft: { ...was, id, namespace }, touched: t };
     });
-  }, [open, createMode, orgSlug]);
+  }, [open, createMode, orgSlug, romanizerVersion]);
 
   // The help line SchemaForm would have shown under the id: the localized row
   // when there is one, else the spec's own `.describe()` (see package-schema).
@@ -541,17 +550,25 @@ export function PackageFormDialog({
   // (a CJK-only name), an id that derived no namespace, or the author
   // clearing the field.
   const idStr = String(draft.id ?? '').trim();
-  const idMissing = createMode && !idStr && (touched.id || nameOk);
-  // objectui#13389 — the display name is there but holds no Latin letter to
-  // make an id from (a Chinese name, say): say that, rather than the "filled
-  // in from the display name" line over an empty box.
+  // A Chinese name whose pinyin dictionary is still loading: its id is about
+  // to be derived, so no row may say it is missing yet.
+  const idPending = createMode && !touched.id && romanizerPending(String(draft.name ?? ''));
+  const idMissing = createMode && !idStr && (touched.id || nameOk) && !idPending;
+  // objectui#13389 — the display name is there but yields nothing to make an
+  // id from (a Japanese name, say): say that, rather than the "filled in from
+  // the display name" line over an empty box.
   const idNotDerived =
-    createMode && !touched.id && !idStr && nameOk && !toIdSegment(String(draft.name ?? ''));
+    createMode &&
+    !touched.id &&
+    !idStr &&
+    nameOk &&
+    !idPending &&
+    !toIdSegment(romanizeHan(String(draft.name ?? '')));
   const nsMissing =
     createMode && !String(draft.namespace ?? '').trim() && (touched.namespace || !!idStr);
   // objectstack#27833 — once a name is in, every other create gate is a row
   // behind Advanced (id, namespace, version), so a failing one opens it.
-  const advancedNeeded = createMode && nameOk && !(idOk && nsOk && versionOk);
+  const advancedNeeded = createMode && nameOk && !idPending && !(idOk && nsOk && versionOk);
   const showAdvanced = advancedOpen || advancedNeeded;
 
   const createForms = React.useMemo(

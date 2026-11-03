@@ -15,10 +15,11 @@ import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDis
 // `resolveFieldScale` is the same kind of ask: the width an ABSENT `scale`
 // means is the protocol's answer, not this package's (objectui#9843).
 import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
+import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, formatDisplayNumber } from '@object-ui/i18n';
 import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
-import { useObjectTranslation } from '@object-ui/react';
+import { useObjectTranslation, classifyLoadError } from '@object-ui/react';
 import { SchemaRendererContext as _SchemaRendererContext } from '@object-ui/react';
 import { useRelatedRecordActions } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
@@ -43,6 +44,8 @@ import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCar
 type LookupCacheEntry =
   | { state: 'pending'; promise: Promise<void> }
   | { state: 'ok'; record: Record<string, unknown> | null | undefined; schema: unknown }
+  // The reader's own read was REFUSED (objectstack#29641): settled, not failed.
+  | { state: 'refused' }
   | { state: 'err' };
 const lookupNameCache: Map<string, LookupCacheEntry> = new Map();
 
@@ -244,8 +247,15 @@ export function isLikelyOpaqueId(v: unknown): boolean {
  *   answers a record hidden from this reader and a record that does not exist
  *   identically on purpose (existence non-disclosure, objectui#8631), so this
  *   state is that fused answer and nothing finer.
- * - `undefined` — anything else: not asked, still in flight, the read threw,
- *   or a record came back that no display field could name.
+ *   It is also the answer to a read the reader is REFUSED (objectstack#29641):
+ *   the target object's read gate answers the record GET with `403
+ *   PERMISSION_DENIED` (for an id that exists and for one that does not), which
+ *   the adapter throws rather than mapping to `null`. Read through the shared
+ *   `classifyLoadError` (`forbidden`), never from the message.
+ * - `undefined` — anything else: not asked, still in flight, the read failed
+ *   for any other reason (network, 5xx, 401: it may pass on a retry, so it
+ *   says nothing about the record), or a record came back that no display
+ *   field could name.
  */
 type LookupNameAnswer = { state: 'named'; name: string } | { state: 'absent' } | undefined;
 
@@ -324,8 +334,13 @@ function useLookupName(
         // heuristic alone can surface an autonumber over the real name.
         const schema = await fetchRefObjectSchema(dataSource, referenceTo!);
         lookupNameCache.set(cacheKey, { state: 'ok', record, schema });
-      } catch {
-        lookupNameCache.set(cacheKey, { state: 'err' });
+      } catch (err) {
+        // A refusal is the reader's settled answer, like a not-found; any
+        // other failure stays a failure (objectstack#29641).
+        lookupNameCache.set(
+          cacheKey,
+          classifyLoadError(err) === 'forbidden' ? { state: 'refused' } : { state: 'err' },
+        );
       }
       force((n) => n + 1);
     })();
@@ -335,6 +350,7 @@ function useLookupName(
 
   if (!isResolvable) return undefined;
   const entry = lookupNameCache.get(cacheKey);
+  if (entry?.state === 'refused') return { state: 'absent' };
   if (entry?.state !== 'ok') return undefined;
   if (entry.record == null) return { state: 'absent' };
   const name = resolveLookupRecordName(entry.record, entry.schema, displayField, policy, referenceTo);
@@ -2727,7 +2743,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
   const lookupAnswer = useLookupName(referenceTo, primaryPrimitiveId, displayField, perms);
   const resolvedName = lookupAnswer?.state === 'named' ? lookupAnswer.name : undefined;
   // The reader's own read of the first primitive answered "no record"
-  // (objectui#13335). Only that id gets the restricted face: in flight, a
+  // (objectui#13335) or was refused (objectstack#29641). Only that id gets the restricted face: in flight, a
   // failed read, an unnamed record and the entries never asked keep the
   // unresolved one below.
   const restrictedId = lookupAnswer?.state === 'absent' ? primaryPrimitiveId : undefined;
@@ -3240,23 +3256,17 @@ function RestrictedLookupReference({ label }: { label: string }): React.ReactEle
 }
 
 /**
- * The value a `lookup` / `user` field declaring `referenceNameVisible: true`
- * is served on `$expand` when the reader may read the record carrying it but
- * is refused the record it points at (director ruling 6574398310, letter B):
- * the id the row holds, the target's display name, and the refusal said in
- * the value. The server's own type is `ReferenceNameOnlyValue` in
- * `@objectstack/objectql` (`engine-reference-name-visible.ts`); it is served
- * once per element on a `multiple: true` field. `name` is the target's
- * ADR-0079 display name, or the floor `Record #<id>` when a field-level rule
- * on the name column holds it back, and is drawn exactly as served.
- */
-interface ReferenceNameOnlyValue {
-  id: string;
-  name: string;
-  readRefused: true;
-}
-
-/**
+ * `ReferenceNameOnlyValue` (imported from `@objectstack/spec/data`, where
+ * `ReferenceNameOnlyValueSchema` owns the shape and the engine imports the same
+ * type) is the value a `lookup` / `user` field declaring
+ * `referenceNameVisible: true` is served on `$expand` when the reader may read
+ * the record carrying it but is refused the record it points at (director
+ * ruling 6574398310, letter B): the id the row holds, the target's display
+ * name, and the refusal said in the value, once per element on a
+ * `multiple: true` field. `name` is the target's ADR-0079 display name, or the
+ * floor `Record #<id>` when a field-level rule on the name column holds it
+ * back, and is drawn exactly as served.
+ *
  * Is this one reference value the served name-only form? Judged on the
  * in-band `readRefused: true` the server writes, never on the shape of the
  * rest: an expanded record the reader may read can also carry just an id and

@@ -39,10 +39,10 @@
  * temp dir, and asks a child Node process — with that directory as its cwd and
  * nothing of this workspace on its resolution path — the three questions the
  * card measured. The one thing borrowed from the workspace is the tarball's own
- * runtime dependency `ts-morph`, symlinked in so the extractor can be EXECUTED
+ * runtime dependency `typescript`, symlinked in so the extractor can be EXECUTED
  * from the packed copy and not merely resolved; resolution never consults it.
  * That borrow is guarded rather than assumed: `beforeAll` asserts the manifest
- * still declares `ts-morph` under `dependencies` before symlinking, because the
+ * still declares `typescript` under `dependencies` before symlinking, because the
  * copy this file hands over is a copy a real consumer would never receive.
  *
  * ## Names are not shapes — why a consumer-side `tsc` runs here too (#15630)
@@ -129,7 +129,7 @@ interface Manifest {
   version: string;
   exports: ExportsMap;
   /**
-   * Optional on purpose: a manifest that no longer declares `ts-morph` has to be
+   * Optional on purpose: a manifest that no longer declares `typescript` has to be
    * REPRESENTABLE here, so the borrow guard in `beforeAll` is what fails — not
    * a type assertion quietly promising a key the file on disk may not carry.
    */
@@ -472,21 +472,21 @@ beforeAll(() => {
   renameSync(join(extractDir, 'package'), installedRoot);
 
   // The extractor's one runtime dependency, so `import()` can EXECUTE it from
-  // the packed copy. A real-path symlink: pnpm's store keeps ts-morph's own
-  // dependencies beside the real directory, and Node resolves from there.
+  // the packed copy. A real-path symlink into pnpm's store, the same shape any
+  // borrowed store package needs; `typescript` itself has no dependencies.
   //
-  // ⛔ Never borrow it unconditionally. A consumer receives `ts-morph` only
+  // ⛔ Never borrow it unconditionally. A consumer receives `typescript` only
   // because the PUBLISHED manifest declares it a runtime dependency; this file
   // hands itself a copy the consumer would not have, so the premise is asserted
   // BEFORE the symlink can paper over its absence.
   expect(
-    MANIFEST.dependencies?.['ts-morph'],
-    `${PACKAGE_NAME} must declare ts-morph in "dependencies" — the symlink below borrows it from this workspace, ` +
+    MANIFEST.dependencies?.['typescript'],
+    `${PACKAGE_NAME} must declare typescript in "dependencies" — the symlink below borrows it from this workspace, ` +
       'but an installed copy of the tarball receives it only from that manifest entry. Moved to devDependencies or ' +
       'dropped, the free-identifiers path would fail with ERR_MODULE_NOT_FOUND for every real consumer while this ' +
       'pin, supplying its own copy, stayed green.',
   ).toBeTypeOf('string');
-  symlinkSync(realpathSync(join(PACKAGE_ROOT, 'node_modules', 'ts-morph')), join(consumer, 'node_modules', 'ts-morph'), 'dir');
+  symlinkSync(realpathSync(join(PACKAGE_ROOT, 'node_modules', 'typescript')), join(consumer, 'node_modules', 'typescript'), 'dir');
 
   const probePath = join(consumer, 'probe.mjs');
   writeFileSync(probePath, PROBE_SOURCE);
@@ -665,7 +665,7 @@ describe('the extractor that answers from the packed copy is the platform\'s own
     });
   });
 
-  it('refuses a scope leak with the free identifier named — the ts-morph path runs from the tarball too', () => {
+  it('refuses a scope leak with the free identifier named — the compiler path runs from the tarball too', () => {
     const runtime = probe.runtime as Extract<ProbeResult['runtime'], { free: unknown }>;
     expect(runtime.free).not.toBeNull();
     expect(runtime.free).toMatchObject({

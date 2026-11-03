@@ -43,7 +43,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleRequire } from 'bundle-require';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
-import { ts } from 'ts-morph';
+import ts from 'typescript';
 import { GENERATOR_SCAFFOLD_TARGETS, stackBindingCandidates, type ScaffoldBindings } from '../src/commands/generate.js';
 import {
   TEMPLATES,
