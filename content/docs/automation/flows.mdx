@@ -2453,7 +2453,7 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
    `== null` / `!isBlank()` in the same branch: the run binds every declared
    field, `null` when empty, CEL has no `>` for null, and the run fails there
    while the write that fired it still lands. A bare `budget` is `record.budget`,
-   judged alike; a start-condition guard holds at every edge and branch — spell
+   and `os validate` judges it too; a start guard holds at every edge and branch — spell
    it `record.budget != null`, which both doors accept, and `has()` is no guard.
 </Callout>
 
