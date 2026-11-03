@@ -495,10 +495,20 @@ describe('[#15887] the three object shapes record their verdict HERE, not one la
     // one: under a wall an external object states its organization scope, and
     // this one — registered past the boot refusal — states none.
     const { middleware } = await boot();
-    const opCtx = sweep('ext_customer', 'update', MEMBER_CTX);
+    // A delete sweep is selected through the row wall: the recorded verdict is
+    // the deny, and no `organization_id = <org>` is injected.
+    const opCtx = sweep('ext_customer', 'delete', MEMBER_CTX);
     await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'deny' });
     expect(injectedOrgWall(opCtx)).toBeUndefined();
+    // An update sweep is REFUSED whole by the write wall, naming the undeclared
+    // scope — the engine is never reached.
+    const update = sweep('ext_customer', 'update', MEMBER_CTX);
+    await expect(middleware(update, engineTerminal(update))).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      message: expect.stringContaining("'ext_customer' states none the organization wall can enforce"),
+    });
   });
 
   it('[#7835] a FEDERATED object whose AUTHOR declared a real remote `organization_id` records `organization` — the exit is PROVENANCE, not `external`', async () => {

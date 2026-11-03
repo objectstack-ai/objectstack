@@ -22,16 +22,20 @@
  *    to whatever a driver answers, so a row without the column reads to no one;
  *  - `tenancy: { enabled: false }` — the object is shared by every organization;
  *  - `systemFields: { tenant: false }` — the same opt-out, spelled on the
- *    system fields (`systemFields: false` includes it).
+ *    system fields. These two are the wall's own opt-out clauses, and the only
+ *    ones: the whole-block `systemFields: false` is in neither (the registry's
+ *    recorded reading), so it states nothing here.
  *
  * An external object that states none is REFUSED BY NAME when the boot
  * completes ({@link refuseUndeclaredExternalObjectScope}, run from a
  * `kernel:ready` handler beside the ADR-0131 D5 refusal of a declaration the
  * posture does not read), and one registered after the boot — a Studio
  * import, a runtime datasource — is DENIED at Layer 0 (`computeTenantLayer0Verdict`
- * answers `deny`, the shape the owner anchor took: no provable scope, no row).
- * Neither reads as "shared": the undeclared state is a configuration defect,
- * and a defect fails toward isolation, never toward exposure.
+ * answers `deny`, the shape the owner anchor took: no provable scope, no row)
+ * and REFUSED on every write by the write wall (`composeWriteTenantWall`,
+ * ahead of its scope pre-test, with {@link undeclaredExternalScopeWriteRefusal}'s
+ * sentence). The undeclared state is a configuration defect, and a defect
+ * fails toward isolation, never toward exposure.
  *
  * `tenancy.tenantField` on an external object is refused the same way: the
  * wall keys on `organization_id` alone, and the one reader of a declared
@@ -62,14 +66,19 @@ const TENANT_SCOPE_COLUMN = 'organization_id';
 /**
  * What an external object states about its organization scope.
  *
+ * - `tenant-field-unenforceable` — `tenancy.tenantField` names a column other
+ *   than `organization_id`, which the wall does not read on an external object
+ *   (judged first: a tenant field the wall cannot read is refused whatever
+ *   else the object declares, unless it opted out of tenancy altogether).
+ * - `shared` — the wall's own two opt-out clauses, `tenancy.enabled: false` or
+ *   `systemFields.tenant: false`; the whole-block `systemFields: false` is in
+ *   neither and states nothing.
  * - `walled` — it declares its own `organization_id` (any definition other
  *   than the platform's injected one; a parsed copy of the shipped definition
- *   carries the parser's defaults and so counts as the author's).
- * - `shared` — `tenancy.enabled: false`, `systemFields.tenant: false` or
- *   `systemFields: false`.
+ *   carries the parser's defaults and so counts as the author's). An object
+ *   with its own column is never answered `shared` unless it also opted out,
+ *   because the wall walls it.
  * - `undeclared` — none of the above.
- * - `tenant-field-unenforceable` — `tenancy.tenantField` names a column other
- *   than `organization_id`, which the wall does not read on an external object.
  */
 export type ExternalOrganizationScope = 'walled' | 'shared' | 'undeclared' | 'tenant-field-unenforceable';
 
@@ -94,13 +103,15 @@ export function declaredForeignTenantField(schema: unknown): string | null {
  */
 export function externalOrganizationScopeOf(schema: unknown): ExternalOrganizationScope | null {
   if (!isFederatedObject(schema)) return null;
-  if (isTenancyDisabled(schema)) return 'shared';
+  // The wall's two opt-out clauses, exactly as `getObjectSecurityMeta` reads
+  // `tenancyDisabled`: an object that opted out is shared whatever column it
+  // carries, because the wall composes nothing on it.
   const systemFields = (schema as { systemFields?: unknown }).systemFields;
-  if (systemFields === false) return 'shared';
-  if (systemFields && typeof systemFields === 'object' && (systemFields as { tenant?: unknown }).tenant === false) {
-    return 'shared';
-  }
-  if (declaredForeignTenantField(schema) !== null) return 'tenant-field-unenforceable';
+  const optedOut =
+    isTenancyDisabled(schema) ||
+    (!!systemFields && typeof systemFields === 'object' && (systemFields as { tenant?: unknown }).tenant === false);
+  if (!optedOut && declaredForeignTenantField(schema) !== null) return 'tenant-field-unenforceable';
+  if (optedOut) return 'shared';
   if (readFieldDef(schema, TENANT_SCOPE_COLUMN) !== undefined && !hasPhantomTenantAnchor(schema)) return 'walled';
   return 'undeclared';
 }
@@ -122,6 +133,30 @@ export const EXTERNAL_SCOPE_REMEDY =
   "`external.columnMap: { <remote column>: 'organization_id' }`) — the rows are then walled by organization; " +
   '`tenancy: { enabled: false }` — the object is shared by every organization; or ' +
   '`systemFields: { tenant: false }` — the same opt-out, spelled on the system fields.';
+
+/**
+ * The write wall's refusal of an external object that states no organization
+ * scope, as the caller reads it: the rule, the object, and the three ways out
+ * — never the "no active organization" sentence, which would send a caller
+ * who has one to join one. The developer half names the posture and the door.
+ */
+export function undeclaredExternalScopeWriteRefusal(
+  object: string,
+  operation: string,
+  posture: TenancyPosture,
+): { message: string; developerMessage: string } {
+  return {
+    message:
+      `[Security] Access denied: under the '${posture}' tenancy posture every external object states its ` +
+      `organization scope, and '${object}' states none the organization wall can enforce — so this ${operation} is ` +
+      `refused. ${EXTERNAL_SCOPE_REMEDY}`,
+    developerMessage:
+      `[ADR-0015 §10] '${object}' is an external object registered after the boot (the boot refuses one by name) ` +
+      `whose organization scope is undeclared, so the Layer 0 wall answers \`deny\` for it under the '${posture}' ` +
+      `posture: every read answers no row, and every ${operation} is refused here, ahead of the wall's scope ` +
+      'pre-test, whatever organization the caller carries. System contexts are unaffected.',
+  };
+}
 
 /** The sentence for an object whose only declaration is a tenant field the wall does not read. */
 export function foreignTenantFieldSentence(object: string, tenantField: string): string {

@@ -698,6 +698,20 @@ function createWalledDriver(): IDataDriver {
       walledCalls.push({ method: 'find', object, query: snapshot(query) });
       return (walledTables[object] ?? []).map((r) => ({ ...r }));
     },
+    // The remote accepts writes: a write that reaches it lands, and is seen.
+    async create(object: string, data: Row) {
+      walledCalls.push({ method: 'create', object, data: snapshot(data) });
+      const row = { id: `w_${walledCalls.length}`, ...data };
+      (walledTables[object] ??= []).push(row);
+      return { ...row };
+    },
+    async delete(object: string, id: string | number) {
+      walledCalls.push({ method: 'delete', object, id });
+      const rows = walledTables[object] ?? [];
+      const at = rows.findIndex((r) => r.id === id);
+      if (at >= 0) rows.splice(at, 1);
+      return at >= 0;
+    },
   };
   return blind as unknown as IDataDriver;
 }
@@ -727,7 +741,10 @@ const WALLED_DATASOURCE = {
   driver: DATASOURCE,
   schemaMode: 'external' as const,
   config: {},
-  external: { allowWrites: false, validation: { onMismatch: 'fail' as const, checkOnBoot: false } },
+  // Writes opted in at the datasource, so the object registered after the boot
+  // can declare `writable: true` and the write wall — not the datasource's
+  // read-only gate — is what refuses its writes ((h5b)).
+  external: { allowWrites: true, validation: { onMismatch: 'fail' as const, checkOnBoot: false } },
 };
 
 const WALLED_STACK = defineStack({
@@ -736,7 +753,8 @@ const WALLED_STACK = defineStack({
   objects: [
     externalObject(WALLED, 'walled', { fields: { name: { type: 'text', label: 'Name' }, organization_id: { type: 'text', label: 'Organization' } } }),
     externalObject(WALLED_BLIND, 'walled_blind', { fields: { name: { type: 'text', label: 'Name' }, organization_id: { type: 'text', label: 'Organization' } } }),
-    externalObject(SHARED, 'shared', { tenancy: { enabled: false } }),
+    // Writable, so (h5b)'s control insert reaches the remote.
+    externalObject(SHARED, 'shared', { tenancy: { enabled: false }, external: { remoteName: 'shared', writable: true } }),
     externalObject(SHARED_SYSTEM_FIELDS, 'shared_sf', { systemFields: { tenant: false } }),
     { name: LOCAL, label: LOCAL, sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } },
   ],
@@ -796,6 +814,7 @@ describe('(h) under the `isolated` posture every external object states its orga
   let wEngine: any;
   let tokenA: string;
   let tokenB: string;
+  let adminTokenW: string;
   const prevEnv: Record<string, string | undefined> = {};
 
   const wReq = (path: string, init?: RequestInit) => wApp.request(`${ORIGIN}${API}${path}`, init);
@@ -844,6 +863,16 @@ describe('(h) under the `isolated` posture every external object states its orga
     wEngine = await wKernel.getServiceAsync('objectql');
     await wEngine.insert('sys_organization', { id: ORG_A, name: 'Org A', slug: ORG_A }, { context: { isSystem: true } });
     await wEngine.insert('sys_organization', { id: ORG_B, name: 'Org B', slug: ORG_B }, { context: { isSystem: true } });
+    // The platform owner, seated in A: a caller WITH an active organization
+    // and the grants to write anything — the caller (h5b) refuses.
+    const adminUsers = await wEngine.find('sys_user', { where: { email: ADMIN.email }, limit: 1, context: { isSystem: true } });
+    const adminUserId = String(adminUsers?.[0]?.id);
+    await wEngine.insert('sys_member', { id: `mem_${adminUserId}`, organization_id: ORG_A, user_id: adminUserId, role: 'owner' }, { context: { isSystem: true, tenantId: ORG_A } });
+    const adminSignedIn = await wReq('/auth/sign-in/email', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: ADMIN.email, password: ADMIN.password }),
+    });
+    if (!adminSignedIn.ok) throw new Error(`walled admin signIn failed: ${adminSignedIn.status} ${await adminSignedIn.text()}`);
+    adminTokenW = ((await adminSignedIn.json()) as any).token;
     tokenA = await memberOf(A_EMAIL, ORG_A);
     tokenB = await memberOf(B_EMAIL, ORG_B);
   }, BOOT_TIMEOUT);
@@ -907,7 +936,7 @@ describe('(h) under the `isolated` posture every external object states its orga
       name: LATE,
       label: 'Late',
       datasource: DATASOURCE,
-      external: { remoteName: 'late' },
+      external: { remoteName: 'late', writable: true },
       sharingModel: 'public_read_write',
       fields: { name: { type: 'text', label: 'Name' } },
     });
@@ -930,6 +959,36 @@ describe('(h) under the `isolated` posture every external object states its orga
     for (const call of seen) expect(JSON.stringify(call.query)).toMatch(/__rls_deny__|__deny_all__/);
     // CONTROL: the same member on the declared shared object reads unwalled.
     expect(await security.getReadFilter(SHARED, { userId: 'usr_spike_a', tenantId: ORG_A, positions: [] })).toBeUndefined();
+  });
+
+  it('(h5b) …and accepts no write: an insert naming no organization is refused by the write wall, naming the undeclared scope; an update and a delete stay refused; the remote sees no write', async () => {
+    // The platform owner seated in A — a caller WITH an active organization —
+    // on the writable object (h5) registered. The datasource opted writes in
+    // and the object declares `writable: true`, so only the wall stands here.
+    const mark = walledCalls.length;
+    const inserted = await wAs(adminTokenW, 'POST', `/data/${LATE}`, { name: 'Nobody’s row' });
+    const insertedBody = await readJson(inserted);
+    expect(inserted.status, JSON.stringify(insertedBody)).toBe(403);
+    const message = String(insertedBody?.error?.message ?? insertedBody?.error ?? insertedBody?.message ?? '');
+    expect(String(insertedBody?.error?.code ?? insertedBody?.code)).toBe('PERMISSION_DENIED');
+    // The rule, the object and the three ways out — never the missing-organization sentence.
+    expect(message).toContain(`every external object states its organization scope, and '${LATE}' states none`);
+    expect(message).toContain('`tenancy: { enabled: false }`');
+    expect(message).toContain('`systemFields: { tenant: false }`');
+    expect(message).not.toContain('active organization');
+    // An update and a delete stay refused (the row wall selects no row, or the wall refuses).
+    const updated = await wAs(adminTokenW, 'PATCH', `/data/${LATE}/l_a`, { name: 'Renamed' });
+    expect([403, 404]).toContain(updated.status);
+    const deleted = await wAs(adminTokenW, 'DELETE', `/data/${LATE}/l_a`);
+    expect([403, 404]).toContain(deleted.status);
+    // The remote saw no write at all, and holds what it held.
+    const writes = walledCalls.slice(mark).filter((c) => c.object === LATE && ['create', 'update', 'delete'].includes(c.method));
+    expect(writes).toEqual([]);
+    expect((walledTables[LATE] ?? []).map((r) => r.id).sort()).toEqual(['l_a', 'l_b']);
+    // CONTROL: the same caller's insert on the declared shared object reaches the remote.
+    const shared = await wAs(adminTokenW, 'POST', `/data/${SHARED}`, { name: 'Shared 3' });
+    expect(shared.status, await shared.clone().text()).toBeLessThan(300);
+    expect(walledCalls.slice(mark).some((c) => c.object === SHARED && c.method === 'create')).toBe(true);
   });
 
   it('(h6) an external object that states no scope at boot is refused BY NAME, with the three ways out; so is a `tenancy.tenantField` the wall cannot read', async () => {

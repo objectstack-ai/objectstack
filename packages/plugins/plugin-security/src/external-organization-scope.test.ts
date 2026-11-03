@@ -64,9 +64,30 @@ describe('externalOrganizationScopeOf — the one reading of the declaration', (
     expect(externalOrganizationScopeOf({ name: 'ext', external: { remoteName: 'x' }, tenancy: { enabled: false }, fields: REMOTE_COLUMNS })).toBe('shared');
   });
 
-  it('`systemFields.tenant: false`, and the whole-block `systemFields: false`, declare the object shared', () => {
+  it('`systemFields.tenant: false` declares the object shared', () => {
     expect(externalOrganizationScopeOf({ name: 'ext', external: { remoteName: 'x' }, systemFields: { tenant: false }, fields: REMOTE_COLUMNS })).toBe('shared');
-    expect(externalOrganizationScopeOf({ name: 'ext', external: { remoteName: 'x' }, systemFields: false, fields: REMOTE_COLUMNS })).toBe('shared');
+  });
+
+  it("the whole-block `systemFields: false` is not one of the wall's opt-out clauses: alone it states nothing", () => {
+    // The registry's recorded reading: the wall's `tenancyDisabled` has exactly
+    // two clauses, and `systemFields: false` is in neither.
+    const schema = { name: 'ext', external: { remoteName: 'x' }, systemFields: false, fields: REMOTE_COLUMNS };
+    expect(externalOrganizationScopeOf(schema)).toBe('undeclared');
+    expect(externalOrganizationScopeIsUndeclared(schema)).toBe(true);
+  });
+
+  it('an object with its own `organization_id` beside `systemFields: false` is walled — never answered shared', () => {
+    expect(externalOrganizationScopeOf({
+      name: 'ext', external: { remoteName: 'x' }, systemFields: false,
+      fields: { organization_id: { type: 'text', label: 'Org' }, ...REMOTE_COLUMNS },
+    })).toBe('walled');
+  });
+
+  it("an opt-out clause beside an own `organization_id` is shared, as the wall reads it (it composes nothing on an opted-out object)", () => {
+    expect(externalOrganizationScopeOf({
+      name: 'ext', external: { remoteName: 'x' }, tenancy: { enabled: false },
+      fields: { organization_id: { type: 'text', label: 'Org' }, ...REMOTE_COLUMNS },
+    })).toBe('shared');
   });
 
   it('`tenancy.tenantField` naming another column is a declaration the wall cannot enforce', () => {
@@ -101,6 +122,8 @@ describe('refuseUndeclaredExternalObjectScope — the boot refusal', () => {
       name: 'ext_foreign', external: { remoteName: 'f' }, tenancy: { enabled: true, tenantField: 'remote_org' },
       fields: { remote_org: { type: 'text', label: 'R' }, organization_id: { ...TENANT_SCOPE_FIELD_DEF } },
     },
+    // The whole-block opt-out is not a declaration: refused with the others.
+    { name: 'ext_sf_false', external: { remoteName: 'sf' }, systemFields: false, fields: REMOTE_COLUMNS },
   ];
 
   it('names every undeclared external object, sorted, and only those', () => {
@@ -108,6 +131,7 @@ describe('refuseUndeclaredExternalObjectScope — the boot refusal', () => {
       { object: 'ext_a', scope: 'undeclared' },
       { object: 'ext_b', scope: 'undeclared' },
       { object: 'ext_foreign', scope: 'tenant-field-unenforceable', tenantField: 'remote_org' },
+      { object: 'ext_sf_false', scope: 'undeclared' },
     ]);
   });
 
@@ -122,9 +146,9 @@ describe('refuseUndeclaredExternalObjectScope — the boot refusal', () => {
     const error = thrown as ExternalObjectOrganizationScopeUndeclaredError;
     expect(error.name).toBe('ExternalObjectOrganizationScopeUndeclaredError');
     expect(error.posture).toBe(posture);
-    expect(error.objects.map((o) => o.object)).toEqual(['ext_a', 'ext_b', 'ext_foreign']);
+    expect(error.objects.map((o) => o.object)).toEqual(['ext_a', 'ext_b', 'ext_foreign', 'ext_sf_false']);
     expect(error.message).toContain(`'${posture}' tenancy posture every external object states its organization scope`);
-    expect(error.message).toContain("'ext_a', 'ext_b'");
+    expect(error.message).toContain("'ext_a', 'ext_b', 'ext_sf_false'");
     expect(error.message).toContain('`organization_id` field of its own');
     expect(error.message).toContain('`tenancy: { enabled: false }`');
     expect(error.message).toContain('`systemFields: { tenant: false }`');
@@ -140,7 +164,7 @@ describe('refuseUndeclaredExternalObjectScope — the boot refusal', () => {
   });
 
   it('CONTROL: a registry whose every external object declares its scope boots', () => {
-    expect(() => refuseUndeclaredExternalObjectScope('isolated', objects.filter((o) => !/^ext_(a|b|foreign)$/.test(o.name)))).not.toThrow();
+    expect(() => refuseUndeclaredExternalObjectScope('isolated', objects.filter((o) => !/^ext_(a|b|foreign|sf_false)$/.test(o.name)))).not.toThrow();
   });
 });
 
@@ -295,5 +319,51 @@ describe('SecurityPlugin — the Layer 0 door, for an external object registered
     (plugin as any).ql.getSchema = () => schema;
     (plugin as any).metadata.get = async () => schema;
     expect(await (plugin as any).getReadFilter('task', MEMBER_CTX)).toEqual({ organization_id: 'org-1' });
+  });
+});
+
+describe('SecurityPlugin — the write wall, for an external object registered after the boot', () => {
+  const insertVerdict = async (schema: Record<string, unknown>, ctx: Record<string, unknown>, posture?: string) => {
+    const { plugin } = await bootWith([], posture ? { posture } : {});
+    (plugin as any).ql.getSchema = () => schema;
+    (plugin as any).metadata.get = async () => schema;
+    const verdicts = await (plugin as any).writeWallVerdict(schema.name, 'insert', ctx, [{ name: 'Nobody’s row' }]);
+    return verdicts?.[0];
+  };
+
+  it('an insert naming no organization, by a caller WITH an active organization, is refused — naming the undeclared scope and the three ways out', async () => {
+    const verdict = await insertVerdict(undeclared(), MEMBER_CTX);
+    expect(verdict?.admitted).toBe(false);
+    expect(verdict?.code).toBe('PERMISSION_DENIED');
+    expect(verdict?.message).toContain("every external object states its organization scope, and 'ext_customer' states none");
+    expect(verdict?.message).toContain('`organization_id` field of its own');
+    expect(verdict?.message).toContain('`tenancy: { enabled: false }`');
+    expect(verdict?.message).toContain('`systemFields: { tenant: false }`');
+    // A caller who has an organization is not told to join one.
+    expect(verdict?.message).not.toContain('active organization');
+  });
+
+  it('a caller WITHOUT an active organization meets the same sentence: the object, not the session, is what is missing', async () => {
+    const verdict = await insertVerdict(undeclared(), { ...MEMBER_CTX, tenantId: undefined });
+    expect(verdict?.admitted).toBe(false);
+    expect(verdict?.message).toContain("'ext_customer' states none");
+    expect(verdict?.message).not.toContain('active organization');
+  });
+
+  it('under `group` the same insert is refused', async () => {
+    const verdict = await insertVerdict(undeclared(), { ...MEMBER_CTX, accessible_org_ids: ['org-1', 'org-2'] }, 'group');
+    expect(verdict?.admitted).toBe(false);
+    expect(verdict?.message).toContain("'ext_customer' states none");
+  });
+
+  it('CONTROL: the declared shared object admits the same insert', async () => {
+    const schema = { name: 'ext_customer', external: { remoteName: 'customers' }, tenancy: { enabled: false }, fields: REMOTE_COLUMNS };
+    const verdict = await insertVerdict(schema, MEMBER_CTX);
+    expect(verdict?.admitted).toBe(true);
+  });
+
+  it('CONTROL: under `single` the undeclared object admits the insert as before', async () => {
+    const verdict = await insertVerdict(undeclared(), MEMBER_CTX, 'single');
+    expect(verdict?.admitted).toBe(true);
   });
 });

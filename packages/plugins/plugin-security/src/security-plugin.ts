@@ -4490,9 +4490,10 @@ export class SecurityPlugin implements Plugin {
     // [#25223 cut 5] The body moved to `security-plugin-write-tenant-wall.ts` (see `WriteTenantWallHost`).
     const readOrgScopingEnabled = () => this.orgScopingEnabled;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'> = {
+    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'getObjectSecurityMeta' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'> = {
       computeWriteTenantCheckFilter: (...a) => this.computeWriteTenantCheckFilter(...a),
       computeWriteTenantWall: (...a) => this.computeWriteTenantWall(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get orgScopingEnabled() { return readOrgScopingEnabled(); },
       organizationWallRefusal: (...a) => this.organizationWallRefusal(...a),
       get tenancyPosture() { return readTenancyPosture(); },

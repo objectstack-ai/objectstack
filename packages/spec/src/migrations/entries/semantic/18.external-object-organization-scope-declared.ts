@@ -22,11 +22,13 @@ export const entry: SemanticMigration = {
   reason:
     'The platform provisions no storage for an external object, so the `organization_id` it injects into the '
     + "registered schema is a column the remote may not have. Whether an external object's rows belong to one "
-    + "organization or to every organization is a fact only the author knows, and until 18.3 an object that said "
-    + 'nothing was read as shared under a walled posture. It is now refused by name when the boot completes '
-    + '(SecurityPlugin, `kernel:ready`), and an external object registered after the boot (Studio, a runtime '
-    + 'datasource) that states nothing is denied at Layer 0 — every read answers zero rows and every write is '
-    + 'refused — until it does. `tenancy.tenantField` naming a column other than `organization_id` is refused on '
+    + 'organization or to every organization is a fact only the author knows, so under a walled posture the object '
+    + 'states it. One that states none is refused by name when the boot completes (SecurityPlugin, `kernel:ready`), '
+    + 'and an external object registered after the boot (Studio, a runtime datasource) that states nothing answers '
+    + 'no row and accepts no write — every read is denied at Layer 0 and every insert, update and delete is refused '
+    + '— until it does. An object a later plugin registers at `kernel:ready` or `kernel:bootstrapped`, or one on a '
+    + 'host that withholds the boot-phase hooks, meets that denial rather than the boot refusal. '
+    + '`tenancy.tenantField` naming a column other than `organization_id` is refused on '
     + 'an external object the same way: the organization wall keys on `organization_id` alone, and a declared '
     + 'tenant field is read only by storage the platform provisions. The `single` posture enforces no wall, owes '
     + 'no declaration and is unchanged. ADR-0015 §10 as amended, ADR-0095 D1.',
