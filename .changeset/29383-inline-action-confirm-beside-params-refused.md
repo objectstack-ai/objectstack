@@ -12,11 +12,11 @@ Metadata-protocol: narrowed (an inline action may no longer declare `confirmText
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or renamed: the inline door already picked both keys and keeps them, and this adds the pair refusal ActionSchema carries. There is no rewrite that keeps what the author meant without reading it (the confirm sentence may or may not suit the param dialog's description line), so the author decides, and the refusal names the remedy. The in-repo census at the base found no shipped inline action carrying the pair. -->
 
-**BREAKING** accept-set narrowing at `InlineActionSchema` (`@objectstack/spec`), served wherever a page component's inline `properties.action` is parsed: `defineStack`, `os validate`, `os compile` and the publish gate.
+**BREAKING** accept-set narrowing at `InlineActionSchema` (`@objectstack/spec`), served where a page's `element:button` `properties.action` is judged: the component-props gate (`component-props-invalid`, `@objectstack/lint`) at every CLI command (`os validate`, `os compile`, the publish gate) and at the runtime `page` save door. `defineStack` does not parse a component's `properties` bag, so it does not refuse the pair.
 
 - **Before.** `{ type: 'api', target: '/x', confirmText: 'Reject this request?', params: [{ name: 'reason', type: 'textarea' }] }` parsed clean, and the console showed a confirm dialog and then the param dialog.
 - **Now.** The same body is refused at `confirmText` with the registered door's message: the pair shows TWO dialogs for one decision; carry the question in `description` and drop `confirmText`.
 - **Unchanged.** `confirmText` on an inline action with no `params`, or beside `params: []`, parses as before; so does an inline action with `params` and `description`. A view's `bulkActionDefs` keep the pair, which renders one dialog by that schema's own contract.
-- **Who sees it.** An author whose page button declares an inline action with both keys.
+- **Who sees it.** An author whose page button declares an inline action with both keys. A stored page keeps loading and serving; its next save is refused, with the remedy in the finding.
 
 **The remedy.** Move the confirm sentence to the inline action's `description`, which the param dialog draws under its title, and drop `confirmText`.
