@@ -245,6 +245,22 @@ export const FieldTranslationSchema = lazySchema(() => strictObject({
    * (translated) label.
    */
   inlineTitle: z.string().optional().describe("Translated inline master-detail grid title — overlays the field's own `inlineTitle`"),
+  /**
+   * The field's own `relatedListTitle` — the title of the related list a
+   * `master_detail` / `lookup` field draws on its PARENT's record page (the
+   * side card, or the full-width table of a `relatedList: 'primary'` list).
+   * The field lives on the child object, so the address is the child's:
+   * `objects.<child>.fields.<field>.relatedListTitle`. Overlaid by
+   * `translateObject` on the served child object, which is what the console
+   * derives the related list's title from.
+   *
+   * No fallback to the child object's translated label: an authored
+   * `relatedListTitle` with no entry here keeps its authored text, because a
+   * bundle translates an attribute and never swaps another attribute in over
+   * authored text. An absent `relatedListTitle` already renders the child's
+   * (translated) label.
+   */
+  relatedListTitle: z.string().optional().describe("Translated detail-page related list title — overlays the field's own `relatedListTitle`"),
 }).describe('Translation data for a single field'));
 
 export type FieldTranslation = z.input<typeof FieldTranslationSchema>;

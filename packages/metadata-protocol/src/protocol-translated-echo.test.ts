@@ -131,4 +131,23 @@ describe('[#29673] restoreTranslatedEchoes', () => {
         const echoed = restoreTranslatedEchoes(typed, { source: packagedBase, bundle, packagedBase });
         expect(echoed.item.fields.amount.label).toBe('Amount');
     });
+
+    it('a self-lookup\'s translated relatedListTitle is put back to its source like every other field slot the read writes', () => {
+        const selfBundle = {
+            'zh-CN': { objects: { clm_contract: { fields: { renewed_from: { relatedListTitle: '续签合同' } } } } },
+        } as unknown as TranslationBundle;
+        const source = () => ({
+            name: 'clm_contract',
+            label: 'Contract',
+            fields: {
+                renewed_from: { type: 'lookup', label: 'Renewed From', reference: 'clm_contract', relatedListTitle: 'Renewals' },
+            },
+        });
+        const echo: any = translateObject(source(), selfBundle, { locale: 'zh-CN' });
+        // The precondition: the read really translated the slot.
+        expect(echo.fields.renewed_from.relatedListTitle).toBe('续签合同');
+        const { item, restored } = restoreTranslatedEchoes(echo, { source: source(), bundle: selfBundle });
+        expect((item as any).fields.renewed_from.relatedListTitle).toBe('Renewals');
+        expect(restored.map((r) => r.path)).toEqual(['fields.renewed_from.relatedListTitle']);
+    });
 });

@@ -1504,6 +1504,9 @@ export function collectExpectedEntries(
         // The inline child grid's heading, drawn on the PARENT's form but
         // addressed by the child field that declares it (`translateObject`).
         pushOptional(out, ['objects', objectName, 'fields', fieldName, 'inlineTitle'], field.inlineTitle, 'field', { objectName });
+        // The related list's title on the parent's record page, addressed the
+        // same way: by the child field that declares it.
+        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'relatedListTitle'], field.relatedListTitle, 'field', { objectName });
 
         // Options — accept either `{value, label}[]` arrays or a record map.
         //

@@ -876,7 +876,9 @@ export const ShowcaseTranslationBundle = {
         description: '组织架构层级——在自引用对象上演示树形 / 树形表格视图。',
         fields: {
           name: { label: '名称' },
-          parent: { label: '上级单元' },
+          // The self-lookup's related-list title on a unit's record page,
+          // translated at birth like the label beside it.
+          parent: { label: '上级单元', relatedListTitle: '下级单元' },
           kind: {
             label: '类型',
             options: { company: '公司', division: '事业部', department: '部门', team: '团队' },
