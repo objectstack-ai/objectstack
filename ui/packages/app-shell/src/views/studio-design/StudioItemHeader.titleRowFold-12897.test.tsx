@@ -530,6 +530,27 @@ describe('the override mark folded into the ⋯ menu (objectstack#29692)', () =>
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(onRestore).not.toHaveBeenCalled();
   });
+
+  it('with the note line under the title row (objectstack#29691), the folded mark opens once and Restore closes the menu', () => {
+    layout.row = 330;
+    const onRestore = vi.fn();
+    render(
+      <FoldingLeaf
+        note="Saved to HotCRM’s customizations"
+        kind={<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" onRestore={onRestore} />}
+      />,
+    );
+    expect(document.querySelector('[data-slot="item-note"]')).toHaveTextContent('Saved to HotCRM’s customizations');
+    const entry = within(openOwnMore()).getByTestId('studio-item-header-folded-chips');
+    const chip = within(entry).getByTestId('studio-override-chip');
+    fireEvent.click(chip);
+    expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('studio-override-restore'));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('studio-override-popover')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
 });
 
 describe('the note line sits under the title row, outside the fold (objectstack#29691)', () => {
