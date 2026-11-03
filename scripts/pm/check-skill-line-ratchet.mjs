@@ -1225,7 +1225,17 @@ export const CEILINGS = new Map([
   // verbatim out of SKILL.md, whose ceiling fell 819 → 319 in the same PR; +32
   // against a net source decrease of 500. Landed count, headroom 0, same
   // convention.
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 101],
+  // Raised 101 → 102 by the main-green doorbell — an ORDINARY raise on a
+  // CROSS_FILE_MOVES destination, recorded under that entry's `ruledRaises`
+  // below, ⛔ not a second move. The text is §C's resume line: a seat that
+  // receives `Notify: main-green` merges `origin/main` through the relay's
+  // `pr_update_branch`, drops its `Waits-on:` line and resumes landing as §C's
+  // last step says; the hold line itself (`Waits-on: main-red #n`) folded into
+  // §C's existing release-condition line at zero lines. Ruling of record: the
+  // main-red resume card (#29445, filing gate ③, a task the maintainer set
+  // directly), maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
+  // Measured delta +1 (101 → 102); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 102],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -1356,7 +1366,20 @@ export const CEILINGS = new Map([
   // 94-95 each merged after deleting what contract-review.md and AGENTS.md
   // already state, and the reporting pair 101-102 replaced by one pointer to the
   // push list in lanes/triage.md. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 99],
+  // Raised 99 → 100 by the main-green doorbell — an ORDINARY raise, ⛔ not a
+  // cross-file move. The text is two lines beside the main-red anchor duties:
+  // when an anchor card closes, triage (the director when triage is absent)
+  // reads the open PRs whose body carries a line-leading `Waits-on: main-red
+  // #n`, rings each one's seat once with `Notify: main-green` in the same
+  // round and counts them in the round record, with the worked example (anchor
+  // #N closes ⇒ PRs #a and #b each get one knock). One line was paid by
+  // deleting the Clause-② boundary test that execution-duties.md already states
+  // (its `Clause-②` line and its narrowing line), so the net is +1. Ruling of
+  // record: the main-red resume card (#29445, filing gate ③, a task the
+  // maintainer set directly), maintainer verbatim and untranslated:
+  // 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
+  // Measured delta +1 (99 → 100); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 100],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1464,7 +1487,18 @@ export const CEILINGS = new Map([
   // 6595244387 (the rate) and 6595840476. The key row and the record/rate
   // line are the two lines the ruling orders; the 不敲 line was rewritten in
   // place. Measured delta +2 (56 → 58 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/project-forms.md', 58],
+  // Raised 58 → 59 by the main-green doorbell — an ORDINARY raise, ⛔ not a
+  // cross-file move. The text is one 〈信箱 PR〉 scenario row: when a main-red
+  // anchor card closes, triage (the director when triage is absent) rings the
+  // seat of every open PR whose body carries `Waits-on: main-red #n` with
+  // `Notify: main-green`; the key's full spelling lives in
+  // `record-recognisers.mjs` MAILBOX_KEYS, which the self-test pins against this
+  // section both ways, so the row cannot be folded into a neighbour (each sits
+  // at 113–120 B against the 120-byte cap). Ruling of record: the main-red
+  // resume card (#29445, filing gate ③, a task the maintainer set directly),
+  // maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
+  // Measured delta +1 (58 → 59); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 59],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -2283,6 +2317,17 @@ export const CROSS_FILE_MOVES = new Map([
       ruling: '入队与落地 consolidation into landing-operations.md under the principle-only cut of SKILL.md, authorised by #14685 item 5 (comment 5520452691)',
       was: 69,
       sources: [['.claude/skills/pm-dispatch/SKILL.md', 819]],
+      ruledRaises: [
+        {
+          // Quoted beside this entry's ceiling above. Copied from there, not paraphrased.
+          ruling:
+            'the main-green resume line on `.claude/skills/pm-dispatch/references/landing-operations.md` §C'
+            + ' — the main-red resume card (#29445, filing gate ③, a task the maintainer set directly),'
+            + ' maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」',
+          date: '2026-11-03',
+          delta: 1,
+        },
+      ],
     },
   ],
   // The thin triage seat (maintainer's word 2026-10-23, verbatim and

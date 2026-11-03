@@ -86,9 +86,10 @@
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单
 
 - 这种 PR 停在 draft,正文写精确的预期红清单:逐条失败测试名 + 报错签名。
-- 正文同写解除条件:点名所依赖的那张 PR 合入。
+- 正文同写解除条件:依赖 PR 或锚卡修复合入;因 main 红停放者加行首 `Waits-on: main-red #n`。
 - 每个 CI-failure 事件与清单比对:签名匹配静默跳过,新签名才是真问题。
 - 依赖合入后:末轮同步走中继 `pr_update_branch`(`rest-channel.md`)→ 红清零 → 转 ready → 入队。
+- 收 `Notify: main-green` 即合 `origin/main`(中继 `pr_update_branch`)、删 `Waits-on:` 行,照上行续落地。
 
 ## D. 串行接力:多个已实现 PR 全碰生成物时,一次只放行一个
 
