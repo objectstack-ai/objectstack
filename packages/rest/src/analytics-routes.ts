@@ -55,6 +55,8 @@ import {
 // analytics family this route never had. See the module header for the
 // measurement that decides its shape.
 import { datasetSelectionRefusal } from './analytics-selection-door.js';
+// [#29156] …and the door parse for the body AROUND `selection`.
+import { datasetQueryBodyRefusal } from './analytics-dataset-body-door.js';
 import { logError } from './log.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, type RestServer } from './rest-server.js';
@@ -124,6 +126,17 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                 }
 
                 const body = req.body ?? {};
+                // [#29156] The OUTER body first: the four keys this handler
+                // reads are the only ones it understands, and any other key
+                // used to be dropped without a word — a `runtimeFilter` beside
+                // `selection` answered 200 with the unfiltered aggregate. The
+                // same pass refuses `dataset` beside `datasetName`, where the
+                // inline definition used to win silently.
+                // {@link datasetQueryBodyRefusal} carries the measurement.
+                const bodyRefusal = await datasetQueryBodyRefusal(body);
+                if (bodyRefusal) {
+                    return res.status(bodyRefusal.status).json(bodyRefusal.body);
+                }
                 const selection = body.selection;
                 if (!selection || !Array.isArray(selection.measures) || selection.measures.length === 0) {
                     return res.status(400).json({

@@ -402,3 +402,130 @@ describe('[#4441] a lookup id that resolves to nothing is refused', () => {
     expect(row.other).toBe('whatever');
   });
 });
+
+/**
+ * [#29062] The write judges only the reference values it ADDS.
+ *
+ * The delete walk leaves a `user` / `multi_user` value naming a deleted user
+ * in place (`DELETE_SEMANTICS_REFERENCE_TYPES` in `engine.ts` leaves `user` out
+ * by declaration), so a row can hold an id that names no user. An edit form
+ * PATCHes the whole record back, that id included, and the check used to judge
+ * every value the payload carried: the editor was refused `reference_not_found`
+ * for a value they never touched. A value, or a multi-valued member, already
+ * stored on the row is not this write's reference and is not judged again; a
+ * newly added missing id is refused exactly as before.
+ */
+describe('[#29062] a reference value already stored on the row is not judged again', () => {
+  let engine: ObjectQL;
+  let stores: Map<string, Map<string, Record<string, unknown>>>;
+  const userCtx = { userId: 'u_alive' };
+  const sys = { context: { isSystem: true } } as any;
+
+  const sysUser = {
+    name: 'sys_user',
+    label: 'User',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+    },
+  };
+  const holder = {
+    name: 'ref_holder',
+    label: 'Holder',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      title: { name: 'title', label: 'Title', type: 'text' as const },
+      owner_user: { name: 'owner_user', label: 'Owner', type: 'user' as const },
+      members: { name: 'members', label: 'Members', type: 'user' as const, multiple: true },
+      project: { name: 'project', label: 'Project', type: 'lookup' as const, reference: 'ref_permission_set' },
+      tags: { name: 'tags', label: 'Tags', type: 'lookup' as const, reference: 'ref_permission_set', multiple: true },
+    },
+  };
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const stub = makeStubDriver();
+    stores = stub.stores;
+    engine.registerDriver(stub.driver, true);
+    await engine.init();
+    engine.registry.registerObject(sysUser as any);
+    engine.registry.registerObject(permissionSet);
+    engine.registry.registerObject(holder as any);
+    for (const id of ['u_alive', 'u_gone']) await engine.insert('sys_user', { id, name: id }, sys);
+    await engine.insert('ref_permission_set', { id: 'ps_real', name: 'Real' }, sys);
+    await engine.insert(
+      'ref_holder',
+      { id: 'h1', title: 'T', owner_user: 'u_gone', members: ['u_alive', 'u_gone'] },
+      { context: userCtx } as any,
+    );
+    // The user is deleted afterwards; the walk leaves both stored values in place.
+    await engine.delete('sys_user', { where: { id: 'u_gone' }, context: { isSystem: true } } as any);
+    expect(stores.get('sys_user')?.has('u_gone')).toBe(false);
+    expect(stores.get('ref_holder')?.get('h1')).toMatchObject({ owner_user: 'u_gone', members: ['u_alive', 'u_gone'] });
+  });
+
+  const patch = (data: Record<string, unknown>) =>
+    engine.update('ref_holder', data, { where: { id: 'h1' }, context: userCtx } as any);
+
+  it('a single user field carried back unchanged is not refused', async () => {
+    const row: any = await patch({ title: 'T2', owner_user: 'u_gone' });
+    expect(row.title).toBe('T2');
+    expect(stores.get('ref_holder')?.get('h1')?.owner_user).toBe('u_gone');
+  });
+
+  it('a multi user field carried back unchanged is not refused', async () => {
+    const row: any = await patch({ title: 'T2', members: ['u_alive', 'u_gone'] });
+    expect(row.title).toBe('T2');
+    expect(stores.get('ref_holder')?.get('h1')?.members).toEqual(['u_alive', 'u_gone']);
+  });
+
+  it('a multi user field keeping its stored ghost and adding a new one refuses only the new one', async () => {
+    const err = await refusalOf(() => patch({ members: ['u_alive', 'u_gone', 'u_never'] }));
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: 'members', code: 'reference_not_found', value: 'u_never' });
+    expect(stores.get('ref_holder')?.get('h1')?.members).toEqual(['u_alive', 'u_gone']);
+  });
+
+  it('a single user field repointed at another missing user is still refused', async () => {
+    const err = await refusalOf(() => patch({ owner_user: 'u_never' }));
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: 'owner_user', code: 'reference_not_found', value: 'u_never' });
+  });
+
+  it('an insert naming the deleted user is still refused', async () => {
+    const err = await refusalOf(() =>
+      engine.insert('ref_holder', { title: 'N', members: ['u_alive', 'u_gone'] }, { context: userCtx } as any),
+    );
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: 'members', code: 'reference_not_found', value: 'u_gone' });
+  });
+
+  it('a lookup that adds a missing id is still refused, member by member', async () => {
+    await patch({ project: 'ps_real', tags: ['ps_real'] });
+    const single = await refusalOf(() => patch({ project: 'ps_missing' }));
+    expect(single.fields[0]).toMatchObject({ field: 'project', code: 'reference_not_found', value: 'ps_missing' });
+    const multi = await refusalOf(() => patch({ tags: ['ps_real', 'ps_missing'] }));
+    expect(multi.fields).toHaveLength(1);
+    expect(multi.fields[0]).toMatchObject({ field: 'tags', code: 'reference_not_found', value: 'ps_missing' });
+  });
+
+  it('a bulk update forgives a value only when every matched row already holds it', async () => {
+    await engine.insert('ref_holder', { id: 'h2', title: 'T', members: ['u_alive'] }, { context: userCtx } as any);
+    // h1 holds u_gone, so a bulk write over h1 alone carries it back untouched.
+    await engine.update(
+      'ref_holder', { members: ['u_alive', 'u_gone'] },
+      { where: { id: 'h1' }, multi: true, context: userCtx } as any,
+    );
+    // Over h1 and h2 the same payload ADDS u_gone to h2: refused, nothing written.
+    const err = await refusalOf(() =>
+      engine.update(
+        'ref_holder', { members: ['u_alive', 'u_gone'] },
+        { where: { title: 'T' }, multi: true, context: userCtx } as any,
+      ),
+    );
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: 'members', code: 'reference_not_found', value: 'u_gone' });
+    expect(stores.get('ref_holder')?.get('h2')?.members).toEqual(['u_alive']);
+  });
+});

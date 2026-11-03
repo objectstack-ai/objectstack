@@ -71,9 +71,10 @@ import { detectPackageManager } from './detect-package-manager.js';
 import { fileURLToPath } from 'node:url';
 
 import { syncObjectStackDeps } from './pkg-utils.js';
-import { copyDir } from './template-copy.js';
+import { copyDir, findTemplateCollisions } from './template-copy.js';
 import {
   deriveManifestId,
+  sanitizeNamespace,
   readTemplateNamespace,
   rewriteObjectNamePrefix,
   findStaleNamespacePrefixes,
@@ -107,23 +108,6 @@ function toTitleCase(str: string): string {
   return str.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/**
- * Convert an npm package name into a valid ObjectStack namespace identifier
- * (regex `^[a-z][a-z0-9_]{1,19}$`, reserved: base/system/sys). Mirrors the
- * implementation in `@objectstack/cli` so both scaffolders agree.
- */
-export function sanitizeNamespace(name: string): string {
-  let s = name.replace(/^@[^/]+\//, '');
-  s = s.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-  s = s.replace(/^_+|_+$/g, '');
-  if (!s) s = 'app';
-  if (/^[0-9]/.test(s)) s = 'a' + s;
-  if (s.length < 2) s = (s + '_app').slice(0, 20);
-  if (s.length > 20) s = s.slice(0, 20).replace(/_+$/, '');
-  if (['base', 'system', 'sys'].includes(s)) s = (s + '_app').slice(0, 20);
-  return s;
-}
-
 function readCliVersion(): string {
   try {
     const pkgPath = path.resolve(__dirname, '..', 'package.json');
@@ -148,13 +132,17 @@ function printWarning(msg: string) { console.log(chalk.yellow(`  ⚠ ${msg}`)); 
 
 // ─── Loading: bundled (fs copy) ─────────────────────────────────────
 
-function loadBundled(templateDir: string, targetDir: string): string[] {
+function bundledTemplateDir(templateDir: string): string {
   const src = path.join(BUNDLED_TEMPLATES_DIR, templateDir);
   if (!fs.existsSync(src)) {
     throw new Error(`Bundled template missing on disk: ${src}`);
   }
+  return src;
+}
+
+function loadBundled(templateDir: string, targetDir: string): string[] {
   const collected: string[] = [];
-  copyDir(src, targetDir, collected);
+  copyDir(bundledTemplateDir(templateDir), targetDir, collected);
   return collected;
 }
 
@@ -576,6 +564,31 @@ const program = new Command()
     const targetWasEmpty = topLevelNames(targetDir).size === 0;
 
     try {
+      // The current directory gets the named directory's protection, scoped to
+      // collisions: files the template does not write (a `.git/`, a notes
+      // file) may stay, but a template file that would replace one the user
+      // already has refuses the whole run — checked before the first write, so
+      // the refusal leaves the directory exactly as it was. Without it a run
+      // with no name in an existing project replaced its README.md and
+      // package.json and exited 0.
+      const collisions = targetWasEmpty
+        ? []
+        : findTemplateCollisions(bundledTemplateDir(template.source.dir), targetDir);
+      if (collisions.length > 0) {
+        printError(
+          `Directory is not empty and the template would overwrite ${collisions.length} existing ` +
+            `${collisions.length === 1 ? 'file' : 'files'}: ${targetDir}`,
+        );
+        for (const rel of collisions) console.log(chalk.dim(`    ${rel}`));
+        console.log(
+          chalk.dim(
+            '  Nothing was written. Move those files aside, or scaffold into a new directory: ' +
+              'create-objectstack <name>',
+          ),
+        );
+        process.exit(1);
+      }
+
       fs.mkdirSync(targetDir, { recursive: true });
 
       const createdFiles = loadBundled(template.source.dir, targetDir);

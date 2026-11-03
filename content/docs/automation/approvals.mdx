@@ -327,8 +327,10 @@ run is never killed — and the log says both that the fallback fired and that i
 found nobody.
 
 The "previous approver picks the next step's approvers" loop needs no record
-field at all: declare `decisionOutputs: ['next_reviewers']` on node A, have the
-approver decide with `{ outputs: { next_reviewers: ['u2', 'u3'] } }`, and let
+field at all: declare `decisionOutputs: [{ key: 'next_reviewers', multiple: true }]`
+on node A (`multiple: true` because the answer is a list; a bare
+`'next_reviewers'` takes one value), have the approver decide with
+`{ outputs: { next_reviewers: ['u2', 'u3'] } }`, and let
 node B's approver be
 `{ type: 'expression', value: 'vars.<nodeA-id>.next_reviewers' }`. The author
 declares output keys, approvers only fill values; undeclared keys reject the
@@ -339,12 +341,31 @@ multiple: true }` — which renders a multi-select user picker in the decision
 dialog instead of free text (`department` / `team` render the matching
 system-object picker and commit record ids; `position` renders a picker over
 the position registry and commits position machine names; `multiple` collects
-an array of them). The type shapes only the input widget; the whitelist
-still works by `key`, so bare strings and typed declarations mix freely.
+an array of them). The whitelist still works by `key`, so bare strings and
+typed declarations mix freely.
+
+The runtime enforces every declaration at the decision, on an approve and a
+reject alike, before anything is written:
+
+- `multiple: true` takes a list, and only a list, with no entry twice. An
+  absent or `false` `multiple` takes one value. This holds for every entry,
+  `text` and bare strings included.
+- A picker output's values are also resolved, the way the matching
+  `expression` approver's `resolveAs` expands them, in the request's
+  organization: `user`, `department` and `team` by record id, `position` by
+  the machine name of a position someone holds. A position name nobody holds is
+  refused, and so is a `sys_position` record id: either would route to nobody.
+- A mismatch is refused with `400 VALIDATION_FAILED` naming every
+  `outputs.<key>` that does not match. No decision is recorded and the request
+  stays pending, so the approver can decide again.
+
+A `text` output (the default, and every bare-string entry) is judged by shape
+only: its value is free text. A blank value is left to `required`, below.
 
 Add **`required: true`** when the next step cannot run without it — the very
 case above, where node B has nobody to route to if the lead skipped the field.
-Unlike `type` / `multiple`, this one is enforced by the runtime: an **approve**
+Where `type` / `multiple` judge the shape of a value the approver supplies,
+`required` judges whether one is there: an **approve**
 carrying no value (or a blank one — `''`, `[]`) for a required key is rejected
 before any write, so the run can never resume past the node with the key
 missing. A **reject** never requires it: the run leaves down the `reject` edge,
@@ -434,7 +455,15 @@ What an entry that resolves to nobody leaves on the slate depends on its kind:
   decide it (the admin-override callout under
   [Acting on requests in the console](#acting-on-requests-in-the-console)).
   Beside entries that do resolve, a literal is a slot like any other, so a
-  `behavior` that needs every slot (`unanimous`) waits on it too.
+  `behavior` that needs every slot (`unanimous`) waits on it too. A `team`,
+  `position`, `department` or `org_membership_level` entry whose holder read
+  failed (`sys_team_member`, `sys_user_position`, `sys_business_unit_member`
+  or `sys_member`, and for a `department` also the `sys_business_unit` read of
+  the unit and of its child units) keeps its literal the same way. It logs `could not be
+  expanded — a directory or read-filter lookup failed` with the `error`,
+  instead of `expanded to nobody`, and never routes to the holders that
+  happened to read. An `expression` value whose `resolveAs` read failed keeps
+  its literal and logs the same line, with the `expression` source.
 - **A slate left empty, or holding only literals,** goes to the node's
   `onEmptyApprovers` policy, whose four values are listed under
   [Approving across organizations](#cross-org-approvers). Under the default,
@@ -653,10 +682,13 @@ hold (the literal left by a position nobody held when the request opened, once
 someone is staffed into it). A named `actorId` must be one of those identities,
 and a named `position:<name>` takes that position's slot; the deprecated
 pre-rename prefix is not one of them (ADR-0090 D3) and returns 403
-(`FORBIDDEN: cannot act as '…'`). No
-such slot and no admin override returns 403 (`FORBIDDEN: actor '…' is
-not a pending approver`); a request that isn't pending returns 409
-(`INVALID_STATE`). The decision records two facts on its `sys_approval_action`
+(`FORBIDDEN: cannot act as '…'`). A request the caller may not read, and
+no admin override covers, returns 404 (`REQUEST_NOT_FOUND`), exactly as an id
+that names no request does — on every door that acts on a request, before any
+other check of it.
+For a caller who can read it, no such slot and no admin override returns 403
+(`FORBIDDEN: actor '…' is not a pending approver`); a request that isn't
+pending returns 409 (`INVALID_STATE`). The decision records two facts on its `sys_approval_action`
 row: `actor_id` is the user who decided, and `acted_as` is the slot the decision
 took, in that slot's stored spelling — the multi-approver tally counts approvals
 by matching `acted_as` against the slate. A `reassign` row records the slot it
@@ -987,8 +1019,8 @@ in-flight request, `reassign` hands one slot to another user directly.
 | Code | HTTP | Meaning |
 |:---|:---|:---|
 | `VALIDATION_FAILED` | 400 | Malformed request |
-| `FORBIDDEN` | 403 | Actor may not take this action (not a pending approver, or not the submitter for a submitter-only verb) |
-| `REQUEST_NOT_FOUND` | 404 | No such request |
+| `FORBIDDEN` | 403 | Actor can read the request but may not take this action (not a pending approver, or not the submitter for a submitter-only verb) |
+| `REQUEST_NOT_FOUND` | 404 | No such request — or one the caller may not read: every door that reads or acts on a request gives both the same answer |
 | `DUPLICATE_REQUEST` | 409 | A pending request already exists for this record |
 | `INVALID_STATE` | 409 | The request is no longer pending |
 | `THROTTLED` | 429 | Rate limited |

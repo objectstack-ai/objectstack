@@ -284,7 +284,9 @@ The key's full contract is in the [Field reference](/docs/references/data/field)
 `lookup` / `master_detail` to an id with no matching row in the target object is
 rejected with `400 VALIDATION_FAILED` and a `fields[]` entry whose `code` is
 `reference_not_found` (see the [error catalog](/docs/api/error-catalog)). The
-same check runs on bulk updates.
+same check runs on bulk updates. An update judges only the references it adds: a
+value the row already stores, carried back unchanged, is not judged again, so a
+deleted user's id left in a `user` field does not block later edits of the record.
 
 Clearing a relationship is not a dangling reference: `null`, `""` and `[]` all mean
 "no link". Which of them `deleteBehavior: 'set_null'` writes when the referenced
@@ -299,6 +301,13 @@ in `packages/spec/src/data/field.zod.ts`, rendered in the
 record is deleted; the integrity check above governs what may be **written**
 here in the first place. They are two halves of the same relationship contract.
 </Callout>
+
+A `user` field takes part only when it declares a `deleteBehavior`. Declared, it
+works as it does on a `lookup` when the user is deleted: `cascade` deletes the
+records holding that user, `set_null` clears the field (a `multiple: true` field
+loses only that member), and `restrict` refuses the user delete with
+`409 DELETE_RESTRICTED`; a `set_null` on a `required` user field refuses it too. A
+`user` field that declares none keeps the deleted user's id, as it always has.
 
 ### File & Media Types
 
@@ -444,7 +453,7 @@ These properties are available on all field types:
 
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `searchable` | `boolean` | `false` | Include in full-text search |
+| `searchable` | `boolean` | `false` | Search this field when the object declares no `searchableFields` — any type but `secret` / `password` / `vector`; a declared `searchableFields` is the whole set |
 | `externalId` | `boolean` | `false` | Not read: nothing matches on it. A seed dataset names its match field in its own `externalId`, an import in its mapping's `upsertKey` |
 
 Database indexes are declared at the object level in the object's `indexes[]` array — there is no per-field `index` flag. See [Indexing](/docs/data-modeling/indexing).

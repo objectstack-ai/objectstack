@@ -20,7 +20,11 @@
  */
 import { describe, it, expect } from 'vitest';
 import { composeStacks, defineStack, ObjectStackDefinitionSchema } from './stack.zod';
-import { judgeCollectionItemOwnerStamp } from './kernel/collection-item-owner-stamp';
+import {
+  judgeCollectionItemOwnerStamp,
+  OWNER_STAMP_JUDGED_COLLECTIONS,
+  type OwnerStampJudgedCollection,
+} from './kernel/collection-item-owner-stamp';
 
 type Envelope = Error & { code?: string; status?: number; issues?: Array<{ code?: string; path?: PropertyKey[]; message?: string }> };
 
@@ -166,5 +170,172 @@ describe('[ADR-0010] a release artifact\'s items are judged against the package 
     const flattened = { ...artifact, connectors: [connector('crm_conn', CRM), connector('orders_conn')] };
     expect(flattened.manifest.id).not.toBe(CRM);
     expect(stampIssues(flattened)).toEqual([]);
+  });
+});
+
+// ─── Key by key: one pin per judged collection ──────────────────────────────
+
+/** The object every fixture below binds to. */
+const PROBE_OBJECT = {
+  name: 'probe_thing',
+  label: 'Thing',
+  sharingModel: 'private',
+  ownership: 'user',
+  fields: { title: { type: 'text', label: 'Title' } },
+};
+
+const probeFlow = {
+  name: 'probe_flow',
+  label: 'Flow',
+  type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [{ id: 'e1', source: 'start', target: 'end' }],
+};
+
+const probeDataset = {
+  name: 'probe_ds',
+  label: 'Dataset',
+  object: 'probe_thing',
+  dimensions: [{ name: 'title', field: 'title', type: 'string' }],
+  measures: [{ name: 'row_count', aggregate: 'count' }],
+};
+
+const probeQueue = { name: 'probe_queue', label: 'Queue', members: [] };
+
+/**
+ * One spec-valid item per judged collection, and what else the stack needs for
+ * it to resolve. Keyed by the constant's own member type, so a collection added
+ * to {@link OWNER_STAMP_JUDGED_COLLECTIONS} does not compile here until it has
+ * a fixture, and the suite below reads its list from the constant itself.
+ */
+const JUDGED_FIXTURES: Record<OwnerStampJudgedCollection, { item: Record<string, unknown>; context?: Record<string, unknown> }> = {
+  objects: { item: { ...PROBE_OBJECT, name: 'probe_other', label: 'Other' } },
+  apps: { item: { name: 'probe_app', label: 'App', navigation: [{ id: 'nav_1', type: 'object', objectName: 'probe_thing', label: 'Thing' }] } },
+  picklists: { item: { name: 'probe_pick', label: 'Pick', options: [{ value: 'aa', label: 'A' }] } },
+  actions: { item: { name: 'probe_go', label: 'Go', type: 'script', target: 'go' } },
+  views: { item: { object: 'probe_thing', list: { type: 'grid', data: { provider: 'object', object: 'probe_thing' }, columns: ['title'] } } },
+  pages: { item: { name: 'probe_page', label: 'Page', type: 'app', regions: [] } },
+  dashboards: { item: { name: 'probe_dash', label: 'Dash', widgets: [] } },
+  reports: {
+    item: { name: 'probe_report', label: 'Report', type: 'summary', dataset: 'probe_ds', rows: ['title'], values: ['row_count'] },
+    context: { datasets: [probeDataset] },
+  },
+  datasets: { item: probeDataset },
+  flows: { item: probeFlow },
+  webhooks: {
+    item: { name: 'probe_webhook', label: 'Webhook', object: 'probe_thing', triggers: ['create'], url: 'https://example.com/hook' },
+    context: { requires: ['webhooks', 'realtime'] },
+  },
+  jobs: { item: { name: 'probe_job', label: 'Job', schedule: { type: 'interval', intervalMs: 60000 }, body: { language: 'js', source: 'return 1;', capabilities: [] } } },
+  positions: { item: { name: 'probe_pos', label: 'Pos' } },
+  permissions: { item: { name: 'probe_perm', label: 'Perm', objects: {} } },
+  capabilities: { item: { name: 'probe.export', label: 'Export' } },
+  sharingRules: { item: { name: 'probe_share', label: 'Share', object: 'probe_thing', type: 'criteria', condition: 'true', sharedWith: { type: 'team', value: 'team_ops' } } },
+  queues: { item: probeQueue },
+  assignmentRules: {
+    item: { name: 'probe_route', object: 'probe_thing', entries: [{ name: 'to_queue', assignTo: { type: 'queue', value: 'probe_queue' } }] },
+    context: { queues: [probeQueue] },
+  },
+  agents: { item: { name: 'probe_agent', label: 'Agent', role: 'Assistant', instructions: 'Triage the request.' } },
+  tools: { item: { name: 'probe_tool', label: 'Tool', description: 'tool', parameters: { type: 'object', properties: {} } } },
+  skills: { item: { name: 'probe_skill', label: 'Skill', description: 'skill', instructions: 'x', tools: [] } },
+  apis: {
+    item: { name: 'probe_api', description: 'api', path: '/api/v1/apps/crm/p1', method: 'GET', type: 'flow', target: 'probe_flow' },
+    context: { flows: [probeFlow] },
+  },
+  hooks: { item: { name: 'probe_hook', label: 'Hook', object: 'probe_thing', events: ['beforeInsert'], handler: () => {} } },
+  mappings: { item: { name: 'probe_map', label: 'Map', targetObject: 'probe_thing', fieldMapping: [{ source: 'a', target: 'title' }] } },
+  analyticsCubes: { item: { name: 'probe_cube', title: 'Cube', description: 'cube', sql: 'probe_thing', measures: {}, dimensions: {} } },
+  connectors: { item: connector('probe_conn') },
+  emailTemplates: { item: { name: 'probe_mail', label: 'Mail', subject: 'Hi', bodyHtml: '<p>Hello</p>' } },
+  docs: { item: { name: 'probe_doc', label: 'Doc', content: '# Doc' } },
+  books: { item: { name: 'probe_book', label: 'Book', groups: [] } },
+  data: { item: { object: 'probe_thing', records: [] } },
+};
+
+/** Where the fixture of `key` sits in its collection: `objects` keeps the probe object first. */
+const fixtureIndex = (key: OwnerStampJudgedCollection): number => (key === 'objects' ? 1 : 0);
+
+/** A one-package stack carrying the fixture of `key`, stamped `stamp` (absent when `undefined`). */
+function stackWith(key: OwnerStampJudgedCollection, stamp?: unknown): Record<string, unknown> {
+  const { item, context } = JUDGED_FIXTURES[key];
+  const stamped = stamp === undefined ? { ...item } : { ...item, _packageId: stamp };
+  const stack: Record<string, unknown> = { manifest: manifest(CRM, { type: 'module' }), objects: [PROBE_OBJECT], ...context };
+  stack[key] = key === 'objects' ? [PROBE_OBJECT, stamped] : [stamped];
+  return stack;
+}
+
+describe('[ADR-0010] the build door judges every collection the registration door judges, key by key', () => {
+  it('the fixture table covers exactly the judged collections', () => {
+    expect(Object.keys(JUDGED_FIXTURES).sort()).toEqual([...OWNER_STAMP_JUDGED_COLLECTIONS].sort());
+  });
+
+  it.each(OWNER_STAMP_JUDGED_COLLECTIONS.map((key) => [key] as const))(
+    '%s: one foreign-stamped item raises the gate\'s issue at its `_packageId`; unstamped, the same stack parses',
+    (key) => {
+      const control = ObjectStackDefinitionSchema.safeParse(stackWith(key));
+      expect(control.success, `CONTROL: ${control.success ? '' : JSON.stringify(control.error.issues.slice(0, 3))}`).toBe(true);
+      // The item schema must keep the key for the judge: one that stops
+      // spreading `MetadataProtectionFields` either strips it (no issue here)
+      // or refuses it as unrecognized (an issue at the item, not this one).
+      expect(stampIssues(stackWith(key, OTHER)).map(([path, code]) => [path, code]))
+        .toEqual([[`${key}.${fixtureIndex(key)}._packageId`, 'custom']]);
+      expect(stampIssues(stackWith(key, CRM)), 'CONTROL: a stamp equal to `manifest.id`').toEqual([]);
+    },
+  );
+});
+
+// ─── The residual walk, as the boot walks it ────────────────────────────────
+
+describe('[ADR-0010 · ADR-0130 D4] a `packages[]` stack\'s residual is judged on exactly what the boot files as residual', () => {
+  const ORDERS = 'com.acme.orders';
+  const listOf = (object: string) => ({ type: 'grid', data: { provider: 'object', object }, columns: ['title'] });
+  const OTHER_OBJECT = { ...PROBE_OBJECT, name: 'probe_other', label: 'Other' };
+
+  /** Two packages composed as `os build` does; the artifact's own id is the orders module's. */
+  const artifactOf = (crmBody: Record<string, unknown> = {}) => composeStacks([
+    defineStack({ manifest: manifest(CRM, { type: 'module' }), objects: [PROBE_OBJECT, OTHER_OBJECT], ...crmBody } as never, { strict: false }),
+    defineStack({ manifest: manifest(ORDERS, { type: 'module' }) } as never),
+  ], { manifest: 'preserve' }) as unknown as Record<string, unknown> & { manifest: { id: string } };
+
+  it.each([['data'], ['jobs']] as const)(
+    'a top-level `%s` item no body declares is filed by no boot door as a residual, so its stamp is not judged at the build door either',
+    (key) => {
+      const { item, context } = JUDGED_FIXTURES[key];
+      const artifact = { ...artifactOf(), ...context, [key]: [{ ...item, _packageId: OTHER }] };
+      expect(artifact.manifest.id).toBe(ORDERS);
+      expect(ObjectStackDefinitionSchema.safeParse(artifact).success).toBe(true);
+    },
+  );
+
+  it('a residual dataset IS filed under the artifact\'s id (the residual rule walks `datasets`), so its stamp is judged', () => {
+    const { item } = JUDGED_FIXTURES.datasets;
+    expect(stampIssues({ ...artifactOf(), datasets: [{ ...item, _packageId: OTHER }] }).map(([path]) => path))
+      .toEqual(['datasets.0._packageId']);
+  });
+
+  it('CONTROL: a residual picklist IS filed under the artifact\'s id (the metadata door registers it), so its stamp is still judged', () => {
+    const { item } = JUDGED_FIXTURES.picklists;
+    expect(stampIssues({ ...artifactOf(), picklists: [{ ...item, _packageId: OTHER }] }).map(([path]) => path))
+      .toEqual(['picklists.0._packageId']);
+  });
+
+  it('a view container is claimed by the object it binds to, however its binding is spelled: a copy spelled the other way is not a residual', () => {
+    // The body's container binds through its list alone; the top-level copy
+    // through its own `object`, carrying the body's own stamp.
+    const artifact = artifactOf({ views: [{ list: listOf('probe_thing') }] });
+    const flattened = { ...artifact, views: [{ object: 'probe_thing', list: listOf('probe_thing'), _packageId: CRM }] };
+    expect(stampIssues(flattened)).toEqual([]);
+  });
+
+  it('two containers that bind different objects through their lists alone are two slots: the top-level one is a residual, judged', () => {
+    const artifact = artifactOf({ views: [{ list: listOf('probe_thing') }] });
+    const withResidual = { ...artifact, views: [{ list: listOf('probe_thing') }, { list: listOf('probe_other'), _packageId: OTHER }] };
+    expect(stampIssues(withResidual)).toEqual([
+      ['views.1._packageId', 'custom', expect.stringContaining(`from package '${ORDERS}'`)],
+    ]);
   });
 });

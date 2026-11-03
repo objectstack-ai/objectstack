@@ -20,7 +20,8 @@ import { useNavigate } from 'react-router-dom';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { useRecentItems, type RecentItem } from '../../hooks/useRecentItems.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
-import { useNavTargetLabel } from '../../hooks/useNavTargetLabel.js';
+import { useNavTargetLabel, type NavTargetLabelOptions } from '../../hooks/useNavTargetLabel.js';
+import { readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { useFavorites } from '../../hooks/useFavorites.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 // Its own line: the line above is the pack-hook binding `perm-home-namespace-3546.test.tsx` reads.
@@ -150,7 +151,7 @@ function BuilderChip({
       onClick={disabled ? undefined : onClick}
       data-testid={testId}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors',
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors max-sm:h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         'disabled:pointer-events-none disabled:opacity-60',
         tone === 'outline'
@@ -222,8 +223,9 @@ function HomeAiActions({
     layout === 'stack'
       ? 'mt-6 flex flex-col sm:flex-row items-center gap-3'
       : 'flex shrink-0 items-center gap-2';
-  // In the greeting row the buttons take the builder chips' 32 px height.
-  const buttonClass = layout === 'stack' ? undefined : 'h-8 px-3 text-[13px]';
+  // In the greeting row the buttons take the builder chips' 32 px height;
+  // below `sm` both layouts take the 44 px touch target.
+  const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-[13px] max-sm:h-11';
   return (
     <div className={container}>
       {showBuild && (
@@ -343,10 +345,14 @@ function usePendingDraftsRow(t: (key: string, opts?: any) => string, language: s
   );
 }
 
+/** Home's labels read each object they name by name (objectstack#29121). */
+const BY_NAME: NavTargetLabelOptions = { byName: true };
+
 export function HomePage() {
   const navigate = useNavigate();
   const { t, language } = useObjectTranslation();
-  const { apps, objects, loading } = useMetadata();
+  const metadata = useMetadata();
+  const { apps, loading } = metadata;
   const { recentItems } = useRecentItems();
   // A recent entry stores identity; the rail labels it with this, on the
   // render, in the current language (objectui#11678).
@@ -354,7 +360,10 @@ export function HomePage() {
   // A record row's trail names its object as the sidebar names an unlabelled
   // navigation entry for it, and the app as its launcher tile does
   // (objectui#12604).
-  const targetLabel = useNavTargetLabel();
+  //
+  // objectstack#29121 — by name: the object a row names is read alone (as its
+  // icon below is), so Home never loads the whole registry for its rows.
+  const targetLabel = useNavTargetLabel(BY_NAME);
   const { appLabel } = useObjectLabel();
   const { favorites } = useFavorites();
   const { user } = useAuth();
@@ -491,7 +500,9 @@ export function HomePage() {
     const app = segment ? matchAppBySegment(activeApps, segment) : undefined;
     const objectIcon =
       item.type === 'record' && objectName
-        ? (objects ?? []).find((o: { name?: unknown }) => o?.name === objectName)?.icon
+        ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown } | null | undefined>).find(
+            (o) => o?.name === objectName,
+          )?.icon
         : undefined;
     return {
       context:
@@ -788,6 +799,7 @@ export function HomePage() {
               the heading's "System Settings" link rather than a tile */}
           <HomeAppsStrip
             apps={launcherApps}
+            routeApps={apps}
             favorites={favorites}
             settingsHref={setupApp ? setupPath : undefined}
             settingsLabel={

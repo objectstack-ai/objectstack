@@ -344,7 +344,13 @@ const SITES = [
     // under its new name only, and the mirror attaches it above.
     notAttachable: [],
   },
-  { site: 'SpecDashboardFields → DashboardComponentSchema (complex.zod.ts)', spec: SpecDashboardSchema, attached: [], notAttachable: [] },
+  {
+    site: 'SpecDashboardFields → DashboardComponentSchema (complex.zod.ts)',
+    spec: SpecDashboardSchema,
+    // objectstack#29213: a `globalFilters` entry keyed `dateRange` beside a declared `dateRange`.
+    attached: ['checkDashboardReservedDateRangeGlobalFilters'],
+    notAttachable: [],
+  },
   {
     site: 'SpecPageFields → PageNodeSchema (layout.zod.ts)',
     spec: SpecPageSchema,

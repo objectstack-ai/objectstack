@@ -22,7 +22,9 @@
 // 403 `NOT_OVERRIDABLE`, nothing written, nothing removed.
 //
 // The controls — what the seal leaves open, measured on the same boot:
-//  - a regime-O overlay: a packaged VIEW is overlaid and its overlay removed;
+//  - a regime-O customization: a packaged VIEW is customized in its base's
+//    `.custom` pair and the customization removed (#28576: the package-less
+//    write onto it is closed);
 //  - a NEW flow, through `PUT /meta/flow/:name` and through `POST /automation`
 //    (the card's positive control: creating a new flow in Studio works);
 //  - the switch: `POST /automation/:name/toggle` turns the managed flow off and
@@ -190,11 +192,21 @@ describe('[ADR-0131 D6] managed content is sealed — the hatch opens nothing a 
         }
     });
 
-    it('control (regime O): a packaged VIEW is overlaid, and its overlay removed', async () => {
+    it('control (regime O): a packaged VIEW is customized in its base\'s pair, and the customization removed', async () => {
+        // [#28576, ADR-0146 D11] The write naming no package onto it is closed,
+        // naming the pair; the customization lives in `com.example.crm.custom`.
         const view = authorable(await served('view', VIEW));
-        const put = await call('PUT', `/meta/view/${VIEW}`, { ...view, label: 'My Opportunities' });
+        const closed = await call('PUT', `/meta/view/${VIEW}`, { ...view, label: 'My Opportunities' });
+        expect([closed.status, closed.code], closed.text).toEqual([403, 'NOT_OVERRIDABLE']);
+        expect(closed.text).toContain("'com.example.crm.custom' (?package=com.example.crm.custom)");
+        const pair = await call('POST', '/packages/com.example.crm/ensure-customization');
+        expect([200, 201], pair.text).toContain(pair.status);
+        const put = await call('PUT', `/meta/view/${VIEW}?package=com.example.crm.custom`, {
+            ...view, label: 'My Opportunities', overrides: { package: 'com.example.crm', basedOn: '4.0.0' },
+        });
         expect(put.status, put.text).toBe(200);
-        const del = await call('DELETE', `/meta/view/${VIEW}`);
+        expect((await served('view', VIEW)).label).toBe('My Opportunities');
+        const del = await call('DELETE', `/meta/view/${VIEW}?package=com.example.crm.custom`);
         expect(del.status, del.text).toBe(200);
         expect(del.text).toContain('reset to artifact default');
     });

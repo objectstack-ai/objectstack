@@ -2,6 +2,7 @@ import React from 'react';
 import { Input, EmptyValue, cn } from '@object-ui/components';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 import { resolveFieldCurrency, currencySymbol } from '../currency.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
@@ -190,7 +191,7 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
           // (and carries the wrong width for a JPY or KWD field).
           placeholder={currencyField?.placeholder}
           disabled={readonly || props.disabled}
-          className={cn(symbol ? 'pl-8' : '', refusal ? BAD_INPUT_BORDER : '', className)}
+          className={cn(PHONE_TOUCH_HEIGHT, symbol ? 'pl-8' : '', refusal ? BAD_INPUT_BORDER : '', className)}
           // Surface the field's declared range (e.g. `min: 0` on a budget) so the
           // browser's spinner/keyboard affordances respect it (objectui#2572);
           // server-side validation still owns enforcement.

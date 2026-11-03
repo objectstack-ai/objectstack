@@ -196,15 +196,8 @@ import {
   ObjectGantt, // ObjectQL-integrated gantt: loads records, writes back edits
   ObjectGanttRenderer, // the registered renderer for `object-gantt`
   GanttView, // the standalone timeline component
-  QuickFilterBar, // the toolbar's quick-filter dropdowns
-  ResourceWorkload, // resource × period workload grid
-  normalizeDependencies, // raw dependency-field value -> GanttDependency[]
   normalizeTaskType, // raw type-field value -> GanttTaskType
-  normalizeShiftSegments, // raw timeSegments config -> NormShiftSegments
-  parseHHMM,
-  shiftDayStart,
-  bandAt,
-  computeWorkload,
+  parseHHMM, // 'HH:MM' -> minutes after midnight
 } from '@object-ui/plugin-gantt';
 
 import type {
@@ -217,22 +210,14 @@ import type {
   GanttDependencyObject,
   GanttLinkType,
   GanttMarker,
-  QuickFilterDef,
-  QuickFilterBarProps,
-  QuickFilterField,
-  QuickFilterOption,
-  QuickFilterLabels,
-  ShiftSegmentsConfig,
-  ShiftBandConfig,
-  NormShiftSegments,
+  NormShiftSegments, // the shape GanttViewProps.shiftSegments takes
   NormShiftBand,
-  ResourceWorkloadProps,
-  WorkloadColumn,
-  WorkloadOptions,
-  ResourceCell,
-  ResourceLoad,
 } from '@object-ui/plugin-gantt';
 ```
+
+The quick-filter bar, the resource-workload grid and the shift-band helpers
+are `ObjectGantt` internals and are not exported; configure them through the
+`gantt` block (`quickFilters`, `resourceView`, `timeSegments`) instead.
 
 To serve the gantt under a registry key of your own, register the exported
 renderer under that key:

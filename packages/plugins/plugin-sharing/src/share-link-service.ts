@@ -33,7 +33,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 // published from the lean `./core` entry, so there is no structural reason to
 // keep a copy. `declared-fields.ts`'s doc comment is the canonical statement of
 // the rule; this seam defers to it instead of restating it.
-import { materializeDeclaredFields, readInternalColumn } from '@objectstack/objectql/core';
+import { declaredColumnSet, materializeDeclaredFields, readInternalColumn } from '@objectstack/objectql/core';
 // [#14935] The ONE reading of `publicSharing.enabled`, imported from the
 // package that DECLARES the key rather than spelled out again here. This file
 // exported its own copy (#14637) and `@objectstack/runtime` kept a documented
@@ -345,6 +345,41 @@ function assertEligible(
 }
 
 /**
+ * [#29130] The SHAPE of the mint's `redactFields`: absent, or an array of
+ * strings. A request-shape refusal (`400 VALIDATION_FAILED`), asked with the
+ * mint's other request-shape checks, before any record is read. Returns the
+ * list (`[]` when none was sent).
+ */
+function redactFieldsShape(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.some((name) => typeof name !== 'string')) {
+    throw makeError(400, 'VALIDATION_FAILED', 'redactFields must be an array of field names');
+  }
+  return raw;
+}
+
+/**
+ * [#29130] Every `redactFields` entry must name a column a read of `object`
+ * serves (`declaredColumnSet`). Refused with the door's request-shape family
+ * (`400 VALIDATION_FAILED`), naming every unknown entry, so nothing is minted.
+ * A schema with no checkable field map gives no verdict.
+ */
+function assertRedactFieldColumns(names: readonly string[], schema: unknown, object: string): void {
+  if (names.length === 0) return;
+  const columns = declaredColumnSet(schema as { fields?: unknown } | undefined);
+  if (!columns) return;
+  const unknown = Array.from(new Set(names.filter((name) => !columns.has(name))));
+  if (unknown.length > 0) {
+    throw makeError(
+      400,
+      'VALIDATION_FAILED',
+      `redactFields names ${unknown.length === 1 ? 'a field' : 'fields'} object '${object}' does not have: ` +
+        `${unknown.join(', ')} — a redaction that matches no field hides nothing, so no link was issued`,
+    );
+  }
+}
+
+/**
  * One line out of a CEL fault. The engine appends a source excerpt and a caret
  * line, which is right for a log and wrong for an API message.
  */
@@ -565,6 +600,11 @@ export class ShareLinkService implements IShareLinkService {
       throw makeError(400, 'VALIDATION_FAILED', 'emailAllowlist is required when audience=email');
     }
 
+    // [#29130] The shape of `redactFields` is a request-shape check like the two
+    // above; whether each name is a column of the object is judged after the
+    // authority check below.
+    const redactFields = redactFieldsShape(input.redactFields);
+
     // Confirm the target record exists AND — for an HTTP caller — that the
     // caller holds authority over it. [Finding-2] Reading under the caller's
     // own context (positions/permissions/RLS) means a client can no longer
@@ -639,6 +679,19 @@ export class ShareLinkService implements IShareLinkService {
         : makeError(403, 'FORBIDDEN', `Not permitted to share ${input.object}/${input.recordId}`);
     }
 
+    // [#29130] Every `redactFields` entry must name a column of the object, or
+    // nothing is minted. A name that matches no column strips nothing at
+    // resolve, while the landing page still lists it as hidden — so one typo
+    // served the field the minter meant to keep back, under a notice saying it
+    // was withheld. The column set is the one a read SERVES (`declaredColumnSet`:
+    // the field map plus the platform-provisioned columns), so a name is
+    // accepted exactly when there is something for it to hide. Judged AFTER the
+    // authority check, so a caller with no authority over the record learns
+    // nothing about the object's columns from the refusal. A schema with no
+    // checkable field map gives no verdict (the shared rule: a door that cannot
+    // see the field map does not invent one), and the entries are kept as sent.
+    assertRedactFieldColumns(redactFields, schema, input.object);
+
     // [#7861] The declared eligibility gate. Placed AFTER the authority check
     // (it needs the record, and a caller with no authority over the row must
     // not learn anything about its contents from the refusal) and BEFORE the
@@ -667,7 +720,7 @@ export class ShareLinkService implements IShareLinkService {
           ? input.emailAllowlist.map((e) => e.trim().toLowerCase()).filter(Boolean)
           : null,
       password_hash: passwordHash,
-      redact_fields: input.redactFields && input.redactFields.length > 0 ? input.redactFields : null,
+      redact_fields: redactFields.length > 0 ? redactFields : null,
       label: input.label ?? null,
       revoked_at: null,
       created_by: context.userId ?? null,

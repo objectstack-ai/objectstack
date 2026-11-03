@@ -741,9 +741,72 @@ export function fieldPermissionVote(
   return { readable: entry.readable === true, editable: verdict === 'matched' && entry.editable === true };
 }
 
+/**
+ * [ADR-0066 D2 / ①] Does `set` hold the super-user ("View/Modify All Data")
+ * bypass on `objectName`? The ONE reading of that question:
+ * `PermissionEvaluator.superuserBypassSets` (`@objectstack/plugin-security`,
+ * the row-level bypass every RLS, sharing and explain consumer folds through)
+ * asks it per set, and so does the field merge's super-user vote below, so the
+ * two can never disagree about who is a super-user on an object.
+ *
+ * The set's own entry for the object answers when it has one; otherwise its
+ * `'*'` wildcard does (`resolveObjectPermission` in the evaluator: lookup, not
+ * merge). The private posture never changes the answer, because it withholds
+ * only a wildcard that carries NEITHER bit.
+ *
+ *  - `view`   — `viewAllRecords` OR `modifyAllRecords` (Modify All implies View All);
+ *  - `modify` — `modifyAllRecords` only: View All never widens a write.
+ */
+export function holdsSuperuserBypass(
+  set: { objects?: Record<string, unknown> | null } | null | undefined,
+  objectName: string,
+  bit: 'view' | 'modify',
+): boolean {
+  const objects = set?.objects;
+  if (!objects || typeof objects !== 'object') return false;
+  const op = (objects[objectName] || objects['*']) as
+    | { viewAllRecords?: unknown; modifyAllRecords?: unknown }
+    | null
+    | undefined;
+  if (!op || typeof op !== 'object') return false;
+  return bit === 'modify' ? Boolean(op.modifyAllRecords) : Boolean(op.viewAllRecords || op.modifyAllRecords);
+}
+
+/**
+ * [ADR-0066 D2 ⑧ as amended — ruling of record 6573563853, letter A] The
+ * super-user vote in the field merge: when any of `sets` holds the bypass on
+ * `objectName` ({@link holdsSuperuserBypass}), it votes on EVERY field of that
+ * object — `viewAllRecords` votes `readable: true`, `modifyAllRecords` votes
+ * `readable: true` and `editable: true`. `null` when no set holds it.
+ *
+ * A set that grants the object through its super-user bits but names no field
+ * used to cast no vote at all, so another set's `readable: false` hid the
+ * field from a platform admin who also held that set. Union without deny is
+ * otherwise unchanged: a caller who holds no super-user set on the object is
+ * narrowed by a declared mask as before. Applied to the fields the merge
+ * already holds an entry for; an absent field is unrestricted anyway.
+ *
+ * Both merges apply it after their declared-entry votes —
+ * `PermissionEvaluator.getFieldPermissions` per object and
+ * {@link buildEffectiveFieldPermissions} for every object.
+ */
+export function superuserFieldVote(
+  sets: ReadonlyArray<{ objects?: Record<string, unknown> | null } | null | undefined>,
+  objectName: string,
+): { readable: true; editable: boolean } | null {
+  let read = false;
+  for (const ps of sets) {
+    if (holdsSuperuserBypass(ps, objectName, 'modify')) return { readable: true, editable: true };
+    if (!read && holdsSuperuserBypass(ps, objectName, 'view')) read = true;
+  }
+  return read ? { readable: true, editable: false } : null;
+}
+
 /** A resolved permission set, as far as the field merge reads it. */
 export interface EffectiveFieldPermissionsInputSet {
   fields?: Record<string, unknown> | null;
+  /** Read only for the super-user vote ({@link superuserFieldVote}). */
+  objects?: Record<string, unknown> | null;
 }
 
 /**
@@ -755,6 +818,9 @@ export interface EffectiveFieldPermissionsInputSet {
  * no row), so a row-conditioned entry is reported as its lock: a client reading
  * this map never advertises an edit the write gate refuses, and may hide one it
  * admits on the rows the condition does not name.
+ *
+ * A set holding the super-user bypass on an object then votes on every field
+ * of it ({@link superuserFieldVote}, ruling of record 6573563853).
  *
  * Every entry is a FRESH object, as {@link buildEffectiveObjectPermissions}'s are.
  */
@@ -773,6 +839,19 @@ export function buildEffectiveFieldPermissions(
       if (vote.editable) acc.editable = true;
       fields[key] = acc;
     }
+  }
+  // [Ruling of record 6573563853] The super-user vote, per object the map
+  // names — the same function `getFieldPermissions` applies per object.
+  const votes = new Map<string, ReturnType<typeof superuserFieldVote>>();
+  for (const [key, acc] of Object.entries(fields)) {
+    const dot = key.indexOf('.');
+    if (dot <= 0) continue;
+    const objectName = key.slice(0, dot);
+    if (!votes.has(objectName)) votes.set(objectName, superuserFieldVote(sets, objectName));
+    const vote = votes.get(objectName);
+    if (!vote) continue;
+    acc.readable = true;
+    if (vote.editable) acc.editable = true;
   }
   return fields;
 }

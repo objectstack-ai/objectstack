@@ -144,10 +144,14 @@ import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engin
 // [#25522 cut 10] The write path's reference check and the caller's read of a
 // master-detail header; the methods of the same names below hand each body the
 // members it reads (`ReferentialIntegrityHost`).
-import { assertReferencesResolve, masterDetailHeadersCallerReads } from './engine-referential-integrity.js';
+import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredReferenceRows } from './engine-referential-integrity.js';
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
+// [#29460] A `referenceNameVisible` reference's refused targets served by name
+// and id on the expanded read; the method of the same name below hands the body
+// the members it reads (`ReferenceNameVisibleHost`).
+import { serveReferenceNames } from './engine-reference-name-visible.js';
 // [#25522 cut 12] The driver options every driver call receives, and the tenancy
 // posture and Layer 0 verdict they are scoped by; the methods of the same names
 // below hand each body the members it reads (`DriverOptionsHost`).
@@ -166,7 +170,7 @@ import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // contract is new (#5945).
 import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 // [#20157] The judge-only filter-admission member's verdict and options.
-import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
+import type { EngineFilterJudgement, EngineFilterJudgementOptions, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -201,7 +205,7 @@ import {
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
-import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rollbackFailedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -312,6 +316,7 @@ import { count, rejectCredentialAggregation } from './engine-count-aggregate.js'
 // ADR-0100: the credential-column guard's filter / sort half, beside the
 // aggregate half above — one collector, one envelope.
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
+import { assertNoInternalFieldEvaluated, rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
@@ -385,7 +390,10 @@ import {
   PLATFORM_PROVISIONED_COLUMNS,
   declaredColumnSet,
   rowsWithDeclaredColumnsOnly,
+  rowsWithSelectedColumnsAnswered,
+  selectedStoredColumns,
   withDeclaredColumnsOnly,
+  withSelectedColumnsAnswered,
 } from './declared-read-columns.js';
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
 // [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
@@ -1805,23 +1813,69 @@ export function declaredMultiValued(field: { type?: unknown; multiple?: unknown 
  * materialized default included, was inert: a parent delete left its children
  * holding the deleted id.
  *
- * ⛔ `user` stays out. It stores like a `lookup`, but the spec's parse puts it
- * on the other side of the line and materializes no `deleteBehavior` on it, so
- * no `user` field declares a delete outcome by default. Moving it is a change
- * to the declaration, made in the spec, never here.
+ * `user` is not a member of this set: see {@link USER_REFERENCE_TYPE}, which
+ * takes part only when it declares a delete outcome of its own.
  */
 const DELETE_SEMANTICS_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'tree']);
 
 /**
- * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}? This
+ * [#29253] A `user` field takes part in the referential delete walk when, and
+ * only when, it DECLARES a `deleteBehavior` (one of the enum's three values).
+ *
+ * It stores like a `lookup` (the target is fixed to `sys_user` by the type,
+ * {@link referenceTargetOf}), but the spec's parse materializes no
+ * `deleteBehavior` on it: a `user` field that authors nothing declares no
+ * delete outcome, so deleting the user leaves it as it was, exactly as before.
+ * A `user` field that authors one is a declaration the spec accepts and
+ * round-trips, and the walk used to read it never, so an authored `restrict`
+ * refused nothing and an authored `cascade` deleted nothing. It now reads like
+ * a `lookup`'s authored value: `cascade` deletes the rows holding the deleted
+ * user, `set_null` clears them (on a multi-valued field, removes the member),
+ * and `restrict` refuses the delete with the walk's own `DELETE_RESTRICTED`;
+ * a `set_null` on a REQUIRED `user` field escalates to that refusal as a
+ * required `lookup`'s does.
+ *
+ * Every door that deletes a user reaches this walk: better-auth deletes the
+ * user row (admin remove-user, self delete-user) through the plugin-auth
+ * adapter's `engine.delete` by id, and the generic data doors refuse a
+ * caller-context `sys_user` delete before it (ADR-0092 D2).
+ *
+ * ⛔ No default is invented here. "Absent" stays outside the walk, because the
+ * spec's parse decides what a bare `user` field declares, not this file.
+ */
+const USER_REFERENCE_TYPE = 'user';
+const DECLARED_DELETE_BEHAVIORS: ReadonlySet<string> = new Set(['set_null', 'cascade', 'restrict']);
+
+/**
+ * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}, or
+ * [#29253] is it a `user` field that declares a `deleteBehavior`
+ * ({@link USER_REFERENCE_TYPE})? This
  * is the ONE family test every reader of the referential delete walk asks:
  * {@link ObjectQL.cascadeRelationBehavior}, through it the collection walk and
  * the dependents walk, and {@link ObjectQL.planCascadeAtomicity}. So the walk
  * that runs and the verdict on whether it runs as one unit of work cannot
  * disagree about which relations take part. ⛔ Never a type literal at a site.
  */
-function statesDeleteSemantics(fdef: { type?: unknown } | null | undefined): boolean {
-  return typeof fdef?.type === 'string' && DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+function statesDeleteSemantics(fdef: { type?: unknown; deleteBehavior?: unknown } | null | undefined): boolean {
+  if (typeof fdef?.type !== 'string') return false;
+  if (fdef.type === USER_REFERENCE_TYPE) {
+    return typeof fdef.deleteBehavior === 'string' && DECLARED_DELETE_BEHAVIORS.has(fdef.deleteBehavior);
+  }
+  return DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+}
+
+/**
+ * [#29253] The object a delete-walk relation points at. The `reference`
+ * carrier is read through the one arbiter ({@link referenceCarrierOf}), so an
+ * unreadable carrier still throws and an absent one still answers `undefined`.
+ * A `user` field's target is fixed by its type, so it answers `sys_user`
+ * ({@link referenceTargetOf}) whether or not the carrier spells it: a raw
+ * `{ type: 'user' }` registration names no `reference` and still references a
+ * user.
+ */
+function deleteWalkTargetOf(fdef: { type?: unknown } | null | undefined, reader: string): string | undefined {
+  const carrier = referenceCarrierOf(fdef, reader);
+  return fdef?.type === USER_REFERENCE_TYPE ? referenceTargetOf(fdef) : carrier;
 }
 
 /**
@@ -5961,7 +6015,13 @@ export class ObjectQL implements IObjectQLEngine {
         this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
         continue;
       }
-      await entry.handler(context);
+      // [#29422] A stale-roll-up refusal a hook's own `ctx.api` write raised
+      // describes THAT write, not this one: `hookStoppedRefusal`.
+      try {
+        await entry.handler(context);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, context.object, entry.hookName);
+      }
     }
   }
 
@@ -6009,7 +6069,9 @@ export class ObjectQL implements IObjectQLEngine {
    * (`transaction()` covers that one alone and would refuse the write), or when
    * that driver has no transactions (ADR-0119 D1; asking would only warn).
    * `SummaryRecomputeError` means "the records WERE written": it is rethrown
-   * after the commit, never through the rollback.
+   * after the commit, never through the rollback. Only the write's OWN refusal
+   * arrives here: one a hook's `ctx.api` write raised was already converted
+   * where it left the handler (#29422, `hookStoppedRefusal`), so it rolls back.
    */
   private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
     const threaded = context?.transaction;
@@ -6275,7 +6337,12 @@ export class ObjectQL implements IObjectQLEngine {
     } as unknown as HookContext;
     for (const entry of flagged) {
       if (skipAutomations && entry.meta) continue;
-      await entry.handler(wholeOpCtx);
+      // [#29422] As in `triggerHooks`.
+      try {
+        await entry.handler(wholeOpCtx);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, object, entry.hookName);
+      }
     }
     // `input` is identity-shared with the batch context, so the observation
     // covers everything the handlers touched.
@@ -10402,10 +10469,28 @@ export class ObjectQL implements IObjectQLEngine {
    *   would turn an ordering detail into a boot failure. This leaves a real
    *   residual — an `isSystem` caller can still write a dangling reference —
    *   which is recorded on the issue rather than silently accepted.
+   *   [#28881] ⛔ Except a flow run's elevated write (`runAs: 'system'`):
+   *   its context carries the flow-write mark (`keepsFlowWriteReferenceCheck`,
+   *   `@objectstack/core`, set by `resolveRunDataContext` in
+   *   service-automation) and is checked like a user write. Its elevation is
+   *   for authorization (other people's rows, past RLS and FLS), never for a
+   *   link to a row that does not exist, and it keeps every authorization
+   *   exemption `isSystem` gives it. A write it sets off (a hook's `ctx.api`,
+   *   its `sudo()`, a cascade leg) spreads that context and is checked as
+   *   the flow's own.
    * - **Empty values are not references.** `null` / `undefined` / `''` mean
    *   "no link", which is what `deleteBehavior: 'set_null'` produces.
    * - **Already-expanded objects are skipped.** A read round-trip can hand back
    *   `{id, name, …}` in the slot; that is not an id write.
+   * - **A value the row already stores is not the write's (#29062).** The
+   *   check judges only the references a write ADDS. An update's `storedRows`
+   *   (the by-id prior row; a predicate update's matched rows) forgive a
+   *   refused value, or a multi-valued member, that every one of those rows
+   *   already holds: an edit form carries the whole record back, and a stored
+   *   id that has since stopped resolving (the delete walk leaves a `user`
+   *   value in place, `DELETE_SEMANTICS_REFERENCE_TYPES`) is not the editor's
+   *   to answer for. A value new to any of the rows is refused as before, and
+   *   an insert has no stored rows, so every value it supplies is judged.
    *
    * ## Why the probe bypasses RLS — and why it keeps the tenant wall
    *
@@ -10460,13 +10545,14 @@ export class ObjectQL implements IObjectQLEngine {
     supplied: Record<string, unknown> | null | undefined,
     context: any,
     msgCtx?: { locale?: string; translate?: any; objectName?: string },
+    storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
     const host: ThisParameterType<typeof assertReferencesResolve> = {
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
     };
-    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx);
+    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
   }
 
   /**
@@ -10515,8 +10601,11 @@ export class ObjectQL implements IObjectQLEngine {
    * that exists nowhere.
    *
    * `null` (fail-open) only where {@link referenceExists} answers it, and for
-   * an unregistered master, which has no read door to ask either. Never reached
-   * by a SYSTEM caller: {@link assertReferencesResolve} returns before it.
+   * an unregistered master, which has no read door to ask either. A SYSTEM
+   * caller reaches it only as a flow run's elevated write, or a write that
+   * write sets off (#28881): its read door returns every header
+   * ({@link masterDetailHeadersCallerReads}), so the header's existence in the
+   * caller's tenant is what is asked.
    *
    * ⛔ `master_detail` only — the plain `lookup` probe is not this rule's.
    */
@@ -13746,9 +13835,69 @@ export class ObjectQL implements IObjectQLEngine {
           error: (e as Error).message,
         });
       }
+
+      // [#29460] `referenceNameVisible` (ruling 6574398310, letter B): the ids
+      // the caller's own expansion above left bare are asked whether the
+      // caller was REFUSED them, and a refused target is served by its name
+      // and id only. Every other value keeps the answer the loop gave it. See
+      // {@link serveReferenceNames}.
+      if ((fieldDef as { referenceNameVisible?: unknown }).referenceNameVisible === true) {
+        await this.serveReferenceNames(objectName, records, fieldName, referenceObject, execCtx);
+      }
     }
 
     return records;
+  }
+
+  /**
+   * [#29460] Serve `FieldSchema.referenceNameVisible` on an expanded read
+   * (director ruling 6574398310, letter B). Runs from
+   * {@link expandRelatedRecords} for a field declaring the key, after the
+   * caller's own expansion of it, and rewrites only the ids that expansion
+   * left bare.
+   *
+   * For each such id it asks, as the caller and with none of the caller's
+   * `$expand` nesting, whether the caller may read it (the security service's
+   * object-level admission, then an id-only read for the row scope). A refused
+   * id whose record exists in the caller's tenant becomes
+   * `{ id, name, readRefused: true }`: `name` is ADR-0079's display name,
+   * read by the engine under the tenant-kept elevation from exactly `id` and
+   * the resolved name field, with the floor `Record #<id>` when field-level
+   * security keeps that field from the caller. A readable target keeps its
+   * expansion, an id the caller's own nested filter left bare stays bare, an
+   * id no record has stays bare. `multiple: true` is judged per element.
+   *
+   * ⛔ Never served on an unexpanded read: ADR-0104 D1's stored form is the
+   * bare id for every caller. ⛔ The caller's projection, filter, order and
+   * nested expand never reach the elevated read, and the field's
+   * `displayField` does not choose its column.
+   */
+  private async serveReferenceNames(
+    objectName: string,
+    records: any[],
+    fieldName: string,
+    referenceObject: string,
+    execCtx?: ExecutionContext,
+  ): Promise<void> {
+    // The body lives in `engine-reference-name-visible.ts` (see `ReferenceNameVisibleHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof serveReferenceNames> = {
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+      find: (...a) => this.find(...a),
+      resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
+      formulaReadsReference: (name, def, fields) => {
+        try {
+          const entry = formulaPlanEntry(name, def, fields);
+          return entry.hops !== undefined || entry.hopConflict !== undefined;
+        } catch {
+          // An expression the planner cannot compile is not served by name.
+          return true;
+        }
+      },
+    };
+    return serveReferenceNames.call(host, objectName, records, fieldName, referenceObject, execCtx);
   }
 
   /**
@@ -14131,6 +14280,12 @@ export class ObjectQL implements IObjectQLEngine {
    * allowed set, never widened. All drivers already execute `$or`/`$icontains`,
    * so this needs no driver changes.
    *
+   * [#29394] A resolved field whose declared type can never hold a string (the
+   * #15661 door's verdict) gets no clause — `expandSearchToFilter` skips it —
+   * because that door judges only the caller's `where`, above, and never this
+   * expansion. The set itself is not narrowed, so the refusals below judge it
+   * as before, and a set of only such fields answers no rows.
+   *
    * The keys are deleted whether or not anything expanded — leaving them on
    * would hand the driver a key it does not read, which is the same silent drop
    * one layer down.
@@ -14441,6 +14596,10 @@ export class ObjectQL implements IObjectQLEngine {
     // for a non-system caller — judged on the caller's own `where` / `orderBy`
     // / `expand`, before the search term is expanded into `where` and before
     // the middlewares inject their server-authored filters.
+    // [internal: true] …and a flagged column is never evaluated for one either,
+    // judged first so the refusal is the data door's own (the door asks the
+    // same definition before the engine runs).
+    rejectInternalFieldEvaluation(object, ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
     rejectCredentialEvaluation(object, 'find', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
@@ -14546,6 +14705,13 @@ export class ObjectQL implements IObjectQLEngine {
           // declared record. See `declared-read-columns.ts`.
           if (Array.isArray(result)) {
             result = rowsWithDeclaredColumnsOnly(result, declaredColumnSet(_findSchema));
+            // [#29408] …and answered on every stored declared column the read
+            // SELECTED: one the driver returned no key for (a driver that
+            // stores only written columns) is `null`, as driver-sql's column
+            // answers — the row's persisted state is in hand. Unselected,
+            // formula and FLS-refused columns stay absent; see
+            // `selectedStoredColumns`.
+            result = rowsWithSelectedColumnsAnswered(result, selectedStoredColumns(_findSchema, driverAst?.fields));
           }
 
           // Post-process: evaluate formula virtual fields against the raw rows.
@@ -14767,7 +14933,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [commit 74155c735] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
-    // [ADR-0100] Same credential-column refusal as `find`, same position.
+    // [ADR-0100] Same internal-field and credential-column refusals as `find`, same position.
+    rejectInternalFieldEvaluation(objectName, ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
     rejectCredentialEvaluation(objectName, 'findOne', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
@@ -14845,6 +15012,8 @@ export class ObjectQL implements IObjectQLEngine {
       // [#21571] Same default projection as `find`, same position: the
       // declared field set, applied to the row as the driver returned it.
       result = withDeclaredColumnsOnly(result, declaredColumnSet(_findOneSchema));
+      // [#29408] Same answer on the selected stored columns as `find`.
+      result = withSelectedColumnsAnswered(result, selectedStoredColumns(_findOneSchema, driverAst?.fields));
 
       // Post-process: evaluate formula virtual fields against the raw row
       // ([#20082] with the caller's permission map when a formula calls `can`).
@@ -18142,9 +18311,12 @@ export class ObjectQL implements IObjectQLEngine {
                const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], permissionResolution))(updatePayload);
                emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
                // [#4441] A repoint is as capable of dangling as an initial link.
+               // [#29062] …but a value the row already stores is not a repoint:
+               // the prior row is what the check forgives a refused value against.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 async () => [priorRecord],
                );
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
@@ -18568,9 +18740,13 @@ export class ObjectQL implements IObjectQLEngine {
                // [#4441] The bulk call site too — a guard wired into single-id
                // writes only is still a hole one call site over (AGENTS.md
                // PD #10's own worked example, #3106).
+               // [#29062] A refused value is forgiven only when EVERY matched row
+               // already stores it (the `readPriorRows` memo, read only then);
+               // a row it is new to makes it this write's reference.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 readPriorRows,
                );
                // `updateMany` presence is part of the ladder verdict resolved above.
                // [commit 9d7f7259f] The predicate driver exit, enveloped on the same
@@ -18903,7 +19079,7 @@ export class ObjectQL implements IObjectQLEngine {
           //    verdict that asserts something POSITIVE about the schema
           //    ("nothing references this object"). An unreadable carrier can
           //    no more support that claim than an unreadable registry can.
-          const ref = referenceCarrierOf(fdef, 'ObjectQL.planCascadeAtomicity');
+          const ref = deleteWalkTargetOf(fdef, 'ObjectQL.planCascadeAtomicity');
           if (!ref) continue;
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
@@ -19286,7 +19462,8 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`,
-   * `lookup` or `tree` field ({@link statesDeleteSemantics}) referencing
+   * `lookup` or `tree` field, or a `user` field that declares a
+   * `deleteBehavior` ({@link statesDeleteSemantics}), referencing
    * `object`, honor the field's `deleteBehavior`:
    *   - `cascade`  → delete the dependent rows (recursively, so grandchildren
    *                  are handled by each child's own delete),
@@ -19481,7 +19658,7 @@ export class ObjectQL implements IObjectQLEngine {
     // removed the parent, left a `master_detail` child behind, and
     // reported success. No `restrict` refusal, no `set_null`, nothing
     // logged. Absence still skips the field here exactly as before.
-    const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
+    const ref = deleteWalkTargetOf(fdef, 'ObjectQL.cascadeDeleteRelations');
     if (!ref) return undefined;
     // Match the target object by raw or resolved name.
     let resolvedRef: string | undefined;
@@ -19523,6 +19700,10 @@ export class ObjectQL implements IObjectQLEngine {
     // honoured as written. Its `cascade` is a subtree delete, and a cycle in
     // the data (a corrupt row pointing at its own descendant) terminates on
     // the cascade set, the same membership test any self-reference has.
+    //
+    // [#29253] A `user` field reaches here only with an authored value
+    // ({@link statesDeleteSemantics}), and reads it as a `lookup` reads its
+    // own: the `|| 'set_null'` fallback below is never what a `user` gets.
     //
     // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
     // every other value a master_detail can declare — including an
@@ -20882,8 +21063,13 @@ export class ObjectQL implements IObjectQLEngine {
               // wrapping its cascade. `buildDriverOptions` only fills keys that
               // are still `undefined`, so re-running it adds the handle and
               // changes nothing else.
+              //
+              // A dependent's stale-roll-up refusal stops the walk before this
+              // row is removed, so it is not this delete's answer:
+              // `cascadeStoppedRefusal` says what it is instead.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext);
+                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext)
+                  .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 return await driver.delete(
                   object,
                   hookContext.input.id as string,
@@ -20975,8 +21161,11 @@ export class ObjectQL implements IObjectQLEngine {
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
                    deletedSecrets = deletedSecretSlots(deleteSchema, matched);
-                   // [#27004] One walk, rooted at the whole matched set.
-                   await this.cascadeDeleteRelations(object, matchedIds, writeContext);
+                   // [#27004] One walk, rooted at the whole matched set. A
+                   // dependent's stale-roll-up refusal is not this delete's
+                   // answer, as in the by-id branch.
+                   await this.cascadeDeleteRelations(object, matchedIds, writeContext)
+                     .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                    // The id set rides an `$in`; batched so one statement never
                    // outgrows a driver's bind-parameter limit.
                    const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
@@ -21138,6 +21327,21 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * The `internal: true` evaluate refusal for EVERY caller — the
+   * `QueryEvaluationGate` member of the `objectql` slot contract. The body is
+   * `internal-field-evaluation-guard.ts`, the one definition, which this
+   * engine's own read path also applies to every non-system caller; a door
+   * asks this method and never restates it.
+   */
+  assertNoInternalFieldEvaluated(
+    object: string,
+    query: InternalFieldEvaluationQuery,
+    options?: InternalFieldEvaluationOptions,
+  ): void {
+    assertNoInternalFieldEvaluated(object, query, this.relatedSchemaOf, options);
+  }
+
+  /**
    * Fail-closed guard (ADR-0100 / #3171 / #7922): refuse to aggregate over a
    * field whose value is withheld on the generic read path. Such fields reach
    * this guard through **two independent collectors**, and it needs both:
@@ -21197,6 +21401,11 @@ export class ObjectQL implements IObjectQLEngine {
       // [ADR-0100] The filter half of the credential-column guard — `where`
       // and every `aggregations[i].filter` — before the search term joins
       // `where`; the aggregate half (`rejectCredentialAggregation`) follows.
+      // [internal: true] The flagged-column refusal goes first, over every
+      // position at once (`where`, `groupBy`, each aggregation's `field` and
+      // `filter`), so a non-system caller meets the data door's words here
+      // too rather than the aggregate guard's.
+      rejectInternalFieldEvaluation(object, query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       rejectCredentialEvaluation(object, 'aggregate', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
@@ -21800,17 +22009,22 @@ export class ObjectQL implements IObjectQLEngine {
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
     } catch (err) {
+      let rollbackFailed = false;
       try {
         if (drv.rollback) await drv.rollback(trx);
         else if (drv.rollbackTransaction) await drv.rollbackTransaction(trx);
       } catch {
         // swallow rollback failures so the original error surfaces
+        rollbackFailed = true;
       }
       // [#21274] A boundary outside the middleware seam: a commit failure, or
       // a callback that reached the driver through the transaction handle.
       // An error that already crossed an engine boundary inside the callback
-      // comes back as the same reference.
-      throw redactPropagatedDriverFault(err);
+      // comes back as the same reference. A stale-roll-up refusal ("stored")
+      // is no longer true once this rollback has run: `rolledBackRefusal`.
+      // [#29421] Nor is "rolled back" once the rollback threw:
+      // `rollbackFailedRefusal`.
+      throw redactPropagatedDriverFault(rollbackFailed ? rollbackFailedRefusal(err) : rolledBackRefusal(err));
     }
   }
 
@@ -22800,8 +23014,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     } catch (error) {
       if (driver.rollback) await driver.rollback(trx);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
-      // [#21274] The engine surface's twin (`ObjectQL.transaction`).
-      throw redactPropagatedDriverFault(error);
+      // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
+      // stale-roll-up conversion included.
+      throw redactPropagatedDriverFault(rolledBackRefusal(error));
     }
   }
 

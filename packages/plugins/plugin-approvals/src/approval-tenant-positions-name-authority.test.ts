@@ -343,7 +343,9 @@ describe('[#16166] a stored `sys_user_position` row spelling an org built-in con
 
       const outcome = await h.attemptDecide(context, req.id);
 
-      expect(outcome.threw).toBe('FORBIDDEN');
+      // Not an override actor, and no participant: no reader of the request,
+      // so the door answers as for a missing id.
+      expect(outcome.threw).toBe('REQUEST_NOT_FOUND');
       // The state half, asserted because a refusal that still moved the request
       // would be no refusal at all.
       expect({ status: outcome.status, decided: outcome.decided })
@@ -359,7 +361,7 @@ describe('[#16166] a stored `sys_user_position` row spelling an org built-in con
 
       const outcome = await h.attemptRecall(context, req.id);
 
-      expect(outcome).toEqual({ threw: 'FORBIDDEN', status: 'pending' });
+      expect(outcome).toEqual({ threw: 'REQUEST_NOT_FOUND', status: 'pending' });
     },
   );
 
@@ -384,9 +386,10 @@ describe('[#16166] a stored `sys_user_position` row spelling an org built-in con
       const b = await h.openRequest();
       const viaPlain = await h.attemptDecide(plain.context, b.id);
 
-      // The floor: a plain member is refused. If this arm ever stops being
-      // FORBIDDEN, the comparison above is measuring nothing.
-      expect(viaPlain).toEqual({ threw: 'FORBIDDEN', status: 'pending', decided: false });
+      // The floor: a plain member is refused — a non-participant, answered as
+      // for a missing id. If this arm ever stops being refused, the comparison
+      // above is measuring nothing.
+      expect(viaPlain).toEqual({ threw: 'REQUEST_NOT_FOUND', status: 'pending', decided: false });
       expect(viaName).toEqual(viaPlain);
       expect(await h.svc.listRequests({}, plain.context)).toEqual([]);
     },

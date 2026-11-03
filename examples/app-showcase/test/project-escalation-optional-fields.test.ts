@@ -33,88 +33,27 @@
  * notify hands over, not inbox fan-out.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
-import { ObjectQLPlugin } from '@objectstack/objectql';
-import { SqlDriver } from '@objectstack/driver-sql';
-import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
+import { describe, it, expect, afterEach } from 'vitest';
 
 import { Account, Project } from '../src/data/objects/index.js';
 import { ProjectEscalationFlow } from '../src/automation/flows/index.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import {
+  SYS, OWNER_EMAIL, bootShowcaseFlowKernel, closeShowcaseFlowKernels, insertedId, latestRun, stepStatus,
+  type ShowcaseFlowKernel,
+} from './showcase-flow-run.testkit.js';
 
-const SYS = { context: { isSystem: true, positions: [], permissions: [] } as any };
 const FLOW = ProjectEscalationFlow.name;
-/** A user the directory holds: an inbox-only notify delivers an address only to its holder. */
-const OWNER_EMAIL = 'admin@objectos.ai';
 
-const openKernels: Array<{ shutdown?: () => Promise<void> }> = [];
-const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
-afterEach(async () => {
-  vi.unstubAllGlobals();
-  while (openKernels.length) {
-    try { await openKernels.pop()?.shutdown?.(); } catch { /* noop */ }
-  }
-  while (openDrivers.length) {
-    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
-  }
-});
+afterEach(closeShowcaseFlowKernels);
 
-interface Emitted { audience: string[]; title: string }
+interface Booted extends ShowcaseFlowKernel { accountId: string }
 
-interface Booted {
-  automation: AutomationEngine & Record<string, any>;
-  data: any;
-  emitted: Emitted[];
-  accountId: string;
-}
-
-async function boot(flow: unknown = ProjectEscalationFlow): Promise<Booted> {
-  // The critical branch POSTs to an incident system; answer it here so the
-  // try/catch takes its success path without leaving the process.
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } })));
-
-  const emitted: Emitted[] = [];
-  const kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
-  await kernel.use(new ObjectQLPlugin());
-  await kernel.use(new AutomationServicePlugin());
-  await kernel.use({
-    name: 'test.messaging-recorder', type: 'standard', version: '1.0.0', dependencies: [],
-    async init(ctx: any) {
-      ctx.registerService('messaging', {
-        async emit(n: any) {
-          emitted.push({ audience: [...(n.audience ?? [])], title: String(n.payload?.title ?? '') });
-          return { delivered: 1, failed: 0 };
-        },
-      });
-    },
-    async start() {},
-  } as any);
-  await kernel.bootstrap();
-  openKernels.push(kernel as any);
-
-  const objectql: any = kernel.getService('objectql');
-  const data: any = kernel.getService('data');
-  const automation = kernel.getService<AutomationEngine>('automation') as AutomationEngine & Record<string, any>;
-
-  const driver: any = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
-  await driver.connect();
-  objectql.registerDriver(driver, true);
-  openDrivers.push(driver);
-
-  for (const obj of [Account, Project]) objectql.registry.registerObject(obj, 'showcase', 'showcase');
-  objectql.registry.registerObject(
-    { name: 'sys_user', label: 'User', managedBy: 'better-auth', fields: { email: { type: 'email', label: 'Email' }, name: { type: 'text', label: 'Name' } } },
-    '@objectstack/example-showcase',
-  );
-  await objectql.syncSchemas();
-  await installDefaultOrganization(objectql);
-  await objectql.getDriverForObject('sys_user')!.create('sys_user', { id: 'usr_admin', email: OWNER_EMAIL, name: 'Admin' });
-
-  automation.registerFlow((flow as any).name, flow as any);
-
-  const account = await data.insert('showcase_account', { name: 'Escalation Co' }, SYS);
-  return { automation, data, emitted, accountId: (Array.isArray(account) ? account[0] : account).id };
+async function boot(): Promise<Booted> {
+  // The critical branch POSTs to an incident system; the kit stubs `fetch`, so
+  // the try/catch takes its success path without leaving the process.
+  const kernel = await bootShowcaseFlowKernel([Account, Project], [ProjectEscalationFlow]);
+  const account = await kernel.data.insert('showcase_account', { name: 'Escalation Co' }, SYS);
+  return { ...kernel, accountId: insertedId(account) };
 }
 
 /**
@@ -127,7 +66,7 @@ async function turnRed(booted: Booted, fields: Record<string, unknown>): Promise
   const created = await booted.data.insert('showcase_project', {
     name: 'esc', account: booted.accountId, status: 'planned', health: 'yellow', ...fields,
   }, SYS);
-  const id = (Array.isArray(created) ? created[0] : created).id;
+  const id = insertedId(created);
   const previous = await booted.data.findOne('showcase_project', { where: { id }, ...SYS });
   await booted.data.update('showcase_project', { id, health: 'red' }, SYS);
   const record = await booted.data.findOne('showcase_project', { where: { id }, ...SYS });
@@ -140,14 +79,7 @@ async function turnRed(booted: Booted, fields: Record<string, unknown>): Promise
   const result = await booted.automation.execute(FLOW, {
     record, previous, object: 'showcase_project', event: 'update', organizationId: null,
   } as any);
-  const runs: any[] = (await booted.automation.listRuns(FLOW)) ?? [];
-  const run = runs[0] ?? {};
-  return { result, run, steps: run.steps ?? [] };
-}
-
-/** `nodeId → status` for the steps that ran or were passed over. */
-function stepStatus(steps: any[]): Record<string, string> {
-  return Object.fromEntries(steps.map((s) => [s.nodeId, s.status]));
+  return { result, ...(await latestRun(booted, FLOW)) };
 }
 
 describe('showcase_project_escalation on a project missing an optional field', () => {

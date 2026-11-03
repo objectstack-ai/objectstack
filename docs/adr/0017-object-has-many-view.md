@@ -70,6 +70,20 @@ has-many ViewItem.**
   - `shared` — authored at runtime, org-wide; gated by `view.manageShared`.
   - `personal` — authored at runtime, visible only to its `owner`;
     available to any user with object read.
+
+    > **Note (2026-11-02, ruling of record `6570568131` on
+    > [#28971](https://github.com/objectstack-ai/objectstack/issues/28971), letter C, 「同意」) — named
+    > personal views are a user-owned ADR-0131 D3 object, not this layer.** The per-user direction this bullet
+    > describes, and that the Status line above calls "a parked v18 direction", is ruled: a reader's named
+    > personal view is a row of a user-owned data object, as
+    > [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D13 anticipated. It is not
+    > a view item, and it does not reuse `scope: 'personal'`. The first version follows #28949, #28948,
+    > #28950 and #28912. The same ruling sets two design constraints: a personal view's id does not use the
+    > `<object>.<viewKey>` view-item name syntax, and no unnamed preference layer sits on top of a personal
+    > view. They bear on how §3.1's `ViewItemNameSchema` and section 3's overlay text are read; that text
+    > is unchanged. Retiring the inert `personal` declarations is #29037's, not this note's. The bullet and the
+    > Status line stay as written, and this note governs how they are read.
+
 - **Dual-read loader** — existing aggregated `defineView` containers are
   **auto-expanded** into ViewItems at load time *and* still registered
   under the bare `<object>` key, so legacy consumers keep working with no

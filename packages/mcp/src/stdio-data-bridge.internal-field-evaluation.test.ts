@@ -1,20 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The stdio data bridge asks the data door's internal-field gate — the
- * `protocol` service's `assertNoInternalFieldEvaluated` — before its engine
- * reads anything, on `query` (the call's `where` and `orderBy`) and on
- * `aggregate` (`where`, `groupBy`, `aggregations`), and a refusal it throws
- * reaches the caller as thrown: the tool renders its `code`, `status` and
- * sentence, and the engine is never asked.
+ * The stdio data bridge leaves the `internal: true` evaluate refusal to the
+ * ENGINE: it hands the engine the caller's query under the caller's principal
+ * on `query` (`where`, `orderBy`) and on `aggregate` (`where`, `groupBy`,
+ * `aggregations`), never asks a `protocol` service for it (a host may register
+ * none, or a protocol other than the shipped one), and a refusal the engine
+ * throws reaches the caller as thrown: the tool renders its `code`, `status`
+ * and sentence.
  *
- * The gate itself is the protocol's and is pinned there
- * (`@objectstack/metadata-protocol`, the public-face cases beside the data
- * door's position enumeration), and the whole path on a real stack in
- * `@objectstack/dogfood`. This file pins the bridge's half: that it asks, with
- * what, before what — and that a host whose protocol has no such face (or that
- * registers no protocol) is served exactly as before. Refusals are asserted on
- * the envelope, never on a bare throw.
+ * The refusal itself is the engine's one definition and is pinned there
+ * (`@objectstack/objectql`, `internal-field-evaluation-guard.test.ts`, which
+ * also boots a kernel with no protocol service), and the whole path on a real
+ * stack, with and without a protocol service, in `@objectstack/dogfood`. This
+ * file pins the bridge's half. Refusals are asserted on the envelope, never on
+ * a bare throw.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -23,40 +23,41 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { createStdioDataBridge, type StdioProtocolObjectReads } from './stdio-data-bridge.js';
+import { createStdioDataBridge } from './stdio-data-bridge.js';
 import { registerObjectTools } from './mcp-http-tools.js';
 
 const OBJECT = 'ifx_vault';
 const FLAGGED = 'pin';
 const DEF = { name: OBJECT, fields: { name: { type: 'text' }, [FLAGGED]: { type: 'text' } } };
 
-/** The door's refusal as the protocol throws it (fields only; the sentence is the protocol's to pin). */
-function doorRefusal(param: string) {
-  return Object.assign(new Error(`Cannot evaluate '${OBJECT}' by '${FLAGGED}' (${param}): the query was not run.`), {
+/** The engine's refusal (fields only; the sentence is the engine's to pin). */
+function engineRefusal(param: string) {
+  return Object.assign(new Error(`Cannot filter '${OBJECT}' by '${FLAGGED}' (${param}): the query was not run.`), {
     code: 'INVALID_FIELD', status: 400, httpStatus: 400, object: OBJECT, field: FLAGGED, fields: [FLAGGED], param,
   });
 }
 
-/** A stand-in for the protocol's gate: refuses any query whose JSON names the flagged field. */
-function gate() {
-  return vi.fn((_object: string, query: Record<string, unknown>) => {
-    if (JSON.stringify(query).includes(`"${FLAGGED}"`)) throw doorRefusal('filter');
-  });
-}
+const PRINCIPAL = { userId: 'u1', isSystem: false } as unknown as ExecutionContext;
 
-function makeBridge(protocol?: StdioProtocolObjectReads) {
+/** A stand-in engine that refuses any query whose JSON names the flagged field, as the real one does. */
+function makeBridge(withProtocolFace = false) {
+  const refuses = (query: unknown) => {
+    if (JSON.stringify(query).includes(`"${FLAGGED}"`)) throw engineRefusal('filter');
+  };
   const engine = {
-    find: vi.fn(async () => [{ id: 'r1', name: 'alpha' }]),
-    aggregate: vi.fn(async () => [{ n: 1 }]),
+    find: vi.fn(async (_object: string, query: unknown) => { refuses(query); return [{ id: 'r1', name: 'alpha' }]; }),
+    aggregate: vi.fn(async (_object: string, query: unknown) => { refuses(query); return [{ n: 1 }]; }),
   };
   const metadataService = { getObject: vi.fn(async (name: string) => (name === OBJECT ? DEF : undefined)) };
+  // A protocol that still carries a face of that name: the bridge must not ask it.
+  const protocolFace = vi.fn();
   const bridge = createStdioDataBridge({
     engine: engine as unknown as IDataEngine,
     metadataService: metadataService as unknown as IMetadataService,
-    ...(protocol ? { protocol: () => protocol } : {}),
-    resolvePrincipal: async () => ({ userId: 'u1', isSystem: false }) as unknown as ExecutionContext,
+    ...(withProtocolFace ? { protocol: () => ({ assertNoInternalFieldEvaluated: protocolFace }) as never } : {}),
+    resolvePrincipal: async () => PRINCIPAL,
   });
-  return { bridge, engine };
+  return { bridge, engine, protocolFace };
 }
 
 const refusalOf = async (run: () => Promise<unknown>) => {
@@ -66,24 +67,22 @@ const refusalOf = async (run: () => Promise<unknown>) => {
 };
 const REFUSED = { code: 'INVALID_FIELD', status: 400, field: FLAGGED, object: OBJECT };
 
-describe('the stdio bridge asks the protocol\'s internal-field gate before the engine', () => {
-  it('query: the gate is asked with the call\'s where and orderBy, and its refusal stops the read', async () => {
-    const assertNoInternalFieldEvaluated = gate();
-    const { bridge, engine } = makeBridge({ assertNoInternalFieldEvaluated });
+describe('the stdio bridge leaves the internal-field refusal to the engine', () => {
+  it('query: the engine gets the call\'s where and orderBy under the principal, and its refusal reaches the caller', async () => {
+    const { bridge, engine } = makeBridge();
     const where = { [FLAGGED]: { $startsWith: 'x' } };
     const orderBy = [{ field: 'name', order: 'asc' as const }];
     expect(await refusalOf(() => bridge.query(OBJECT, { where, orderBy, limit: 5 }))).toEqual(REFUSED);
-    expect(assertNoInternalFieldEvaluated).toHaveBeenCalledWith(OBJECT, { where, orderBy });
-    expect(engine.find).not.toHaveBeenCalled();
+    expect(engine.find).toHaveBeenCalledTimes(1);
+    expect(engine.find.mock.calls[0]![1]).toMatchObject({ where, orderBy });
+    expect((engine.find.mock.calls[0] as unknown[])[2]).toEqual({ context: PRINCIPAL });
 
     const sorted = [{ field: FLAGGED, order: 'desc' as const }];
     expect(await refusalOf(() => bridge.query(OBJECT, { orderBy: sorted }))).toEqual(REFUSED);
-    expect(engine.find).not.toHaveBeenCalled();
   });
 
-  it('aggregate: the gate is asked with where, groupBy and aggregations, and its refusal stops the aggregate', async () => {
-    const assertNoInternalFieldEvaluated = gate();
-    const { bridge, engine } = makeBridge({ assertNoInternalFieldEvaluated });
+  it('aggregate: the engine gets where, groupBy and aggregations under the principal, and its refusal reaches the caller', async () => {
+    const { bridge, engine } = makeBridge();
     const bodies = [
       { where: { [FLAGGED]: 'x' }, aggregations: [{ function: 'count' as const, alias: 'n' }] },
       { groupBy: [FLAGGED], aggregations: [{ function: 'count' as const, alias: 'n' }] },
@@ -92,39 +91,31 @@ describe('the stdio bridge asks the protocol\'s internal-field gate before the e
     ];
     for (const body of bodies) {
       expect(await refusalOf(() => bridge.aggregate!(OBJECT, body))).toEqual(REFUSED);
-      expect(assertNoInternalFieldEvaluated).toHaveBeenLastCalledWith(OBJECT, {
-        where: (body as { where?: unknown }).where,
-        groupBy: (body as { groupBy?: unknown }).groupBy,
-        aggregations: body.aggregations,
-      });
+      expect(engine.aggregate.mock.lastCall![1]).toMatchObject({ ...body, context: PRINCIPAL });
     }
-    expect(engine.aggregate).not.toHaveBeenCalled();
   });
 
-  it('CONTROL — a query the gate passes reaches the engine unchanged, on both verbs', async () => {
-    const assertNoInternalFieldEvaluated = gate();
-    const { bridge, engine } = makeBridge({ assertNoInternalFieldEvaluated });
-    const where = { name: 'alpha' };
-    await bridge.query(OBJECT, { where, orderBy: [{ field: 'name', order: 'asc' }] });
+  it('never asks a protocol service for it, even one carrying a face of that name', async () => {
+    const { bridge, engine, protocolFace } = makeBridge(true);
+    expect(await refusalOf(() => bridge.query(OBJECT, { where: { [FLAGGED]: 'x' } }))).toEqual(REFUSED);
+    expect(await refusalOf(() => bridge.aggregate!(OBJECT, { groupBy: [FLAGGED], aggregations: [{ function: 'count', alias: 'n' }] }))).toEqual(REFUSED);
+    expect(protocolFace).not.toHaveBeenCalled();
     expect(engine.find).toHaveBeenCalledTimes(1);
-    expect((engine.find.mock.calls[0] as unknown[])[1]).toMatchObject({ where, orderBy: [{ field: 'name', order: 'asc' }] });
+    expect(engine.aggregate).toHaveBeenCalledTimes(1);
+  });
+
+  it('CONTROL — an ordinary-field query is served by the engine, on both verbs', async () => {
+    const { bridge, engine } = makeBridge();
+    const where = { name: 'alpha' };
+    const rows = await bridge.query(OBJECT, { where, orderBy: [{ field: 'name', order: 'asc' }] });
+    expect(engine.find).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(rows)).toContain('alpha');
     await bridge.aggregate!(OBJECT, { where, groupBy: ['name'], aggregations: [{ function: 'count', alias: 'n' }] });
     expect(engine.aggregate).toHaveBeenCalledTimes(1);
-    expect(assertNoInternalFieldEvaluated).toHaveBeenCalledTimes(2);
   });
 
-  it('CONTROL — no protocol, or one without the face: served as before (no door to agree with)', async () => {
-    for (const protocol of [undefined, {} as StdioProtocolObjectReads]) {
-      const { bridge, engine } = makeBridge(protocol);
-      await bridge.query(OBJECT, { where: { [FLAGGED]: 'x' } });
-      await bridge.aggregate!(OBJECT, { where: { [FLAGGED]: 'x' }, aggregations: [{ function: 'count', alias: 'n' }] });
-      expect(engine.find).toHaveBeenCalledTimes(1);
-      expect(engine.aggregate).toHaveBeenCalledTimes(1);
-    }
-  });
-
-  it('query_records and aggregate_records render the gate\'s refusal as its envelope', async () => {
-    const { bridge, engine } = makeBridge({ assertNoInternalFieldEvaluated: gate() });
+  it('query_records and aggregate_records render the engine\'s refusal as its envelope', async () => {
+    const { bridge } = makeBridge();
     const server = new McpServer({ name: 'pin', version: '0' });
     registerObjectTools(server, bridge);
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -140,10 +131,8 @@ describe('the stdio bridge asks the protocol\'s internal-field gate before the e
         expect(res.isError, name).toBe(true);
         const { error } = JSON.parse(res.content[0]!.text) as { error: { code: unknown; status: unknown; message: string } };
         expect({ code: error.code, status: error.status }).toEqual({ code: 'INVALID_FIELD', status: 400 });
-        expect(error.message).toBe(doorRefusal('filter').message);
+        expect(error.message).toBe(engineRefusal('filter').message);
       }
-      expect(engine.find).not.toHaveBeenCalled();
-      expect(engine.aggregate).not.toHaveBeenCalled();
     } finally {
       await client.close();
     }

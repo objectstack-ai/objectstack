@@ -39,6 +39,8 @@ const PROBE = {
     opened_on: { name: 'opened_on', type: 'date' },
     seen_at: { name: 'seen_at', type: 'datetime' },
     doubled: { name: 'doubled', type: 'formula', expression: 'amount * 2' },
+    // [#29167] A formula whose declared result IS a date: refused all the same.
+    opened_calc: { name: 'opened_calc', type: 'formula', expression: 'opened_on', returnType: 'date' },
   },
 };
 
@@ -106,6 +108,26 @@ describe('[#25818] the aggregate query shapes that answered a plausible wrong ta
     expect(reads, 'every refusal precedes the driver').toHaveLength(0);
   });
 
+  it('[#29167] refuses a dateGranularity over a virtual (formula) field, whatever its returnType: INVALID_FIELD / 400 at groupBy.N.dateGranularity — no read', async () => {
+    // Before this arm the in-memory aggregation served one null group here:
+    // the formula has no stored value for it to bucket.
+    for (const field of ['doubled', 'opened_calc']) {
+      const err = await refusalOf(aggregate({
+        groupBy: ['status', { field, dateGranularity: 'month' }],
+        aggregations: [COUNT],
+      }));
+      expect(envelopeOf(err), field).toEqual({ code: 'INVALID_FIELD', status: 400, httpStatus: 400 });
+      expect({ path: err?.path, param: err?.param, field: err?.field, fields: err?.fields, object: err?.object }, field)
+        .toEqual({ path: 'groupBy.1.dateGranularity', param: 'groupBy', field, fields: [field], object: OBJECT });
+      expect(err!.message, field).toContain(
+        `groupBy.1.dateGranularity buckets '${field}' by 'month', but '${field}' is a formula field — its value is computed on read and never stored`,
+      );
+      // The store-the-value remedy the sort and filter axes give a virtual field.
+      expect(err!.message, field).toContain(`Denormalise the value onto '${OBJECT}' (a stored date or datetime field, written when the source changes) and bucket that.`);
+    }
+    expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+  });
+
   it('refuses a repeated aggregation alias: INVALID_QUERY / 400 at the second aggregations.N.alias — no read', async () => {
     const err = await refusalOf(aggregate({
       aggregations: [COUNT, { function: 'sum', field: 'amount', alias: 'n' }],
@@ -144,13 +166,13 @@ describe('[#25818] the aggregate query shapes that answered a plausible wrong ta
     expect(reads).toHaveLength(0);
   });
 
-  it('CONTROL a date or datetime bucket, a formula or undeclared bucket, and distinct columns are served', async () => {
+  it('CONTROL a date or datetime bucket, an undeclared bucket, and distinct columns are served', async () => {
     await expect(aggregate({ groupBy: [{ field: 'opened_on', dateGranularity: 'month' }], aggregations: [COUNT] }))
       .resolves.toEqual([{ opened_on: '2026-01', n: 1 }, { opened_on: '2026-02', n: 2 }]);
     await expect(aggregate({ groupBy: [{ field: 'seen_at', dateGranularity: 'month' }], aggregations: [COUNT] }))
       .resolves.toEqual([{ seen_at: '2026-01', n: 1 }, { seen_at: '2026-02', n: 2 }]);
-    // The declaration cannot type a formula or an undeclared column: no verdict.
-    await expect(aggregate({ groupBy: [{ field: 'doubled', dateGranularity: 'month' }], aggregations: [COUNT] })).resolves.toBeDefined();
+    // The declaration cannot type an undeclared column: no verdict. [#29167] A
+    // formula under a dateGranularity is refused (above), no longer a control.
     await expect(aggregate({ groupBy: [{ field: 'created_at', dateGranularity: 'month' }], aggregations: [COUNT] })).resolves.toBeDefined();
     // An alias moves the group column, so the field's own name is free.
     await expect(aggregate({ groupBy: [{ field: 'status', alias: 's' }], aggregations: [{ function: 'count', alias: 'status' }] }))
@@ -160,7 +182,7 @@ describe('[#25818] the aggregate query shapes that answered a plausible wrong ta
       groupBy: [{ field: 'opened_on', dateGranularity: 'year', alias: 'y' }, { field: 'opened_on', dateGranularity: 'month', alias: 'm' }],
       aggregations: [COUNT, { function: 'sum', field: 'amount', alias: 'total' }],
     })).resolves.toEqual([{ y: '2026', m: '2026-01', n: 1, total: 10 }, { y: '2026', m: '2026-02', n: 2, total: 50 }]);
-    expect(reads, "each served query read once").toHaveLength(6);
+    expect(reads, "each served query read once").toHaveLength(5);
   });
 
   it('the REST door answers the engine\'s refusal, not a 200 — through findData and the wire mapping', async () => {

@@ -42,6 +42,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 import { CloneFlowRequestSchema, CloneFlowResponseSchema } from '@objectstack/spec/api';
+import { FlowSchema } from '@objectstack/spec/automation';
 import { ROUTE_LEDGER } from '../route-ledger.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
@@ -97,7 +98,13 @@ interface Answer {
     body: any;
 }
 
-async function boot() {
+/**
+ * `parse`: the engine's registration as a strict `FlowSchema` parse — the
+ * check `registerFlow` runs first (`canonicalizeFlow`), so a definition the
+ * protocol refuses (an illegal machine name among it) throws the way the real
+ * engine throws. The default rig's engine is a map that accepts anything.
+ */
+async function boot(options: { parse?: boolean } = {}) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -126,7 +133,11 @@ async function boot() {
     const protocol = new ObjectStackProtocolImplementation(engine as any, () => services);
 
     const flows = new Map<string, any>([[SOURCE, shipped], [LOCAL, flowOf(LOCAL)]]);
-    const registerFlow = vi.fn((name: string, definition: unknown) => { flows.set(name, definition); return definition; });
+    const registerFlow = vi.fn((name: string, definition: unknown) => {
+        if (options.parse) FlowSchema.parse(definition);
+        flows.set(name, definition);
+        return definition;
+    });
     const unregisterFlow = vi.fn((name: string) => { flows.delete(name); });
     const getFlow = vi.fn(async (name: string) => flows.get(name) ?? null);
     const named: Record<string, unknown> = {
@@ -238,6 +249,58 @@ describe('[#28149] the default target: the copy lands in <base>.custom, switched
     }, 60_000);
 });
 
+describe('[#29650, ADR-0146 D2/D4] New similar while the source\'s override is live', () => {
+    /**
+     * Customize the base's flow the way Studio does: ensure the pair, save the
+     * pair's item under the base's name DECLARING the override, and arm it in
+     * place of the base (ADR-0146 D9 item 1), so the engine's map holds the
+     * override's body for the name, which is what `getFlow` answers the door.
+     */
+    async function customize(rig: Awaited<ReturnType<typeof boot>>) {
+        const override = {
+            ...flowOf(SOURCE),
+            label: 'Lead follow-up (customized)',
+            description: 'Edited in Studio after Customize.',
+            overrides: { package: BASE.id, basedOn: BASE.version },
+        };
+        await rig.protocol.ensureCustomizationPackage({ basePackageId: BASE.id });
+        await rig.protocol.saveMetaItem({ type: 'flow', name: SOURCE, item: override, packageId: PAIR } as any);
+        rig.flows.set(SOURCE, override);
+        return override;
+    }
+
+    it('the copy is the pair\'s own item: 200, no `overrides` block, stored in the pair', async () => {
+        const rig = await boot();
+        const override = await customize(rig);
+        // The override really is live and stored, so this measures a strip, not an absence.
+        expect((await rig.rows(SOURCE)).map((r) => [r.package_id, r.item.overrides])).toEqual([[PAIR, override.overrides]]);
+
+        const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(PAIR);
+        expect(answer.data.flow).not.toHaveProperty('overrides');
+        const copyRows = await rig.rows('acme_lead_followup');
+        expect(copyRows.map((r) => r.package_id)).toEqual([PAIR]);
+        expect(copyRows[0].item).not.toHaveProperty('overrides');
+        expect(rig.flows.get('acme_lead_followup')).not.toHaveProperty('overrides');
+        expect(answer.data.flow.status).toBe(FLOW_CLONE_STATUS);
+    }, 60_000);
+
+    it('copies what the source serves: the override\'s definition, and the override stays as it was', async () => {
+        const rig = await boot();
+        const override = await customize(rig);
+
+        const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.flow.description).toBe(override.description);
+        // The override is untouched: still the one row in the pair, still declaring.
+        expect((await rig.rows(SOURCE)).map((r) => [r.package_id, r.item.overrides])).toEqual([[PAIR, override.overrides]]);
+        expect(rig.flows.get(SOURCE)).toEqual(override);
+    }, 60_000);
+});
+
 describe('[#28149] an explicit target: `package`', () => {
     it('a writable package that depends on the base takes the copy', async () => {
         const rig = await boot();
@@ -307,6 +370,37 @@ describe('[#28149] a source no package ships has no pair', () => {
         expect(answer.data.packageId).toBe(OTHER.id);
         expect((await rig.rows('local_digest_copy')).map((r) => r.package_id)).toEqual([OTHER.id]);
         expect(answer.data.flow.status).toBe('obsolete');
+    }, 60_000);
+});
+
+describe('[#29016] a clone the engine refuses installs no pair', () => {
+    it('control — with the parsing engine, a legal name still lands in the ensured pair', async () => {
+        const rig = await boot({ parse: true });
+
+        const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(PAIR);
+        expect(rig.installed()).toContain(PAIR);
+    }, 60_000);
+
+    it('an illegal machine name is refused 400 and the package list is unchanged', async () => {
+        const rig = await boot({ parse: true });
+        const before = rig.installed();
+        const publishedBefore = rig.published.length;
+
+        const answer = await rig.clone(SOURCE, { name: 'Bad-Name!', label: 'Illegal' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(400);
+        expect(answer.code).toBe('VALIDATION_FAILED');
+        expect(answer.body.error.details.fields).toMatchObject([{ field: 'name' }]);
+        // A refused clone changes nothing: no pair installed or persisted…
+        expect(rig.installed()).toEqual(before);
+        expect(rig.installed()).not.toContain(PAIR);
+        expect(rig.published.length).toBe(publishedBefore);
+        // …and no copy registered or stored.
+        expect(rig.flows.has('Bad-Name!')).toBe(false);
+        expect(await rig.rows('Bad-Name!')).toEqual([]);
     }, 60_000);
 });
 

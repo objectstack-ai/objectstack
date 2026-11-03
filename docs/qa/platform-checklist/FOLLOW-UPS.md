@@ -779,3 +779,163 @@ non-numeric fields) and `expression-editors` knownGaps[4] (the RLS editor reads 
 CEL' on a formula-field predicate). These three were read from source, not measured.
 `app-and-nav-properties` scores acceptance[5]'s `requiresObject` cell as not judged:
 neither Studio nor Setup edits that key, and no ruling says Studio must.
+
+## 13. Scoped re-point 2026-11-02 — the Setup-designer items to the Studio door (#28579 slice 1, ADR-0146 N-29)
+
+**Not a sweep, and no new items.** Sixteen named items were re-measured against `main`
+(`dfbe34d887`) after N-28 (#28818, with #28785) and N-30 (#29264), using the measured notes
+on #28579 (QA runs #28981, #29002, #29124) as inputs. Each changed item's `history` row says
+what moved and why. Left untouched, with the reason in the slice's report:
+`integration-system.external-datasource-federated-read` and `external-schema-browser-ui`
+(the datasource is the one metadata type ADR-0146 D1 keeps in Setup, and its routes still
+render there) and `platform-core.packaged-object-extend-only` (API-only; both write doors
+answer as before).
+
+### 13a. Transitional, and why
+
+- **`studio-authoring.packaged-display-class-direct-edit`** carries `blocked`
+  (`dependency`, #28579 slice 2), and **`studio-authoring.org-override-registry-gate`**
+  scores acceptance[1] and [4] `blocked(dependency)`: both prove a package-less overlay on a
+  packaged view or dashboard, which #28850 closed (403 `NOT_OVERRIDABLE` naming the
+  `.custom` pair). The replacement — Customize as a declared override in the pair, and
+  Restore package original — is slice 2's new items.
+- **The switched-off sentence's remedy** in `api-backend.packaged-action-disabled-dispatch`
+  and `automation.packaged-flow-disable-durable`: see 13b. The clauses keep the served text.
+
+### 13b. Product finding — reported, not filed here
+
+- `describeTurnedOffPackagedItem` (`packages/types/src/packaged-item-turned-off.ts`), the one
+  sentence the `ACTION_DISABLED` and `FLOW_DISABLED` 409s read, still tells the end user an
+  administrator can turn the item on again "under Setup › Packaged automation" (and, for a
+  flow, "copy it there under a new name"). That page is retired (ADR-0146 D4/D11): an
+  action's switch is Setup › Packaged actions, and a flow's switch and New similar are on the
+  flow in Studio. The finding is in the slice's report for the seat to card.
+
+### 13c. Other items still naming a retired Setup door (outside this slice's list)
+
+`platform-core.metadata-authoring-roundtrip` steps[7] and `studio-authoring.record-page-roundtrip`
+steps[0]/[3] (`/apps/showcase_app/metadata/page/…`), `studio-authoring.permission-matrix-editor-ux`
+steps[0] (`/apps/com.objectstack.setup/metadata/permission/…`) and
+`automation.packaged-flow-subflow-disable-refusal` steps[7] (the retired Setup
+packaged-automation page as the UI half). Those Setup URLs redirect to Studio since #28818,
+so the items still reach a page; their text was not re-measured here.
+
+## 14. Scoped authoring 2026-11-02 — the ADR-0146 promises as items (#28579 slice 2)
+
+**Not a sweep.** One item per promise ADR-0146 shipped, each read from source at `main`
+(`eb123b7ccc`) and citing the card that landed it, plus the carry-overs from §13. Each item's
+`history` row says what it is and why.
+
+- **New:** `studio-authoring.package-customize-restore-display` (N-17: view, dashboard and
+  report, from Customize to Restore package original), `automation.package-flow-override`
+  (N-11/N-18/N-22), `studio-authoring.package-extension-field-c` (N-23c),
+  `platform-core.customization-pair-ensure-door` (N-13/N-14),
+  `cli.packageless-overlay-ceremony-and-close` (N-16a/N-16b),
+  `studio-authoring.package-customization-counts-and-marks` (N-24/N-26b) and
+  `platform-core.setup-metadata-redirects-to-studio` (N-28).
+- **Extended, not twinned:** `studio-authoring.access-permission-set-lifecycle` takes New
+  similar on a packaged set (N-20b) as steps[6] and acceptance[5].
+- **§13a resolved:** `studio-authoring.packaged-display-class-direct-edit` is retired, with
+  `supersededBy` the new display item (its retiredReason maps each clause). The dashboard
+  leg moves from the platform's `system_overview` to the showcase's
+  `showcase_ops_dashboard`. `studio-authoring.org-override-registry-gate`'s open side is now
+  the declared override from `com.example.showcase.custom`, so its transitional knownGap is
+  gone. The two §13b clauses are untouched: their knownGap waits on #29374.
+- **§13c resolved:** the four items there now name Studio's landing URL instead of the
+  retired Setup page. `platform-core.metadata-authoring-roundtrip` acceptance[4] also stops
+  saying a packaged view "accepts" a package-less overlay. Its verify already read the
+  writable-package save, and that verify is unchanged.
+
+### 14a. The live browser journeys are slice 3's
+
+Every new item's `automated.ref` names the unit and integration pins that hold the contract,
+and none of them drives a live deployment. Four items say in `automated.ref` that no e2e spec
+walks the browser journey yet, which #28579 slice 3 owes: customize/restore display, the
+`__c` extension field, counts and marks, and the flow override. The ensure door, the
+ceremony and the redirects are API, CLI and URL contracts, and their live leg is the run's.
+
+### 14b. Measured from source — the pair's uninstall refusal is unreachable for a read-only base
+
+`DELETE /api/v1/packages/:id` runs `requireWritablePackage`
+(`packages/runtime/src/domains/packages.ts`) before `assertPackageUninstallable`
+(`packages/objectql/src/registry.ts`). So a booted or system/cloud base, such as the showcase,
+answers **422 `WRITABLE_PACKAGE_REQUIRED`** and the pair is never asked. The 409
+`RESOURCE_CONFLICT` that names the pair and its export URL is reached only for a writable
+base whose pair is installed. `platform-core.customization-pair-ensure-door` scores both:
+409 on a writable QA base with an exported pair, and 422 on the showcase.
+`packages-uninstall-refuse-before-mutate.test.ts` pins the order. A live spec (slice 3) that
+expects 409 when uninstalling the showcase will fail. Reach: source-read, not measured live.
+
+### 14c. Product finding — reported, not filed here
+
+Studio's landing still describes the D11-closed model. `engine.studio.landing.description`
+and `readonlyHint` (`ui/packages/i18n/src/namespaces/studio/en.ts`, rendered by
+`BuilderLanding.tsx`) tell the user to "customize them with an environment overlay".
+`BuilderLanding.environmentOverlayCopy-12171.test.ts` pins that phrase. The door is now
+Customize, which writes into the base's `.custom` pair. Reach: source-read only. The finding
+is in the slice's report for the seat to card.
+
+## 15. Scoped run 2026-11-02 — the live journey and the first run of the ADR-0146 items (#28579 slice 3)
+
+**Not a sweep.** This slice adds one live spec, `ui/e2e/live/studio-customize-journey.spec.ts`,
+and makes one checklist-test run over §14's seven new items on a fresh showcase built from
+`main` `128681f4`. The run record is the slice's `qa-run` issue. The spec walks a view's
+Customize, Restore package original, Add field `region__c` and the uninstall refusal on the
+read-only showcase. It sits in the required `Live E2E UI` job's allowlist. Three items name it
+in `automated.ref`: the display item's view variant, the `__c` item and the ensure door's 422.
+The flow override, the counts and marks, the redirects and the ceremony have no live spec, so
+§14a still holds for them. `studio-authoring.access-permission-set-lifecycle` gains an
+`automated` block that is scoped to acceptance[5].
+
+### 15a. Assertion defects — fixed in this diff, each a revision with its history row
+
+- `studio-authoring.package-customization-counts-and-marks` acceptance[2] said a writable
+  package is never asked. The All metadata area does ask every package except a pair, and its
+  own pin asserts that read. Only the landing asks for read-only bases alone.
+- `platform-core.setup-metadata-redirects-to-studio` had three gaps:
+  - It did not count the console's app-segment rewrite (`/apps/setup` →
+    `/apps/com.objectstack.setup`). With the canonical segment typed, a metadata URL reaches
+    Studio in one hop.
+  - A package leg's object item opens its Data pillar (ADR-0146 D1), and the item did not
+    allow for that.
+  - Its datasource clause named the jsdom stubs' test ids instead of the real pages.
+- `studio-authoring.package-extension-field-c` steps[6] named an object without the package's
+  namespace prefix. The server answers that with 422 `NAMESPACE_PREFIX` before the `__c` judge
+  runs.
+
+### 15b. Product findings — reported, not filed here
+
+Each one is in the slice's report for the seat to card. The reach shown is the one measured on
+the run's boot.
+
+1. **The base's export carries a dashboard or report override.** After a published override of
+   `showcase_ops_dashboard` (or `showcase_hours_by_status`) in `com.example.showcase.custom`,
+   `GET /api/v1/packages/com.example.showcase/export` holds the item with the edited label and
+   the `overrides` key, instead of the base unchanged. A view override does not leak this way.
+   This contradicts ADR-0146 D8's export rule. D8 also says the export of the app's surface
+   serves the override, and the ADR has to say which export each rule means. It fails
+   `studio-authoring.package-customize-restore-display` acceptance[4]. It was reproduced through
+   Studio and over the API.
+2. **A published base-field patch is not served on the object.** A label in the extension's
+   `fieldPatches` shows only on `/meta/object/showcase_task/layers`. The read naming no package,
+   the read naming the base, and the list all serve the shipped label. This contradicts D10 and
+   `registry-extension-field-patches.test.ts`, which pins every read serving the patch. Reach:
+   any `fieldPatches` label on `showcase_task`. It is an off-clause probe of the `__c` item.
+3. **Studio's cross-package list of a type cannot be opened.** Typed directly, even with
+   `?package=all`, `/studio/~all/metadata/object` and `/studio/~all/metadata/flow` are rewritten
+   to `?package=com.example.showcase` and then to that package's leg. The cause is the `?package=`
+   repair in `ResourceListPage.tsx`, which runs whenever the area names no package. It fails the
+   redirects item's acceptance[0] (for `/apps/setup/metadata/object`) and acceptance[3] (the
+   package-less Packaged automation bookmark).
+4. **Studio does not know a system-scope package is read-only.** `parsePackages` drops system
+   and cloud packages, so `com.objectstack.plugin-auth` opens with no read-only chip and no
+   Customize. An edit to `system_overview` is refused with 403 `NOT_OVERRIDABLE` in an alert. Over
+   the API, that dashboard is customizable in its pair: ensure answers 201 with namespace
+   `sys_custom` and `^3`, the declared PUT and the publish land, and the reads serve the override.
+5. **The uninstall refusal's remedy describes the closed model.** The 422
+   `WRITABLE_PACKAGE_REQUIRED` text (`CUSTOMISE_BESIDE_REMEDY` in
+   `packages/runtime/src/domains/packages.ts`) still says to save an item under its own name.
+   Since D11 that package-less save is refused with 403. Reach: `DELETE
+   /api/v1/packages/com.example.showcase`.
+6. **The pair's extension has no name in the list.** The All metadata `object_extension` list
+   draws the pair's extension row with "—" in the name column. This is a display issue only.

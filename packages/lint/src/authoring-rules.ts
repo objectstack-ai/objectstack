@@ -125,7 +125,7 @@ import {
   validateFlowTriggerReadiness,
 } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
-import { validateRecordTitle } from './validate-record-title.js';
+import { validateRecordTitle, validateTitleFormatRetired } from './validate-record-title.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
@@ -150,6 +150,8 @@ import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
+import { validateFlowRegionShape } from './validate-flow-region-shape.js';
+import { lintConnectorCredentialLiterals } from './lint-connector-credential-literals.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
@@ -1546,9 +1548,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['flow'],
     run: (stack) => validateApprovalApprovers(stack),
   },
-  // ADR-0079 — `titleFormat` is retired in favour of `nameField`, and an object
-  // with no resolvable title ships records with no meaningful name. Advisory:
-  // auto-provision and the `Record #<id>` floor keep it from ever being fatal.
+  // ADR-0079 — `titleFormat` is retired in favour of `nameField`, and the
+  // ruling of record on #29007 (6574393684, letter B) refuses it: an object
+  // definition that declares one is refused at the metadata save gate and by
+  // `os validate`. `gating` because a declared template titles nothing — the
+  // explicit or stamped `nameField` outranks it — so a save that accepts it is
+  // a silent no-op. The schema still parses the key, so a stored object that
+  // carries it keeps loading; the runtime gate charges a finding on the
+  // written item to the write itself (`runtime-gate.ts`, "Re-saving a row is
+  // writing it"), so the row is refused when it is next saved, and a draft
+  // save passes until it is published (#4463 D1). Pre-parse: the predicate
+  // reads one authored key, and the finding must survive an unrelated schema
+  // error elsewhere in the stack.
+  {
+    name: 'validateTitleFormatRetired',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-record-title.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) => validateTitleFormatRetired(stack),
+  },
+  // ADR-0079 — an object with no resolvable title ships records with no
+  // meaningful name. Advisory: auto-provision and the `Record #<id>` floor
+  // keep it from ever being fatal.
   {
     name: 'validateRecordTitle',
     tier: 'advisory',
@@ -1606,14 +1630,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `validate-form-layout.ts`'s module note carries the measurement.
   // Pure structured-metadata walk (no lazy dependency), so wiring it to all
   // three costs nothing measurable.
+  //
+  // [#29309] Runtime publish gate: a `view` write's snapshot carries `objects`
+  // as context, and the rule reads nothing else beside the written view — the
+  // bound object's fields and its `fieldGroups`. Measured at the two doors
+  // that run this registry (an active save, a publish): the universe is the
+  // registry's merged objects (`getAllObjects`, the overlay and every extender
+  // folded on, the shape `getObject` serves) with the stored rows folded on by
+  // the read API's own merge, so an extension field is known and no phantom is
+  // reported. So RUNTIME_NEEDS_FULL_SNAPSHOT no longer held here. Advisory,
+  // so both findings ride back on the 2xx `advisories` and nothing is refused.
+  // An object outside the write's package closure is not in the snapshot and
+  // the rule then judges that form not at all (both checks skip an unknown
+  // object), never reports it. `object` is not declared, for the reason the
+  // file-field rule below gives.
   {
     name: 'validateFormLayout',
     tier: 'advisory',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-form-layout.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['view'],
     run: (stack) => validateFormLayout(stack),
   },
   // Ruling C on #25572 (#25650) — a form open to anonymous intake that
@@ -1943,6 +1981,53 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['flow'],
     run: (stack) =>
       lintFlowCredentialLiterals(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.hint,
+      })),
+  },
+  // [#29049] ADR-0031 region shape: a flow whose `loop` body, `parallel`
+  // branches or `try_catch` regions are not single-entry/single-exit and
+  // acyclic at any depth, or whose `parallel` has one branch, is a flow the
+  // automation engine refuses to register, so it never runs. The verdict is
+  // the engine's own call (`FlowSchema`, then the spec's `validateControlFlow`);
+  // `os validate` and `os build` gated on it through a CLI-only walk
+  // (#28893), which left `os lint` blind. Registered here, all three commands
+  // judge it, and the CLI walk is retired.
+  {
+    name: 'validateFlowRegionShape',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-region-shape.ts',
+    // [#29233] Runtime publish gate (#4463): a flow whose region the engine
+    // refuses to register can only ever publish as a flow that never runs, so
+    // the draft read and every publish door refuse it here, through this one
+    // row, rather than through a gate-local copy of the same judgement.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack) => validateFlowRegionShape(stack),
+  },
+  // The same predicate over a declarative connector's four header/env maps
+  // (`providerConfig.headers`, `defaultHeaders`, `transport.headers`,
+  // `transport.env`) — the maps the connector read path withholds whole, which
+  // still keep a literal in metadata (ruling 6566912252, letter ①A). Advisory
+  // for the same reason as the flow entry above, and on the fourth door for
+  // `connector`: `PUT /meta/connector/:name` is the door a Studio / REST / MCP
+  // author of a connector has.
+  {
+    name: 'lintConnectorCredentialLiterals',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/lint-connector-credential-literals.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['connector'],
+    run: (stack) =>
+      lintConnectorCredentialLiterals(stack).map((f) => ({
         severity: f.severity,
         rule: f.rule,
         where: f.where,

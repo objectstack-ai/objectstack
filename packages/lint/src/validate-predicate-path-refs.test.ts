@@ -696,7 +696,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 90 today, an ADDITION of ONE: #28255 offered the field form's
     // `percentDisplay` row once the console's percent face reads it, gated on
     // `data.type == 'percent'`. It reaches the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(90);
+    // It is 91 today, an ADDITION of ONE: #29462 offered the field form's
+    // `referenceNameVisible` row, gated on `data.type in ['lookup','user']`. It
+    // is an in-list, so it does not reach the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(91);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -817,7 +820,11 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `data.type != 'joined'`, a single-quoted literal comparison.
     // It is 65 today: #28255's `field :: percentDisplay` row is gated on
     // `data.type == 'percent'`, a single-quoted literal comparison.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
+    // It is 63 today: #29415 opened both `deleteBehavior` gates (field form and
+    // object form) to `user` and respelled them `data.type in ['lookup','user']`,
+    // an `in`-list outside this rule, so two `==` literal comparisons left the
+    // census.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(63);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

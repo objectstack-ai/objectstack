@@ -144,6 +144,28 @@ describe('ADR-0067 — revertCommit', () => {
     await expect(p.revertCommit({ commitId: 'nope' })).rejects.toMatchObject({ code: 'COMMIT_NOT_FOUND', status: 404 });
   });
 
+  it('refuses a commit of ANOTHER package with commit_not_found naming the package, and writes nothing', async () => {
+    const { engine, commits } = makeFakeEngine([
+      applyCommit({ id: 'cmt_a', items: [{ type: 'object', name: 'course', existedBefore: false, prevVersion: null }], created_at: '2026-06-24T00:00:00.000Z' }),
+    ]);
+    const repo = { get: vi.fn(async () => ({ hash: 'h1' })), delete: vi.fn(async () => {}), restoreVersion: vi.fn() };
+    const p = makeProtocol(engine, repo);
+
+    await expect(p.revertCommit({ commitId: 'cmt_a', packageId: 'app.other' })).rejects.toMatchObject({
+      code: 'COMMIT_NOT_FOUND',
+      status: 404,
+      message: "No commit 'cmt_a' in package 'app.other'.",
+    });
+    expect(repo.delete).not.toHaveBeenCalled();
+    expect(repo.restoreVersion).not.toHaveBeenCalled();
+    expect(commits).toHaveLength(1);
+
+    // Control: the commit's own package reverts it.
+    const res = await p.revertCommit({ commitId: 'cmt_a', packageId: 'app.edu' });
+    expect(res).toMatchObject({ success: true, revertedCount: 1 });
+    expect(commits.map((c) => c.operation)).toEqual(['apply', 'revert']);
+  });
+
   it('reverts dependent artifacts in REVERSE apply order (view before its object)', async () => {
     const { engine } = makeFakeEngine([
       applyCommit({
@@ -187,6 +209,27 @@ describe('ADR-0067 — rollbackToPackageCommit', () => {
     const { engine } = makeFakeEngine();
     const p = makeProtocol(engine, {});
     await expect(p.rollbackToPackageCommit({ commitId: 'ghost' })).rejects.toMatchObject({ code: 'COMMIT_NOT_FOUND' });
+  });
+
+  it('refuses a target commit of ANOTHER package with commit_not_found, and reverts nothing', async () => {
+    const { engine, commits } = makeFakeEngine([
+      applyCommit({ id: 'c1', items: [], created_at: '2026-06-24T00:00:01.000Z' }),
+      applyCommit({ id: 'c2', items: [{ type: 'object', name: 'x', existedBefore: false, prevVersion: null }], created_at: '2026-06-24T00:00:02.000Z' }),
+    ]);
+    const repo = { get: vi.fn(async () => ({ hash: 'h' })), delete: vi.fn(async () => {}), restoreVersion: vi.fn() };
+    const p = makeProtocol(engine, repo);
+
+    await expect(p.rollbackToPackageCommit({ commitId: 'c1', packageId: 'app.other' })).rejects.toMatchObject({
+      code: 'COMMIT_NOT_FOUND',
+      status: 404,
+      message: "No commit 'c1' in package 'app.other'.",
+    });
+    expect(repo.delete).not.toHaveBeenCalled();
+    expect(commits).toHaveLength(2);
+
+    // Control: the package's own rollback reverts c2.
+    const res = await p.rollbackToPackageCommit({ commitId: 'c1', packageId: 'app.edu' });
+    expect(res).toMatchObject({ success: true, revertedCommits: ['c2'] });
   });
 });
 

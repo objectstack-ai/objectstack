@@ -34,7 +34,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
 
@@ -169,6 +169,12 @@ function Where() {
   return <output data-testid="where">{`${location.pathname}${location.search}`}</output>;
 }
 
+/** The browser's Back button: one step back in the history. */
+function HistoryBack() {
+  const navigate = useNavigate();
+  return <button type="button" data-testid="history-back" onClick={() => navigate(-1)} />;
+}
+
 type Entry = string | { pathname: string; search?: string; state?: unknown };
 
 function mountPage(entries: Entry[], objects = objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')])) {
@@ -184,6 +190,7 @@ function mountPage(entries: Entry[], objects = objectsWith([action('convert', 'C
           <Route path="/apps/:appName/:objectName" element={<div data-testid="list" />} />
         </Routes>
         <Where />
+        <HistoryBack />
       </MetadataCtx.Provider>
     </MemoryRouter>,
   );
@@ -263,6 +270,24 @@ describe('the record page on a phone (objectstack#27058)', () => {
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-2`));
     fireEvent.click(pageBar()!.querySelector('[data-record-crumb-back]')!);
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}`));
+  });
+
+  // objectstack#29071 — 「‹」 replaces the record's history entry: the
+  // browser's Back afterwards leaves for the entry below, never the record.
+  it('「‹」 does not leave the record behind it in the history', async () => {
+    mountPage([
+      `/apps/${APP}/home`,
+      `/apps/${APP}/${LEAD}`,
+      { pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from: { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS } } },
+    ]);
+    await barDrawn();
+    fireEvent.click(pageBar()!.querySelector('[data-record-crumb-back]')!);
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}`));
+    fireEvent.click(screen.getByTestId('history-back'));
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}`));
+    expect(document.querySelector('[data-record-page-root]')).toBeNull();
+    fireEvent.click(screen.getByTestId('history-back'));
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/home`));
   });
 
   it('opened directly: 「‹ Leads」 to the object\'s list, and no counter', async () => {

@@ -5,6 +5,7 @@ import {
   resolveSearchFields,
   SEARCHABLE_ENUM_TYPES,
   SEARCHABLE_TEXTUAL_TYPES,
+  SEARCH_FLAG_EXCLUDED_TYPES,
   SEARCH_VIRTUAL_TYPES,
 } from '@objectstack/spec/data';
 import {
@@ -215,9 +216,12 @@ describe('validateSearchableFields — what it deliberately does not flag', () =
   });
 
   it('does not flag a field that exists but is an odd search target', () => {
-    // An explicit `searchableFields` is authoritative — the engine scans
+    // An explicit `searchableFields` is authoritative — the runtime admits
     // exactly what it names — so declaring a json column is a choice, not
-    // drift. This rule answers existence only.
+    // drift. It is admitted but contributes no clause to the `$search`
+    // expansion (its declared type can never hold a string). This rule
+    // answers existence only: flagging it would reject metadata the runtime
+    // accepts (ADR-0072 D1).
     const findings = validateSearchableFields({
       objects: [
         {
@@ -535,9 +539,11 @@ describe('validateSearchableFields — list views that narrow the set', () => {
 
   it('passes a view entry of odd type once the object declares it searchable', () => {
     // The runtime's declared branch filters by EXISTENCE, never by type: a
-    // json/lookup column declared on the OBJECT is honored by the engine and
-    // admitted by the gate, so the view echoing it must stay green — flagging
-    // it would reject metadata the runtime accepts.
+    // json/lookup column declared on the OBJECT is admitted to the resolved
+    // set and by the gate (a json column contributes no clause to the
+    // `$search` expansion; a single lookup becomes an `$icontains` over the
+    // stored foreign key), so the view echoing it must stay green — flagging
+    // it would reject metadata the runtime accepts (ADR-0072 D1).
     const findings = validateSearchableFields({
       objects: [
         {
@@ -822,7 +828,76 @@ describe('validateSearchableFields — objectstack-ui SKILL.md parity (#6675)', 
     const refused = validateSearchableFields(viewStack(['account_id'], noDeclaration));
     expect(refused).toHaveLength(1);
     expect(refused[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
-    expect(refused[0].message).toContain("of type 'lookup', which 'search' cannot scan");
+    // [#29008] The verdict names the opt-in the field lacks: the runtime now
+    // admits a field of any type marked `searchable: true` (ruling record
+    // 6573569376), so "which 'search' cannot scan" stopped being true.
+    expect(refused[0].message).toContain("of type 'lookup' and not marked `searchable: true`");
+  });
+});
+
+/**
+ * [#29008] The field's own `searchable: true` — the lint resolves the allowed
+ * set with the runtime's function, so its field-meta projection must carry the
+ * flag, or a narrowing the ingress accepts would be refused here.
+ */
+describe('[#29008] validateSearchableFields — a field marked searchable: true', () => {
+  const noteStack = (fields: Record<string, unknown>, viewSet: string[], objectSet?: string[]) => ({
+    objects: [{ name: 'dev_note', ...(objectSet ? { searchableFields: objectSet } : {}), fields }],
+    views: [{
+      name: 'dev_note',
+      objectName: 'dev_note',
+      list: { label: 'All', type: 'grid', data: { provider: 'object', object: 'dev_note' }, columns: ['name'] },
+      listViews: {
+        code: {
+          label: 'Code', type: 'grid', data: { provider: 'object', object: 'dev_note' },
+          columns: ['name'], searchableFields: viewSet,
+        },
+      },
+    }],
+  });
+  const flagged = {
+    name: { type: 'text' },
+    snippet: { type: 'code', searchable: true },
+    body: { type: 'html', searchable: true },
+  };
+
+  it('with no object declaration, a view narrowing to flagged `code` / `html` fields lints clean', () => {
+    expect(validateSearchableFields(noteStack(flagged, ['snippet', 'body']))).toEqual([]);
+  });
+
+  it('CONTROL — the same fields unflagged are refused, and the fix line offers the flag', () => {
+    const refused = validateSearchableFields(noteStack(
+      { name: { type: 'text' }, snippet: { type: 'code' } },
+      ['snippet'],
+    ));
+    expect(refused).toHaveLength(1);
+    expect(refused[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(refused[0].message).toContain("of type 'code' and not marked `searchable: true`");
+    expect(refused[0].hint).toBe(
+      'Mark "snippet" `searchable: true` on "dev_note", drop it from this view, or target a text-like field instead',
+    );
+  });
+
+  it('CONTROL — a flagged `vector` stays refused, and the verdict says the flag cannot admit it', () => {
+    const refused = validateSearchableFields(noteStack(
+      { name: { type: 'text' }, embedding: { type: 'vector', searchable: true } },
+      ['embedding'],
+    ));
+    expect(refused).toHaveLength(1);
+    expect(refused[0].message).toContain("of type 'vector', never scanned even with `searchable: true`");
+    expect(refused[0].hint).toBe('Drop "embedding" from this view, or target a text-like field instead');
+  });
+
+  it('CONTROL — an object that DECLARES its set ignores the flag: outside the declaration is refused', () => {
+    const refused = validateSearchableFields(noteStack(flagged, ['snippet'], ['name']));
+    expect(refused).toHaveLength(1);
+    expect(refused[0].message).toContain('outside the declared searchableFields (name)');
+  });
+
+  it('the allowed set is the runtime\'s: indexObjectSearchTargets carries the flag into the resolution', () => {
+    const target = indexObjectSearchTargets(noteStack(flagged, ['snippet'])).get('dev_note');
+    expect(target?.fields.snippet).toEqual({ type: 'code', hidden: false, searchable: true });
+    expect(target?.fields.name).toEqual({ type: 'text', hidden: false, searchable: false });
   });
 });
 
@@ -892,11 +967,13 @@ describe('[#6674] validateSearchableFields — a virtual formula entry', () => {
 
   it('CONTROL — a json or lookup entry on the OBJECT\'s own set stays clean', () => {
     // The carve-out #4830 wrote down, deliberately preserved: the runtime's
-    // declared branch executes those (a `$contains` over the stored JSON text /
-    // the stored foreign key). Narrow and rarely useful, but a scan that CAN
-    // match — flagging it would reject metadata the runtime accepts (ADR-0072
-    // D1). If this control ever goes red, #6674 has quietly become "the declared
-    // branch is type-filtered", which it is not.
+    // declared branch admits those. A json column contributes no clause to the
+    // `$search` expansion (its declared type can never hold a string); a single
+    // lookup becomes an `$icontains` over the stored foreign key, narrow and
+    // rarely useful but a scan that CAN match. Either way, flagging it would
+    // reject metadata the runtime accepts (ADR-0072 D1). If this control ever
+    // goes red, #6674 has quietly become "the declared branch is
+    // type-filtered", which it is not.
     expect(
       validateSearchableFields({
         objects: [
@@ -1239,6 +1316,9 @@ describe('[#22161] one-line verdicts — the three searchable ids', () => {
     // the virtual-type claim it states are held to their spec sources here.
     const types = [...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ');
     expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain(`(${types})`);
+    // [#29008] …and the opt-in's hard exclusions, as the explanation spells them.
+    const flagExcluded = [...SEARCH_FLAG_EXCLUDED_TYPES].map((t) => `\`${t}\``).join(' / ');
+    expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain(`of any type but ${flagExcluded}`);
     expect([...SEARCH_VIRTUAL_TYPES]).toEqual(['formula']);
     expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain('`formula` alone');
   });

@@ -26,6 +26,15 @@
  *  - a row stored before the member column existed (a second locale's body,
  *    no member) is backfilled at boot, so it is answered as its own member.
  *
+ * [#28576, ADR-0146 D11] A write naming no package onto the package's
+ * template is closed, so the administrator writes here go into the base's
+ * pair (`inPair`, below), where the member semantics are the same row for
+ * row; a package-less row is laid down as a release before the close stored
+ * it (`seedPackagelessRow`), served until the ceremony moves it; a shipped
+ * member's package-less write is refused, and an unshipped member's, which
+ * the ceremony moves as the pair's own member declaring nothing (#28904, the
+ * last section), stays open.
+ *
  * ## The harness
  *
  * `environment-overlay-five-types.test.ts`'s: the real `ObjectQL` engine and
@@ -70,6 +79,8 @@ function mailManifest(): Record<string, unknown> {
         // package's protection envelope (`_packageId`, `_provenance`), which a
         // hydrated overlay of them is grafted with.
         version: '1.0.0',
+        // [#28576] A pair is formed from the base's namespace (ADR-0146 D3).
+        namespace: 'acmemail',
         emailTemplates: [
             template('en-US', 'PKG en'), template('zh-CN', 'PKG zh'),
             // [#22877 stage 2] A second template the package ships in `en-US`
@@ -182,7 +193,60 @@ async function boot(
         engine, () => new Map(), kernel === 'environment' ? 'env_prod' : undefined,
     );
     const load = await protocol.loadMetaFromDb();
-    return { engine, protocol, load };
+    await protocol.ensureCustomizationPackage({ basePackageId: PKG } as any);
+    return { engine, protocol: inPair(protocol), raw: protocol, load };
+}
+
+/**
+ * [#28576, ADR-0146 D11] A write naming no package onto the package's
+ * template is closed, so every administrator write in this file is the one
+ * that stays open: into the base's pair, `com.acme.mail.custom`, declaring
+ * what it overrides. This wrapper names the pair on each save, publish and
+ * delete that names no package, and adds the declaration to a saved body of a
+ * member the package ships (one it does not ship is the pair's own item) —
+ * the member semantics pinned below are the pair's, row for row, as they were
+ * the package-less row's. A write that names a package (the drafts into the
+ * pair below, declared; [#28905] a write naming `PKG` itself is refused) is
+ * passed through untouched.
+ */
+const PAIR = 'com.acme.mail.custom';
+const DECLARATION = { package: PKG, basedOn: '1.0.0' };
+/** Whether the package ships this body's `(name, locale)` member. */
+const shipsMember = (item: any) => ((mailManifest().emailTemplates as any[]) ?? [])
+    .some((shipped) => shipped.name === (item?.name ?? NAME) && shipped.locale === item?.locale);
+function inPair(protocol: ObjectStackProtocolImplementation): ObjectStackProtocolImplementation {
+    const named = (request: any) => request?.packageId !== undefined;
+    return new Proxy(protocol, {
+        get(target, key, receiver) {
+            const value = Reflect.get(target, key, receiver);
+            if (key === 'saveMetaItem') {
+                return (request: any) => (named(request) ? value.call(target, request) : value.call(target, {
+                    ...request,
+                    packageId: PAIR,
+                    // [#28746] A member the package does not ship is the pair's
+                    // own item, not an override: it declares none.
+                    item: request.type !== 'email_template' || shipsMember(request.item) ? { ...request.item, overrides: DECLARATION } : request.item,
+                }));
+            }
+            if (key === 'deleteMetaItem' || key === 'publishMetaItem') {
+                return (request: any) => value.call(target, named(request) ? request : { ...request, packageId: PAIR });
+            }
+            return typeof value === 'function' ? value.bind(target) : value;
+        },
+    });
+}
+
+/**
+ * [#28576] A package-less row of the package's template as a release before
+ * the close stored it, written straight to the overlay store (the write door
+ * refuses that write now): such a row is still served by every read until
+ * `os migrate packageless-overlays` moves it (ADR-0146 D11).
+ */
+async function seedPackagelessRow(raw: ObjectStackProtocolImplementation, name: string, body: Record<string, unknown>) {
+    const repo = (raw as any).getOverlayRepo();
+    await repo.put({ type: 'email_template', name, org: 'env' }, body, {
+        parentVersion: null, actor: null, source: 'older-release', intent: 'override-artifact', packageId: null,
+    });
 }
 
 const overlayRows = (stores: Map<string, Map<string, Record<string, unknown>>>) =>
@@ -308,10 +372,15 @@ describe('two locales of one email template survive a restart (#22877)', () => {
         expect(await bareNameSubject(second.protocol)).toBe('PKG en');
         expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'LEGACY zh' });
 
-        // That locale's next save updates the backfilled row — no second row.
-        await second.protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('zh-CN', 'ADMIN zh') });
+        // [#28576, ADR-0146 D11] That locale's next save naming no package is
+        // refused, naming the ceremony that moves the row; the backfilled row
+        // stays the one served — no second row.
+        const refused: any = await second.raw.saveMetaItem({ type: 'email_template', name: NAME, item: template('zh-CN', 'ADMIN zh') })
+            .then(() => undefined, (e: unknown) => e);
+        expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(String(refused?.message)).toContain('os migrate packageless-overlays');
         expect(overlayRows(stores).map((r) => r.id)).toEqual(['legacy_zh']);
-        expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'ADMIN zh' });
+        expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'LEGACY zh' });
     });
 });
 
@@ -332,7 +401,12 @@ const T = 'email_template';
 const subjectOf = async (protocol: ObjectStackProtocolImplementation, member?: string) =>
     ((await protocol.getMetaItem({ type: T, name: NAME, ...(member !== undefined ? { member } : {}) })) as any)?.item?.subject;
 
-/** The registry's own entry for one member — what a peer, a send or a bare-name engine read is served. */
+/**
+ * The registry's own entry for one member — what a bare-name engine read is
+ * served. [#29600] A pair's override of a member the package ships is not
+ * registered (it is served from its row, which the send reads through the
+ * execution list), so this answers the package's member there.
+ */
 const registrySubject = (engine: ObjectQL, member: string) =>
     (engine.registry.getItem<any>(T, NAME, undefined, member))?.subject;
 
@@ -376,21 +450,25 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
     it('DELETE by member: resetting zh-CN removes its row only, and the en-US overlay stays served — the registry included', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { engine, protocol } = await bootWithBothSaved(stores);
-        expect(registrySubject(engine, 'en-US')).toBe('ADMIN en');
-        expect(registrySubject(engine, 'zh-CN')).toBe('ADMIN zh');
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'ADMIN zh' });
+        // [#29600] The pair's override of a member the package ships is served
+        // from its row and never registered under the package's envelope: the
+        // registry's entry is the package's own member.
+        expect(registrySubject(engine, 'en-US')).toBe('PKG en');
+        expect(registrySubject(engine, 'zh-CN')).toBe('PKG zh');
 
         expect(await protocol.deleteMetaItem({ type: T, name: NAME, member: 'zh-CN' })).toMatchObject({ success: true, reset: true });
         expect(overlayRows(stores).map((r) => r.bundle_member ?? null)).toEqual([null]);
         // The reset member is back on the package wording; the other member's
-        // overlay is still the registry's entry — not swept with the group.
+        // overlay is still served — not swept with the group.
         expect(registrySubject(engine, 'zh-CN')).toBe('PKG zh');
-        expect(registrySubject(engine, 'en-US')).toBe('ADMIN en');
+        expect(await subjectOf(protocol, 'en-US')).toBe('ADMIN en');
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
         expect(await subjectOf(protocol, 'zh-CN')).toBe('PKG zh');
 
         const after = await boot(stores);
         expect(await servedSubjects(after.protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
-        expect(registrySubject(after.engine, 'en-US')).toBe('ADMIN en');
+        expect(await subjectOf(after.protocol, 'en-US')).toBe('ADMIN en');
     });
 
     it('DELETE by member of a member NO artifact ships: its overlay leaves the registry, and the canonical overlay stays', async () => {
@@ -410,7 +488,10 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
 
         expect(await protocol.deleteMetaItem({ type: T, name: DIGEST, member: 'zh-CN' })).toMatchObject({ success: true, reset: true });
         expect(digestEntry('zh-CN')).toBeUndefined();
-        expect(digestEntry('en-US')).toBe('ADMIN digest en');
+        // [#29600] The canonical member's override (a member the package
+        // ships) is served from its row; the registry holds the package's.
+        expect(((await protocol.getMetaItem({ type: T, name: DIGEST, member: 'en-US' })) as any)?.item?.subject).toBe('ADMIN digest en');
+        expect(digestEntry('en-US')).toBe('PKG digest en');
         const listed: any = await protocol.getMetaItemsForExecution({ type: T });
         const digest = (listed?.items ?? []).filter((it: any) => it?.name === DIGEST).map((it: any) => `${it.locale}:${it.subject}`);
         expect(digest).toEqual(['en-US:ADMIN digest en']);
@@ -422,7 +503,8 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
         expect(await protocol.deleteMetaItem({ type: T, name: NAME })).toMatchObject({ success: true, reset: true });
         expect(overlayRows(stores).map((r) => r.bundle_member)).toEqual(['zh-CN']);
         expect(registrySubject(engine, 'en-US')).toBe('PKG en');
-        expect(registrySubject(engine, 'zh-CN')).toBe('ADMIN zh');
+        // [#29600] The zh-CN override stays served, from its row.
+        expect(await subjectOf(protocol, 'zh-CN')).toBe('ADMIN zh');
         expect(await subjectOf(protocol)).toBe('PKG en');
     });
 
@@ -566,11 +648,17 @@ describe('[#26699] the layered read addresses ONE member by the selector', () =>
 });
 
 describe('the package-batch doors and the cluster fan-out carry the member (#22877, stage 2)', () => {
-    /** A zh-CN draft bound to the package, beside an en-US active overlay that has none. */
+    /**
+     * A zh-CN draft bound to the package's pair, beside an en-US active
+     * overlay that has none. [#28905, ADR-0146 D1] A draft naming the
+     * read-only package itself is refused now, so the package-batch doors are
+     * asked of the pair, whose drafts declare the override; the member
+     * semantics pinned below are the same, row for row.
+     */
     async function bootWithZhDraft(stores: Map<string, Map<string, Record<string, unknown>>>) {
         const booted = await boot(stores);
         await booted.protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
-        await booted.protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'DRAFT zh'), mode: 'draft', packageId: PKG });
+        await booted.protocol.saveMetaItem({ type: T, name: NAME, item: { ...template('zh-CN', 'DRAFT zh'), overrides: DECLARATION }, mode: 'draft', packageId: PAIR });
         return booted;
     }
     const draftRows = (stores: Map<string, Map<string, Record<string, unknown>>>) =>
@@ -582,7 +670,7 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         const { protocol } = await bootWithZhDraft(stores);
         expect(draftRows(stores).map((r) => r.bundle_member)).toEqual(['zh-CN']);
 
-        const out: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        const out: any = await protocol.publishPackageDrafts({ packageId: PAIR });
         expect(out, JSON.stringify(out)).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
         expect(draftRows(stores)).toEqual([]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'DRAFT zh' });
@@ -591,7 +679,7 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
     it('revertCommit: the revert of that publish removes the zh-CN row it created and leaves en-US', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { protocol } = await bootWithZhDraft(stores);
-        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PAIR });
         expect(published.commitId, JSON.stringify(published)).toBeTruthy();
 
         const reverted: any = await protocol.revertCommit({ commitId: published.commitId });
@@ -599,7 +687,7 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         expect(overlayRows(stores).map((r) => r.bundle_member ?? null)).toEqual([null]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
         // [#23073] The timeline serves each item's member: the publish and its revert, zh-CN both.
-        const commits = await protocol.listCommits({ packageId: PKG });
+        const commits = await protocol.listCommits({ packageId: PAIR });
         expect(commits.map((c) => c.items.map((it) => [it.type, it.name, it.member]))).toEqual([
             [[T, NAME, 'zh-CN']], [[T, NAME, 'zh-CN']],
         ]);
@@ -608,23 +696,23 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
     it('discardPackageDrafts: the zh-CN draft is discarded as zh-CN', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { protocol } = await bootWithZhDraft(stores);
-        const out: any = await protocol.discardPackageDrafts({ packageId: PKG });
+        const out: any = await protocol.discardPackageDrafts({ packageId: PAIR });
         expect(out, JSON.stringify(out)).toMatchObject({ success: true, discardedCount: 1, failedCount: 0 });
         expect(draftRows(stores)).toEqual([]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
-        const listed = await protocol.listDrafts({ packageId: PKG });
+        const listed = await protocol.listDrafts({ packageId: PAIR });
         expect(listed.drafts).toEqual([]);
     });
 
     it('[#23073] the draft list and the commit timeline tell two languages of one template apart, and each listed member addresses its own item by name', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { protocol } = await boot(stores);
-        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'DRAFT en'), mode: 'draft', packageId: PKG });
-        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'DRAFT zh'), mode: 'draft', packageId: PKG });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: { ...template('en-US', 'DRAFT en'), overrides: DECLARATION }, mode: 'draft', packageId: PAIR });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: { ...template('zh-CN', 'DRAFT zh'), overrides: DECLARATION }, mode: 'draft', packageId: PAIR });
         const wording: Record<string, string> = { 'en-US': 'DRAFT en', 'zh-CN': 'DRAFT zh' };
 
         // Two drafts of one `type` and `name`, told apart by `member` alone.
-        const listed = await protocol.listDrafts({ packageId: PKG });
+        const listed = await protocol.listDrafts({ packageId: PAIR });
         expect(listed.drafts.map((d) => [d.type, d.name, d.member]).sort()).toEqual([[T, NAME, 'en-US'], [T, NAME, 'zh-CN']]);
         // The listed member round-trips through the by-name door: each reads its own draft.
         for (const d of listed.drafts) {
@@ -632,9 +720,9 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
             expect(read?.item?.subject).toBe(wording[d.member!]);
         }
 
-        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PAIR });
         expect(published, JSON.stringify(published)).toMatchObject({ success: true, publishedCount: 2, failedCount: 0 });
-        const [commit] = await protocol.listCommits({ packageId: PKG });
+        const [commit] = await protocol.listCommits({ packageId: PAIR });
         expect(commit!.items.map((it) => [it.type, it.name, it.member]).sort()).toEqual([[T, NAME, 'en-US'], [T, NAME, 'zh-CN']]);
         for (const it of commit!.items) {
             const read: any = await protocol.getMetaItem({ type: it.type, name: it.name, member: it.member });
@@ -664,12 +752,18 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
 
         await writer.protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
         await writer.protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'ADMIN zh') });
-        await vi.waitFor(() => expect(registrySubject(peer.engine, 'zh-CN')).toBe('ADMIN zh'));
-        expect(registrySubject(peer.engine, 'en-US')).toBe('ADMIN en');
+        // [#29600] A pair's override of a shipped member is served from its
+        // row and never enters the registry, so the peer converges on its
+        // served read, and its registry keeps the package's own members.
+        await vi.waitFor(async () => expect(await subjectOf(peer.protocol, 'zh-CN')).toBe('ADMIN zh'));
+        expect(await subjectOf(peer.protocol, 'en-US')).toBe('ADMIN en');
+        expect(registrySubject(peer.engine, 'zh-CN')).toBe('PKG zh');
+        expect(registrySubject(peer.engine, 'en-US')).toBe('PKG en');
 
         await writer.protocol.deleteMetaItem({ type: T, name: NAME, member: 'zh-CN' });
-        await vi.waitFor(() => expect(registrySubject(peer.engine, 'zh-CN')).toBe('PKG zh'));
-        expect(registrySubject(peer.engine, 'en-US')).toBe('ADMIN en');
+        await vi.waitFor(async () => expect(await subjectOf(peer.protocol, 'zh-CN')).toBe('PKG zh'));
+        expect(await subjectOf(peer.protocol, 'en-US')).toBe('ADMIN en');
+        expect(registrySubject(peer.engine, 'zh-CN')).toBe('PKG zh');
     });
 });
 
@@ -704,9 +798,10 @@ async function bootWithOverlays(
     beforeHydration?: (engine: ObjectQL) => void,
 ) {
     const first = await boot(stores);
+    // [#28576] Package-less rows a release before the close stored: the
+    // hydration of an unmigrated row is what this section pins.
     for (const locale of ['en-US', 'zh-CN']) {
-        expect(await first.protocol.saveMetaItem({ type: T, name, item: { ...template(locale, `ADMIN ${name} ${locale}`), name } }))
-            .toMatchObject({ success: true });
+        await seedPackagelessRow(first.raw, name, { ...template(locale, `ADMIN ${name} ${locale}`), name });
     }
     return boot(stores, 'environment', beforeHydration);
 }
@@ -787,39 +882,56 @@ describe('[#23074] the artifact envelope is stamped only on the member the packa
     });
 
     /**
-     * A by-name reset of the `zh-CN` member of `name`, through the delete door,
-     * read back at once and after a restart: `after` is the `zh-CN` subject the
-     * registry and the by-name read then serve. Before the door, each of the
-     * registry's two heal verbs that the delete's heal
+     * A by-name reset of the `zh-CN` member of `name`, through the delete door
+     * naming no package, read back at once and after a restart. Before the
+     * door, each of the registry's two heal verbs that the delete's heal
      * (`restoreArtifactRegistryView`) calls is asked about the hydrated entry,
      * on a boot of its own.
+     *
+     * [#28576, ADR-0146 D11] `after` is the `zh-CN` subject the registry and
+     * the by-name read then serve, or `'closed'`: the ceremony moves a shipped
+     * member's unmigrated row, so its package-less reset is refused naming the
+     * ceremony and the row keeps serving its member. A member the base does
+     * not ship moves as the pair's own member, declaring nothing (a declared
+     * override of it is refused, #28777; #28904), and the close reaches only
+     * the declared-override moves, so its package-less reset stays open, as
+     * before the close.
      */
-    async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }, after: string | undefined) {
+    async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }, after: string | undefined | 'closed') {
         const shadowBoot = (await bootWithOverlays(new Map(), name)).engine;
         expect(shadowBoot.registry.removeRuntimeShadow(T, name, 'zh-CN'), 'removeRuntimeShadow').toBe(verbs.shadow);
         const overlayEntryBoot = (await bootWithOverlays(new Map(), name)).engine;
         expect(overlayEntryBoot.registry.removeOverlayEntry(T, name, 'zh-CN'), 'removeOverlayEntry').toBe(verbs.overlayEntry);
 
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
-        const { engine, protocol } = await bootWithOverlays(stores, name);
-        expect(await protocol.deleteMetaItem({ type: T, name, member: 'zh-CN' })).toMatchObject({ success: true });
-        expect(engine.registry.getItem<any>(T, name, undefined, 'zh-CN')?.subject).toBe(after);
+        const { engine, protocol, raw } = await bootWithOverlays(stores, name);
+        const reset = raw.deleteMetaItem({ type: T, name, member: 'zh-CN' });
+        let served = after;
+        if (after === 'closed') {
+            const refused: any = await reset.then(() => undefined, (e: unknown) => e);
+            expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect(String(refused?.message)).toContain('os migrate packageless-overlays');
+            served = `ADMIN ${name} zh-CN`;
+        } else {
+            expect(await reset).toMatchObject({ success: true });
+        }
+        expect(engine.registry.getItem<any>(T, name, undefined, 'zh-CN')?.subject).toBe(served);
         expect(engine.registry.getItem<any>(T, name, undefined, 'en-US')?.subject).toBe(`ADMIN ${name} en-US`);
-        expect(((await protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(after);
+        expect(((await protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(served);
         const restarted = await boot(stores);
-        expect(((await restarted.protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(after);
+        expect(((await restarted.protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(served);
     }
 
-    it('the reset (?member=): an unshipped member is retired by the overlay-entry tier, and nothing is left serving it', async () => {
+    it('the reset (?member=): an unshipped member is retired by the overlay-entry tier, and nothing is left serving it (its package-less reset stays open)', async () => {
         // No `zh-CN` artifact takes its place, so the shadow heal declines and
         // the overlay-entry retirement takes the tenant row.
         await resetZh(DIGEST, { shadow: false, overlayEntry: true }, undefined);
     });
 
-    it('CONTROL the reset (?member=): a shipped member is un-shadowed onto its artifact', async () => {
-        // The shadow heal lifts the entry onto the `zh-CN` artifact, and the
-        // retirement refuses it as packaged code.
-        await resetZh(NAME, { shadow: true, overlayEntry: false }, 'PKG zh');
+    it('CONTROL the reset (?member=): a shipped member\'s unmigrated row: its package-less reset door is closed', async () => {
+        // The shadow heal would lift the entry onto the `zh-CN` artifact, and
+        // the retirement refuses it as packaged code.
+        await resetZh(NAME, { shadow: true, overlayEntry: false }, 'closed');
     });
 
     it('a registry that answers another member\'s artifact: the graft keeps it off the body', async () => {
@@ -860,5 +972,150 @@ describe('[#23074] the artifact envelope is stamped only on the member the packa
         expect(read.item.locale).toBe('ja-JP');
         expect(read.item._packageId).toBe(PKG);
         expect(read.packageId).toBe(PKG);
+    });
+});
+
+/**
+ * [#28904, ADR-0146 D2 / D11] `os migrate packageless-overlays` and a
+ * package-less row of a member the package does not ship. The package ships
+ * `acme.digest` in `en-US` alone, so a `zh-CN` row of it overrides nothing
+ * the package ships: the pair holds it only as its OWN member, declaring no
+ * override (a declared override of it stays refused, #28777). The ceremony
+ * moves it that way and reports it `moved`, naming the member it adds; a
+ * shipped member's row (`acme.welcome`'s `zh-CN`) still moves as the declared
+ * override. Either way the send path keeps the row's wording and envelope
+ * columns, the unbound row is gone, and a second run moves nothing.
+ */
+describe('[#28904] the ceremony moves a row of a member the package does not ship as the pair\'s own member', () => {
+    const ACTOR = 'os migrate packageless-overlays';
+    const ENVELOPE = {
+        bodyText: 'ADMIN digest zh-CN text',
+        replyTo: 'support@acme.test',
+        fromOverride: { name: 'Acme 支持', address: 'support@acme.test' },
+    };
+    const rowsOf = (stores: Map<string, Map<string, Record<string, unknown>>>, name: string) =>
+        Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.type === T && r.name === name)
+            .map((r) => ({
+                packageId: (r.package_id as string | null | undefined) ?? null,
+                member: (r.bundle_member as string | null | undefined) ?? null,
+                state: r.state,
+                body: JSON.parse(String(r.metadata)) as Record<string, unknown>,
+            }));
+    /** The member the send path resolves (`plugin-email`'s loader reads the execution list by `(name, locale)`). */
+    const sentMember = async (protocol: ObjectStackProtocolImplementation, name: string, locale: string) =>
+        (((await protocol.getMetaItemsForExecution({ type: T })) as any)?.items as any[] ?? [])
+            .find((it) => it?.name === name && it?.locale === locale);
+    const census = (protocol: ObjectStackProtocolImplementation): Promise<any> => (protocol as any).listPackagelessOverlays();
+    const migrate = (protocol: ObjectStackProtocolImplementation): Promise<any> =>
+        (protocol as any).migratePackagelessOverlays({ actor: ACTOR });
+
+    /** One package-less row of `name` in `zh-CN`, stored by a release before the close, then a restart. */
+    async function withUnboundZh(name: string, extra: Record<string, unknown> = {}) {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const first = await boot(stores);
+        await seedPackagelessRow(first.raw, name, { ...template('zh-CN', `ADMIN ${name} zh-CN`), name, ...ENVELOPE, ...extra });
+        return { stores, ...(await boot(stores)) };
+    }
+
+    it('an unshipped locale: moved into the pair as its own member with no `overrides`, still sent with its wording and envelope, and a re-run moves 0', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST);
+        const sent = { subject: `ADMIN ${DIGEST} zh-CN`, bodyHtml: `<p>ADMIN ${DIGEST} zh-CN</p>`, ...ENVELOPE };
+        expect(await sentMember(raw, DIGEST, 'zh-CN')).toMatchObject(sent);
+
+        const listed = await census(raw);
+        expect(listed.rows.map((r: any) => [r.name, r.member, r.disposition, r.addedMember])).toEqual([[DIGEST, 'zh-CN', 'movable', 'zh-CN']]);
+
+        const result = await migrate(raw);
+        expect(result.outcomes).toEqual([{ id: listed.rows[0].id, outcome: 'moved', packageId: PAIR, addedMember: 'zh-CN' }]);
+        expect(result.bases).toEqual([{ base: PKG, pair: PAIR, pairCreated: false, moved: 1, declarationsCompleted: 0, failed: 0, shadowed: 0 }]);
+        const stored = rowsOf(stores, DIGEST);
+        expect(stored.map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
+        expect(stored[0]!.body).not.toHaveProperty('overrides');
+        expect(stored[0]!.body).toMatchObject(sent);
+
+        // Still sent, at once and after a restart; the package's own `en-US` member is untouched.
+        for (const served of [raw, (await boot(stores)).raw]) {
+            expect(await sentMember(served, DIGEST, 'zh-CN')).toMatchObject(sent);
+            expect(((await served.getMetaItem({ type: T, name: DIGEST, member: 'zh-CN' })) as any)?.item).toMatchObject(sent);
+            expect((await sentMember(served, DIGEST, 'en-US'))?.subject).toBe('PKG digest en');
+        }
+
+        const again = await migrate(raw);
+        expect(again.rows).toEqual([]);
+        expect(again.outcomes).toEqual([]);
+        expect(rowsOf(stores, DIGEST).map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
+    });
+
+    it('[#29392] an unshipped locale in a row bound to the package itself (a save naming it, before that write was closed): listed bound, and moved into the pair as its own member', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const first = await boot(stores);
+        await (first.raw as any).getOverlayRepo().put(
+            { type: T, name: DIGEST, org: 'env' },
+            { ...template('zh-CN', `ADMIN ${DIGEST} zh-CN`), name: DIGEST, ...ENVELOPE },
+            { parentVersion: null, actor: null, source: 'older-release', intent: 'override-artifact', packageId: PKG },
+        );
+        const { raw } = await boot(stores);
+        expect(rowsOf(stores, DIGEST).map((r) => [r.packageId, r.member])).toEqual([[PKG, 'zh-CN']]);
+
+        const listed = await census(raw);
+        expect(listed.rows.map((r: any) => [r.name, r.member, r.disposition, r.addedMember, r.base, r.boundToBase]))
+            .toEqual([[DIGEST, 'zh-CN', 'movable', 'zh-CN', PKG, true]]);
+        const result = await migrate(raw);
+        expect(result.outcomes).toEqual([{ id: listed.rows[0].id, outcome: 'moved', packageId: PAIR, addedMember: 'zh-CN' }]);
+        const stored = rowsOf(stores, DIGEST);
+        expect(stored.map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
+        expect(stored[0]!.body).not.toHaveProperty('overrides');
+        for (const served of [raw, (await boot(stores)).raw]) {
+            expect(await sentMember(served, DIGEST, 'zh-CN')).toMatchObject({ subject: `ADMIN ${DIGEST} zh-CN`, ...ENVELOPE });
+            expect((await sentMember(served, DIGEST, 'en-US'))?.subject).toBe('PKG digest en');
+        }
+        expect((await migrate(raw)).rows).toEqual([]);
+    });
+
+    it('an unshipped locale whose stored body declares the base: the declaration is dropped, as the pair\'s own member carries none', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST, { overrides: { package: PKG, basedOn: '0.9.0' } });
+        const result = await migrate(raw);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.addedMember])).toEqual([['moved', 'zh-CN']]);
+        const stored = rowsOf(stores, DIGEST);
+        expect(stored.map((r) => [r.packageId, r.member])).toEqual([[PAIR, 'zh-CN']]);
+        expect(stored[0]!.body).not.toHaveProperty('overrides');
+        expect((await sentMember(raw, DIGEST, 'zh-CN'))?.subject).toBe(`ADMIN ${DIGEST} zh-CN`);
+    });
+
+    it('READ BACK FIRST: a save that leaves no row of that member in the pair keeps the unbound row, and the row is reported failed', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST);
+        // A save door that answers and writes nothing.
+        (raw as any).saveMetaItem = async () => ({ success: true });
+        const result = await migrate(raw);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['failed']);
+        expect(result.outcomes[0].error).toContain("does not read back as its own member 'zh-CN'");
+        expect(rowsOf(stores, DIGEST).map((r) => [r.packageId, r.member])).toEqual([[null, 'zh-CN']]);
+        expect(result.bases[0]).toMatchObject({ moved: 0, failed: 1 });
+    });
+
+    it('CONTROL a shipped locale: moved as the declared override of the package, as before', async () => {
+        const { stores, raw } = await withUnboundZh(NAME);
+        const listed = await census(raw);
+        expect(listed.rows.map((r: any) => [r.name, r.member, r.disposition])).toEqual([[NAME, 'zh-CN', 'movable']]);
+        expect(listed.rows[0]).not.toHaveProperty('addedMember');
+
+        const result = await migrate(raw);
+        expect(result.outcomes).toEqual([{ id: listed.rows[0].id, outcome: 'moved', packageId: PAIR, basedOn: '1.0.0' }]);
+        const stored = rowsOf(stores, NAME);
+        expect(stored.map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
+        expect(stored[0]!.body.overrides).toEqual({ package: PKG, basedOn: '1.0.0' });
+        expect(await sentMember(raw, NAME, 'zh-CN')).toMatchObject({ subject: `ADMIN ${NAME} zh-CN`, ...ENVELOPE });
+    });
+
+    it('the refusal of a declared override at an unshipped locale is unchanged: after the move, that save into the pair answers 403 NOT_OVERRIDABLE', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST);
+        await migrate(raw);
+        const refused: any = await raw.saveMetaItem({
+            type: T, name: DIGEST, packageId: PAIR,
+            item: { ...template('zh-CN', 'DECLARED zh-CN'), name: DIGEST, overrides: DECLARATION },
+        } as any).then(() => undefined, (e: unknown) => e);
+        expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(rowsOf(stores, DIGEST).map((r) => r.body.subject)).toEqual([`ADMIN ${DIGEST} zh-CN`]);
     });
 });

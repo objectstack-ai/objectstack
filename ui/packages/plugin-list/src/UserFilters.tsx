@@ -200,6 +200,26 @@ export interface UserFiltersProps {
    * ObjectView/InterfaceListPage mirror them into `uf_*` URL params.
    */
   onSelectionsChange?: (selections: Record<string, Array<string | number | boolean>>) => void;
+  /**
+   * Receives the bar's {@link UserFiltersHandle} while a dropdown or toggle
+   * bar is mounted (objectstack#29052). The selection stays the bar's own
+   * state; the handle only lets a host clear it, e.g. the list's empty-state
+   * "Clear filters". A host that passes no ref gets today's bar unchanged.
+   * Tabs mode sets no handle: a preset tab is a choice among the view's
+   * presets, not a filter the reader added.
+   */
+  ref?: React.Ref<UserFiltersHandle>;
+}
+
+/** What a host can ask of a mounted user-filter bar (see `UserFiltersProps.ref`). */
+export interface UserFiltersHandle {
+  /**
+   * Clears every chip, author defaults included, exactly as pressing each
+   * chip's × would: `onFilterChange` receives no conditions, and
+   * `onSelectionsChange` reports every chip field with an empty selection, so
+   * a host that persists selections (the `uf_*` URL params) drops them all.
+   */
+  clear(): void;
 }
 
 /**
@@ -295,6 +315,7 @@ export function UserFilters({
   className,
   initialSelections,
   onSelectionsChange,
+  ref,
 }: UserFiltersProps) {
   // The AUTHORING type (ADR-0053) only admits dropdown/tabs; stored metadata
   // still carries the spec-deprecated `toggle`, which must keep rendering
@@ -312,6 +333,7 @@ export function UserFilters({
           className={className}
           initialSelections={initialSelections}
           onSelectionsChange={onSelectionsChange}
+          handleRef={ref}
         />
       );
     case 'tabs':
@@ -339,6 +361,7 @@ export function UserFilters({
           objectDefPending={objectDefPending}
           onFilterChange={onFilterChange}
           className={className}
+          handleRef={ref}
         />
       );
     default:
@@ -507,6 +530,7 @@ interface DropdownFiltersProps {
   className?: string;
   initialSelections?: Record<string, Array<string | number | boolean>>;
   onSelectionsChange?: (selections: Record<string, Array<string | number | boolean>>) => void;
+  handleRef?: React.Ref<UserFiltersHandle>;
 }
 
 /** Selected values per field name, the dropdown bar's whole filter state. */
@@ -592,7 +616,7 @@ function typingOf(field: ResolvedField): string {
   return JSON.stringify([field.type, field.options.map(o => o.value)]);
 }
 
-function DropdownFilters({ fields, objectDef, objectDefPending, data, onFilterChange, maxVisible, className, initialSelections, onSelectionsChange }: DropdownFiltersProps) {
+function DropdownFilters({ fields, objectDef, objectDefPending, data, onFilterChange, maxVisible, className, initialSelections, onSelectionsChange, handleRef }: DropdownFiltersProps) {
   const { fieldLabel, translateOptions } = useSafeFieldLabel();
   const moreLabel = useMoreLabel();
   const tt = useSafeTranslate();
@@ -680,13 +704,28 @@ function DropdownFilters({ fields, objectDef, objectDefPending, data, onFilterCh
     [onFilterChange, controlKinds],
   );
 
-  const handleChange = (field: string, values: (string | number | boolean)[]) => {
-    typingRef.current.set(field, null);
-    const next = { ...selectedValues, [field]: values };
+  // A selection the reader made: final for typing, applied, and reported to
+  // the host for persistence.
+  const commitSelection = (next: DropdownSelection, changed: string[]) => {
+    changed.forEach(field => typingRef.current.set(field, null));
     setSelectedValues(next);
     emitFilters(next);
     onSelectionsChange?.(next);
   };
+
+  const handleChange = (field: string, values: (string | number | boolean)[]) => {
+    commitSelection({ ...selectedValues, [field]: values }, [field]);
+  };
+
+  // `clear()` names every chip field, held or not: a host that persists the
+  // selection per field drops only the fields a report names.
+  React.useImperativeHandle(handleRef, () => ({
+    clear: () => {
+      const cleared: DropdownSelection = {};
+      for (const field of [...fields.map(f => f.field), ...Object.keys(selectedValues)]) cleared[field] = [];
+      commitSelection(cleared, Object.keys(cleared));
+    },
+  }));
 
   // Emit default/restored filters on mount, coerced to the option value types
   // (see `coerceToOptionTypes`) so the checkbox state and the query condition
@@ -1288,9 +1327,10 @@ interface ToggleFiltersProps {
   objectDefPending: boolean;
   onFilterChange: (filters: any[]) => void;
   className?: string;
+  handleRef?: React.Ref<UserFiltersHandle>;
 }
 
-function ToggleFilters({ fields, objectDefPending, onFilterChange, className }: ToggleFiltersProps) {
+function ToggleFilters({ fields, objectDefPending, onFilterChange, className, handleRef }: ToggleFiltersProps) {
   const [activeToggles, setActiveToggles] = React.useState<Set<string>>(() => {
     const defaults = new Set<string>();
     fields.forEach(f => {
@@ -1321,6 +1361,14 @@ function ToggleFilters({ fields, objectDefPending, onFilterChange, className }: 
       return next;
     });
   };
+
+  React.useImperativeHandle(handleRef, () => ({
+    clear: () => {
+      const none = new Set<string>();
+      setActiveToggles(none);
+      emitFilters(none);
+    },
+  }));
 
   // Emit default filters on mount
   React.useEffect(() => {

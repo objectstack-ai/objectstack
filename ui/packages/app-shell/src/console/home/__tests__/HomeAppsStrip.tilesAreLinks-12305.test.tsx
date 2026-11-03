@@ -65,6 +65,7 @@ function renderStrip(
       <LocationProbe />
       <HomeAppsStrip
         apps={apps}
+        routeApps={apps}
         favorites={[]}
         onBrowseMarketplace={() => {}}
         isAdmin={false}

@@ -861,6 +861,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // (receiver `service`). A call added to or removed from that file moves
       // the census verdict, so a change to it has to re-run this suite.
       'packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts',
+      // [#28977] Declared by name for the same reason: the census LEDGER
+      // carries a NOT_SDK row for service-analytics' dry-run parity pin for a
+      // date bucket over a column that is not a date, which calls
+      // `analytics.query(` twice on the real AnalyticsService (receiver
+      // `service`).
+      'packages/services/service-analytics/src/__tests__/objectql-echo-non-date-bucket.test.ts',
     ],
     heldBy: {
       // `scripts/**` is rostered TODAY through the census's own
@@ -1224,6 +1230,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-storage/src/storage-route-ledger.ts',
       'packages/services/service-i18n/src/i18n-route-ledger.ts',
       'packages/services/service-settings/src/settings-route-ledger.ts',
+      // [#29443] The personal-view door's ledger, imported the same way.
+      'packages/plugins/plugin-auth/src/personal-view-route-ledger.ts',
       // flow-trigger / validation conformance pin spec's zod schemas.
       'packages/spec/src/automation/**',
       'packages/spec/src/data/**',
@@ -1377,7 +1385,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
   '@objectstack/metadata-protocol': {
     // src/sys-metadata-repository.draft-drain.test.ts reads the durability
     // log-level gate's own source to pin that the repository stays inside it.
-    globs: ['scripts/check-durability-degradation-log-level.mjs'],
+    // [#25467 E1] The two by-path pins (protocol.read-verb-canonical-fold,
+    // protocol.lookup-artifact-item-call-sites) blank comments through the
+    // shared mask before they read the split's modules.
+    globs: [
+      'scripts/check-durability-degradation-log-level.mjs',
+      'scripts/js-comment-mask.mjs',
+    ],
   },
   '@objectstack/downstream-contract': {
     // test/source-resolution.pin.test.ts resolves every spec specifier a

@@ -19,7 +19,7 @@ DDL, the same forms and list views, the same API.
 |:---|:---|
 | You need extra data on an object another package ships (`sys_user`, a CRM package's `account`) | **Object extension** |
 | You need a new business entity of your own | Define your own [object](/docs/data-modeling/objects) |
-| A single tenant needs a field only they use | Tenant customization, not a package extension — an extension ships in code with the package |
+| Your deployment needs a field on an object an installed package ships | An object extension in that package's paired `.custom` package, the field named `<name>__c` — [below](#customizing-an-installed-packages-object) |
 | You need an action, hook, view or page on someone else's object | Declare that artifact at the top level and bind it to the target object — [see below](#what-an-extension-may-not-contribute) |
 
 ---
@@ -62,7 +62,7 @@ check that spelling first.
 
 | Key | Merge behaviour |
 |:---|:---|
-| `fields` | **Additive.** Merged into the target's field map. A name the target already has is **replaced**, not merged. |
+| `fields` | **Additive.** Merged into the target's field map. A name the target already has is **replaced**, not merged — never in a `.custom` package, whose added fields all end in `__c`. |
 | `fieldPatches` | **Applied, field by field.** Changes the *display* of one of the target's own fields — never one an extension adds — without replacing it — [below](#relabelling-a-vendor-field). |
 | `validations` | **Concatenated.** Your rules run alongside the owner's; neither replaces the other. |
 | `indexes` | **Concatenated**, same as validations. |
@@ -134,11 +134,19 @@ reason.
   sit in the owner's stored declaration, so the install door admits a patch of one and
   every read applies it, while `os validate`, which reads the declaration you wrote,
   refuses it.
+- **Patch it or take it over, not both.** An extension that names one field in both
+  `fields` and `fieldPatches` is refused when it parses: `fields` takes the owner's field
+  over whole, so the patch would land on your own replacement and the owner's field would
+  reach neither. Keep the patch to change only its display, or keep the `fields` entry
+  and set the text there. An option is addressed by its stored `value`, so a key no value
+  can be (`Tech Sector`, a label) is refused too.
 - **Conflicts resolve like `label`.** Two extensions patching the same key: the higher
   `priority` wins. A tenant who has edited that text keeps their own, [below](#extensions-and-tenant-customization).
-- **A patch must name something real.** A field the target does not declare, or an option
-  value its field does not have, is refused when the package installs and by
-  `os validate` when the target is in the same stack. A field whose options come from a
+- **A patch must name something real.** A key that cannot be a field name (`Industry`,
+  `Annual Revenue`, a label) is refused when it parses: `fieldPatches` is keyed by the
+  field's name, lowercase snake_case like every key of `fields`. A field the target does
+  not declare, or an option value its field does not have, is refused when the package
+  installs and by `os validate` when the target is in the same stack. A field whose options come from a
   shared picklist has no option labels of its own to patch. At boot, an unmatched patch
   is not applied and is named once in the log; the boot carries on.
 - **Options are the owner's too.** A patch is judged against the options the owner
@@ -164,6 +172,55 @@ declares. Neither is refused; at boot the registry names each such field once in
 with every package that declares it and the one whose definition is served. Name
 defensively — prefix added fields with something specific to your package when the
 name is at all generic.
+
+**The `__c` suffix is reserved to the customer.** A field named `<name>__c` may be
+declared only by a base package's paired `.custom` package, below; in any other package,
+on its own objects or in its extensions, it is refused, so a vendor's next version can
+never take a customer's field name. The save, publish and restore doors, the install
+door, `os validate` and `os build` all refuse it, naming the field.
+
+---
+
+## Customizing an installed package's object
+
+A customer adds to an object an installed package ships — HotCRM's `crm_account` — from
+the base's paired customization package `hotcrm.custom`
+([ADR-0146](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)
+D10). The object is extended, never replaced:
+
+- **Every field the pair adds to a base object ends in `__c`** (`region__c`); an unsuffixed field in a
+  `.custom` extension is refused with the suffixed name to use. A field the base
+  declares is changed only through `fieldPatches`, [above](#relabelling-a-vendor-field).
+- **The extension is an item of the pair.** In code it is an `objectExtensions` entry of
+  the `hotcrm.custom` stack; at runtime it is an `object_extension` item saved into the
+  pair (`PUT /api/v1/meta/object_extension/crm_account?package=hotcrm.custom`, the body
+  `ObjectExtensionSchema` with `extend`), drafted, published and exported like any item.
+  Studio's **Add field** on a read-only base object writes exactly that, creating the
+  pair on first use.
+- **An object takes no `overrides` declaration.** Declaring one on an object is refused,
+  naming the extension as the route.
+
+{/* os:check */}
+```typescript
+import { defineObjectExtension, Field } from '@objectstack/spec/data';
+
+export const AccountRegionExtension = defineObjectExtension({
+  extend: 'crm_account',
+  fields: { region__c: Field.text({ label: 'Region' }) },
+});
+```
+
+```typescript
+export default defineStack({
+  manifest: {
+    id: 'hotcrm.custom',                  // the base's id + '.custom'
+    namespace: 'crm_custom',              // the base's namespace + '_custom'
+    dependencies: { hotcrm: '^3' },       // the base, at its installed major
+    /* … */
+  },
+  objectExtensions: [AccountRegionExtension],
+});
+```
 
 ---
 

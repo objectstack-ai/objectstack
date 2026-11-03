@@ -344,6 +344,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.lookup.searchHostFields': '搜索本对象的字段…',
   'designer.field.lookup.pageSize': '选择器分页大小',
   'designer.field.lookup.allowCreate': '允许快速创建',
+  'designer.field.lookup.referenceNameVisible': '不可读时显示名称',
+  'designer.field.lookup.referenceNameVisible.help': '允许此记录的读者看到被引用记录的名称（纯文本，不带链接），即使其无权打开该记录。该记录的其他内容一律不显示；名称字段上的字段级规则仍然生效（此时名称显示为 Record # 加 id）。未设置：此类引用显示为「受限记录」。',
   'designer.field.relatedList.heading': '父记录上的关联列表',
   'designer.field.relatedList.shown': '显示',
   'designer.field.relatedList.hidden': '不显示',
@@ -936,6 +938,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.action.scriptLanguage': '脚本语言',
   'engine.inspector.action.scriptBody': '脚本主体',
   'engine.inspector.action.scriptBodyHint': '在沙箱中以 {signature} 的形式运行。',
+  'engine.inspector.action.capabilitiesHint': '此函数体可调用的 ctx API。调用未授权的 API 会在动作运行时被拒绝。',
   'engine.inspector.action.method': '请求方法',
   // objectstack#26736 — 请求体形态，对应规范的两种形态。
   'engine.inspector.action.bodyShape': '请求体形态',
@@ -996,6 +999,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.refusal.publishWhere': '未发布。请检查{where}：详情中说明了需要修改的内容。',
   'engine.studio.refusal.publishUnlocated': '未发布：服务端拒绝了此草稿。详情中说明了原因。',
   'engine.studio.refusal.publishPlain': '未发布：{reason}',
+  'engine.studio.refusal.draftUnreadable': '此项有一份您无权读取的未发布草稿，因此 Studio 没有打开它：在这里编辑已发布版本会覆盖那份草稿。持有该草稿所需权限的人可以编辑或发布它。详情中有服务器的答复。',
   'engine.studio.publishRefused': '未发布：{count} 项需要修改。「待发布的变更」会保留每项原因，直到修复为止。',
   'engine.studio.publishRefusedOne': '未发布：{count} 项需要修改。「待发布的变更」会保留原因，直到修复为止。',
   'engine.studio.publishRefusedBatch': '没有内容生效：软件包作为一个整体发布，其余草稿会等待这项修复。',
@@ -1887,6 +1891,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.nameLabel': '名称',
   'engine.studio.access.idLabel': '标识',
   'engine.studio.data.savedDraft': '对象「{label}」已存为草稿',
+  'engine.studio.draftSaved': '已保存 {item} 的草稿',
   'engine.studio.data.lastSaved': '已于 {time} 保存',
   // Pillar tab labels
   'engine.fieldType.text': '单行文本',
@@ -2264,6 +2269,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.bannerTitle':
     '此矩阵仅列出本包声明的对象,「Save」只合并本包切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效(与数据、界面一致)。',
   'engine.studio.access.banner': '仅本包对象 · 保存为草稿',
+  // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
+  'engine.studio.access.bannerPair': '本包及 {package} 的对象 · 保存为草稿',
+  'engine.studio.access.bannerTitlePair':
+    '此权限集位于 {package} 的定制包中，因此矩阵除本包声明的对象外，也列出 {package} 的对象；「Save」只合并这一切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效。',
   'engine.studio.access.bannerTitleReadOnly':
     '此矩阵仅列出本包声明的对象。本软件包为只读:其权限集可在此查看,但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)
@@ -2768,6 +2777,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.listItemNeedsInput': '「{list}」第 {n} 项的「{input}」需要填写',
   // objectstack#27785 — a report's chart held until its axes are picked.
   'engine.studio.held.reportChartNeedsInput': '报表图表的「{input}」需要填写',
+  'engine.studio.held.reportJoinedNeedsBlock': '联合报表需要在「{list}」中至少添加一个块',
   // objectstack#27895 — a list view held until a required setting of its type's own block is picked again.
   'engine.studio.held.listViewTypeNeedsInput': '视图{type}设置中的「{input}」需要填写',
   'engine.studio.held.fieldNeedsInput': '字段「{field}」的「{input}」需要填写',
@@ -2858,7 +2868,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.interfaces.create.descriptionInPair': '存为本部署对 {baseName} 定制的草稿，并在画布上打开。{baseName} 的导航保持安装时的样子。',
   'engine.studio.app.scaffoldNav': '将本包的对象添加为菜单项',
   'engine.studio.landing.title': '应用构建',
-  'engine.studio.landing.description': '在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用环境覆盖进行定制。',
+  'engine.studio.landing.description': '在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用「自定义」或「新建类似」修改其条目，修改保存在该软件包的 .custom 定制包中。',
   'engine.studio.landing.mineHeading': '我的软件包(可写)',
   'engine.studio.landing.noneWritable': '还没有可写软件包 — 新建一个开始。',
   'engine.studio.landing.dup': '复制',
@@ -2870,7 +2880,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.dupCreated': '已复制为可写软件包「{name}」',
   'engine.studio.landing.installedHeading': '已安装(只读 · 可浏览)',
   // objectui#11808 — the routes a read-only package does have.
-  'engine.studio.landing.readonlyHint': '源码与已安装的软件包为只读，不能在此编辑或复制。对于接受环境覆盖的元数据类型，可用环境覆盖（overlay）进行定制。',
+  'engine.studio.landing.readonlyHint': '源码与已安装的软件包为只读，不能在此编辑或复制。要修改其中一个，请打开条目并选择「自定义」或「新建类似」：修改保存在该软件包的 .custom 定制包中，升级仍会到达已安装的软件包。',
   'engine.studio.landing.marketplace': '或从应用市场安装一个模板应用',
   'engine.studio.landing.customizations.customized': '已定制 {customized} 项',
   'engine.studio.landing.customizations.separator': '，',
@@ -3214,6 +3224,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.col.label': '标签',
   'engine.list.col.source': '来源',
   'engine.list.col.object': '对象',
+  // objectstack#29569 — an object_extension lists by the object it extends.
+  'engine.list.col.extend': '对象',
   'engine.list.col.type': '类型',
   'engine.list.col.description': '描述',
   'engine.list.col.sharedWith': '共享给',

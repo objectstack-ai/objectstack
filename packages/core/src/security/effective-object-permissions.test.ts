@@ -19,6 +19,7 @@ import {
   buildEffectiveFieldPermissions,
   buildEffectiveObjectPermissions,
   fieldPermissionVote,
+  holdsSuperuserBypass,
   registryObjectPackageDisabled,
 } from './effective-object-permissions.js';
 
@@ -571,6 +572,39 @@ describe('buildEffectiveFieldPermissions (#25866)', () => {
       { fields: { 'deal.amount': { readable: true, editable: true } } },
     ]);
     expect(widened).toEqual({ 'deal.amount': { readable: true, editable: true } });
+  });
+
+  // [ADR-0066 ⑧, ruling of record 6573563853] A set holding the super-user
+  // bypass on an object votes on every field of it: `viewAllRecords` reads,
+  // `modifyAllRecords` reads and edits — the same sets `superuserBypassSets`
+  // (`@objectstack/plugin-security`) names, through `holdsSuperuserBypass`.
+  it('a super-user set votes on every declared field of its object; a plain set does not', () => {
+    const mask = { fields: { 'deal.amount': { readable: false, editable: false }, 'lead.score': { readable: false, editable: false } } };
+    expect(buildEffectiveFieldPermissions([{ objects: { '*': { modifyAllRecords: true } } }, mask])).toEqual({
+      'deal.amount': { readable: true, editable: true },
+      'lead.score': { readable: true, editable: true },
+    });
+    expect(buildEffectiveFieldPermissions([{ objects: { deal: { viewAllRecords: true } } }, mask])).toEqual({
+      'deal.amount': { readable: true, editable: false },
+      'lead.score': { readable: false, editable: false },
+    });
+    // An explicit entry shadows the same set's wildcard, as at row level.
+    expect(buildEffectiveFieldPermissions([{ objects: { '*': { viewAllRecords: true }, deal: { allowRead: true } } }, mask]))
+      .toEqual({ 'deal.amount': { readable: false, editable: false }, 'lead.score': { readable: true, editable: false } });
+    // Control: no bypass bit, no vote — union without deny is unchanged.
+    expect(buildEffectiveFieldPermissions([{ objects: { deal: { allowRead: true, allowEdit: true } } }, mask])).toEqual({
+      'deal.amount': { readable: false, editable: false },
+      'lead.score': { readable: false, editable: false },
+    });
+  });
+
+  it('holdsSuperuserBypass: explicit entry first, then the wildcard; modify implies view, view never implies modify', () => {
+    expect(holdsSuperuserBypass({ objects: { '*': { viewAllRecords: true } } }, 'deal', 'view')).toBe(true);
+    expect(holdsSuperuserBypass({ objects: { '*': { viewAllRecords: true } } }, 'deal', 'modify')).toBe(false);
+    expect(holdsSuperuserBypass({ objects: { deal: { modifyAllRecords: true } } }, 'deal', 'view')).toBe(true);
+    expect(holdsSuperuserBypass({ objects: { '*': { modifyAllRecords: true }, deal: {} } }, 'deal', 'modify')).toBe(false);
+    expect(holdsSuperuserBypass({ objects: null }, 'deal', 'view')).toBe(false);
+    expect(holdsSuperuserBypass(null, 'deal', 'view')).toBe(false);
   });
 
   it('aliases nothing: every entry is a fresh object', () => {

@@ -3,12 +3,13 @@
 import path from 'path';
 import fs from 'fs';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import chalk from 'chalk';
-import { bundleRequire } from 'bundle-require';
+import { bundleRequire, dynamicImport } from 'bundle-require';
 import type { Plugin } from 'esbuild';
 import { hasStackProvenance, stackConversionsOf, type ConversionNotice } from '@objectstack/spec';
 import { printErrorToStderr, printWarningToStderr } from './format.js';
+import { configLoadRefusal, isRawZodError, type EvaluatedConfigBundle } from './config-load-refusal.js';
 
 export interface LoadedConfig {
   config: any;
@@ -770,6 +771,51 @@ function authoredArgumentOf(value: unknown): unknown {
 }
 
 /**
+ * Bundle and evaluate the config module — the ONE place a config's module
+ * graph runs, for {@link loadConfig} and for `os serve`'s own load.
+ *
+ * A raw `ZodError` thrown while the module evaluates — a `define*` helper's
+ * `Schema.parse` refusing its input — is rethrown as the located, formatted
+ * refusal of `./config-load-refusal.ts` instead of reaching a catch-all whose
+ * `error.message` is the issues as a JSON array. Every other throw (a syntax
+ * error, a missing import, a helper's own prose refusal, `defineStack`'s
+ * formatted one) passes through untouched.
+ *
+ * The bundle's text is read just before bundle-require imports it, because
+ * bundle-require deletes the file once the import settles; the refusal needs
+ * its inline source map to turn the stack frame back into the authored file.
+ *
+ * @param plugins esbuild plugins to bundle with (the authored-source shim)
+ */
+export async function bundleConfigModule(
+  absolutePath: string,
+  plugins?: Plugin[],
+): Promise<{ mod: any }> {
+  const cwd = process.cwd();
+  let bundle: EvaluatedConfigBundle | undefined;
+  try {
+    return await bundleRequire({
+      filepath: absolutePath,
+      cwd,
+      external: BUNDLE_REQUIRE_EXTERNALS,
+      ...(plugins ? { esbuildOptions: { plugins } } : {}),
+      require: (outfile, ctx) => {
+        const file = outfile.startsWith('file:') ? fileURLToPath(outfile) : outfile;
+        try {
+          bundle = { file, text: fs.readFileSync(file, 'utf8') };
+        } catch {
+          // Unreadable: the refusal then names the config entry, never a guess.
+        }
+        return dynamicImport(outfile, ctx);
+      },
+    });
+  } catch (error) {
+    if (isRawZodError(error)) throw configLoadRefusal(error, absolutePath, bundle, cwd);
+    throw error;
+  }
+}
+
+/**
  * Load and bundle a config file using bundle-require.
  * Returns the resolved config object, its load time, and the provenance of
  * whatever named exports were merged into it.
@@ -815,13 +861,10 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
   const absolutePath = resolveConfigPath(source);
   const start = Date.now();
 
-  const { mod } = await bundleRequire({
-    filepath: absolutePath,
-    external: BUNDLE_REQUIRE_EXTERNALS,
-    ...(options?.authoredSource
-      ? { esbuildOptions: { plugins: [authoredSourcePlugin(absolutePath)] } }
-      : {}),
-  });
+  const { mod } = await bundleConfigModule(
+    absolutePath,
+    options?.authoredSource ? [authoredSourcePlugin(absolutePath)] : undefined,
+  );
 
   const baseConfig = mod.default || mod;
   if (!baseConfig) {

@@ -13,7 +13,8 @@
  *    (positions, capabilities, permission sets, sharing rules), whose items
  *    have one name per deployment and may belong to no package (ADR-0131 D3),
  *    served in the environment scope (`?scope=environment`), as Setup's catalog
- *    serves it today.
+ *    serves it today. Outside that scope, a type's list here is the list
+ *    across every package, each row opening its owning package (#29566).
  *
  * ## Why `~all` and not `~org`
  *
@@ -148,8 +149,9 @@ const ALL_PACKAGES_VALUE = 'all';
  *  - the per-package leg with no `?package=` gets its own, because the item
  *    page binds its saves to `?package=` (`readActivePackageBinding`): without
  *    it a save in the area would leave the package;
- *  - the cross-package leg with no `?package=` stays as it is, the pages
- *    keeping their Setup meaning for a URL that names no package.
+ *  - the cross-package leg with no `?package=` stays as it is: a URL that
+ *    names no package lists across packages, and no page repairs one in
+ *    (#29566).
  *
  * `rest` is the path below the area's root as the URL spells it (encoded),
  * `''` at the root; `search` is the URL's query, with or without its `?`.

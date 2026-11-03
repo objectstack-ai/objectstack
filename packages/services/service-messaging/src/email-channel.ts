@@ -472,7 +472,8 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
 
             // Same per-recipient resolution on the `sys_notification_template`
             // arm (#13881); the store walks its own ladder (`zh-CN` → `zh` →
-            // DEFAULT_LOCALE) underneath, so a tag with no row still renders.
+            // the declared fallback and its primary subtag → DEFAULT_LOCALE)
+            // underneath, so a tag with no row still renders.
             const locale = recipientLocale ?? defaultLocale;
             // The row is the recipient organization's: the delivery's own
             // organization keys the read (see NotificationTemplateStore).

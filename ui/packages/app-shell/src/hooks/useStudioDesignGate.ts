@@ -61,21 +61,26 @@
  *
  * ## Cost
  *
- * One `GET /api/v1/packages` per package asked about, and only for a principal
- * who passes (1): the list is read when the asked package changes (an app
- * switch), never per render. Readers mounted in one commit (the app bar, the
- * sidebar's rows and a page's pencil) share one request through `fetchPackages`' in-flight
- * read (objectui#11797). Nothing caches the answer: `fetchPackages` is
- * deliberately not a response cache, and no provider holds the package list
- * outside Studio.
+ * One `GET /api/v1/packages` per session, and only for a principal who passes
+ * (1) (objectstack#29119). The list is the largest response an app page reads,
+ * and it used to be read again on every app switch. It is now held for the
+ * session by `fetchSessionPackages`, keyed by the signed-in user and the active
+ * organization: a later app page, the same app's next page and every reader
+ * mounted in one commit (the app bar, the sidebar's rows and a page's pencil)
+ * answer from it, and readers mounted before it is held share one request
+ * through the in-flight read (objectui#11797). It is read again for a package
+ * id it does not name (a package created since), and after any package write
+ * this tab makes; `fetchSessionPackages`' doc states what a held answer can
+ * get wrong and for how long. Studio's own reads stay `fetchPackages`, which
+ * holds nothing.
  *
  * @module
  */
 
 import { useEffect, useState } from 'react';
-import { useWorkspaceAdminStatus } from '@object-ui/auth';
+import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useCanAuthorMetadata } from './useCanAuthorMetadata.js';
-import { fetchPackages, type PkgEntry } from '../views/studio-design/packages-io.js';
+import { fetchSessionPackages, type PkgEntry } from '../views/studio-design/packages-io.js';
 
 /**
  * The package a Studio path opens: its first segment after `/studio/`, decoded
@@ -122,27 +127,45 @@ export function isDesignablePackage(packages: readonly PkgEntry[], packageId: st
 }
 
 /**
- * The posture for `packageId`, read once per id. It carries the id it answers
- * for, so an answer for the previous app is never read as this one's.
+ * Whose package list a gate reads: the signed-in user and the active
+ * organization. An organization switch that stays inside the page changes it,
+ * and so does a sign-in as someone else.
+ */
+function usePackageListSession(): string {
+  const { user, activeOrganization } = useAuth();
+  return JSON.stringify([user?.id ?? null, activeOrganization?.id ?? null]);
+}
+
+/**
+ * The posture for `packageId`, read once per id and session. It carries the id
+ * and session it answers for, so an answer for the previous app (or the
+ * previous organization) is never read as this one's.
  */
 function usePackagePosture(packageId: string | null): StudioPosture | null {
-  const [verdict, setVerdict] = useState<{ packageId: string; posture: StudioPosture | null } | null>(null);
+  const session = usePackageListSession();
+  const [verdict, setVerdict] = useState<{
+    packageId: string;
+    session: string;
+    posture: StudioPosture | null;
+  } | null>(null);
   useEffect(() => {
     if (packageId === null) return undefined;
     let cancelled = false;
-    fetchPackages().then(
+    fetchSessionPackages(session, packageId).then(
       (packages) => {
-        if (!cancelled) setVerdict({ packageId, posture: packageStudioPosture(packages, packageId) });
+        if (!cancelled) setVerdict({ packageId, session, posture: packageStudioPosture(packages, packageId) });
       },
       () => {
-        if (!cancelled) setVerdict({ packageId, posture: null });
+        if (!cancelled) setVerdict({ packageId, session, posture: null });
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [packageId]);
-  return packageId !== null && verdict?.packageId === packageId ? verdict.posture : null;
+  }, [packageId, session]);
+  return packageId !== null && verdict?.packageId === packageId && verdict.session === session
+    ? verdict.posture
+    : null;
 }
 
 /**

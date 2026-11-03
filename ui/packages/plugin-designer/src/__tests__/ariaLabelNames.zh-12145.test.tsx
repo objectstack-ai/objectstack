@@ -12,8 +12,7 @@
  * hears the zh pack's words:
  *
  *  - `HistoryPanel`'s undo / redo buttons: `designer.undo` / `designer.redo`;
- *  - `Minimap`'s image: `designer.canvasMinimap`;
- *  - `VersionHistory`'s region: `designer.versionHistory`.
+ *  - `Minimap`'s image: `designer.canvasMinimap`.
  *
  * (`DashboardDesignPage`'s back button reads `detail.goBack` through the same
  * hook.) Every name is read against the PACK, never against a literal.
@@ -26,7 +25,6 @@ import { I18nProvider } from '@object-ui/i18n';
 import { en, zh } from '@object-ui/i18n/locales';
 import { HistoryPanel } from '../components/HistoryPanel';
 import { Minimap } from '../components/Minimap';
-import { VersionHistory } from '../components/VersionHistory';
 import type { UndoRedoState } from '../hooks/useUndoRedo';
 
 afterEach(cleanup);
@@ -52,17 +50,15 @@ const designerChrome = () => (
   <>
     <HistoryPanel history={history} />
     <Minimap items={[]} canvasWidth={300} canvasHeight={200} />
-    <VersionHistory versions={[]} />
   </>
 );
 
-type Names = { undo: string; redo: string; canvasMinimap: string; versionHistory: string };
+type Names = { undo: string; redo: string; canvasMinimap: string };
 
 function expectNamed(names: Names) {
   expect(screen.getByRole('button', { name: names.undo })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: names.redo })).toBeInTheDocument();
   expect(screen.getByRole('img', { name: names.canvasMinimap })).toBeInTheDocument();
-  expect(screen.getByRole('region', { name: names.versionHistory })).toBeInTheDocument();
 }
 
 describe('designer chrome is named from the pack (objectui#12145)', () => {
@@ -72,7 +68,7 @@ describe('designer chrome is named from the pack (objectui#12145)', () => {
   });
 
   it('under zh, each is named by the zh pack, not by the English words', async () => {
-    for (const k of ['undo', 'redo', 'canvasMinimap', 'versionHistory'] as const) {
+    for (const k of ['undo', 'redo', 'canvasMinimap'] as const) {
       expect(zh.designer[k]).not.toBe(en.designer[k]);
     }
     render(
@@ -80,7 +76,7 @@ describe('designer chrome is named from the pack (objectui#12145)', () => {
         {designerChrome()}
       </I18nProvider>,
     );
-    await screen.findByRole('region', { name: zh.designer.versionHistory });
+    await screen.findByRole('img', { name: zh.designer.canvasMinimap });
     expectNamed(zh.designer);
     expect(screen.queryByRole('button', { name: en.designer.undo })).toBeNull();
   });

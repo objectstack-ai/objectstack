@@ -31,10 +31,17 @@
 //     that locale's wording, `DELETE ?member=zh-CN` resets that locale alone
 //     and, after a cold boot, each locale serves the expected wording; a
 //     misspelled or misplaced selector is a located 400.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// both locales are saved into the showcase's `.custom` pair: `en-US`, the
+// member the base ships, declares the override; `zh-CN`, which the base does
+// not ship, is the pair's own member and declares none (#28746), listed and
+// sent on the base's address (#28828). The reset names the pair too.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -47,6 +54,7 @@ const SYS = { isSystem: true, positions: [], permissions: [] };
 
 /** The template the showcase package declares (`com.example.showcase`), in `en-US`. */
 const NAME = 'showcase_task_done_email';
+const BASE = 'com.example.showcase';
 const PACKAGE_SUBJECT = '✅ Task done: {{title}}';
 const ADMIN_EN = 'Done (admin, English): {{title}}';
 const ADMIN_ZH = '已完成（管理员中文）：{{title}}';
@@ -105,6 +113,12 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
             .map((r) => ({ member: r.bundle_member ?? null, subject: JSON.parse(String(r.metadata)).subject }))
             .sort((a, b) => String(a.member).localeCompare(String(b.member)));
     };
+    /** A save of one locale into the pair: the shipped `en-US` declares the override, another locale is the pair's own member. */
+    const saveLocale = (served: Record<string, unknown>, locale: string, subject: string) => {
+        const { overrides: _declared, ...doc }: Record<string, unknown> = { ...served, locale, subject };
+        return call('PUT', inPair(`/meta/email_template/${NAME}`, BASE),
+            locale === 'en-US' ? declaredOverride(doc, BASE, '0.1.0') : doc);
+    };
     const restart = async () => {
         await stack!.stop();
         stack = await boot(dbFile);
@@ -118,6 +132,7 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         dbFile = join(dir, 'showcase.db');
         stack = await boot(dbFile);
         token = await stack.signIn();
+        await ensurePair(stack, token, BASE);
     }, 180_000);
 
     afterAll(async () => {
@@ -131,9 +146,9 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         expect(served.status).toBe(200);
         expect(served.body.subject).toBe(PACKAGE_SUBJECT);
 
-        const en = await call('PUT', `/meta/email_template/${NAME}`, { ...served.body, locale: 'en-US', subject: ADMIN_EN });
+        const en = await saveLocale(served.body, 'en-US', ADMIN_EN);
         expect(en.status, JSON.stringify(en.json)).toBe(200);
-        const zh = await call('PUT', `/meta/email_template/${NAME}`, { ...served.body, locale: 'zh-CN', subject: ADMIN_ZH });
+        const zh = await saveLocale(served.body, 'zh-CN', ADMIN_ZH);
         expect(zh.status, JSON.stringify(zh.json)).toBe(200);
 
         expect(await overlayRows()).toEqual([
@@ -159,7 +174,7 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         expect(await sendSubject('ja-JP')).toBe('Done (admin, English): Ship it');
 
         const served = await metaBody();
-        const again = await call('PUT', `/meta/email_template/${NAME}`, { ...served.body, locale: 'zh-CN', subject: ADMIN_ZH.replace('：', '（二）：') });
+        const again = await saveLocale(served.body, 'zh-CN', ADMIN_ZH.replace('：', '（二）：'));
         expect(again.status, JSON.stringify(again.json)).toBe(200);
         expect((await overlayRows()).map((r) => r.member)).toEqual([null, 'zh-CN']);
 
@@ -173,7 +188,7 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         expect(await metaBody('?member=zh-CN')).toMatchObject({ status: 200, body: { subject: ADMIN_ZH.replace('：', '（二）：') } });
         expect(await metaBody('?member=en-US')).toMatchObject({ status: 200, body: { subject: ADMIN_EN } });
 
-        const reset = await call('DELETE', `/meta/email_template/${NAME}?member=zh-CN`);
+        const reset = await call('DELETE', inPair(`/meta/email_template/${NAME}?member=zh-CN`, BASE));
         expect(reset.status, JSON.stringify(reset.json)).toBe(200);
         expect(reset.json).toMatchObject({ success: true, reset: true });
         expect(await overlayRows()).toEqual([{ member: null, subject: ADMIN_EN }]);

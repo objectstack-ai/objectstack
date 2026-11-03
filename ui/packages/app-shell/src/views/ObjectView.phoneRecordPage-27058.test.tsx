@@ -15,9 +15,10 @@
  *    way;
  *  - a `?recordId=` link (a shared pane URL) is replaced by the record page,
  *    so Back does not return to a URL that reopens it;
- *  - a reader's split or drawer preference draws nothing on a phone, and the
+ *  - a reader's drawer or page preference draws nothing on a phone, and the
  *    Display menu has no Open records section to set one;
- *  - control: at 1440 px the same `?recordId=` opens the pane beside the list.
+ *  - control: at 1440 px the same `?recordId=` opens the drawer over the list
+ *    (the split pane beside it retired, objectstack#28915).
  *
  * The record body is not what this file reads, so `RecordDetailView` is a
  * null sink.
@@ -215,7 +216,7 @@ describe('on a phone a record opens as a page, always (objectstack#27058)', () =
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it.each([['split'], ['drawer']])('a reader who prefers %s: nothing is drawn beside the list, and the Display menu offers no Open records', async (preference) => {
+  it.each([['drawer'], ['page']])('a reader who prefers %s: nothing is drawn beside the list, and the Display menu offers no Open records', async (preference) => {
     window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, preference);
     setWidth(PHONE_WIDTH);
     mountList();
@@ -232,10 +233,11 @@ describe('on a phone a record opens as a page, always (objectstack#27058)', () =
     expect(window.localStorage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe(preference);
   });
 
-  it('control: at 1440 px the same ?recordId= opens the pane beside the list', async () => {
+  it('control: at 1440 px the same ?recordId= opens the drawer over the list', async () => {
     setWidth(DESKTOP_WIDTH);
     mountList('?recordId=r2');
-    await screen.findByTestId('record-split-pane', undefined, { timeout: 5000 });
+    await screen.findByRole('dialog', undefined, { timeout: 5000 });
+    expect(screen.getByTestId('record-list-host')).toBeTruthy();
     expect(location()).toBe(`${LIST_PATH}?recordId=r2`);
     expect(screen.queryByTestId('record-page-route')).toBeNull();
   });

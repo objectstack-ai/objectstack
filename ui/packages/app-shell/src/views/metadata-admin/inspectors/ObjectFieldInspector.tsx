@@ -94,6 +94,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from '@object-ui/components';
 import { Plus, X, ArrowUp, ArrowDown, Copy, AlertTriangle } from 'lucide-react';
 import { InspectorComboField, type InspectorComboOption } from './InspectorComboField.js';
@@ -108,6 +112,7 @@ import {
   type FieldsView,
   type FieldEntry,
 } from '../previews/object-fields-io.js';
+import { romanizeHan, useHanRomanizer, useWhenRomanizerLands } from '../romanizeHan.js';
 import {
   FIELD_TYPE_META,
   type FieldTypeId,
@@ -484,6 +489,17 @@ function isLookup(type: string): boolean {
 }
 
 /**
+ * The two types `FieldSchema` accepts `referenceNameVisible` on (objectstack#29171,
+ * ruling 6574398310 letter B): a `lookup`, and a `user` field (the `sys_user`
+ * reference). Every other type is refused the key at parse, an authored
+ * `false` included, `master_detail` and `tree` among them — which is why the
+ * toggle is offered here and the key is dropped by a retype to anything else.
+ */
+function offersReferenceNameVisible(type: string): boolean {
+  return type === 'lookup' || type === 'user';
+}
+
+/**
  * objectui#11786 — what the object write guard holds this field for: its
  * options (a choice type with no option source) or its target (a relationship
  * with no usable `reference`), else nothing. Asked of the guard itself, on the
@@ -711,6 +727,51 @@ function displayPatchSentence(locale: SupportedLocale): string {
 }
 
 /**
+ * The reason a base field's locked controls give in display-patch mode: the
+ * whitelist sentence and the id of the element that shows it. `null` when no
+ * control here is locked for that reason — every other mode, and a read-only
+ * rail, whose host already describes the whole rail body (objectui#12303).
+ */
+const DisplayPatchReasonContext = React.createContext<{ id: string; text: string } | null>(null);
+
+/**
+ * A locked control of a base field, explained (objectstack#28986). In
+ * display-patch mode the rail stays writable for the whitelist, so the host's
+ * read-only rail wrapper is not drawn, and a natively disabled control takes
+ * neither hover nor focus. Each locked control (or row of them) therefore sits
+ * in its own tab stop, described by the whitelist sentence and showing it as a
+ * tooltip on hover and focus: the Archive pattern of `DeclaredActionsBar`
+ * (objectui#11811). An editable whitelisted control is never wrapped, so it
+ * carries no leftover reason. Outside that mode this renders its children
+ * as they are; `className` styles the wrapper only.
+ */
+function DisplayPatchLock({ children, className }: { children: React.ReactNode; className?: string }) {
+  const reason = React.useContext(DisplayPatchReasonContext);
+  if (!reason) return <>{children}</>;
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            role="group"
+            tabIndex={0}
+            aria-describedby={reason.id}
+            data-disabled-reason=""
+            data-testid="field-base-patch-locked"
+            className={`rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${className ?? ''}`}
+          >
+            {children}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="left" align="start" className="max-w-xs">
+          {reason.text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/**
  * The CEL editors this inspector mounts, as aggregation keys. Errors are
  * counted PER SITE rather than into one running total: the four editors lint
  * independently and asynchronously, so a single shared counter would let
@@ -734,6 +795,10 @@ export function ObjectFieldInspector({
   const name = String(selection.id);
   const idx = indexOfField(view, name);
   const entry = idx >= 0 ? view.entries[idx] : null;
+  // A Chinese Label derives the API name through its pinyin (`romanizeHan`);
+  // the dictionary starts loading as soon as the Label holds a Chinese
+  // character, so the keystrokes after it derive.
+  useHanRomanizer(typeof entry?.def.label === 'string' ? entry.def.label : '');
   // The formula editor's field picker lists siblings by the label every other
   // surface shows them with (the same resolver as `LabelTranslationHint`).
   const { fieldLabel } = useSafeFieldLabel();
@@ -829,6 +894,14 @@ export function ObjectFieldInspector({
   const ddlLocked = locked || !!external;
   const whitelisted = (key: string) => (BASE_FIELD_DISPLAY_WHITELIST.field as readonly string[]).includes(key);
   const displayLocked = (key: string) => readOnly || (displayPatchOnly && !whitelisted(key));
+  // objectstack#28986 — the sentence is also the reason every locked control
+  // gives (`DisplayPatchLock`); on a read-only rail the host gives its own.
+  const displayPatchReasonId = React.useId();
+  const displayPatchReasonText = displayPatchOnly ? displayPatchSentence(locale) : '';
+  const displayPatchReason = React.useMemo(
+    () => (displayPatchOnly && !readOnly ? { id: displayPatchReasonId, text: displayPatchReasonText } : null),
+    [displayPatchOnly, readOnly, displayPatchReasonId, displayPatchReasonText],
+  );
 
   /* ─── Blocking CEL verdicts → the host's Save gate (objectui#4306) ─────
    *
@@ -1022,7 +1095,10 @@ export function ObjectFieldInspector({
       Array.isArray(def.options)
       && !takesOptionKind(nextType, def.multiple)
       && withoutOptionKinds(def.options).some((o, i) => o !== (def.options as unknown[])[i]);
-    if (keepsPicklist && !dropsKinds) {
+    // The spec refuses `referenceNameVisible` off `lookup` / `user`, `false`
+    // included, so a retype to any other type removes the key outright.
+    const dropsNameVisible = 'referenceNameVisible' in def && !offersReferenceNameVisible(nextType);
+    if (keepsPicklist && !dropsKinds && !dropsNameVisible) {
       patchDef(requireMaster ? { type: nextType, required: true } : { type: nextType });
       return;
     }
@@ -1030,10 +1106,28 @@ export function ObjectFieldInspector({
     if (requireMaster) nextDef.required = true;
     if (!keepsPicklist) delete nextDef.picklist;
     if (dropsKinds) nextDef.options = withoutOptionKinds(def.options as unknown[]);
+    if (dropsNameVisible) delete nextDef.referenceNameVisible;
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: nextDef };
     writeView({ shape: view.shape, entries: nextEntries });
   };
+
+  /**
+   * The declared name exposure, offered on `lookup` (beside its picker config)
+   * and on `user`. Checking writes `true`; clearing removes the key, so an
+   * unset field carries no `referenceNameVisible` at all.
+   */
+  const nameVisibleToggle = (
+    <DisplayPatchLock>
+      <ReferenceNameVisibleField
+        value={def.referenceNameVisible === true}
+        divided={type === 'lookup'}
+        onCommit={(on) => (on ? patchDef({ referenceNameVisible: true }) : unsetDefKey('referenceNameVisible'))}
+        disabled={locked}
+        locale={locale}
+      />
+    </DisplayPatchLock>
+  );
 
   /** The names the object's other fields carry: what the API name box refuses. */
   const takenNames = view.entries.filter((_, i) => i !== idx).map((e) => e.name);
@@ -1070,8 +1164,11 @@ export function ObjectFieldInspector({
   // toFieldNameLoose (prefix-stable, unlike slugify which trims trailing
   // underscores and would fight mid-word typing) — while the name is still
   // an auto-generated default and the user hasn't customised it. Mirrors the
-  // object/app Name behaviour. toFieldNameLoose returns '' for non-Latin
-  // labels, in which case the unique default name is kept. Pure — the
+  // object/app Name behaviour. A Chinese label derives through its pinyin
+  // (`romanizeHan`: `客户等级` → `kehu_dengji`); toFieldNameLoose returns ''
+  // for a label that still yields nothing (a Japanese one, or a Chinese one
+  // before the dictionary has landed), in which case the unique default name
+  // is kept. Pure — the
   // caller applies the label and (if any) the derived name in one write,
   // since two separate writeView() calls from the same stale `entry` closure
   // would have the second clobber the first.
@@ -1094,7 +1191,7 @@ export function ObjectFieldInspector({
       // that scheme too, or a type-typed rename right after add never derives.
       /^field_\d+$/.test(entry.name);
     if (!isAutoName) return null;
-    const derived = toFieldNameLoose(label);
+    const derived = toFieldNameLoose(romanizeHan(label));
     if (!derived || derived === entry.name) return null;
     if (view.entries.some((e, i) => i !== idx && e.name === derived)) return null;
     return derived;
@@ -1234,30 +1331,36 @@ export function ObjectFieldInspector({
           <Copy className="h-3.5 w-3.5" />
         </Button>
       )}
-      <InspectorReorderButtons
-        index={idx}
-        total={view.entries.length}
-        onMove={moveTo}
-        disabled={locked}
-      />
+      {view.entries.length > 1 && idx >= 0 && (
+        <DisplayPatchLock className="flex items-center gap-1">
+          <InspectorReorderButtons
+            index={idx}
+            total={view.entries.length}
+            onMove={moveTo}
+            disabled={locked}
+          />
+        </DisplayPatchLock>
+      )}
     </div>
   );
 
   const footer = external ? undefined : (
-    <InspectorRemoveButton
-      label={tFormat('designer.field.remove', locale, {
-        label: typeof def.label === 'string' ? def.label : entry.name,
-      })}
-      onClick={removeField}
-      disabled={locked}
-    />
+    <DisplayPatchLock>
+      <InspectorRemoveButton
+        label={tFormat('designer.field.remove', locale, {
+          label: typeof def.label === 'string' ? def.label : entry.name,
+        })}
+        onClick={removeField}
+        disabled={locked}
+      />
+    </DisplayPatchLock>
   );
 
   const typeMetaLabel = typeMeta ? t(`engine.fieldType.${typeMeta.id}`, locale) : undefined;
   // objectui#11786 — read off the field as it stands, for the hints below.
   const heldNeed = locked ? null : guardHeldNeed(entry.name, def);
 
-  return (
+  const shell = (
     <InspectorShell
       kindLabel={tr('designer.field.kind')}
       title={typeof def.label === 'string' && def.label ? (def.label as string) : entry.name}
@@ -1269,8 +1372,12 @@ export function ObjectFieldInspector({
       {/* Basic */}
       <Section title={tr('designer.field.section.basic')}>
         {displayPatchOnly && (
-          <p data-testid="field-base-patch-only" className="text-[11px] leading-snug text-muted-foreground">
-            {displayPatchSentence(locale)}
+          <p
+            id={displayPatchReasonId}
+            data-testid="field-base-patch-only"
+            className="text-[11px] leading-snug text-muted-foreground"
+          >
+            {displayPatchReasonText}
           </p>
         )}
         {external && (
@@ -1278,14 +1385,16 @@ export function ObjectFieldInspector({
             <ExternalFieldBadge binding={external} state={externalWriteState} locale={locale} />
           </div>
         )}
-        <FieldApiNameInput
-          label={tr('designer.field.apiName')}
-          value={entry.name}
-          takenNames={takenNames}
-          onRename={setKey}
-          disabled={ddlLocked}
-          locale={locale}
-        />
+        <DisplayPatchLock>
+          <FieldApiNameInput
+            label={tr('designer.field.apiName')}
+            value={entry.name}
+            takenNames={takenNames}
+            onRename={setKey}
+            disabled={ddlLocked}
+            locale={locale}
+          />
+        </DisplayPatchLock>
         <InspectorTextField
           label={tr('designer.field.label')}
           value={typeof def.label === 'string' ? (def.label as string) : ''}
@@ -1321,29 +1430,33 @@ export function ObjectFieldInspector({
         />
         {/* objectui#11793 — searchable, grouped by category, an icon and a
             one-line description per type; a choice still goes to `changeType`. */}
-        <FieldTypePicker
-          label={tr('designer.field.type')}
-          value={type}
-          onCommit={changeType}
-          disabled={ddlLocked}
-          locale={locale}
-        />
-        <div className="flex items-center gap-4 pt-1">
-          <InspectorCheckboxField
-            label={tr('designer.field.required')}
-            value={!!def.required}
-            onCommit={(v) => patchDef({ required: v || undefined })}
-            // Locked once it is on: the box can still be ticked on a stored
-            // master that lacks it, never cleared (objectui#12326).
-            disabled={locked || (cbpMasterDetail && def.required === true)}
+        <DisplayPatchLock>
+          <FieldTypePicker
+            label={tr('designer.field.type')}
+            value={type}
+            onCommit={changeType}
+            disabled={ddlLocked}
+            locale={locale}
           />
-          <InspectorCheckboxField
-            label={tr('designer.field.unique')}
-            value={!!def.unique}
-            onCommit={(v) => patchDef({ unique: v || undefined })}
-            disabled={locked}
-          />
-        </div>
+        </DisplayPatchLock>
+        <DisplayPatchLock>
+          <div className="flex items-center gap-4 pt-1">
+            <InspectorCheckboxField
+              label={tr('designer.field.required')}
+              value={!!def.required}
+              onCommit={(v) => patchDef({ required: v || undefined })}
+              // Locked once it is on: the box can still be ticked on a stored
+              // master that lacks it, never cleared (objectui#12326).
+              disabled={locked || (cbpMasterDetail && def.required === true)}
+            />
+            <InspectorCheckboxField
+              label={tr('designer.field.unique')}
+              value={!!def.unique}
+              onCommit={(v) => patchDef({ unique: v || undefined })}
+              disabled={locked}
+            />
+          </div>
+        </DisplayPatchLock>
         {cbpMasterDetail && (
           <p data-testid="field-required-cbp-master" className="text-[11px] text-muted-foreground">
             {tr('designer.field.requiredCbpMaster')}
@@ -1357,14 +1470,16 @@ export function ObjectFieldInspector({
           rows={2}
         />
         {defaultValueKind(type) && (
-          <DefaultValueField
-            kind={defaultValueKind(type)!}
-            value={def.defaultValue}
-            options={offeredOptions}
-            onCommit={(v) => patchDef({ defaultValue: v })}
-            disabled={locked}
-            locale={locale}
-          />
+          <DisplayPatchLock>
+            <DefaultValueField
+              kind={defaultValueKind(type)!}
+              value={def.defaultValue}
+              options={offeredOptions}
+              onCommit={(v) => patchDef({ defaultValue: v })}
+              disabled={locked}
+              locale={locale}
+            />
+          </DisplayPatchLock>
         )}
         <TextareaField
           label={tr('designer.field.helpText')}
@@ -1377,16 +1492,18 @@ export function ObjectFieldInspector({
       </Section>
 
       {/* Type-specific */}
-      {(isPicklist(type) || isLookup(type) || isComputed(type) || isNumeric(type) || isTexty(type) || offersValueDomain(type)) && (
+      {(isPicklist(type) || isLookup(type) || offersReferenceNameVisible(type) || isComputed(type) || isNumeric(type) || isTexty(type) || offersValueDomain(type)) && (
         <Section title={tFormat('designer.field.section.options', locale, { type: typeMetaLabel ?? type })}>
           {isPicklist(type) && (
-            <PicklistSourceField
-              boundPicklist={typeof def.picklist === 'string' ? def.picklist : undefined}
-              roster={picklistRoster}
-              onCommit={bindPicklist}
-              disabled={locked}
-              locale={locale}
-            />
+            <DisplayPatchLock>
+              <PicklistSourceField
+                boundPicklist={typeof def.picklist === 'string' ? def.picklist : undefined}
+                roster={picklistRoster}
+                onCommit={bindPicklist}
+                disabled={locked}
+                locale={locale}
+              />
+            </DisplayPatchLock>
           )}
           {isPicklist(type) && def.picklist !== undefined && (
             <BoundPicklistOptions
@@ -1414,186 +1531,209 @@ export function ObjectFieldInspector({
           {heldNeed === 'options' && <HeldHint>{tr('designer.field.hint.addOption')}</HeldHint>}
           {isLookup(type) && (
             <>
-              <ObjectPicker
-                label={tr('designer.field.relatedObject')}
-                value={typeof def.reference === 'string' ? (def.reference as string) : ''}
-                onCommit={(v) => patchDef({ reference: v || undefined })}
-                disabled={locked}
-                placeholder={tr('designer.field.objectNamePlaceholder')}
-                locale={locale}
-              />
+              <DisplayPatchLock>
+                <ObjectPicker
+                  label={tr('designer.field.relatedObject')}
+                  value={typeof def.reference === 'string' ? (def.reference as string) : ''}
+                  onCommit={(v) => patchDef({ reference: v || undefined })}
+                  disabled={locked}
+                  placeholder={tr('designer.field.objectNamePlaceholder')}
+                  locale={locale}
+                />
+              </DisplayPatchLock>
               {heldNeed === 'target' && <HeldHint>{tr('designer.field.hint.pickTarget')}</HeldHint>}
-              <LookupConfigFields
-                def={def}
-                patchDef={patchDef}
-                hostFieldNames={view.entries.map((e) => e.name).filter((n) => n !== entry.name)}
-                readOnly={locked}
-                locale={locale}
-              />
-              {(type === 'lookup' || type === 'master_detail') && (
-                <RelatedListFields
+              <DisplayPatchLock>
+                <LookupConfigFields
                   def={def}
                   patchDef={patchDef}
-                  unsetDefKey={unsetDefKey}
-                  ownFields={view.entries}
+                  hostFieldNames={view.entries.map((e) => e.name).filter((n) => n !== entry.name)}
                   readOnly={locked}
                   locale={locale}
                 />
+              </DisplayPatchLock>
+              {type === 'lookup' && nameVisibleToggle}
+              {(type === 'lookup' || type === 'master_detail') && (
+                <DisplayPatchLock>
+                  <RelatedListFields
+                    def={def}
+                    patchDef={patchDef}
+                    unsetDefKey={unsetDefKey}
+                    ownFields={view.entries}
+                    readOnly={locked}
+                    locale={locale}
+                  />
+                </DisplayPatchLock>
               )}
             </>
           )}
+          {/* A `user` field's target is always `sys_user`: no picker config, only this key. */}
+          {type === 'user' && nameVisibleToggle}
           {type === 'formula' && (
-            <CelPredicateField
-              id={`field-formula-${entry.name}`}
-              label={tr('designer.field.formula')}
-              // Legacy alias: older Studio drafts carry a `formula` key the
-              // engine never reads (it computes from `expression`); it seeds
-              // the editor and the first edit migrates it.
-              value={readPredicate(def.expression ?? def.formula)}
-              onChange={(v) => {
-                formulaEdited.current = true;
-                // The edit commits `expression` and the next definition is
-                // built WITHOUT the legacy `formula` key (objectui#12681): a
-                // `formula: undefined` patch would leave an own key on the
-                // draft, and the spec check reports a present `formula` as the
-                // retired key on a field that carries none — on every edit.
-                const { formula: legacyFormula, ...rest } = def;
-                writeDef({
-                  ...rest,
-                  expression: writePredicate(def.expression ?? legacyFormula, v),
-                  ...(v.trim() ? {} : { returnType: undefined }),
-                });
-              }}
-              onLintChange={(issues) => {
-                reportCel('formula', issues);
-                settleFormulaType({ errors: issues.filter((i) => i.severity === 'error').length });
-              }}
-              onInferredTypeChange={(inferred) => settleFormulaType({ typed: true, inferred })}
-              disabled={locked}
-              placeholder="record.amount * 0.2"
-              objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
-              // A formula may reference every sibling, not itself (circular).
-              fieldNames={view.entries.map((e) => e.name).filter((n) => n !== entry.name)}
-              fieldOptions={view.entries
-                .filter((e) => e.name !== entry.name)
-                .map((e) => {
-                  const source = typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name;
-                  const objectName = typeof (draft as any).name === 'string' ? ((draft as any).name as string) : '';
-                  return { name: e.name, label: objectName ? fieldLabel(objectName, e.name, source) : source };
-                })}
-              scope="record"
-              roots={FORMULA_ROOTS}
-              role="value"
-              t={tr}
-            />
+            <DisplayPatchLock>
+              <CelPredicateField
+                id={`field-formula-${entry.name}`}
+                label={tr('designer.field.formula')}
+                // Legacy alias: older Studio drafts carry a `formula` key the
+                // engine never reads (it computes from `expression`); it seeds
+                // the editor and the first edit migrates it.
+                value={readPredicate(def.expression ?? def.formula)}
+                onChange={(v) => {
+                  formulaEdited.current = true;
+                  // The edit commits `expression` and the next definition is
+                  // built WITHOUT the legacy `formula` key (objectui#12681): a
+                  // `formula: undefined` patch would leave an own key on the
+                  // draft, and the spec check reports a present `formula` as the
+                  // retired key on a field that carries none — on every edit.
+                  const { formula: legacyFormula, ...rest } = def;
+                  writeDef({
+                    ...rest,
+                    expression: writePredicate(def.expression ?? legacyFormula, v),
+                    ...(v.trim() ? {} : { returnType: undefined }),
+                  });
+                }}
+                onLintChange={(issues) => {
+                  reportCel('formula', issues);
+                  settleFormulaType({ errors: issues.filter((i) => i.severity === 'error').length });
+                }}
+                onInferredTypeChange={(inferred) => settleFormulaType({ typed: true, inferred })}
+                disabled={locked}
+                placeholder="record.amount * 0.2"
+                objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
+                // A formula may reference every sibling, not itself (circular).
+                fieldNames={view.entries.map((e) => e.name).filter((n) => n !== entry.name)}
+                fieldOptions={view.entries
+                  .filter((e) => e.name !== entry.name)
+                  .map((e) => {
+                    const source = typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name;
+                    const objectName = typeof (draft as any).name === 'string' ? ((draft as any).name as string) : '';
+                    return { name: e.name, label: objectName ? fieldLabel(objectName, e.name, source) : source };
+                  })}
+                scope="record"
+                roots={FORMULA_ROOTS}
+                role="value"
+                t={tr}
+              />
+            </DisplayPatchLock>
           )}
           {type === 'summary' && (
-            <SummaryConfigFields
-              def={def}
-              patchDef={patchDef}
-              readOnly={locked}
-              locale={locale}
-            />
+            <DisplayPatchLock>
+              <SummaryConfigFields
+                def={def}
+                patchDef={patchDef}
+                readOnly={locked}
+                locale={locale}
+              />
+            </DisplayPatchLock>
           )}
           {isNumeric(type) && (
-            <div className="grid grid-cols-2 gap-2">
-              <InspectorNumberField
-                label={tr('designer.field.precision')}
-                value={typeof def.precision === 'number' ? (def.precision as number) : undefined}
-                onCommit={(v) => patchDef({ precision: v })}
-                disabled={locked}
-              />
-              {offersScale(type) && (
+            <DisplayPatchLock>
+              <div className="grid grid-cols-2 gap-2">
                 <InspectorNumberField
-                  label={tr('designer.field.scale')}
-                  value={typeof def.scale === 'number' ? (def.scale as number) : undefined}
-                  onCommit={(v) => patchDef({ scale: v })}
+                  label={tr('designer.field.precision')}
+                  value={typeof def.precision === 'number' ? (def.precision as number) : undefined}
+                  onCommit={(v) => patchDef({ precision: v })}
                   disabled={locked}
                 />
-              )}
-              <InspectorNumberField
-                label={tr('designer.field.min')}
-                value={typeof def.min === 'number' ? (def.min as number) : undefined}
-                onCommit={(v) => patchDef({ min: v })}
-                disabled={locked}
-              />
-              <InspectorNumberField
-                label={tr('designer.field.max')}
-                value={typeof def.max === 'number' ? (def.max as number) : undefined}
-                onCommit={(v) => patchDef({ max: v })}
-                disabled={locked}
-              />
-            </div>
+                {offersScale(type) && (
+                  <InspectorNumberField
+                    label={tr('designer.field.scale')}
+                    value={typeof def.scale === 'number' ? (def.scale as number) : undefined}
+                    onCommit={(v) => patchDef({ scale: v })}
+                    disabled={locked}
+                  />
+                )}
+                <InspectorNumberField
+                  label={tr('designer.field.min')}
+                  value={typeof def.min === 'number' ? (def.min as number) : undefined}
+                  onCommit={(v) => patchDef({ min: v })}
+                  disabled={locked}
+                />
+                <InspectorNumberField
+                  label={tr('designer.field.max')}
+                  value={typeof def.max === 'number' ? (def.max as number) : undefined}
+                  onCommit={(v) => patchDef({ max: v })}
+                  disabled={locked}
+                />
+              </div>
+            </DisplayPatchLock>
           )}
           {(type === 'currency' || (type === 'formula' && def.returnType === 'currency')) && (
-            <CurrencyConfigField
-              config={def.currencyConfig as CurrencyConfigDraft | undefined}
-              candidates={currencyCodeFieldCandidates(view.entries, name)}
-              onCommit={(next) => patchDef({ currencyConfig: next })}
-              onCreateCodeField={createCurrencyCodeField}
-              disabled={locked}
-              tr={tr}
-            />
+            <DisplayPatchLock>
+              <CurrencyConfigField
+                config={def.currencyConfig as CurrencyConfigDraft | undefined}
+                candidates={currencyCodeFieldCandidates(view.entries, name)}
+                onCommit={(next) => patchDef({ currencyConfig: next })}
+                onCreateCodeField={createCurrencyCodeField}
+                disabled={locked}
+                tr={tr}
+              />
+            </DisplayPatchLock>
           )}
           {isTexty(type) && (
-            <div className="grid grid-cols-2 gap-2">
-              <InspectorNumberField
-                label={tr('designer.field.minLength')}
-                value={typeof def.minLength === 'number' ? (def.minLength as number) : undefined}
-                onCommit={(v) => patchDef({ minLength: v })}
-                disabled={locked}
-                placeholder="0"
-              />
-              <InspectorNumberField
-                label={tr('designer.field.maxLength')}
-                value={typeof def.maxLength === 'number' ? (def.maxLength as number) : undefined}
-                onCommit={(v) => patchDef({ maxLength: v })}
-                disabled={locked}
-                placeholder="255"
-              />
-            </div>
+            <DisplayPatchLock>
+              <div className="grid grid-cols-2 gap-2">
+                <InspectorNumberField
+                  label={tr('designer.field.minLength')}
+                  value={typeof def.minLength === 'number' ? (def.minLength as number) : undefined}
+                  onCommit={(v) => patchDef({ minLength: v })}
+                  disabled={locked}
+                  placeholder="0"
+                />
+                <InspectorNumberField
+                  label={tr('designer.field.maxLength')}
+                  value={typeof def.maxLength === 'number' ? (def.maxLength as number) : undefined}
+                  onCommit={(v) => patchDef({ maxLength: v })}
+                  disabled={locked}
+                  placeholder="255"
+                />
+              </div>
+            </DisplayPatchLock>
           )}
           {offersValueDomain(type) && (
-            <InspectorSelectField
-              label={tr('designer.field.valueDomain')}
-              value={typeof def.valueDomain === 'string' ? (def.valueDomain as string) : ''}
-              options={[
-                { value: '', label: tr('designer.field.valueDomainNone') },
-                ...VALUE_DOMAIN_OPTIONS,
-              ]}
-              // Unset DELETES the key. `FieldSchema` refuses both `null` and
-              // `''` for `valueDomain` (`invalid_value`), and a present key is
-              // a declaration the write path enforces — "no domain" is the
-              // key's absence, never a value of it (objectui#7597).
-              onCommit={(v) => (v ? patchDef({ valueDomain: v }) : unsetDefKey('valueDomain'))}
-              disabled={locked}
-            />
+            <DisplayPatchLock>
+              <InspectorSelectField
+                label={tr('designer.field.valueDomain')}
+                value={typeof def.valueDomain === 'string' ? (def.valueDomain as string) : ''}
+                options={[
+                  { value: '', label: tr('designer.field.valueDomainNone') },
+                  ...VALUE_DOMAIN_OPTIONS,
+                ]}
+                // Unset DELETES the key. `FieldSchema` refuses both `null` and
+                // `''` for `valueDomain` (`invalid_value`), and a present key is
+                // a declaration the write path enforces — "no domain" is the
+                // key's absence, never a value of it (objectui#7597).
+                onCommit={(v) => (v ? patchDef({ valueDomain: v }) : unsetDefKey('valueDomain'))}
+                disabled={locked}
+              />
+            </DisplayPatchLock>
           )}
         </Section>
       )}
 
       {/* Advanced */}
       <Section title={tr('designer.field.section.advanced')}>
-        <div className="grid grid-cols-2 gap-2">
-          <InspectorCheckboxField
-            label={tr('designer.field.readonly')}
-            value={!!def.readonly}
-            onCommit={(v) => patchDef({ readonly: v || undefined })}
-            disabled={locked}
-          />
-          <InspectorCheckboxField
-            label={tr('designer.field.hidden')}
-            value={!!def.hidden}
-            onCommit={(v) => patchDef({ hidden: v || undefined })}
-            disabled={locked}
-          />
-          <InspectorCheckboxField
-            label={tr('designer.field.trackHistory')}
-            value={!!def.trackHistory}
-            onCommit={(v) => patchDef({ trackHistory: v || undefined })}
-            disabled={locked}
-          />
-        </div>
+        <DisplayPatchLock>
+          <div className="grid grid-cols-2 gap-2">
+            <InspectorCheckboxField
+              label={tr('designer.field.readonly')}
+              value={!!def.readonly}
+              onCommit={(v) => patchDef({ readonly: v || undefined })}
+              disabled={locked}
+            />
+            <InspectorCheckboxField
+              label={tr('designer.field.hidden')}
+              value={!!def.hidden}
+              onCommit={(v) => patchDef({ hidden: v || undefined })}
+              disabled={locked}
+            />
+            <InspectorCheckboxField
+              label={tr('designer.field.trackHistory')}
+              value={!!def.trackHistory}
+              onCommit={(v) => patchDef({ trackHistory: v || undefined })}
+              disabled={locked}
+            />
+          </div>
+        </DisplayPatchLock>
         <InspectorTextField
           label={tr('designer.field.placeholder')}
           value={typeof def.placeholder === 'string' ? (def.placeholder as string) : ''}
@@ -1602,91 +1742,98 @@ export function ObjectFieldInspector({
         />
         {/* Conditional rules (ADR-0036 B2) — CEL editors with live lint +
             field autocomplete against THIS object's fields (objectui#1582). */}
-        <div className="space-y-2 border-t pt-2.5">
-          <div className="text-[11px] font-medium text-muted-foreground">
-            {tr('designer.field.conditionalRules')}
+        <DisplayPatchLock>
+          <div className="space-y-2 border-t pt-2.5">
+            <div className="text-[11px] font-medium text-muted-foreground">
+              {tr('designer.field.conditionalRules')}
+            </div>
+            <CelPredicateField
+              id={`field-rule-visible-${entry.name}`}
+              label={tr('designer.field.visibleWhen')}
+              value={readPredicate(def.visibleWhen)}
+              onChange={(v) => patchDef({ visibleWhen: writePredicate(def.visibleWhen, v) })}
+              onLintChange={(issues) => reportCel('visibleWhen', issues)}
+              disabled={locked}
+              placeholder="record.status != 'draft'"
+              objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
+              fieldNames={view.entries.map((e) => e.name)}
+              scope="record"
+              roots={FIELD_RULE_ROOTS}
+              // The authored key, so the wrong-layer advisory reads the
+              // platform's published per-slot verdict (`e3cb47624`). Sound
+              // here because `FIELD_RULE_ROOTS` above IS that helper's
+              // `FIELD_RULE_BOUND_ROOTS`; the formula editor above deliberately
+              // names no slot, because `FORMULA_ROOTS` is not.
+              slot="visibleWhen"
+              t={tr}
+            />
+            <CelPredicateField
+              id={`field-rule-readonly-${entry.name}`}
+              label={tr('designer.field.readonlyWhen')}
+              value={readPredicate(def.readonlyWhen)}
+              onChange={(v) => patchDef({ readonlyWhen: writePredicate(def.readonlyWhen, v) })}
+              onLintChange={(issues) => reportCel('readonlyWhen', issues)}
+              disabled={locked}
+              placeholder="record.status == 'closed'"
+              objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
+              fieldNames={view.entries.map((e) => e.name)}
+              scope="record"
+              roots={FIELD_RULE_ROOTS}
+              // The authored key, so the wrong-layer advisory reads the
+              // platform's published per-slot verdict (`e3cb47624`). Sound
+              // here because `FIELD_RULE_ROOTS` above IS that helper's
+              // `FIELD_RULE_BOUND_ROOTS`; the formula editor above deliberately
+              // names no slot, because `FORMULA_ROOTS` is not.
+              slot="readonlyWhen"
+              t={tr}
+            />
+            <CelPredicateField
+              id={`field-rule-required-${entry.name}`}
+              label={tr('designer.field.requiredWhen')}
+              value={readPredicate(def.requiredWhen)}
+              onChange={(v) => patchDef({ requiredWhen: writePredicate(def.requiredWhen, v) })}
+              onLintChange={(issues) => reportCel('requiredWhen', issues)}
+              disabled={locked}
+              placeholder="record.amount > 10000"
+              objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
+              fieldNames={view.entries.map((e) => e.name)}
+              scope="record"
+              roots={FIELD_RULE_ROOTS}
+              // The authored key, so the wrong-layer advisory reads the
+              // platform's published per-slot verdict (`e3cb47624`). Sound
+              // here because `FIELD_RULE_ROOTS` above IS that helper's
+              // `FIELD_RULE_BOUND_ROOTS`; the formula editor above deliberately
+              // names no slot, because `FORMULA_ROOTS` is not.
+              slot="requiredWhen"
+              t={tr}
+            />
+            <p className="text-[11px] text-muted-foreground/80 px-0.5 leading-snug">
+              {tr('designer.field.conditionalRulesHint')}
+            </p>
           </div>
-          <CelPredicateField
-            id={`field-rule-visible-${entry.name}`}
-            label={tr('designer.field.visibleWhen')}
-            value={readPredicate(def.visibleWhen)}
-            onChange={(v) => patchDef({ visibleWhen: writePredicate(def.visibleWhen, v) })}
-            onLintChange={(issues) => reportCel('visibleWhen', issues)}
-            disabled={locked}
-            placeholder="record.status != 'draft'"
-            objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
-            fieldNames={view.entries.map((e) => e.name)}
-            scope="record"
-            roots={FIELD_RULE_ROOTS}
-            // The authored key, so the wrong-layer advisory reads the
-            // platform's published per-slot verdict (`e3cb47624`). Sound
-            // here because `FIELD_RULE_ROOTS` above IS that helper's
-            // `FIELD_RULE_BOUND_ROOTS`; the formula editor above deliberately
-            // names no slot, because `FORMULA_ROOTS` is not.
-            slot="visibleWhen"
-            t={tr}
-          />
-          <CelPredicateField
-            id={`field-rule-readonly-${entry.name}`}
-            label={tr('designer.field.readonlyWhen')}
-            value={readPredicate(def.readonlyWhen)}
-            onChange={(v) => patchDef({ readonlyWhen: writePredicate(def.readonlyWhen, v) })}
-            onLintChange={(issues) => reportCel('readonlyWhen', issues)}
-            disabled={locked}
-            placeholder="record.status == 'closed'"
-            objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
-            fieldNames={view.entries.map((e) => e.name)}
-            scope="record"
-            roots={FIELD_RULE_ROOTS}
-            // The authored key, so the wrong-layer advisory reads the
-            // platform's published per-slot verdict (`e3cb47624`). Sound
-            // here because `FIELD_RULE_ROOTS` above IS that helper's
-            // `FIELD_RULE_BOUND_ROOTS`; the formula editor above deliberately
-            // names no slot, because `FORMULA_ROOTS` is not.
-            slot="readonlyWhen"
-            t={tr}
-          />
-          <CelPredicateField
-            id={`field-rule-required-${entry.name}`}
-            label={tr('designer.field.requiredWhen')}
-            value={readPredicate(def.requiredWhen)}
-            onChange={(v) => patchDef({ requiredWhen: writePredicate(def.requiredWhen, v) })}
-            onLintChange={(issues) => reportCel('requiredWhen', issues)}
-            disabled={locked}
-            placeholder="record.amount > 10000"
-            objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
-            fieldNames={view.entries.map((e) => e.name)}
-            scope="record"
-            roots={FIELD_RULE_ROOTS}
-            // The authored key, so the wrong-layer advisory reads the
-            // platform's published per-slot verdict (`e3cb47624`). Sound
-            // here because `FIELD_RULE_ROOTS` above IS that helper's
-            // `FIELD_RULE_BOUND_ROOTS`; the formula editor above deliberately
-            // names no slot, because `FORMULA_ROOTS` is not.
-            slot="requiredWhen"
-            t={tr}
-          />
-          <p className="text-[11px] text-muted-foreground/80 px-0.5 leading-snug">
-            {tr('designer.field.conditionalRulesHint')}
-          </p>
-        </div>
+        </DisplayPatchLock>
         {fieldGroups.length > 0 && (
-          <InspectorSelectField
-            label={tr('designer.field.group')}
-            value={typeof def.group === 'string' ? (def.group as string) : ''}
-            options={[
-              { value: '', label: tr('designer.field.noGroup') },
-              ...fieldGroups
-                .filter((g) => typeof g.key === 'string')
-                .map((g) => ({ value: g.key as string, label: String(g.label ?? g.key) })),
-            ]}
-            onCommit={(v) => patchDef({ group: v || undefined })}
-            disabled={locked}
-          />
+          <DisplayPatchLock>
+            <InspectorSelectField
+              label={tr('designer.field.group')}
+              value={typeof def.group === 'string' ? (def.group as string) : ''}
+              options={[
+                { value: '', label: tr('designer.field.noGroup') },
+                ...fieldGroups
+                  .filter((g) => typeof g.key === 'string')
+                  .map((g) => ({ value: g.key as string, label: String(g.label ?? g.key) })),
+              ]}
+              onCommit={(v) => patchDef({ group: v || undefined })}
+              disabled={locked}
+            />
+          </DisplayPatchLock>
         )}
       </Section>
     </InspectorShell>
   );
+  // The shell draws the header's reorder pair and the footer's Remove, so the
+  // reason their locks read is provided above it.
+  return <DisplayPatchReasonContext.Provider value={displayPatchReason}>{shell}</DisplayPatchReasonContext.Provider>;
 }
 
 /* ─────────────── Sub-components ─────────────── */
@@ -1953,12 +2100,32 @@ function OptionsEditor({
     commit(next);
   };
   // Only a row this editor added derives its value from its label: renaming an
-  // authored option must never change the value its records store.
+  // authored option must never change the value its records store. A Chinese
+  // label derives through its pinyin (`romanizeHan`: `已完成` → `yi_wancheng`),
+  // the same rule as every Studio create door; without it the
+  // value stayed '' and the row was silently never saved.
+  const deriveValue = (label: string) => toFieldNameOrEmpty(romanizeHan(label));
   const updateLabel = (i: number, label: string) => {
     const row = rows[i];
     if (row?.kind !== 'option') return;
-    update(i, row.derive ? { label, value: toFieldNameOrEmpty(label) } : { label });
+    update(i, row.derive ? { label, value: deriveValue(label) } : { label });
   };
+  // A Chinese label typed before the pinyin dictionary landed left its row's
+  // value empty; once it lands, each such row still deriving takes its value.
+  useWhenRomanizerLands(
+    () => {
+      let changed = false;
+      const next = rows.map((r) => {
+        if (r.kind !== 'option' || !r.derive || r.option.value !== '' || !r.option.label) return r;
+        const value = deriveValue(r.option.label);
+        if (!value) return r;
+        changed = true;
+        return { ...r, option: { ...r.option, value } };
+      });
+      if (changed) commit(next);
+    },
+    ...rows.flatMap((r) => (r.kind === 'option' && r.derive ? [r.option.label ?? ''] : [])),
+  );
   const updateValue = (i: number, value: string) => {
     const next = [...rows];
     const row = next[i];
@@ -2048,7 +2215,9 @@ function OptionsEditor({
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="flex-1" />
-                  {rowControls(i)}
+                  <DisplayPatchLock className="flex items-center gap-1">
+                    {rowControls(i)}
+                  </DisplayPatchLock>
                 </div>
               </div>
             ) : (
@@ -2069,51 +2238,55 @@ function OptionsEditor({
                     data-testid="option-label"
                     className="h-7 min-w-0 flex-1 text-xs"
                   />
-                  <Input
-                    value={row.option.value}
-                    onChange={(e) => updateValue(i, e.target.value)}
-                    placeholder={t('designer.field.optValue', locale)}
-                    aria-label={t('designer.field.optValueName', locale)}
-                    disabled={disabled}
-                    data-testid="option-value"
-                    className="h-7 min-w-0 flex-1 text-xs font-mono"
-                  />
-                </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="color"
-                    value={row.option.color ?? '#cccccc'}
-                    onChange={(e) => update(i, { color: e.target.value })}
-                    disabled={disabled}
-                    className="h-6 w-6 rounded border bg-background cursor-pointer p-0.5"
-                    title={t('designer.field.optColor', locale)}
-                  />
-                  {showKind && (
-                    <Select
-                      value={row.option.kind ?? KIND_UNSET}
-                      onValueChange={(v) => update(i, { kind: isOptionKind(v) ? v : undefined })}
+                  <DisplayPatchLock className="min-w-0 flex-1">
+                    <Input
+                      value={row.option.value}
+                      onChange={(e) => updateValue(i, e.target.value)}
+                      placeholder={t('designer.field.optValue', locale)}
+                      aria-label={t('designer.field.optValueName', locale)}
                       disabled={disabled}
-                    >
-                      <SelectTrigger
-                        data-testid="option-kind"
-                        aria-label={t('designer.field.optKind', locale)}
-                        className="h-6 w-auto gap-1 px-1.5 py-0.5 text-[11px]"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={KIND_UNSET}>{t('designer.field.optKind.unset', locale)}</SelectItem>
-                        {OPTION_KINDS.map((k) => (
-                          <SelectItem key={k} value={k}>
-                            {t(OPTION_KIND_LABEL_KEY[k], locale)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <span className="flex-1" />
-                  {rowControls(i)}
+                      data-testid="option-value"
+                      className="h-7 min-w-0 flex-1 text-xs font-mono"
+                    />
+                  </DisplayPatchLock>
                 </div>
+                <DisplayPatchLock>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="color"
+                      value={row.option.color ?? '#cccccc'}
+                      onChange={(e) => update(i, { color: e.target.value })}
+                      disabled={disabled}
+                      className="h-6 w-6 rounded border bg-background cursor-pointer p-0.5"
+                      title={t('designer.field.optColor', locale)}
+                    />
+                    {showKind && (
+                      <Select
+                        value={row.option.kind ?? KIND_UNSET}
+                        onValueChange={(v) => update(i, { kind: isOptionKind(v) ? v : undefined })}
+                        disabled={disabled}
+                      >
+                        <SelectTrigger
+                          data-testid="option-kind"
+                          aria-label={t('designer.field.optKind', locale)}
+                          className="h-6 w-auto gap-1 px-1.5 py-0.5 text-[11px]"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={KIND_UNSET}>{t('designer.field.optKind.unset', locale)}</SelectItem>
+                          {OPTION_KINDS.map((k) => (
+                            <SelectItem key={k} value={k}>
+                              {t(OPTION_KIND_LABEL_KEY[k], locale)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <span className="flex-1" />
+                    {rowControls(i)}
+                  </div>
+                </DisplayPatchLock>
               </div>
             ),
           )}
@@ -2366,6 +2539,53 @@ function LookupConfigFields({
           <InspectorCheckboxField label={tr('designer.field.lookup.allowCreate')} value={allowCreate} onCommit={(v) => patchDef({ allowCreate: v || undefined })} disabled={readOnly} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ─────────────── Declared name exposure (referenceNameVisible) ─────────────── */
+
+/**
+ * The `referenceNameVisible` checkbox (objectstack#29171, ruling 6574398310
+ * letter B): a reader of this record may see the referenced record's name, as
+ * plain text with no link, when they cannot open that record. Its label and
+ * help text are the generic `field` form's row for the same key, so the two
+ * authoring surfaces describe it in one wording. The help text is the input's
+ * description, not a separate note.
+ */
+function ReferenceNameVisibleField({
+  value,
+  onCommit,
+  disabled,
+  divided,
+  locale,
+}: {
+  value: boolean;
+  onCommit: (on: boolean) => void;
+  disabled?: boolean;
+  /** Ruled off from the controls above it (a lookup's picker config); a `user` field shows it alone. */
+  divided?: boolean;
+  locale?: string;
+}) {
+  const id = React.useId();
+  const helpId = `${id}-help`;
+  return (
+    <div className={divided ? 'space-y-1 border-t pt-2.5' : 'space-y-1'} data-testid="field-reference-name-visible">
+      <label htmlFor={id} className="flex items-center gap-2 text-xs cursor-pointer select-none">
+        <input
+          id={id}
+          type="checkbox"
+          checked={value}
+          disabled={disabled}
+          aria-describedby={helpId}
+          onChange={(e) => onCommit(e.target.checked)}
+          className="h-3.5 w-3.5"
+        />
+        <span>{t('designer.field.lookup.referenceNameVisible', locale)}</span>
+      </label>
+      <p id={helpId} className="text-[10px] leading-snug text-muted-foreground">
+        {t('designer.field.lookup.referenceNameVisible.help', locale)}
+      </p>
     </div>
   );
 }

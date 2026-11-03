@@ -34,8 +34,18 @@
  *
  * Resolution precedence (server-side, never client-trusted):
  *   1. the object's declared `searchableFields` (filtered to entries that exist
- *      AND have a stored column to scan — #6674)
- *   2. an auto-default: the display/name field + short-text and enum fields.
+ *      AND have a stored column to scan — #6674) — the WHOLE set when it is
+ *      non-empty; no field's own `searchable` flag is read on this branch
+ *   2. an auto-default: the display/name field + short-text and enum fields,
+ *      plus every field marked `searchable: true` of any type except the hard
+ *      exclusions ({@link SEARCH_FLAG_EXCLUDED_TYPES}) and a virtual field.
+ *
+ * The flag's half of (2) is the maintainer's ruling on #29008 (ruling record
+ * 6573569376, letter A): `FieldSchema.searchable` is honoured, not retired —
+ * it was a declared, defaulted key that nothing read (ADR-0049), so a field
+ * the served schema called `searchable: true` was neither scanned nor
+ * admitted as a `$searchFields` override. ADR-0061 D2's "Field-level
+ * `searchable` stays pruned" predates the ruling and no longer describes it.
  *
  * An explicit `$searchFields` override is then INTERSECTED with that allowed
  * set — it can narrow the scan, never widen it (`resolveSearchFields`).
@@ -45,6 +55,15 @@
 export interface SearchFieldMeta {
   type?: string;
   hidden?: boolean;
+  /**
+   * The field's own search opt-in (`FieldSchema.searchable`). Read on the
+   * AUTO branch only: with no `searchableFields` declared, `true` brings the
+   * field into the set whatever its type, except
+   * {@link SEARCH_FLAG_EXCLUDED_TYPES} and a virtual field. `false` and absent
+   * are one answer — the key defaults to `false`, so it can widen the
+   * auto-default and never narrows it.
+   */
+  searchable?: boolean;
   options?: Array<{ label?: string; value: unknown } | string> | unknown;
 }
 
@@ -70,15 +89,15 @@ export const SEARCH_AUTO_EXCLUDED_TYPES: ReadonlySet<string> = new Set([
 ]);
 /**
  * [#6674] Field types with NO STORED COLUMN — the value is computed on read, so
- * a `$contains` scan has nothing to look at. Exactly `formula` today.
+ * a substring scan has nothing to look at. Exactly `formula` today.
  *
  * This is a STORAGE fact, not a taste judgment, and that is what separates it
  * from the three vocabularies above. `SEARCH_AUTO_EXCLUDED_TYPES` says "the
  * auto-default does not GUESS this type" — an author may still declare a `json`
- * or `lookup` column in `searchableFields` and the engine executes it (a
- * `$contains` over the stored JSON text, over the stored foreign key), which is
- * a choice that can match. A `formula` entry cannot: the drivers materialize no
- * column for it (`driver-sql/src/schema-drift.ts` `fieldHasColumn`,
+ * or `lookup` column in `searchableFields` and it is admitted, because a stored
+ * column exists (what each then contributes to a search is set out on
+ * {@link resolveSearchFieldResolution}). A `formula` entry is not: the drivers
+ * materialize no column for it (`driver-sql/src/schema-drift.ts` `fieldHasColumn`,
  * `driver-turso/src/remote-transport.ts` "Virtual — no column"), and the engine
  * excludes it from the projection it sends down (`objectql/src/engine.ts`
  * `buildFormulaPlan`) because the driver would fail on the column name.
@@ -94,6 +113,36 @@ export const SEARCH_AUTO_EXCLUDED_TYPES: ReadonlySet<string> = new Set([
  * type must widen this deliberately rather than by drift.
  */
 export const SEARCH_VIRTUAL_TYPES: ReadonlySet<string> = new Set(['formula']);
+
+/**
+ * The HARD exclusions of the field-level opt-in: types a `searchable: true`
+ * never brings into the auto-default (ruling record 6573569376, letter A).
+ *
+ * The flag otherwise admits a field of ANY type — a `code`, `html`, `lookup` or
+ * `json` column is a stored value a `$icontains` scan can match, and the author
+ * asked for it, which is the same choice a declared `searchableFields` entry
+ * makes. These three are refused it anyway, for reasons the author cannot
+ * waive:
+ *
+ * - `secret` / `password` are CREDENTIALS. The engine withholds every
+ *   credential column from the scan whatever the metadata says (ADR-0100), so
+ *   admitting one here would put a name in the #4254 ingress allow-list that
+ *   the engine never scans — the "narrower search answered with a wider one"
+ *   the ingress exists to refuse. `search-fields.test.ts` holds every credential
+ *   type (`MASKED_ON_READ_FIELD_TYPES`) inside this set, as it does for
+ *   `SEARCH_AUTO_EXCLUDED_TYPES`.
+ * - `vector` is an embedding array: a substring match over it means nothing,
+ *   and it is the heaviest column a scan could touch.
+ *
+ * A virtual field ({@link isVirtualSearchField}) is kept out on top of these,
+ * by the storage fact rather than by this set: it has no column to scan.
+ *
+ * Pinned to exactly these three in `search-fields.test.ts`. Exported so the
+ * two enforcement faces that word a refusal for a flagged field (the ingress
+ * gate and the linter) say "never, even marked" from this same set instead of
+ * carrying their own type literal.
+ */
+export const SEARCH_FLAG_EXCLUDED_TYPES: ReadonlySet<string> = new Set(['secret', 'password', 'vector']);
 
 /**
  * Is this field virtual — computed on read, with no stored column for `search`
@@ -124,10 +173,31 @@ export interface SearchFieldResolutionOptions {
   displayField?: string;
 }
 
+/**
+ * Does the field's own `searchable: true` bring it into the auto-default?
+ *
+ * Asked BEFORE the auto-default's own three exclusions (system name, hidden,
+ * type), because it answers a different question: those say what the default
+ * does not GUESS, and the flag is the author saying it outright — the per-field
+ * twin of naming the field in `searchableFields`, which bypasses the same
+ * three. What the flag cannot do is name a type the platform never scans
+ * ({@link SEARCH_FLAG_EXCLUDED_TYPES}) or a field with no stored column
+ * ({@link isVirtualSearchField}). An unreadable `type` is not admitted: the
+ * hard exclusion cannot be judged without it (fail closed), and the lint
+ * mirror's stub metadata (`{}`) for registry-injected columns stays out.
+ */
+function admittedBySearchableFlag(meta: SearchFieldMeta): boolean {
+  return meta.searchable === true
+    && typeof meta.type === 'string'
+    && !SEARCH_FLAG_EXCLUDED_TYPES.has(meta.type)
+    && !isVirtualSearchField(meta);
+}
+
 function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField?: string): string[] {
   const names = Object.keys(fields).filter((f) => {
-    if (SEARCH_AUTO_EXCLUDED_FIELDS.has(f)) return false;
     const meta = fields[f];
+    if (meta && admittedBySearchableFlag(meta)) return true;
+    if (SEARCH_AUTO_EXCLUDED_FIELDS.has(f)) return false;
     if (!meta || meta.hidden) return false;
     const t = meta.type;
     if (!t) return false;
@@ -196,9 +266,11 @@ function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField
  * `declared` when the object's `searchableFields` (filtered to entries the
  * engine can actually scan) is non-empty, `auto` otherwise. The source matters
  * to the #4254 ingress gate because the two rejections it explains differ: a
- * field missing from a declared list is fixed by adding it there, while a field
- * the auto-default skips is excluded by its TYPE and needs `searchableFields`
- * declared to become a target.
+ * field missing from a declared list is fixed by adding it there (its own
+ * `searchable: true` is not read on that branch), while a field the
+ * auto-default skips is excluded by its name, `hidden` or TYPE and becomes a
+ * target by being marked `searchable: true` — unless its type is one of
+ * {@link SEARCH_FLAG_EXCLUDED_TYPES} — or by `searchableFields` being declared.
  *
  * TWO filters run on the declared branch, and they are different claims:
  *
@@ -207,15 +279,26 @@ function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField
  * 2. [#6674] SCANNABILITY — an entry naming a VIRTUAL field
  *    ({@link isVirtualSearchField}) is dropped. The entry names a real field,
  *    passes existence, and can still never match, because the field has no
- *    stored column for `$contains` to scan.
+ *    stored column for a substring scan to read.
  *
  * Filter 2 is deliberately NOT a type allow-list on the declared branch. The
  * declaration remains the author's explicit choice and still bypasses the
- * auto-default's exclusions: a `json` or `lookup` column declared here is
- * executed by the engine as a `$contains` over the stored JSON text / stored
- * foreign key — narrow, rarely useful, but a scan that CAN match. Only "there
- * is no column at all" is refused, which is why the vocabulary is a storage
- * fact rather than a search-quality one.
+ * auto-default's exclusions, so a `lookup` or `json` column declared here is
+ * ADMITTED to the set. What an admitted column then contributes to a search is
+ * the expansion's call (`expandSearchToFilter`, `@objectstack/objectql`), not
+ * this function's:
+ *
+ * - a single-valued `lookup` column becomes an `$icontains` over the stored
+ *   foreign key — narrow, rarely useful, but a scan that can match;
+ * - [#29394] a column whose DECLARED type can never hold a string — the
+ *   text-operator door's `door-refusal` verdict (`textOperatorDoorVerdict`,
+ *   `./filter-text-operator-declared-type`: numeric, boolean, calendar-date,
+ *   instant, clock-time and structured-JSON types such as `json`) —
+ *   contributes NO clause. A set made only of such columns answers no rows:
+ *   never an error, never every row.
+ *
+ * Only "there is no column at all" is refused, which is why the vocabulary is
+ * a storage fact rather than a search-quality one.
  *
  * Why the drop is not the whole fix. Dropping alone would only make the
  * declaration silently NARROWER — the failure mode #4254 exists to close on

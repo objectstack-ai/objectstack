@@ -20,6 +20,14 @@
  * `grant: 'authorization_code'`), and each instance's registry state from
  * `GET /automation/connectors`.
  *
+ * An instance declaring `clientSource: 'installer'` (ADR-0143 D2.1, the
+ * 2026-11-02 amendment) takes the OAuth client the administrator registered
+ * with the vendor: the begin leg sends it as `{ clientId, clientSecret }`,
+ * and the status answers which client the connection keeps
+ * (`client { source, clientId, hasSecret }`), never its secret. The secret
+ * goes into that one request body and nowhere else: it is not returned,
+ * kept, logged or rendered by this module.
+ *
  * ⛔ No token crosses this module: every answer is a `ConnectorConnectionState`,
  * which carries a status, its reason, scopes and dates. The begin leg's
  * `authorizationUrl` carries the `state` and PKCE challenge the server minted;
@@ -49,6 +57,19 @@ export function connectorConnectionsPagePath(): string {
 export interface ConnectableInstance {
   name: string;
   label: string;
+  /**
+   * `true` when the declaration says `clientSource: 'installer'`: the
+   * administrator enters the OAuth client on the connection. Absent for an
+   * instance whose client is declared or registered dynamically.
+   */
+  installerClient?: true;
+}
+
+/** The OAuth client an administrator enters for an installer-client instance. */
+export interface InstallerClientInput {
+  clientId: string;
+  /** Absent for a public client. */
+  clientSecret?: string;
 }
 
 /** A refusal, in the server's own words: rendered, never parsed. */
@@ -100,10 +121,19 @@ function isOk(status: number, payload: unknown): boolean {
 export function readConnectableInstances(payload: unknown): ConnectableInstance[] {
   const out: ConnectableInstance[] = [];
   for (const item of readMetadataItems(payload)) {
-    const i = item as { name?: unknown; label?: unknown; provider?: unknown; auth?: { type?: unknown; grant?: unknown } } | null;
+    const i = item as {
+      name?: unknown;
+      label?: unknown;
+      provider?: unknown;
+      auth?: { type?: unknown; grant?: unknown; clientSource?: unknown };
+    } | null;
     if (typeof i?.name !== 'string' || i.name.length === 0 || typeof i.provider !== 'string') continue;
     if (i.auth?.type !== 'oauth2' || i.auth.grant !== 'authorization_code') continue;
-    out.push({ name: i.name, label: typeof i.label === 'string' && i.label.length > 0 ? i.label : i.name });
+    out.push({
+      name: i.name,
+      label: typeof i.label === 'string' && i.label.length > 0 ? i.label : i.name,
+      ...(i.auth.clientSource === 'installer' ? { installerClient: true as const } : {}),
+    });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -162,9 +192,22 @@ export async function fetchConnection(name: string, signal?: AbortSignal): Promi
   return readConnectionState(status, body);
 }
 
-/** `POST …/:name/connection` — no body. */
-export async function beginConnection(name: string): Promise<ConnectionBegin> {
-  const { status, body } = await call(connectionUrl(name), { method: 'POST' });
+/**
+ * `POST …/:name/connection` — no body, or, for an installer-client instance,
+ * the client the administrator entered: `{ clientId, clientSecret? }`.
+ */
+export async function beginConnection(name: string, client?: InstallerClientInput): Promise<ConnectionBegin> {
+  const init: RequestInit = client
+    ? {
+      method: 'POST',
+      headers: { ...JSON_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId: client.clientId,
+        ...(client.clientSecret === undefined ? {} : { clientSecret: client.clientSecret }),
+      }),
+    }
+    : { method: 'POST' };
+  const { status, body } = await call(connectionUrl(name), init);
   return readConnectionBegin(status, body);
 }
 

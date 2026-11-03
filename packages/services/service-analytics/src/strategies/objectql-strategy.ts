@@ -8,6 +8,7 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import { assertDatasetGroupColumnsDistinct } from '../dataset-group-column-door.js';
+import { assertDatasetDateBucketsTemporal } from '../dataset-date-bucket-door.js';
 import {
   declaredDatetimeLowering,
   declaredDateColumn,
@@ -793,12 +794,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // routes it there), before any bucket renders: the echo used to print one
     // bucket for two granularities, and both columns for a column raw beside
     // its bucket, for a statement the query refuses.
-    assertDatasetGroupColumnsDistinct(
-      tableName,
-      plan ? crossObjectGroupKeys(query, cube, crossByDim).groupBy : aggregateGroupKeys(query, cube),
-      query,
-      (m) => this.resolveFieldName(cube, m, 'dimension'),
-    );
+    const echoGroupBy = plan ? crossObjectGroupKeys(query, cube, crossByDim).groupBy : aggregateGroupKeys(query, cube);
+    assertDatasetGroupColumnsDistinct(tableName, echoGroupBy, query, (m) => this.resolveFieldName(cube, m, 'dimension'));
+    // [#28977] …then, on the same keys, the engine's refusal of a date bucket
+    // over a field declared neither a date nor a datetime, which `query()`
+    // answers after the column refusal above (#28798). The echo used to print
+    // `strftime('%Y-%m', region)` for it, or, at a non-UTC zone, a 501 saying
+    // the query is served. A host that names no declared type is not judged,
+    // as the engine judges no undeclared field.
+    const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    assertDatasetDateBucketsTemporal(tableName, echoGroupBy, (field) => declaredType?.call(ctx, tableName, field));
     const joinClauses: string[] = [];
     // [#21441] The bucket expression the driver itself groups by for its
     // dialect, read from the `dateBucketSql` hook: `strftime('%Y-%m', …)` on

@@ -104,13 +104,15 @@ function makeEngine(opts: {
 const SUPPORT_DECLARED = [{ name: 'support_tier1', label: 'Support Tier 1', members: [{ type: 'position', value: 'support_agent' }], _packageId: 'com.acme.support' }];
 
 const BASE_TABLES = (): Record<string, Row[]> => ({
+  // Every membership row carries its `id`, as a stored one does: the team and
+  // position reads page by it (#29503) and refuse a row they cannot resume after.
   sys_user_position: [
-    { position: 'support_agent', user_id: 'u_b', organization_id: 'org_a' },
-    { position: 'support_agent', user_id: 'u_a', organization_id: 'org_a' },
-    { position: 'support_agent', user_id: 'u_other_org', organization_id: 'org_b' },
-    { position: 'billing_clerk', user_id: 'u_c', organization_id: 'org_a' },
+    { id: 'up_1', position: 'support_agent', user_id: 'u_b', organization_id: 'org_a' },
+    { id: 'up_2', position: 'support_agent', user_id: 'u_a', organization_id: 'org_a' },
+    { id: 'up_3', position: 'support_agent', user_id: 'u_other_org', organization_id: 'org_b' },
+    { id: 'up_4', position: 'billing_clerk', user_id: 'u_c', organization_id: 'org_a' },
   ],
-  sys_team_member: [{ team_id: 't_night', user_id: 'u_d' }, { team_id: 't_night', user_id: 'u_a' }],
+  sys_team_member: [{ id: 'tm_1', team_id: 't_night', user_id: 'u_d' }, { id: 'tm_2', team_id: 't_night', user_id: 'u_a' }],
   sys_queue: [
     { id: 'q1', name: 'billing', label: 'Billing', organization_id: 'org_a' },
     { id: 'q2', name: 'billing', label: 'Billing B', organization_id: 'org_b' },
@@ -194,6 +196,23 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
     expect(await svc.expandMembers('billing', 'org_a')).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toMatch(/sys_queue_member read failed/);
+  });
+
+  it('[#29503] a failed team or position holder read keeps the queue\'s declared posture: that specification contributes nobody, logged once', async () => {
+    // The team and position reads now refuse a failed read instead of answering
+    // "nobody"; the queue service keeps answering for its own consumers exactly
+    // as its header declares (a failed member-table read contributes nobody),
+    // on the expansion and on the holder check alike. Whether the queue should
+    // refuse too is left to a ruling (ADR-0142 does not declare this posture).
+    for (const failed of ['sys_team_member', 'sys_user_position'] as const) {
+      const warn = vi.fn();
+      const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: [failed] }), { warn });
+      const expected = failed === 'sys_team_member' ? ['u_a', 'u_b'] : ['u_a', 'u_d'];
+      expect(await svc.expandMembers('support_tier1', 'org_a')).toEqual(expected);
+      expect(await svc.isMember(failed === 'sys_team_member' ? 'u_d' : 'u_b', 'support_tier1', 'org_a')).toBe(false);
+      expect(await svc.isMember(failed === 'sys_team_member' ? 'u_b' : 'u_d', 'support_tier1', 'org_a')).toBe(true);
+      expect(warn.mock.calls.some(([line]) => /could not be (expanded|read)/.test(String(line)))).toBe(true);
+    }
   });
 
   it('a failed ledger read leaves the declared default — on — and says so', async () => {

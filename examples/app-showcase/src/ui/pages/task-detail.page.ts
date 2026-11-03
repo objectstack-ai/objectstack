@@ -91,15 +91,35 @@ export const TaskDetailPage = definePage({
         // hence no `visible` beside it: a node `visibleWhen` and
         // `properties.visible` compose as AND, so leaving both would keep the
         // legacy predicate load-bearing.
+        //
+        // The banner's copy reaches a zh-CN reader by two routes, one per key.
+        // `title` is translated by the bundle at
+        // `pages.showcase_task_detail.components.review_alert.title`, which is
+        // why the node carries an `id`: the page-component route addresses a
+        // component by its id, so an id-less node has no bundle key at all.
+        // `body` has no bundle key on that face (`PAGE_COMPONENT_COPY_KEYS` in
+        // `@objectstack/spec/system` is title / description / label /
+        // placeholder / emptyText, and the bundle schema refuses any other),
+        // so it carries its translation at the authoring site, as the inline
+        // locale map `RecordAlertProps.body` accepts. `dismissKey` keeps the
+        // dismissal under one name in every locale: its default is the English
+        // resolution of `title`, and a bundle-translated title would resolve
+        // to the translation, so a banner dismissed in one locale would come
+        // back in the other.
         {
+          id: 'review_alert',
           type: 'record:alert',
           visibleWhen: "has(record.status) && record.status == 'in_review'",
           properties: {
             severity: 'warning',
             icon: 'eye',
             title: 'Awaiting review',
-            body: 'This task is in review — confirm the work before marking it done.',
+            body: {
+              en: 'This task is in review — confirm the work before marking it done.',
+              'zh-CN': '此任务正在评审中——请先确认工作成果，再标记为完成。',
+            },
             dismissible: true,
+            dismissKey: 'showcase_task_review',
           },
         },
         {

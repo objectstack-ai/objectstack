@@ -47,6 +47,8 @@ export function baseOptions(): BaseLayoutProps {
     // `active` is matched against the PUBLIC pathname (`/blog/x`, never the `/en/blog/x`
     // a post is prerendered under) — `components/root-provider.tsx` supplies it.
     links: [
+      // This site's own docs come first: the other three lead off-site or to the blog.
+      { text: 'Docs', url: '/docs', active: 'nested-url' },
       { text: 'Why', url: ESSAY_URL, active: 'url' },
       { text: 'Blog', url: '/blog', active: 'nested-url' },
       // The product site, by role: ObjectOS (editions, pricing, blog) lives there.

@@ -184,6 +184,25 @@ export function parseListedPackageManifests(payload: unknown): ReadonlyMap<strin
   return out;
 }
 
+/**
+ * [objectstack#29567] The listed package `id` as a {@link PkgEntry}, or `null`
+ * when the list does not name it. Unlike {@link parsePackages}, a kernel
+ * package (manifest scope `system` / `cloud`) answers too, with the server's
+ * verdict on its row, so a surface that has one OPEN reads it read-only as the
+ * server's write gate does. The switcher's list still leaves kernel packages
+ * out: that is which packages it offers, not what an open one is.
+ */
+export function listedPackageEntry(
+  manifests: ReadonlyMap<string, ListedPackageManifest>,
+  id: string,
+): PkgEntry | null {
+  const listed = manifests.get(id);
+  if (!listed) return null;
+  const declared = listed.manifest.namespace;
+  const namespace = typeof declared === 'string' && declared ? declared : deriveNamespaceFromPackageId(id);
+  return { id, name: listed.name, writable: listed.writable, namespace };
+}
+
 /** {@link parseListedPackageManifests}, read from the request {@link fetchPackages} shares. */
 export async function fetchListedPackageManifests(): Promise<ReadonlyMap<string, ListedPackageManifest>> {
   return parseListedPackageManifests(await readPackagesPayload());
@@ -250,8 +269,8 @@ export interface EnsuredCustomizationPackage {
  * are derived by the server). Rejects with the server's sentence, verbatim by
  * the rule every reader here uses ({@link readEnvelopeFailureText}): the wall's
  * `403` names who may call it, a `409` what the existing pair lacks. A created
- * pair is a new row of the package list, so the pending list read is dropped
- * and `objectui:packages-changed` is announced, as a package created anywhere
+ * pair is a new row of the package list, so the list reads are forgotten
+ * ({@link forgetPackageListReads}) and `objectui:packages-changed` is announced, as a package created anywhere
  * else in the app announces it.
  */
 export async function ensureCustomizationPackage(baseId: string): Promise<EnsuredCustomizationPackage> {
@@ -259,7 +278,7 @@ export async function ensureCustomizationPackage(baseId: string): Promise<Ensure
     method: 'POST',
     credentials: 'include',
     headers: { Accept: 'application/json' },
-  }).finally(dropPendingPackageRead);
+  }).finally(forgetPackageListReads);
   const payload = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (!res.ok) {
     throw new Error(readEnvelopeFailureText(payload) ?? `HTTP ${res.status}`);
@@ -325,9 +344,13 @@ export async function fetchPackages(): Promise<PkgEntry[]> {
  *    agent creates packages server-side), and a window would answer the read
  *    after such a write with the list from before it;
  *  - a failure reaches the callers already waiting and is then forgotten;
- *  - the writes this module can see drop the pending request — its own
- *    `duplicatePackage` and the `objectui:packages-changed` announcement — so
- *    a read asked after either is never answered by a request sent before it.
+ *  - every package write in this tree drops the pending request
+ *    ({@link forgetPackageListReads}), so a read asked after one is never
+ *    answered by a request sent before it.
+ *
+ * The one list held past its request is the app → Studio entries' own
+ * ({@link fetchSessionPackages}), with the bounds its doc states; this read
+ * holds nothing.
  *
  * Keyed by the `fetch` the request went through: a request only answers
  * callers of the same transport. Each caller parses the shared payload itself,
@@ -336,8 +359,18 @@ export async function fetchPackages(): Promise<PkgEntry[]> {
 const pendingPackageReads = new WeakMap<typeof fetch, Promise<unknown>>();
 let packagesChangedObserved = false;
 
-function dropPendingPackageRead(): void {
+/**
+ * [objectstack#29119] A package write this tab made: the list read still on
+ * the wire and the session's held list ({@link fetchSessionPackages}) are
+ * both from before it, so neither answers a read asked after it. Every
+ * package write in this tree calls it however the write ends (a failed write
+ * may still have changed the list): the writes of this module, the Packages
+ * page's lifecycle and import writes, the marketplace install and uninstall,
+ * and the `objectui:packages-changed` announcement.
+ */
+export function forgetPackageListReads(): void {
   pendingPackageReads.delete(globalThis.fetch);
+  forgetHeldPackageList();
 }
 
 function readPackagesPayload(): Promise<unknown> {
@@ -346,7 +379,7 @@ function readPackagesPayload(): Promise<unknown> {
   // then subscribes): the drop runs before the refetch that event triggers.
   if (!packagesChangedObserved && typeof window !== 'undefined') {
     packagesChangedObserved = true;
-    window.addEventListener('objectui:packages-changed', dropPendingPackageRead);
+    window.addEventListener('objectui:packages-changed', forgetPackageListReads);
   }
   const transport = globalThis.fetch;
   const pending = pendingPackageReads.get(transport);
@@ -369,6 +402,81 @@ function readPackagesPayload(): Promise<unknown> {
   };
   read.then(settle, settle);
   return read;
+}
+
+/**
+ * [objectstack#29119] The package list the app → Studio entries read
+ * (`useStudioEntryGate`), held for the rest of the session once read, per
+ * `fetch` like {@link pendingPackageReads}.
+ *
+ * Those entries ask about the package of every app page a platform admin
+ * opens, and the list is the largest response such a page reads. Read per
+ * app switch, as it was, the same list crossed the wire on every app page of
+ * a session. Held, an admin's session reads it once.
+ *
+ * Only these entries read it. {@link fetchPackages} stays what its doc says,
+ * not a response cache, so every Studio surface still reads the list as the
+ * server has it now. What a held answer can get wrong, and for how long:
+ *  - a package this tab writes: never. Every package write in this tree
+ *    forgets the hold ({@link forgetPackageListReads}).
+ *  - a package created elsewhere (an agent, another tab): never past the first
+ *    ask. An id the held list does not name is read again, once per hold
+ *    ({@link HeldPackageList.unlisted}), so its app gets its entry.
+ *  - a package removed elsewhere: its app is gone too; an entry still drawn
+ *    on a page that outlived it opens Studio, which reads the list itself.
+ *  - a writable verdict that flips elsewhere: until this tab writes a package,
+ *    the session changes or the page reloads. The entry then shows the
+ *    previous posture: the edit pencil opens Studio, which reads the verdict
+ *    fresh and opens read-only, or the view eye stands where the pencil would,
+ *    which costs a click. The server's write gate is the authority either way.
+ *
+ * `session` names whose list it is (the signed-in user and the active
+ * organization), so a sign-in as someone else or an organization switch that
+ * stays inside the page reads again.
+ */
+interface HeldPackageList {
+  session: string;
+  payload: unknown;
+  /** Every id the list names, the kernel packages {@link parsePackages} hides included. */
+  listed: ReadonlySet<string>;
+  /** Ids asked about after this list was read and still not in it: not read again for. */
+  unlisted: Set<string>;
+}
+
+const heldPackageLists = new WeakMap<typeof fetch, HeldPackageList>();
+
+/** Bumped by every forget, so a read asked before a write never becomes the hold. */
+let heldPackageListEpoch = 0;
+
+function forgetHeldPackageList(): void {
+  heldPackageListEpoch += 1;
+  heldPackageLists.delete(globalThis.fetch);
+}
+
+/**
+ * The package list for `session`, read from the server at most once per
+ * session: answered from the hold when it names `packageId` (or was already
+ * read again for it), read and held otherwise. A failed read is not held.
+ * Concurrent first asks share one request ({@link readPackagesPayload}).
+ */
+export async function fetchSessionPackages(session: string, packageId: string): Promise<PkgEntry[]> {
+  const transport = globalThis.fetch;
+  const held = heldPackageLists.get(transport);
+  if (held && held.session === session && (held.listed.has(packageId) || held.unlisted.has(packageId))) {
+    return parsePackages(held.payload);
+  }
+  const epoch = heldPackageListEpoch;
+  const payload = await readPackagesPayload();
+  if (epoch === heldPackageListEpoch) {
+    const current = heldPackageLists.get(transport);
+    const next =
+      current && current.session === session && current.payload === payload
+        ? current
+        : { session, payload, listed: parseListedPackageIds(payload), unlisted: new Set<string>() };
+    if (!next.listed.has(packageId)) next.unlisted.add(packageId);
+    heldPackageLists.set(transport, next);
+  }
+  return parsePackages(payload);
 }
 
 /**
@@ -439,14 +547,15 @@ function describeDuplicateFailure(outcome: DuplicateOutcome): string {
  */
 export async function duplicatePackage(sourceId: string, targetId: string, targetName?: string): Promise<void> {
   // objectui#11797 — a list read still pending when this write lands was asked
-  // before it, so a read asked after it must not join that one. Dropped however
+  // before it, so a read asked after it must not join that one, nor be answered
+  // by the session's held list (objectstack#29119). Forgotten however
   // the write ends: a failed duplicate may still have copied part of a package.
   const res = await fetch(`/api/v1/packages/${encodeURIComponent(sourceId)}/duplicate`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ targetPackageId: targetId, ...(targetName ? { targetName } : {}) }),
-  }).finally(dropPendingPackageRead);
+  }).finally(forgetPackageListReads);
   const payload = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (!res.ok) {
     // The error envelope IS top-level (`{ success: false, error }`) — no `data`

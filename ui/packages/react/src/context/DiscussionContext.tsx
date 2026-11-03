@@ -89,6 +89,22 @@ export interface DiscussionContextValue {
   activityDenied?: boolean;
   /** The same, for the host's `sys_comment` read. */
   commentsDenied?: boolean;
+  /**
+   * The host's `sys_activity` read FAILED: a 5xx or a network failure, not a
+   * refusal (objectstack#29188). The feed renderers then show a load-failure
+   * notice with a Retry instead of claiming the record has no activity. Set by
+   * the host that owns the fetch; a refusal, an answered read and a 404 leave
+   * it unset.
+   */
+  activityFailed?: boolean;
+  /** The same, for the host's `sys_comment` read. */
+  commentsFailed?: boolean;
+  /**
+   * Read the failed feed reads again (objectstack#29188). Offered by the host
+   * alongside {@link activityFailed} / {@link commentsFailed}; the notice's
+   * Retry calls it. Re-reads only the reads that failed.
+   */
+  onRetryFeed?: () => void;
 }
 
 const DiscussionContext = React.createContext<DiscussionContextValue | null>(null);
@@ -115,6 +131,9 @@ export const DiscussionContextProvider: React.FC<DiscussionContextProviderProps>
     value.error,
     value.activityDenied,
     value.commentsDenied,
+    value.activityFailed,
+    value.commentsFailed,
+    value.onRetryFeed,
   ]);
   return (
     <DiscussionContext.Provider value={memo}>{children}</DiscussionContext.Provider>

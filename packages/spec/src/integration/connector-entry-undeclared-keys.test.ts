@@ -3,9 +3,10 @@
 // An authored connector entry (`DeclarativeConnectorEntrySchema`, behind
 // `defineStack({ connectors })`, `os validate` / `os compile`, the artifact load
 // and `PUT /meta/connector/:name`) refuses every TOP-LEVEL key its shape does
-// not declare, located at the key, where it used to parse green. Every refusal
-// is pinned by its issue `code`, `path` and `keys`; every case has a CONTROL
-// accept, so a refusal that fired on everything could not pass. The open
+// not declare, in one issue located at the entry root, where it used to parse
+// green. Every refusal is pinned by its issue `code`, `path` and `keys`; every
+// case has a CONTROL accept, so a refusal that fired on everything could not
+// pass. The open
 // runtime carrier, `ConnectorSchema`, keeps its posture, pinned as a control.
 //
 // `defineConnector()`, the helper every documented `connectors:` entry is

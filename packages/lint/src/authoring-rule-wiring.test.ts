@@ -511,6 +511,8 @@ describe('authoring-rule registry wiring (#4409)', () => {
         'validateStackExpressions',
         'validatePresetComparands',
         'validateReferenceIntegrity',
+        // #29309 — a form section naming an unknown field or field group.
+        'validateFormLayout',
         // #25650 — a form open to anonymous intake declaring a file field.
         'validatePublicFormFileFields',
         // #28005 — a thank-you panel naming a field the engine does not generate.

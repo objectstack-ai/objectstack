@@ -265,7 +265,8 @@ describe('Approval node bridge (ADR-0019)', () => {
         { id: 'start', type: 'start', label: 'Start' },
         {
           id: 'lead_review', type: 'approval', label: 'Lead Review',
-          config: { approvers: [{ type: 'user', value: 'lead' }], decisionOutputs: ['next_reviewers'] },
+          // A list answer needs `multiple: true`: a bare key takes one value since #28658.
+          config: { approvers: [{ type: 'user', value: 'lead' }], decisionOutputs: [{ key: 'next_reviewers', multiple: true }] },
         },
         {
           id: 'co_sign', type: 'approval', label: 'Co-sign',
@@ -305,6 +306,71 @@ describe('Approval node bridge (ADR-0019)', () => {
     expect(marks).toHaveLength(0);
 
     // Both picked reviewers sign off → the run completes down `approve`.
+    await service.decide(second.id, { decision: 'approve', actorId: 'u2' }, SYSTEM_CTX);
+    await service.decide(second.id, { decision: 'approve', actorId: 'u3' }, SYSTEM_CTX);
+    expect(marks).toEqual(['on_approved']);
+    expect(automation.listSuspendedRuns()).toHaveLength(0);
+  });
+
+  it('a typed user output naming no account is refused at the decision, and the run waits instead of stranding (#28658)', async () => {
+    // The showcase dynamic approval's shape: stage 1 declares a typed, required
+    // user list; stage 2 resolves it with `onEmptyApprovers: 'fail'`. A wrong
+    // id used to be recorded as an approval and then strand the run at stage 2.
+    automation.registerFlow('typed_two_stage', {
+      name: 'typed_two_stage',
+      label: 'Typed Two Stage',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        {
+          id: 'lead_review', type: 'approval', label: 'Lead Review',
+          config: {
+            approvers: [{ type: 'user', value: 'lead' }],
+            decisionOutputs: [{ key: 'next_reviewers', type: 'user', multiple: true, required: true }],
+          },
+        },
+        {
+          id: 'co_sign', type: 'approval', label: 'Co-sign',
+          config: {
+            approvers: [{ type: 'expression', value: 'vars.lead_review.next_reviewers' }],
+            behavior: 'unanimous',
+            onEmptyApprovers: 'fail',
+          },
+        },
+        { id: 'on_approved', type: 'mark', label: 'Approved' },
+        { id: 'on_rejected', type: 'mark', label: 'Rejected' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'lead_review' },
+        { id: 'e2', source: 'lead_review', target: 'co_sign', label: 'approve' },
+        { id: 'e3', source: 'lead_review', target: 'on_rejected', label: 'reject' },
+        { id: 'e4', source: 'co_sign', target: 'on_approved', label: 'approve' },
+        { id: 'e5', source: 'co_sign', target: 'on_rejected', label: 'reject' },
+      ],
+    });
+    await automation.execute('typed_two_stage', { object: 'crm_deal', record: { id: 'd1' }, userId: 'submitter' });
+    const first = (await fake.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+
+    for (const bad of [['usr_does_not_exist'], 'u2', ['u2', 'u2']]) {
+      await expect(service.decide(first.id, {
+        decision: 'approve', actorId: 'lead', outputs: { next_reviewers: bad },
+      }, SYSTEM_CTX)).rejects.toThrow(/^VALIDATION_FAILED: `outputs\.next_reviewers`/);
+    }
+    // Nothing recorded: stage 1 still pending, no decision row, the run still waiting at stage 1.
+    const stillFirst = (await fake.find('sys_approval_request', { where: { id: first.id } }))[0];
+    expect(stillFirst.status).toBe('pending');
+    expect((await fake.find('sys_approval_action', { where: { request_id: first.id } })).map((a: any) => a.action))
+      .toEqual(['submit']);
+    expect(automation.listSuspendedRuns()).toHaveLength(1);
+    expect(marks).toHaveLength(0);
+
+    // A valid pick goes through, and the run continues to completion.
+    await service.decide(first.id, {
+      decision: 'approve', actorId: 'lead', outputs: { next_reviewers: ['u2', 'u3'] },
+    }, SYSTEM_CTX);
+    const second = (await fake.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    expect(second.flow_node_id).toBe('co_sign');
+    expect(String(second.pending_approvers).split(',').sort()).toEqual(['u2', 'u3']);
     await service.decide(second.id, { decision: 'approve', actorId: 'u2' }, SYSTEM_CTX);
     await service.decide(second.id, { decision: 'approve', actorId: 'u3' }, SYSTEM_CTX);
     expect(marks).toEqual(['on_approved']);

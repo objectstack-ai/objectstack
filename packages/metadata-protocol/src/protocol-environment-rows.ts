@@ -242,6 +242,24 @@ export function shippingPackageIds(shipped: readonly unknown[]): ReadonlySet<str
 }
 
 /**
+ * [ADR-0146 D11] The READ-ONLY code packages that ship a name, sorted: the
+ * {@link shippingPackageIds} of `shipped` less every package
+ * `isWritablePackage` answers for — a writable package's item is edited in
+ * place (ADR-0070) and has no pair (ADR-0146 D3), and the pair itself is
+ * writable. ONE reading for both halves of D11: the bases
+ * `os migrate packageless-overlays` classifies a package-less row against,
+ * and the bases whose package-less write the doors close
+ * (`packagelessOverlayWriteRefusal`), so the close never reaches a name the
+ * ceremony would call environment metadata, nor misses one it would move.
+ */
+export function readOnlyShippingPackages(
+    shipped: readonly unknown[],
+    isWritablePackage: (packageId: string) => boolean,
+): string[] {
+    return [...shippingPackageIds(shipped)].filter((id) => !isWritablePackage(id)).sort();
+}
+
+/**
  * [#28409, ADR-0146 D8 items 1–2] The one code package that ships a name, or
  * `undefined` when none or several do: the case in which
  * {@link packagelessContentPackage} answers that package for every stored row

@@ -292,6 +292,10 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     const orgs = await ql.find('sys_organization', { context: { isSystem: true } });
     expect(orgs.map((o: any) => o.slug)).toEqual(['default']);
     MEMBER_CTX.tenantId = String(orgs[0].id);
+    // [#28881] The member is a real account: a system run's write stamps its
+    // trigger user as `owner_id`, and that write keeps the reference check, so
+    // a trigger user that resolves to no `sys_user` row is refused.
+    await ql.insert('sys_user', { id: MEMBER_CTX.userId, name: 'Member', email: 'member@example.test' }, { context: { isSystem: true } });
   }
 
   const SYS = { isSystem: true } as const;

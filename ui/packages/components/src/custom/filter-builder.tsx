@@ -16,7 +16,7 @@ import {
   normalizeFilterOperator,
   type ViewFilterRule,
 } from "@objectstack/spec/ui"
-import { expandEmptyOperator } from "@objectstack/spec/data"
+import { DATE_RANGE_PRESETS, expandEmptyOperator, type DateRangePreset } from "@objectstack/spec/data"
 import { SchemaRendererContext } from "@object-ui/react"
 import {
   FILTER_DATE_LIKE_TYPES,
@@ -50,6 +50,16 @@ import {
   pairedCurrencyField,
   syncRecordCurrencyRows,
 } from "./filterRecordCurrency"
+import {
+  RELATIVE_DATE_POINTS,
+  dateMacroName,
+  dateRangePresetOf,
+  dateRangePresetValue,
+  holdsDateMacro,
+  relativeDatePointOf,
+  relativeDatePointValue,
+  type RelativeDatePoint,
+} from "./filterRelativeDates"
 import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
 import { Checkbox } from "../ui/checkbox"
@@ -721,6 +731,28 @@ const FILTER_INPUT_TYPE_BY_FAMILY: Readonly<Record<FilterValueFamily, string>> =
   boolean: "text",
 }
 
+/**
+ * Which relative dates a row offers: `window` (the spec's date-range presets)
+ * on `between`, `point` (today, yesterday, tomorrow) on `before` / `after`, and
+ * nothing on any other operator or on a column that is not `date` /
+ * `datetime`. Relative values on `equals` are deliberately not offered.
+ */
+type RelativeDateKind = "window" | "point"
+
+const RELATIVE_POINT_OPERATORS: ReadonlySet<string> = new Set(["before", "after"])
+
+function relativeDateKind(
+  fieldType: string | undefined,
+  operator: string,
+): RelativeDateKind | undefined {
+  const family = valueFamilyForFieldType(fieldType)
+  if (family !== "date" && family !== "datetime") return undefined
+  const canonical = normalizeFilterBuilderOperator(operator)
+  if (PAIR_VALUE_OPERATORS.has(canonical)) return "window"
+  if (RELATIVE_POINT_OPERATORS.has(canonical)) return "point"
+  return undefined
+}
+
 /** `YYYY-MM-DDTHH:mm[:ss[.sss]]` with NO zone — what `datetime-local` emits. */
 const LOCAL_DATE_TIME_PATTERN =
   /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/
@@ -820,6 +852,9 @@ function convertScalarToFamily(
 
     case "date": {
       if (typeof value !== "string") return undefined
+      // A relative date (`'{today}'`, see `filterRelativeDates.ts`) is a value
+      // every date column holds as it stands: the query resolves it.
+      if (dateMacroName(value) !== undefined) return value
       const trimmed = value.trim()
       const local = LOCAL_DATE_TIME_PATTERN.exec(trimmed)
       if (local) {
@@ -832,6 +867,7 @@ function convertScalarToFamily(
 
     case "datetime": {
       if (typeof value !== "string") return undefined
+      if (dateMacroName(value) !== undefined) return value
       const trimmed = value.trim()
       const local = LOCAL_DATE_TIME_PATTERN.exec(trimmed)
       if (!local) return undefined
@@ -1169,6 +1205,23 @@ const useSafeFilterTranslation = createSafeTranslation(
     'filterBuilder.rangeStart': 'From',
     'filterBuilder.rangeEnd': 'To',
     'filterBuilder.currency': 'Currency',
+    // The relative date choices on a date row, read from the dashboard filter
+    // bar's and the date picker's keys rather than declared again.
+    'dashboard.filters.custom': 'Custom…',
+    'dashboard.filters.range.today': 'Today',
+    'dashboard.filters.range.yesterday': 'Yesterday',
+    'dashboard.filters.range.this_week': 'This week',
+    'dashboard.filters.range.last_week': 'Last week',
+    'dashboard.filters.range.this_month': 'This month',
+    'dashboard.filters.range.last_month': 'Last month',
+    'dashboard.filters.range.this_quarter': 'This quarter',
+    'dashboard.filters.range.last_quarter': 'Last quarter',
+    'dashboard.filters.range.this_year': 'This year',
+    'dashboard.filters.range.last_year': 'Last year',
+    'dashboard.filters.range.last_7_days': 'Last 7 days',
+    'dashboard.filters.range.last_30_days': 'Last 30 days',
+    'dashboard.filters.range.last_90_days': 'Last 90 days',
+    'fields.datePicker.tomorrow': 'Tomorrow',
     'filterBuilder.currencyNeedsAnd': 'A currency amount is compared within the chosen currency only when every condition must match (AND).',
     'fields.currencyCode.search': 'Search currency…',
     'fields.currencyCode.noResults': 'No currency found',
@@ -1216,6 +1269,24 @@ const useSafeFilterTranslation = createSafeTranslation(
   },
   'filterBuilder.where',
 )
+
+/**
+ * The labels of the relative date choices, reused from the keys the dashboard
+ * filter bar and the record form's date picker already translate in every
+ * pack, so the two surfaces name a window the same way.
+ */
+const DATE_RANGE_PRESET_LABEL_KEYS: Readonly<Record<DateRangePreset, string>> = Object.fromEntries(
+  DATE_RANGE_PRESETS.map((preset) => [preset, `dashboard.filters.range.${preset}`]),
+) as Record<DateRangePreset, string>
+const RELATIVE_DATE_POINT_LABEL_KEYS: Readonly<Record<RelativeDatePoint, string>> = {
+  today: 'dashboard.filters.range.today',
+  yesterday: 'dashboard.filters.range.yesterday',
+  tomorrow: 'fields.datePicker.tomorrow',
+}
+/** The choice that keeps the row's own date editor. */
+const CUSTOM_RELATIVE_DATE = "__custom__"
+/** The choice a stored placeholder value no window or point matches is shown as. */
+const STORED_RELATIVE_DATE = "__stored__"
 
 // Typed as the dropdown's own id union, so a bucket naming an id the dropdown
 // does not draw — a stale camelCase spelling, say — fails to compile instead of
@@ -1567,11 +1638,22 @@ function FilterBuilder({
   const changeOperator = (conditionId: string, nextOperator: FilterBuilderOperator) => {
     handleChange({
       ...filterGroup,
-      conditions: filterGroup.conditions.map((c) =>
-        c.id === conditionId
-          ? { ...c, operator: nextOperator, value: reshapeFilterValue(c.value, nextOperator) }
-          : c,
-      ),
+      conditions: filterGroup.conditions.map((c) => {
+        if (c.id !== conditionId) return c
+        // A relative date is carried only to an operator that offers the same
+        // kind (`before` today -> `after` today). Anywhere else half a window
+        // would become a point, or a token would land in a date input that
+        // cannot show it, so the row starts empty instead.
+        const fieldType = fields.find((f) => f.value === c.field)?.type
+        const kind = relativeDateKind(fieldType, c.operator)
+        const carried =
+          kind !== undefined &&
+          holdsDateMacro(c.value) &&
+          relativeDateKind(fieldType, nextOperator) !== kind
+            ? ""
+            : c.value
+        return { ...c, operator: nextOperator, value: reshapeFilterValue(carried, nextOperator) }
+      }),
     })
   }
 
@@ -1715,7 +1797,7 @@ function FilterBuilder({
     return FILTER_INPUT_TYPE_BY_FAMILY[valueFamilyForFieldType(field?.type)]
   }
 
-  const renderValueInput = (condition: FilterBuilderRow) => {
+  const renderValueEditor = (condition: FilterBuilderRow) => {
     const field = fields.find((f) => f.value === condition.field)
     // The spec's vocabulary, not a local literal — and folded through
     // `normalizeFilterBuilderOperator`, so the deprecated alias `notIn` gets
@@ -1954,7 +2036,7 @@ function FilterBuilder({
         return (
           <Input
             type={inputType}
-            className={cn("h-9 text-sm", missingBound === index && "border-destructive")}
+            className={cn("h-9 text-sm max-sm:h-11 max-sm:text-base", missingBound === index && "border-destructive")}
             placeholder={boundLabel}
             aria-label={boundLabel}
             aria-invalid={boundInvalid(index)}
@@ -2009,7 +2091,7 @@ function FilterBuilder({
             updateCondition(condition.id, { value })
           }
         >
-          <SelectTrigger className="h-9 text-sm">
+          <SelectTrigger className="h-9 text-sm max-sm:h-11">
             <SelectValue placeholder={t('filterBuilder.selectValue')} />
           </SelectTrigger>
           <SelectContent>
@@ -2048,7 +2130,7 @@ function FilterBuilder({
             updateCondition(condition.id, { value: value === "true" })
           }
         >
-          <SelectTrigger className="h-9 text-sm">
+          <SelectTrigger className="h-9 text-sm max-sm:h-11">
             <SelectValue placeholder={t('filterBuilder.selectValue')} />
           </SelectTrigger>
           <SelectContent>
@@ -2113,11 +2195,79 @@ function FilterBuilder({
     return (
       <Input
         type={inputType}
-        className="h-9 text-sm"
+        // 16 px text below `sm`: a smaller font makes iOS Safari zoom on focus.
+        className="h-9 text-sm max-sm:h-11 max-sm:text-base"
         placeholder={t('filterBuilder.value')}
         value={formatValue()}
         onChange={(e) => handleValueChange(e.target.value)}
       />
+    )
+  }
+
+  /**
+   * A relative date choice above a `date` / `datetime` row's value editor, on
+   * the operators {@link relativeDateKind} names. The choice reads the stored
+   * value: a window or point it recognises shows its label and hides the date
+   * editor; any other placeholder value (`['{7_days_ago}', '{tomorrow}']`) is
+   * kept, shown as its own text and still filters; a date, or nothing yet, is
+   * `Custom…` with today's date editor under it.
+   */
+  const renderValueInput = (condition: FilterBuilderRow) => {
+    const field = fields.find((f) => f.value === condition.field)
+    const kind = relativeDateKind(field?.type, condition.operator)
+    if (kind === undefined) return renderValueEditor(condition)
+
+    const choices: ReadonlyArray<{ value: string; label: string }> =
+      kind === "window"
+        ? DATE_RANGE_PRESETS.map((preset) => ({ value: preset, label: t(DATE_RANGE_PRESET_LABEL_KEYS[preset]) }))
+        : RELATIVE_DATE_POINTS.map((point) => ({ value: point, label: t(RELATIVE_DATE_POINT_LABEL_KEYS[point]) }))
+    const recognised = kind === "window" ? dateRangePresetOf(condition.value) : relativeDatePointOf(condition.value)
+    const stored = recognised === undefined && holdsDateMacro(condition.value)
+    const selected = recognised ?? (stored ? STORED_RELATIVE_DATE : CUSTOM_RELATIVE_DATE)
+    const storedText = Array.isArray(condition.value)
+      ? condition.value.map(displayScalarValue).join(" – ")
+      : displayScalarValue(condition.value)
+
+    const choose = (next: string) => {
+      if (next === STORED_RELATIVE_DATE) return
+      if (next === CUSTOM_RELATIVE_DATE) {
+        updateCondition(condition.id, { value: kind === "window" ? [] : "" })
+        return
+      }
+      updateCondition(condition.id, {
+        value:
+          kind === "window"
+            ? dateRangePresetValue(next as DateRangePreset)
+            : relativeDatePointValue(next as RelativeDatePoint),
+      })
+    }
+
+    return (
+      <div className="flex flex-col gap-1">
+        <Select value={selected} onValueChange={choose}>
+          <SelectTrigger
+            className="h-9 text-sm"
+            aria-label={t('filterBuilder.value')}
+            data-testid={`filter-relative-date-${condition.field}`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {choices.map((choice) => (
+              <SelectItem key={choice.value} value={choice.value}>
+                {choice.label}
+              </SelectItem>
+            ))}
+            {stored && (
+              <SelectItem value={STORED_RELATIVE_DATE} data-testid={`filter-relative-date-stored-${condition.field}`}>
+                {storedText}
+              </SelectItem>
+            )}
+            <SelectItem value={CUSTOM_RELATIVE_DATE}>{t('dashboard.filters.custom')}</SelectItem>
+          </SelectContent>
+        </Select>
+        {selected === CUSTOM_RELATIVE_DATE && renderValueEditor(condition)}
+      </div>
     )
   }
 
@@ -2132,7 +2282,7 @@ function FilterBuilder({
               variant="outline"
               size="sm"
               onClick={toggleLogic}
-              className="h-7 text-xs"
+              className="h-7 text-xs max-sm:h-11"
               disabled={filterGroup.logic === "and" && pairsCurrency}
               title={pairsCurrency ? t('filterBuilder.currencyNeedsAnd') : undefined}
               data-testid="filter-logic-toggle"
@@ -2147,7 +2297,7 @@ function FilterBuilder({
             variant="ghost"
             size="sm"
             onClick={clearAllConditions}
-            className="h-7 text-xs text-muted-foreground hover:text-destructive"
+            className="h-7 text-xs text-muted-foreground hover:text-destructive max-sm:h-11"
           >
             <Trash2 className="h-3 w-3 mr-1" />
             {t('filterBuilder.clearAll')}
@@ -2164,18 +2314,21 @@ function FilterBuilder({
       <div className="space-y-2">
         {visibleConditions.map((condition) => {
           const pairsWith = pairedCurrencyField(condition, fields, needsValueInput)
-          // Four controls on a paired row, three on every other.
-          const span = pairsWith ? "col-span-3" : "col-span-4"
+          // Four controls on a paired row, three on every other. Below `sm` the
+          // field takes the row's whole width, so its label is not cut, and the
+          // other controls share the line under it.
+          const span = pairsWith ? "col-span-3 max-sm:col-span-6" : "col-span-4 max-sm:col-span-6"
+          const fieldSpan = pairsWith ? "col-span-3 max-sm:col-span-12" : "col-span-4 max-sm:col-span-12"
           const code = pairsWith ? currencyCompanionOf(filterGroup, condition.id)?.value : undefined
           return (
           <div key={condition.id} className="flex items-start gap-2">
             <div className="flex-1 grid grid-cols-12 gap-2">
-              <div className={span}>
+              <div className={fieldSpan}>
                 <Select
                   value={condition.field}
                   onValueChange={(value) => changeField(condition.id, value)}
                 >
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-9 text-sm max-sm:h-11">
                     <SelectValue placeholder={t('filterBuilder.selectField')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -2204,7 +2357,7 @@ function FilterBuilder({
                     if (isFilterBuilderOperator(value)) changeOperator(condition.id, value)
                   }}
                 >
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-9 text-sm max-sm:h-11">
                     <SelectValue placeholder={t('filterBuilder.operator')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -2252,7 +2405,7 @@ function FilterBuilder({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-9 w-9 shrink-0"
+              className="h-9 w-9 shrink-0 max-sm:h-11 max-sm:w-11"
               onClick={() => removeCondition(condition.id)}
             >
               <X className="h-4 w-4" />
@@ -2273,7 +2426,7 @@ function FilterBuilder({
         variant="outline"
         size="sm"
         onClick={addCondition}
-        className="h-8"
+        className="h-8 max-sm:h-11"
         disabled={fields.length === 0}
       >
         <Plus className="h-3 w-3" />

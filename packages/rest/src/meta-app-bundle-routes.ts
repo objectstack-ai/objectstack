@@ -180,6 +180,22 @@ export function inboundRelationObjects(objects: readonly unknown[], targets: rea
     return found;
 }
 
+/**
+ * `names` in the object list's order: every name `objects` lists, at its first
+ * position there, then the names it does not list, in `names` order. The same
+ * set as `names`, each name once.
+ */
+export function inObjectListOrder(objects: readonly unknown[], names: readonly string[]): string[] {
+    const wanted = new Set(names);
+    const ordered: string[] = [];
+    for (const item of objects) {
+        const name = nameOf((item as { name?: unknown } | null)?.name);
+        if (name !== undefined && wanted.has(name)) addOnce(ordered, name);
+    }
+    for (const name of names) addOnce(ordered, name);
+    return ordered;
+}
+
 /** A member the chain could not judge: the whole request answers it. */
 class BundleMemberFault extends Error {
     constructor(readonly object: string) {
@@ -273,8 +289,12 @@ export function registerMetaAppBundleRoute(this: MetaAppBundleRouteHost, scope: 
                     if (!app || app.kind !== 'serve') return { kind: 'refused', app: undefined };
 
                     const reach = appNavigationReach((app.envelope as { item?: unknown } | null)?.item);
-                    const inbound = inboundRelationObjects(await objectList(), reach.objects);
-                    const objects = await members('object', [...reach.objects, ...inbound]);
+                    // The navigation's objects and their inbound relations, served
+                    // in the object list's order: a navigation object that also
+                    // points at another keeps its place in that list (#29680).
+                    const listed = await objectList();
+                    const inbound = inboundRelationObjects(listed, reach.objects);
+                    const objects = await members('object', inObjectListOrder(listed, [...reach.objects, ...inbound]));
                     const served = new Set(objects.map((o) => String((o.envelope as { name?: unknown }).name)));
 
                     const viewNames = [...reach.views];

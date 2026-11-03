@@ -535,7 +535,7 @@ export const RelatedToolbarButton: React.FC<{
       variant={action.variant === 'primary' ? 'default' : 'outline'}
       size="sm"
       onClick={(e) => { e.stopPropagation(); void onToolbarAction(action); }}
-      className="gap-1 h-9 sm:h-7 text-xs shadow-none"
+      className="gap-1 h-11 sm:h-7 text-xs shadow-none"
       data-testid={`related-toolbar-action-${action.name}`}
     >
       {/* Dynamic icon resolution from Lucide, not component creation during render */}
@@ -654,7 +654,7 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
         <Button
           variant="outline"
           size="sm"
-          className="ml-auto h-7 gap-1 text-xs shadow-none"
+          className="ml-auto h-11 sm:h-7 gap-1 text-xs shadow-none"
           data-testid="related-list-load-failed-retry"
           onClick={(e) => { e.stopPropagation(); onRetry(); }}
         >
@@ -3138,7 +3138,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         aria-busy={pendingRows > 0 || undefined}
       >
         <div
-          className="group/panel-head relative flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
+          className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
           data-related-panel-head=""
         >
           {open ? (
@@ -3151,7 +3151,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             // lands on the header and the click never reaches the button.
             <button
               type="button"
-              className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex min-w-0 cursor-pointer items-center gap-1.5 self-stretch rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               style={{ transform: 'none' }}
               title={viewAll}
               data-related-panel-open=""
@@ -3186,7 +3186,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 w-6 p-0 text-muted-foreground"
+                className="h-11 w-11 p-0 sm:h-6 sm:w-6 text-muted-foreground"
                 disabled={newDisabled}
                 aria-label={t('detail.new')}
                 data-testid="related-list-new"
@@ -3199,7 +3199,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 w-6 p-0 text-muted-foreground"
+                className="h-11 w-11 p-0 sm:h-6 sm:w-6 text-muted-foreground"
                 disabled={addBusy}
                 aria-label={add.label || t('detail.add', { defaultValue: 'Add' })}
                 onClick={(e) => { e.stopPropagation(); setAddError(null); setPickerOpen(true); }}
@@ -3218,7 +3218,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           Array.from({ length: pendingRows }, (_, index) => (
             <div
               key={index}
-              className="flex h-8 items-center gap-2 border-t border-border px-3"
+              className="flex min-h-11 sm:h-8 sm:min-h-0 items-center gap-2 border-t border-border px-3"
               data-related-card-row-pending=""
             >
               <Skeleton className="h-3 w-2/3 rounded" />
@@ -3236,7 +3236,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             return (
               <div
                 key={row?.id ?? index}
-                className="flex h-8 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
+                className="flex min-h-11 sm:h-8 sm:min-h-0 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
                 data-related-card-row=""
               >
                 {/* objectstack#27604 — hovering the name (or Space on it)
@@ -3253,7 +3253,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                   {handleRowClick ? (
                     <button
                       type="button"
-                      className="min-w-0 truncate text-left text-primary hover:underline"
+                      className="min-h-11 min-w-0 truncate text-left text-primary hover:underline sm:min-h-0"
                       onClick={(e) => handleRowClick(row, e)}
                     >
                       {name}
@@ -3341,7 +3341,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               onChange={(e) => setFilterText(e.target.value)}
               placeholder={t('detail.relatedFilter', { title, defaultValue: 'Filter {{title}}…' })}
               aria-label={t('detail.relatedFilter', { title, defaultValue: 'Filter {{title}}…' })}
-              className="h-8 pl-8 text-sm"
+              className="h-11 sm:h-8 pl-8 text-sm"
               data-related-enlarged-filter=""
             />
           </div>
@@ -3356,7 +3356,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                     variant={on ? 'secondary' : 'ghost'}
                     size="sm"
                     aria-pressed={on}
-                    className="h-8 gap-1.5 px-2.5 text-xs shadow-none"
+                    className="h-11 sm:h-8 gap-1.5 px-2.5 text-xs shadow-none"
                     onClick={() => setEnlargedChip(chip.id)}
                     data-related-chip={chip.id}
                   >
@@ -3379,7 +3379,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 size="sm"
                 disabled={addBusy}
                 onClick={() => { setAddError(null); setPickerOpen(true); }}
-                className="h-8 gap-1 text-xs shadow-none"
+                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
@@ -3392,7 +3392,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 disabled={newDisabled}
                 data-testid="related-list-new"
                 onClick={() => onNew()}
-                className="h-8 gap-1 text-xs shadow-none"
+                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {t('detail.new')}
@@ -3404,7 +3404,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 size="sm"
                 disabled={exportState.busy}
                 onClick={handleExport}
-                className="h-8 gap-1 text-xs shadow-none"
+                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
                 data-related-enlarged-export=""
               >
                 <Download className="h-3.5 w-3.5" />
@@ -3450,7 +3450,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1 text-xs"
+                  className="h-11 sm:h-7 gap-1 text-xs"
                   disabled={currentPage === 0}
                   onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
                 >
@@ -3460,7 +3460,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1 text-xs"
+                  className="h-11 sm:h-7 gap-1 text-xs"
                   disabled={!canGoNext}
                   onClick={() => setCurrentPage((p) => (canGoNext ? p + 1 : p))}
                 >
@@ -3552,7 +3552,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 size="sm"
                 disabled={addBusy}
                 onClick={(e) => { e.stopPropagation(); setAddError(null); setPickerOpen(true); }}
-                className="gap-1 h-9 sm:h-7 text-xs shadow-none"
+                className="gap-1 h-11 sm:h-7 text-xs shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
@@ -3562,7 +3562,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-9 w-9 p-0 sm:h-7 sm:w-7 text-muted-foreground"
+                className="h-11 w-11 p-0 sm:h-7 sm:w-7 text-muted-foreground"
                 aria-label={t('detail.relatedCardEnlarge', { defaultValue: 'Enlarge' })}
                 data-related-card-enlarge=""
                 onClick={(e) => { e.stopPropagation(); enlargeRelated(ownRelationshipId); }}
@@ -3581,7 +3581,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 disabled={newDisabled}
                 data-testid="related-list-new"
                 onClick={(e) => { e.stopPropagation(); onNew(); }}
-                className="gap-1 h-9 sm:h-7 text-xs shadow-none"
+                className="gap-1 h-11 sm:h-7 text-xs shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {t('detail.new')}
@@ -3603,7 +3603,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               placeholder={t('detail.filterPlaceholder')}
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              className="h-8 text-sm"
+              className="h-11 sm:h-8 text-sm"
             />
           </div>
         )}
@@ -3647,7 +3647,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                   key={field}
                   variant={isActive ? 'secondary' : 'ghost'}
                   size="sm"
-                  className="gap-1 h-7 text-xs"
+                  className="gap-1 h-11 sm:h-7 text-xs"
                   onClick={() => handleSort(field)}
                 >
                   <ArrowUpDown className="h-3 w-3" />
@@ -3679,7 +3679,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs gap-1"
+              className="h-11 sm:h-7 text-xs gap-1"
               disabled={currentPage === 0}
               onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
             >
@@ -3692,7 +3692,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs gap-1"
+              className="h-11 sm:h-7 text-xs gap-1"
               disabled={!canGoNext}
               onClick={() => setCurrentPage((p) => (canGoNext ? p + 1 : p))}
             >
@@ -3715,7 +3715,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onViewAll(); }}
-              className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1 transition-colors sm:min-h-0"
             >
               {t('detail.viewAll')}
               <ExternalLink className="h-3 w-3" />

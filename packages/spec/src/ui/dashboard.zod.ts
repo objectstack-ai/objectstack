@@ -14,6 +14,7 @@ import { DATE_RANGE_PRESETS } from '../data/date-range-presets';
 import { ChartTypeSchema, ChartConfigSchema, type ChartType } from './chart.zod';
 import { ActionType } from './action.zod';
 import { navigationTargetRefusal } from './navigation-target';
+import { duplicateGlobalFilterNames, reservedDateRangeGlobalFilters } from './duplicate-global-filter-names';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // `AriaPropsSchema` is no longer imported here: `widgets[].aria` was retired
 // (#5010). The shape itself is NOT removed — it stays live on `page.aria` /
@@ -1395,7 +1396,9 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    *
    * Every key must name a filter the dashboard declares — a `globalFilters`
    * entry's `name` (its `field` when unnamed), or `dateRange` when the
-   * dashboard declares `dateRange`. The runtime reads a binding by the declared
+   * dashboard declares `dateRange` (a `globalFilters` entry keyed `dateRange`
+   * beside it is refused, so that key always means the built-in date range
+   * there). The runtime reads a binding by the declared
    * filter's name, so any other key is never read; the lint rule
    * `dashboard-filter-binding-unknown` (severity error) refuses it at
    * `os validate` / `os build` and at the metadata publish door.
@@ -1586,10 +1589,13 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * Stable filter name (framework#2501) — the dashboard-variable key under
    * which the filter's value is published (readable in widget expressions as
    * `page.<name>`) and the key widgets reference in `filterBindings`.
-   * Defaults to `field`. The name `"dateRange"` is reserved for the built-in
-   * dashboard date range.
+   * Defaults to `field`. On a dashboard that declares `dateRange`, the name
+   * `"dateRange"` is reserved for that built-in date range: an entry keyed
+   * `dateRange` (by this name, or by `field` when unnamed) is refused, because
+   * it would replace the date range's control and binding. On a dashboard with
+   * no `dateRange` the name is free and the entry is an ordinary filter.
    */
-  name: z.string().optional().describe('Stable filter name (variable key); defaults to field').meta({ title: 'Name' }),
+  name: z.string().optional().describe('Stable filter name (variable key); defaults to field. Refused as dateRange when the dashboard declares dateRange (the built-in date range\'s reserved name)').meta({ title: 'Name' }),
 
   /**
    * Field name to filter on — at the authoring layer it resolves against the
@@ -1667,6 +1673,53 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
   // not inlined: the export is the rule a `.shape` mirror re-attaches (#16489),
   // and it must be this binding, not a copy.
   .superRefine(checkGlobalFilterDateDefaultValue));
+
+/**
+ * A dashboard's `globalFilters` declares each filter key once (#29023). One
+ * located issue per repeated key, at the SECOND declaration's `name` (or its
+ * `field`, when that entry is keyed by `field`), naming the key and every
+ * index. Before this, the dashboard save door saved two filters under one
+ * name: the board drew one control, and its value filtered the other
+ * definition's field, so a tile read a number the author never asked for.
+ *
+ * Attached to the array, not to the dashboard object, so the rule travels with
+ * `DashboardSchema.shape.globalFilters` into any mirror that spreads the
+ * shape. Predicate and message: `duplicate-global-filter-names.ts`
+ * ({@link duplicateGlobalFilterNames}). Not exported: the schema is the door.
+ */
+function refuseDuplicateGlobalFilterNames(globalFilters: readonly unknown[], ctx: z.RefinementCtx): void {
+  for (const duplicate of duplicateGlobalFilterNames(globalFilters)) {
+    ctx.addIssue({ code: 'custom', path: [duplicate.indexes[1]!, duplicate.secondKey], message: duplicate.message });
+  }
+}
+
+/**
+ * A dashboard that declares the built-in `dateRange` declares a filter under
+ * the reserved key `dateRange`, so a `globalFilters` entry keyed `dateRange`
+ * (its `name`, else its `field`) is refused, located at that entry's key.
+ * Before this, the pair parsed and the dashboard save door stored it: the
+ * console and lint resolvers let the later definition win, so the board drew
+ * the entry's control in place of the declared date range and every widget's
+ * `filterBindings.dateRange` was filtered by the entry. On a dashboard with no
+ * `dateRange` the key is free and the entry is an ordinary filter.
+ *
+ * Attached to the dashboard object, not to the `globalFilters` array, because
+ * the verdict reads the sibling `dateRange`. Exported in the house shape of
+ * {@link checkDashboardWidgetStageOrder}, a named `(value, ctx)` check chained
+ * on with `.superRefine(…)`: a mirror that rebuilds the dashboard from
+ * `DashboardSchema.shape` drops every object-level check, and gets this one
+ * back only by importing it and chaining it (the console's
+ * `DashboardComponentSchema` does). Predicate and message:
+ * `duplicate-global-filter-names.ts` ({@link reservedDateRangeGlobalFilters}).
+ */
+export function checkDashboardReservedDateRangeGlobalFilters(
+  dashboard: { dateRange?: unknown; globalFilters?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  for (const entry of reservedDateRangeGlobalFilters(dashboard.dateRange, dashboard.globalFilters)) {
+    ctx.addIssue({ code: 'custom', path: ['globalFilters', entry.index, entry.key], message: entry.message });
+  }
+}
 
 /**
  * Dashboard Schema
@@ -1768,8 +1821,20 @@ export const DashboardSchema = lazySchema(() => strictObject({
     allowCustomRange: z.boolean().default(true).describe('Allow users to pick a custom date range'),
   }).optional().describe('Global dashboard date range filter configuration'),
 
-  /** Global Filters */
-  globalFilters: z.array(GlobalFilterSchema).optional().describe('Global filters that apply to all widgets in the dashboard'),
+  /**
+   * Global Filters. Each filter's key (its `name`, else its `field`) is
+   * declared once per dashboard: the key is what the filter bar draws a
+   * control under and what a widget's `filterBindings` names, so two entries
+   * under one key are two definitions behind one control. Refused by
+   * {@link refuseDuplicateGlobalFilterNames} (#29023). The built-in
+   * `dateRange` is declared under the key `dateRange`, so an entry keyed
+   * `dateRange` beside it is refused too, by the dashboard-level
+   * {@link checkDashboardReservedDateRangeGlobalFilters} (#29213).
+   */
+  globalFilters: z.array(GlobalFilterSchema)
+    .superRefine(refuseDuplicateGlobalFilterNames)
+    .optional()
+    .describe('Global filters that apply to all widgets in the dashboard. Each filter name (its field when it has no name) is declared once, and is not dateRange when the dashboard declares dateRange'),
 
   /**
    * [#22611] The audience gate — the platform's one capability key, with the
@@ -1801,7 +1866,7 @@ export const DashboardSchema = lazySchema(() => strictObject({
   // ADR-0146 D2 — the override declaration (authored; travels with the item).
   ...OverrideDeclarationFields,
 
-}));
+}).superRefine(checkDashboardReservedDateRangeGlobalFilters));
 
 export type Dashboard = z.input<typeof DashboardSchema>;
 /** Post-parse shape of {@link Dashboard} — defaults applied, transforms run (ADR-0122). */

@@ -279,34 +279,31 @@ export const PATH_LIST_MARKER_KEYS = Object.freeze(['inherited-population', 'sel
  */
 export const ROOT_WALK_RESIDUE_LEDGER = [
   [
-    'scripts/check-console-intercept-disarm.mjs',
-    'its `scan(REPO_ROOT)` walks `workspacePackageDirs(root)` — every workspace PACKAGE ROOT\'s package.json and '
-      + 'vitest.config.*, read off pnpm-workspace.yaml. That is workspace-wide but it is not every file: a new test '
-      + 'file under an existing package does not move it, a new PACKAGE does. Declaring the whole tree would put it '
-      + 'on every card on a population it does not read.',
-  ],
-  [
-    'scripts/check-console-intercept-disarm.mjs --self-test',
-    'the same gate file, reached through its self-test invocation; the reading above is the whole of it.',
-  ],
-  [
     'scripts/check-skill-frame-freshness.mjs --self-test',
     'lint.yml runs the SELF-TEST HALF and never the scan — its step is named that, and the step comment states why '
       + '(the pnpm script would drag the scan in with it). The repo-root default parameter belongs to the scan half '
       + 'CI does not schedule, so a whole-tree row for this family would advertise work no workflow performs.',
   ],
+  // ⚖️ `scripts/check-console-intercept-disarm.mjs` and its `--self-test` LEFT this
+  // population under #29353 and their two rows are gone with them — a listed
+  // family that stops being a member reds here. They left BY PATH: the gate now
+  // declares what its scan opens, a package-root `package.json` and vitest
+  // config under each workspace glob, as `ROOT_DIR_WATCH_HINTS` in its own
+  // source, and its scan reds when that declaration drifts from
+  // `pnpm-workspace.yaml`. The rows had stated the population right and drawn
+  // the wrong conclusion from it: an EDITED package-root config moves the gate
+  // as surely as a new package does, so a card editing one learned of the gate
+  // only from CI (PR #29345 paid one fix round).
   // ⚖️ `check:pm-half-states` LEFT this population under #16904's D2 and its row
   // is gone with it — a listed family that stops being a member reds here, and
   // a stale exclusion is an exclusion nobody measures. It is now placeable BY
-  // PATH, and truthfully: `check-half-states.mjs`'s self-test reads two sibling
-  // sources as program text — `scripts/pm/sweep-stale-finding.mjs` and
-  // `scripts/pm/check-prior-rulings.mjs` — to pin that the sweep still ALIASES
-  // the one stale-`finding` screen rather than re-growing a copy, and that the
-  // prior-ruling line's writer still prints the key the patrol greps. So a card
-  // touching either sibling really does owe this gate, which is the opposite of
-  // the #15753 placement this row was written about: that one came from a
-  // noise-floor constant and said the opposite of what the constant declares,
-  // while these two literals are exactly what the self-test reads.
+  // PATH, and truthfully: `check-half-states.mjs`'s self-test reads a sibling
+  // source as program text — `scripts/pm/check-prior-rulings.mjs` — to pin
+  // that the prior-ruling line's writer still prints the key the patrol greps.
+  // So a card touching that sibling really does owe this gate, which is the
+  // opposite of the #15753 placement this row was written about: that one came
+  // from a noise-floor constant and said the opposite of what the constant
+  // declares, while this literal is exactly what the self-test reads.
   // ⚖️ `scripts/symbol-anchors.mjs --self-test` LEFT this population under
   // #18661 and its row is gone with it — a listed family that stops being a
   // member reds here, and a stale exclusion is an exclusion nobody measures.

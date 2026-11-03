@@ -89,7 +89,9 @@ import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
 import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledReads } from '../providers/bundledReads.js';
-import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appRouteSegment, appStudioRoutePath } from '../utils/index.js';
+import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
+import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
@@ -316,14 +318,17 @@ export function AppBarCrumbTrail({
  * The product mark — the way home (objectui#12605). One element for every
  * surface that draws it: the home page, the organizations and Studio front
  * doors, and inside every app after the sidebar trigger. A 32 px target
- * holding a 24 px tile on `--primary` with the stack glyph, or the
- * deployment's logo. Named 「PRODUCT home」; `title` keeps the product's name.
+ * (44 px below `md`, a phone's touch target) holding a 24 px tile on
+ * `--primary` with the stack glyph, or the deployment's logo. Inside an app
+ * the bar below `sm` has no room for it beside 44 px controls, so it is not
+ * drawn there: the app switcher's 「Back to home」 and the drawer's 「All apps」
+ * go home (objectstack#29075). Named 「PRODUCT home」; `title` keeps the product's name.
  *
  * `homePath`, not a literal `/home` (objectui#7256): on a deployment that
  * DECLARES a landing this is the declared one, so the mark and the post-login
  * landing name the same screen.
  */
-function ProductHomeMark({ homePath, label }: { homePath: string; label: string }) {
+function ProductHomeMark({ homePath, label, className }: { homePath: string; label: string; className?: string }) {
   const productName = getProductName();
   const logoUrl = getLogoUrl();
   return (
@@ -332,7 +337,7 @@ function ProductHomeMark({ homePath, label }: { homePath: string; label: string 
       data-testid="app-bar-product-home"
       aria-label={label}
       title={productName}
-      className="flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn('flex size-8 max-md:size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring', className)}
     >
       <span className="flex size-6 items-center justify-center overflow-hidden rounded-md bg-primary text-primary-foreground">
         {logoUrl ? (
@@ -484,6 +489,7 @@ export function AppHeader({
   // objectstack#28645 — the dashboard or page the phone title names, read from
   // the app bundle first; the list below only for one the bundle does not hold.
   const bundledReads = useBundledReads();
+  const readItemsByName = useReadItemsByName(metadata);
   const { currentAppName, recordTitle } = useNavigationContext();
 
   /**
@@ -711,12 +717,22 @@ export function AppHeader({
       if (pathParts[3]) {
         const pageName = pathParts[3];
         const bundledPage = bundledReads?.item('page', pageName, (currentApp as any)?._packageId);
+        // objectstack#29416 — a page the bundle does not hold is read by name,
+        // and from the `/meta/page` list only when that answer cannot be the
+        // prefer-local pick (`readItemPreferLocal`).
         const pageDef =
           bundledPage?.state === 'hit'
             ? bundledPage.value
             : bundledPage?.state === 'pending'
               ? undefined
-              : preferLocal(metadata.pages as any[], pageName, (currentApp as any)?._packageId);
+              : readItemPreferLocal(
+                  readItemsByName,
+                  'page',
+                  pageName,
+                  (currentApp as any)?._packageId,
+                  () => metadata.pages,
+                  metadata.getTypeStatus?.('page'),
+                ).item;
         // A page's `label` may be an inline locale map; drawn raw, the phone
         // bar's title blanked the page (objectui#13488).
         const fallback = metadataText(pageDef?.label, language) ?? humanizeSlug(pageName);
@@ -844,13 +860,14 @@ export function AppHeader({
             control inside an app, so it never moves when the sidebar
             collapses; the sidebar itself carries no trigger. */}
         {isApp ? (
-          <LocalizedSidebarTrigger className="shrink-0 mr-1" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
+          <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
           // objectui#12605 — the product mark sits at the same x on every
           // surface. Off an app there is no sidebar to toggle, so the
           // trigger's slot (its 28 px box and its gap) is held empty: the
-          // mark does not jump left when the viewer goes home.
-          <span aria-hidden data-testid="app-bar-trigger-slot" className="h-7 w-7 shrink-0 mr-1" />
+          // mark does not jump left when the viewer goes home. Below `sm` the
+          // mark is not drawn inside an app, so there is nothing to hold.
+          <span aria-hidden data-testid="app-bar-trigger-slot" className="h-7 w-7 shrink-0 mr-1 max-sm:hidden" />
         )}
 
         {/* The product mark — links to home, on every surface: the home
@@ -865,12 +882,13 @@ export function AppHeader({
             defaultValue: '{{product}} home',
             product: getProductName(),
           })}
+          className={isApp ? 'max-sm:hidden' : undefined}
         />
         {isApp && (
           <span
             aria-hidden
             data-testid="app-bar-home-separator"
-            className="mx-1.5 h-[18px] w-px shrink-0 rotate-[20deg] bg-border"
+            className="mx-1.5 h-[18px] w-px shrink-0 rotate-[20deg] bg-border max-sm:hidden"
           />
         )}
 
@@ -1017,7 +1035,7 @@ export function AppHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="min-[960px]:hidden h-8 w-8 shrink-0"
+              className="min-[960px]:hidden h-8 w-8 max-md:size-11 shrink-0"
               data-testid="action:command-palette:open-mobile"
               onClick={openCommandPalette}
               aria-label={searchLabel}
@@ -1039,12 +1057,15 @@ export function AppHeader({
               with no owning package and for a package that is not writable
               (objectui#12615): not rendered, never disabled. An icon button
               at every width, like the bell beside it (objectui#12461): the pencil alone, named
-              「Edit app」 by its aria-label and its tooltip. */}
+              「Edit app」 by its aria-label and its tooltip. Below `sm` the bar
+              keeps its room for 44 px controls and draws neither Studio
+              button; the app switcher's Studio row takes the same target
+              (objectstack#29075). */}
           {studioEntry?.posture === 'edit' && (
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 shrink-0"
+              className="h-8 w-8 max-md:size-11 max-sm:hidden shrink-0"
               asChild
               data-testid="app-design-in-studio-button"
               aria-label={t('topbar.editApp', { defaultValue: 'Edit app' })}
@@ -1061,7 +1082,7 @@ export function AppHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 shrink-0"
+              className="h-8 w-8 max-md:size-11 max-sm:hidden shrink-0"
               asChild
               data-testid="app-view-in-studio-button"
               aria-label={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
@@ -1105,7 +1126,7 @@ export function AppHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 shrink-0"
+              className="h-8 w-8 max-md:size-11 shrink-0"
               asChild
               aria-label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
             >
@@ -1190,7 +1211,7 @@ export function AppHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 shrink-0 rounded-full"
+              className="h-8 w-8 max-md:size-11 shrink-0 rounded-full"
               aria-label={t('user.accountMenu', { defaultValue: 'Account menu' })}
             >
               <Avatar className="h-7 w-7 rounded-full">
@@ -1201,7 +1222,8 @@ export function AppHeader({
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-64 rounded-lg" sideOffset={4}>
+          {/* 44 px rows below `md`, as the app switcher's menu (objectstack#29075). */}
+          <DropdownMenuContent align="end" className="min-w-64 rounded-lg max-md:[&_[role=menuitem]]:min-h-11" sideOffset={4}>
             {/* User identity */}
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-2 py-2">
@@ -1281,6 +1303,11 @@ export function AppHeader({
                * next to business apps — Personal Settings, etc. The `account`
                * app is represented by the explicit Profile link above, so it
                * is filtered out here to avoid a duplicate (dead) entry.
+               *
+               * Each entry links to the app's one address (`appAddressSegment`),
+               * never its bare package id: a hidden app that shares its package
+               * with the package's first app is reached by its name alone, and
+               * the package id would open that first app instead.
                */}
               {(metadataApps || [])
                 .filter((a: any) => a.active !== false && a.hidden === true && a.name !== 'account')
@@ -1290,7 +1317,7 @@ export function AppHeader({
                   return (
                     <DropdownMenuItem
                       key={`hidden_app_${app.name}`}
-                      onClick={() => leaveTo(`/apps/${appRouteSegment(app) ?? app.name}`)}
+                      onClick={() => leaveTo(`/apps/${appAddressSegment(metadataApps, app)}`)}
                       className="cursor-pointer"
                     >
                       <AppIcon className="mr-2 h-4 w-4" />

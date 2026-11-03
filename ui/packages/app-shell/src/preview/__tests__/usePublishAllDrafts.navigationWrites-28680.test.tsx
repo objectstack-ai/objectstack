@@ -13,7 +13,9 @@
  *
  * Real: the hook, `useMetadataClient`, the `MetadataClient` it builds and the
  * `useNavigationWrites` door. Stubbed: `sonner`, `globalThis.fetch` (the
- * server) and the adapter's `meta.saveItem` (the app write).
+ * server) and the adapter's `meta.saveItem` (the app write) and `meta.getItem`
+ * (the by-name page read: Publish all holds no page body, and a page that
+ * needs a record joins no app, objectstack#29182).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -31,6 +33,8 @@ import { usePublishAllDrafts } from '../usePublishAllDrafts';
 const t: TranslateFn = (key) => key;
 
 let drafts: unknown[] = [];
+/** The published `type` of each page, by name, as the by-name read serves it. */
+let pageTypes: Record<string, string> = {};
 /** The `type/name` of every item that already has a published layer. */
 let published = new Set<string>();
 /** Every request the hook sent, as `METHOD path`, in order. */
@@ -44,6 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   requests.length = 0;
   published = new Set();
+  pageTypes = {};
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -94,7 +99,12 @@ function metaValue(): MetadataContextValue {
 
 async function publishAll() {
   const saveItem = vi.fn(async () => ({}));
-  const adapter = { getClient: () => ({ meta: { saveItem } }) } as unknown as React.ComponentProps<
+  const getItem = vi.fn(async (type: string, name: string) => ({
+    type,
+    name,
+    item: { name, type: pageTypes[name] ?? 'app' },
+  }));
+  const adapter = { getClient: () => ({ meta: { saveItem, getItem } }) } as unknown as React.ComponentProps<
     typeof AdapterCtx.Provider
   >['value'];
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -113,7 +123,7 @@ async function publishAll() {
     const e = schema.navigation.at(-1)!;
     return `${e.type}:${e.pageName ?? e.dashboardName}`;
   });
-  return { outcome, entries };
+  return { outcome, entries, getItem };
 }
 
 describe('Publish all writes app navigation for the pages and dashboards it creates (objectstack#28680)', () => {
@@ -138,6 +148,23 @@ describe('Publish all writes app navigation for the pages and dashboards it crea
     ]);
     const i = (needle: string) => requests.findIndex((r) => r.includes(needle));
     expect(i('/page/new_page/layers')).toBeLessThan(i('/page/new_page/publish'));
+  });
+
+  it('a new record page joins no app; a new navigable page beside it does (objectstack#29182)', async () => {
+    pageTypes = { task_record: 'record', landing: 'home' };
+    drafts = [
+      { type: 'page', name: 'task_record', packageId: null },
+      { type: 'page', name: 'landing', packageId: null },
+    ];
+    const { outcome, entries, getItem } = await publishAll();
+
+    expect(outcome).toEqual({ ok: true, attempted: 2 });
+    expect(entries).toEqual(['page:landing']);
+    // One by-name read per created page, and none for anything else.
+    expect(getItem.mock.calls).toEqual([
+      ['page', 'task_record'],
+      ['page', 'landing'],
+    ]);
   });
 
   it('a layers read that fails is not taken for a create', async () => {

@@ -8,7 +8,9 @@
  * family of shapes after its schema gate: a hook with no `body`, a second
  * default record page of an object, an `external` object binding on a managed
  * datasource (both halves of the pair), an object `datasource` that names no
- * datasource (#26724), a `runAs: 'system'` flow an anonymous
+ * datasource (#26724), a permission-set grant on an object that does not
+ * exist (#28990), a keyed seed whose `externalId` names no field of its
+ * object (#28952), a `runAs: 'system'` flow an anonymous
  * endpoint names, the shared runtime authoring rules, and the authoring gate a
  * domain plugin registers. Measured on `origin/main` `5801a4f2c` before this
  * file: each restore door wrote every one of those shapes back, so a version
@@ -95,6 +97,8 @@ function makeStubEngine() {
     const registered = new Map<string, Map<string, unknown>>();
     // [#26724] The drivers the engine has registered by name, with no datasource item.
     const drivers = new Set<string>();
+    /** The engine's registered objects, by name (empty unless a case stages one). */
+    const objects = new Map<string, unknown>();
     let nextId = 0;
     let commit: unknown = null;
 
@@ -188,7 +192,7 @@ function makeStubEngine() {
             listItems: (type: string) => Array.from(registered.get(type)?.values() ?? []),
             getItem: (type: string, name: string) => registered.get(type)?.get(name),
             getAllObjects: () => [],
-            getObject: () => undefined,
+            getObject: (name: string) => objects.get(name),
             getPackage: () => undefined,
             getArtifactItem: () => undefined,
             isPackageDisabled: () => false,
@@ -200,6 +204,7 @@ function makeStubEngine() {
         historyRows,
         registered,
         drivers,
+        objects,
         serveCommit: (c: unknown) => { commit = c; },
     };
 }
@@ -503,6 +508,53 @@ pinBothDoors({
 });
 
 pinBothDoors({
+    title: 'a permission set restored with a grant on an object that does not exist now (unknownGrantObjectSaveRefusal)',
+    type: 'permission',
+    name: 'qa_widget_editor',
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        h.objects.set('qa_widget', { name: 'qa_widget' });
+        const set = (objects: Record<string, unknown>, label = 'Widget editor') => ({ name: 'qa_widget_editor', label, objects });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'qa_widget_editor', item: set({ qa_widget: { allowRead: true } }) });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'qa_widget_editor', item: set({}) });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'qa_widget_editor', item: set({}, 'Widget editor v3') });
+        // The object v1 granted on is gone, and the set holds no grant on it now.
+        h.objects.delete('qa_widget');
+        return { refused: 1, accepted: 2 };
+    },
+    expectDetail: (error) => {
+        expect(error.issues).toEqual([expect.objectContaining({ path: 'objects.qa_widget', code: 'custom' })]);
+        expect(error.issues[0].message.startsWith("Permission 'qa_widget_editor' grants on object 'qa_widget' which is not defined in objects")).toBe(true);
+    },
+});
+
+pinBothDoors({
+    title: 'a seed restored keyed on a field its object no longer has (seedExternalIdSaveRefusal)',
+    type: 'seed',
+    name: 'wh_order_seed',
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        const seedOf = (externalId: string, label?: string) => ({
+            object: 'wh_order', mode: 'upsert', externalId, records: [{ name: 'O1', code: 'o1' }],
+            ...(label ? { label } : {}),
+        });
+        h.objects.set('wh_order', { name: 'wh_order', fields: { name: { type: 'text' }, code: { type: 'text' } } });
+        await h.protocol.saveMetaItem({ type: 'seed', name: 'wh_order_seed', item: seedOf('code'), mode: 'draft' });
+        await h.protocol.saveMetaItem({ type: 'seed', name: 'wh_order_seed', item: seedOf('name'), mode: 'draft' });
+        await h.protocol.publishMetaItem({ type: 'seed', name: 'wh_order_seed' });
+        // The object lost the field v1 is keyed on.
+        h.objects.set('wh_order', { name: 'wh_order', fields: { name: { type: 'text' } } });
+        return { refused: 1, accepted: 2 };
+    },
+    expectDetail: (error) => {
+        expect(error.issues).toEqual([expect.objectContaining({ path: 'externalId', code: 'custom' })]);
+        expect(error.issues[0].message.startsWith("Seed 'wh_order_seed' keys on externalId member 'code', which is not a field of object 'wh_order'")).toBe(true);
+    },
+});
+
+pinBothDoors({
     title: 'a body the runtime authoring rules refuse (assertRuntimeAuthoringRules)',
     type: 'object',
     name: 'acme_task',
@@ -538,4 +590,57 @@ pinBothDoors({
         return { refused: 1, accepted: 2 };
     },
     expectDetail: (error) => expect(error.message).toBe('refused in state active'),
+});
+
+// ─── [#29696] A flow version stored in a legacy ADR-0087 D2 spelling ─────────
+//
+// The restore doors judge a flow version the way both publish doors judge a
+// stored flow draft (#29557): the runtime authoring rules read it in its
+// D2-converted spelling (`storedFlowVerdictBody`), and the version is restored
+// as stored. Measured on `origin/main` `0eb97fa4` before the fix: a version in
+// the legacy `get_record` `config.filters` spelling, which the save door, the
+// publish doors and the engine all accept, was refused at both restore doors
+// (422 `INVALID_METADATA`, `expression-invalid` at `config.filters`).
+
+const LEGACY_FLOW = 'acme_fetch';
+/** start → get_record → end, the match map spelled under `filterKey`; `brokenEdge` adds a conditional edge whose CEL does not parse. */
+const fetchFlow = (label: string, filterKey: 'filters' | 'filter', brokenEdge = false) => ({
+    name: LEGACY_FLOW,
+    label,
+    type: 'autolaunched',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'fetch', type: 'get_record', label: 'Fetch', config: { objectName: 'acme_deal', [filterKey]: { name: 'Acme' }, outputVariable: 'deal' } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+        { id: 'e1', source: 'start', target: 'fetch' },
+        brokenEdge
+            ? { id: 'e2', source: 'fetch', target: 'end', type: 'conditional', condition: 'record.name ==' }
+            : { id: 'e2', source: 'fetch', target: 'end' },
+    ],
+});
+
+pinBothDoors({
+    title: '[#29696] a flow version in a legacy D2 spelling is judged converted: restored as stored, and refused only where its converted spelling is',
+    type: 'flow',
+    name: LEGACY_FLOW,
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v1', 'filter') });
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v2', 'filter') });
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v3', 'filter') });
+        // Both versions as rows at rest in the legacy spelling; v2 also
+        // carries an edge the rules refuse in any spelling.
+        rewriteHistory(h, 'flow', LEGACY_FLOW, 1, () => fetchFlow('v1', 'filters'));
+        rewriteHistory(h, 'flow', LEGACY_FLOW, 2, () => fetchFlow('v2', 'filters', true));
+        return { refused: 2, accepted: 1 };
+    },
+    // Refused on the edge alone: nothing is reported at the legacy spelling.
+    expectDetail: (error) => {
+        const rules = (error.issues ?? []).map((i: { rule?: string }) => i.rule);
+        expect(rules).toContain('expression-invalid');
+        expect(JSON.stringify(error.issues)).not.toContain('filters');
+    },
 });

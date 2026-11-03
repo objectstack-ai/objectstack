@@ -11,13 +11,12 @@
  * related list's whole face) returns to the record's page, inside the record
  * pane too. Since the pane follows the width rule its record draws these
  * faces, and the pane has an `Esc` of its own: the drawer's dialog layer
- * dismisses (or, below the stack's root, goes back a level), and the split
- * pane beside a list closes on a document listener. The face takes the key
- * first; only an `Esc` pressed with no face open is the pane's.
+ * dismisses (or, below the stack's root, goes back a level), over a list too
+ * (the split pane beside a list retired, objectstack#28915). The face takes
+ * the key first; only an `Esc` pressed with no face open is the pane's.
  *
- * Driven through the real `NavigationOverlay` (its Radix sheet and its split
- * listener), with the page's blocks stubbed: what is measured is who answers
- * the key.
+ * Driven through the real `NavigationOverlay` (its Radix sheet), with the
+ * page's blocks stubbed: what is measured is who answers the key.
  */
 
 import * as React from 'react';
@@ -106,15 +105,15 @@ describe('Esc on an open face inside the record pane (objectstack#27524)', () =>
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
-  it('the split pane beside a list: the face closes, the pane stays; the next Esc closes the pane', () => {
-    const close = vi.fn();
-    render(pane({ mode: 'split', mainContent: <div>list</div>, close }));
-    expect(document.querySelector('[data-testid="record-split-pane"]')?.contains(face())).toBe(true);
+  it('the non-modal drawer over a list: the face closes, the drawer stays; the next Esc closes the drawer', () => {
+    const setIsOpen = vi.fn();
+    render(pane({ mode: 'drawer', mainContent: <div>list</div>, setIsOpen }));
+    expect(document.querySelector('[role="dialog"]')?.contains(face())).toBe(true);
     escape(face()!);
     expect(face()).toBeNull();
-    expect(close).not.toHaveBeenCalled();
+    expect(setIsOpen).not.toHaveBeenCalled();
     escape(pageColumns()!);
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(setIsOpen).toHaveBeenCalledWith(false);
   });
 
   it('an open menu owns Esc: the face stays open under it', () => {
@@ -145,13 +144,13 @@ describe('Esc on an open face inside the record pane (objectstack#27524)', () =>
     expect(setIsOpen).not.toHaveBeenCalled();
   });
 
-  it('a text field in the face, in the split pane beside a list: the face and the pane stay', () => {
-    const close = vi.fn();
-    render(pane({ mode: 'split', mainContent: <div>list</div>, close }));
+  it('a text field in the face, in the drawer over a list: the face and the drawer stay', () => {
+    const setIsOpen = vi.fn();
+    render(pane({ mode: 'drawer', mainContent: <div>list</div>, setIsOpen }));
     const input = document.createElement('textarea');
     face()!.appendChild(input);
     escape(input);
     expect(face()).not.toBeNull();
-    expect(close).not.toHaveBeenCalled();
+    expect(setIsOpen).not.toHaveBeenCalled();
   });
 });

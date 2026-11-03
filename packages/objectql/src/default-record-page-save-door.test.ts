@@ -342,3 +342,79 @@ describe.each(TOPOLOGIES)('%s kernel — the page parse at the save door, and ro
         expect((again as { error: any }).error?.status).toBe(422);
     });
 });
+
+// ── The app-scoped record page (`PageSchema.apps`, ruling A on #28979) ──
+//
+// The default's rule one level down: at most one record page per object PER
+// APP, refused by the same door with the same code, naming both pages and the
+// app. The default and an app's page are two slots and coexist.
+
+const DULY = 'com.acme.duly';
+
+/** An app-scoped record page of `object`; not a default unless `extra` says so. */
+const scopedPage = (name: string, object: string, apps: string[], extra: Record<string, unknown> = {}) =>
+    recordPage(name, object, false, { apps, ...extra });
+
+function expectAppRefusal(outcome: { ok: boolean; error?: any }, saved: string, object: string, app: string, holder: string) {
+    expect(outcome.ok, 'the save was refused').toBe(false);
+    const err = outcome.error;
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'DEFAULT_RECORD_PAGE_CONFLICT', status: 422 });
+    expect({ object: err.object, app: err.app }).toEqual({ object, app });
+    expect(String(err.message).split('. ')[0]).toBe(
+        `Default record page conflict: page '${saved}' cannot be saved as the record page of object `
+        + `'${object}' in app '${app}': ${holder} already is`,
+    );
+}
+
+describe.each(TOPOLOGIES)('%s kernel — a page saved as a second record page of an object in one app', (topology) => {
+    it('is refused over a page a package ships for that app, naming both and the app, and stores nothing', async () => {
+        const { engine, save, storedPages } = await boot(topology);
+        engine.registerApp({ id: DULY, name: 'duly', pages: [scopedPage('duly_member', 'sys_user', ['duly'])] });
+        const outcome = await save('env_member', scopedPage('env_member', 'sys_user', ['duly']));
+        expectAppRefusal(outcome, 'env_member', 'sys_user', 'duly', `page 'duly_member' of package '${DULY}'`);
+        expect(String((outcome as { error?: any }).error?.message)).toContain(
+            "Save 'env_member' without 'duly' in `apps`: a page a package ships stays that app's page unless the "
+            + "deployment is composed without that package's page.",
+        );
+        expect(storedPages()).toEqual([]);
+    });
+
+    it('is refused over a page the environment already stored for that app, naming it', async () => {
+        const { save, storedPages } = await boot(topology);
+        expect((await save('env_member_a', scopedPage('env_member_a', 'acme_task', ['duly']))).ok).toBe(true);
+        const outcome = await save('env_member_b', scopedPage('env_member_b', 'acme_task', ['crm', 'duly']));
+        expectAppRefusal(outcome, 'env_member_b', 'acme_task', 'duly', "page 'env_member_a', authored in this system");
+        expect(storedPages()).toEqual(['env_member_a']);
+    });
+
+    it('control: the same page scoped to another app is accepted', async () => {
+        const { engine, save, storedPages } = await boot(topology);
+        engine.registerApp({ id: DULY, name: 'duly', pages: [scopedPage('duly_member', 'sys_user', ['duly'])] });
+        const outcome = await save('env_member', scopedPage('env_member', 'sys_user', ['crm']));
+        expect(outcome.ok, String((outcome as any).error?.message)).toBe(true);
+        expect(storedPages()).toEqual(['env_member']);
+    });
+
+    it('control: an app\'s page is saved beside the package\'s default for the same object — two slots', async () => {
+        const { save } = await boot(topology);
+        const outcome = await save('env_org_member', scopedPage('env_org_member', 'acme_org', ['duly']));
+        expect(outcome.ok, String((outcome as any).error?.message)).toBe(true);
+    });
+
+    it('control: a save under the app page\'s own name (an overlay by name) stays accepted', async () => {
+        const { save } = await boot(topology);
+        expect((await save('env_member_a', scopedPage('env_member_a', 'acme_task', ['duly']))).ok).toBe(true);
+        const again = await save('env_member_a', scopedPage('env_member_a', 'acme_task', ['duly'], { label: 'Renamed' }));
+        expect(again.ok, String((again as any).error?.message)).toBe(true);
+    });
+
+    it('`apps` on a home page is refused by the page parse, and nothing is stored', async () => {
+        const { save, storedPages } = await boot(topology);
+        const outcome = await save('env_home', { name: 'env_home', label: 'Home', type: 'home', apps: ['duly'], regions: [] });
+        expect(outcome.ok).toBe(false);
+        const err = (outcome as { error: any }).error;
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(String(err.message)).toContain("`apps` is refused on a `type: 'home'` page");
+        expect(storedPages()).toEqual([]);
+    });
+});

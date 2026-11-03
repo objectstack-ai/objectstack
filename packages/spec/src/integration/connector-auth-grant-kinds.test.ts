@@ -216,24 +216,24 @@ describe("ADR-0143 D2.1 — an `authorization_code` client supplied by the insta
     );
   });
 
-  // Declared before it is served (ADR-0049): until #28866 makes the automation
-  // service read the installer's client, the key says so on the spec surface.
-  // The liveness walker does not descend into the `auth` union, so the
-  // `connector/auth` row is the only ledger coordinate over the key. #28866
-  // drops the marker and the row's sentence together, and flips this test.
-  it('is PLANNED until the automation service serves it: the describe marker, and the ledger row over the key', () => {
+  // Served (ADR-0049): the automation service's connect door takes the
+  // installer's client and the connection keeps it, so the key no longer
+  // carries the planned marker, and the `connector/auth` ledger row — the only
+  // coordinate over the key, since the walker does not descend into the `auth`
+  // union — no longer calls it planned.
+  it('is served: no PLANNED describe marker, and no planned sentence on the ledger row over the key', () => {
     const shape = (ConnectorInstanceOAuth2AuthorizationCodeAuthSchema as unknown as {
       shape: Record<string, { description?: string }>;
     }).shape;
-    expect(shape.clientSource.description).toMatch(/^\[PLANNED — not enforced\] /);
+    expect(shape.clientSource.description).not.toMatch(/PLANNED/);
     expect(shape.clientSource.description).toContain('ADR-0143 D2.1');
-    // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the ledger row.
+    // Customer-facing prose carries no tracker id (check:doc-authoring).
     expect(shape.clientSource.description).not.toMatch(/#\d{3,}/);
     const ledger = JSON.parse(fs.readFileSync(new URL('../../liveness/connector.json', import.meta.url), 'utf8'));
-    const note: string = ledger.props.auth.note;
-    expect(note).toContain('`clientSource`');
-    expect(note).toContain('`planned`');
-    expect(note).toContain('#28866');
+    const row = ledger.props.auth;
+    expect(row.status).toBe('live');
+    expect(row.note).not.toContain('`clientSource`');
+    expect(row.note).not.toContain('`planned`');
   });
 });
 

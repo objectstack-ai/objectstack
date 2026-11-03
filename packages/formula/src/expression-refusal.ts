@@ -156,6 +156,19 @@ export interface ExpressionRefusalParams {
    */
   'date-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
+   * Arithmetic on a date field's runtime TEXT that the evaluator cannot answer
+   * (`record.end_date - record.start_date`), judged with the field declared as
+   * that text. `operands` are the CEL operand types (the text is `DateText`);
+   * `reference` is the field as written, when it is known.
+   */
+  'date-text-arithmetic': { readonly operands: string; readonly reference?: string };
+  /**
+   * A formula that computes a `google.protobuf.Duration`
+   * (`today() - record.start_date`), which a field reads as `{}`. `reference`
+   * is the date field it is computed from, when the expression names one.
+   */
+  'date-duration-value': { readonly reference?: string };
+  /**
    * WARNING, never an error: a text or boolean field used with an arithmetic
    * or ordering `operator` against a number.
    */
@@ -224,6 +237,8 @@ const CODE_TABLE = {
   'unbound-root': true,
   'bare-reference': true,
   'date-arithmetic': true,
+  'date-text-arithmetic': true,
+  'date-duration-value': true,
   'type-mismatch': true,
   'field-near-miss': true,
   'traversal-bare-and-traversed': true,

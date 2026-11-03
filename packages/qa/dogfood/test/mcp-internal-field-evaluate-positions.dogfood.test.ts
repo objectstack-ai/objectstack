@@ -10,16 +10,21 @@
  *
  * ## What is pinned
  *
- * The data door refuses those positions for every caller
- * (`assertNoInternalFieldEvaluated`, `@objectstack/metadata-protocol`), before
- * the engine is asked: the engine omits such a field from every row, but it
- * still evaluates one named in a predicate or an order. Three MCP mouths hand a
- * caller's query to the engine without passing through `findData`, where the
- * door asks its gate — the stdio transport's `query_records` and
- * `aggregate_records`, and the HTTP bridge's `aggregate_records` — and each now
- * asks that same gate of the `protocol` service. The HTTP bridge's
- * `query_records` reaches `findData` itself; it is driven here too, as the
- * parity row the other three are held to.
+ * The refusal is the ENGINE's one definition (`QueryEvaluationGate`,
+ * `@objectstack/objectql`): the engine omits such a field from every row, and
+ * its own read path refuses to evaluate one for every non-system caller. The
+ * data door asks the same member before the engine runs, for every caller.
+ * Three MCP mouths hand a caller's query to the engine without passing through
+ * `findData` — the stdio transport's `query_records` and `aggregate_records`,
+ * and the HTTP bridge's `aggregate_records` — and each meets that one
+ * definition (stdio on the engine's path, the HTTP arm by asking the engine's
+ * member). The HTTP bridge's `query_records` reaches `findData` itself; it is
+ * driven here too, as the parity row the other three are held to.
+ *
+ * The stdio transport is driven a second time on a host that registers NO
+ * `protocol` service (the plugin's context answers that slot with "not
+ * registered", as a kernel composed with `registerProtocol: false` and no
+ * `MetadataProtocolPlugin` does): the refusal must not depend on that service.
  *
  * Every refusal is compared with what REST answers for the same body —
  * `code`, `status` and `message`, read from REST in this run, never a sentence
@@ -46,9 +51,8 @@
  * process cannot give a test its stdin), and `start()`'s claim of the real
  * stdin/stdout is the one call stubbed.
  *
- * The negative control — every stdio row and the HTTP aggregate rows served,
- * or answered in the engine's words, with the two MCP-side gate calls removed —
- * is a one-time ablation cited in the PR, not a permanent case.
+ * The negative control — the stdio rows served with the engine's read-path
+ * call removed — is a one-time ablation cited in the PR, not a permanent case.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -185,6 +189,7 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
   let stack: VerifyStack;
   const sessionTokens: Record<string, string> = {};
   const stdio: Record<string, Call> = {};
+  const stdioWithoutProtocol: Record<string, Call> = {};
   const started: MCPServerPlugin[] = [];
   const originalKey = process.env.OS_MCP_STDIO_API_KEY;
 
@@ -211,11 +216,16 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
    * `autoStart` over this kernel's own services. Registrations stay local, so
    * the showcase's own MCP plugin is untouched.
    */
-  async function stdioSession(apiKey: string): Promise<Call> {
+  async function stdioSession(apiKey: string, opts: { withoutProtocol?: boolean } = {}): Promise<Call> {
     const local = new Map<string, unknown>();
     const host = {
       registerService: (name: string, service: unknown) => { local.set(name, service); },
-      getService: (name: string): unknown => (local.has(name) ? local.get(name) : stack.kernel.getService<unknown>(name)),
+      getService: (name: string): unknown => {
+        if (local.has(name)) return local.get(name);
+        // A host that registers no protocol: the kernel's own "not registered" answer.
+        if (opts.withoutProtocol && name === 'protocol') throw new Error(`Service 'protocol' not found`);
+        return stack.kernel.getService<unknown>(name);
+      },
       replaceService: (name: string, service: unknown) => { local.set(name, service); },
       hook: () => {},
       trigger: async () => {},
@@ -301,7 +311,9 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
     await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set: set.name }, SYS);
 
     for (const persona of ['admin', 'member'] as const) {
-      stdio[persona] = await stdioSession(await mintKey(sessionTokens[persona]!, `mcp-internal-field-${persona}`));
+      const key = await mintKey(sessionTokens[persona]!, `mcp-internal-field-${persona}`);
+      stdio[persona] = await stdioSession(key);
+      stdioWithoutProtocol[persona] = await stdioSession(key, { withoutProtocol: true });
     }
   }, 240_000);
 
@@ -315,6 +327,7 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
 
   const transports = {
     stdio: (persona: string) => stdio[persona]!,
+    'stdio, no protocol service': (persona: string) => stdioWithoutProtocol[persona]!,
     http: (persona: string) => httpCall(sessionTokens[persona]!),
   } as const;
 

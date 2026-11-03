@@ -116,6 +116,43 @@ export function deriveManifestId(projectName: string): string {
   return `${SCAFFOLD_ID_PREFIX}${s}`;
 }
 
+/**
+ * The longest namespace a scaffold emits: the longest base namespace that
+ * still has a paired customization namespace (`<namespace>_custom`, ADR-0146
+ * D3). A longer one passes the manifest grammar (20 characters) but has no
+ * pair, so `os validate` on the fresh project warns
+ * `namespace-no-customization-pair` about objects its author never wrote.
+ *
+ * It is `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH` from
+ * `@objectstack/spec/kernel`, restated because this package cannot import it:
+ * the spec is a devDependency here, so a value import would be bundled into
+ * the published scaffolder (`check:undeclared-dep-imports`), and making it a
+ * runtime dependency would put zod into a two-dependency `npx` entry point.
+ * `scaffold-namespace-cap.test.ts` pins the two equal, so they cannot drift.
+ */
+export const SCAFFOLD_NAMESPACE_MAX_LENGTH = 13;
+
+/**
+ * Convert an npm package name into a valid ObjectStack namespace identifier
+ * (regex `^[a-z][a-z0-9_]{1,19}$`, reserved: base/system/sys) that is at most
+ * {@link SCAFFOLD_NAMESPACE_MAX_LENGTH} characters, so it has a paired
+ * customization namespace. A longer name is truncated, with no trailing `_`.
+ * Mirrors `sanitizeNamespace()` in `@objectstack/cli`'s `init` command, so
+ * both scaffolders agree.
+ */
+export function sanitizeNamespace(name: string): string {
+  const max = SCAFFOLD_NAMESPACE_MAX_LENGTH;
+  let s = name.replace(/^@[^/]+\//, '');
+  s = s.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  s = s.replace(/^_+|_+$/g, '');
+  if (!s) s = 'app';
+  if (/^[0-9]/.test(s)) s = 'a' + s;
+  if (s.length < 2) s = (s + '_app').slice(0, max);
+  if (s.length > max) s = s.slice(0, max).replace(/_+$/, '');
+  if (['base', 'system', 'sys'].includes(s)) s = (s + '_app').slice(0, max);
+  return s;
+}
+
 /** Every `*.ts` file under `dir`, recursively. Missing dir → empty. */
 function tsFiles(dir: string, out: string[] = []): string[] {
   if (!fs.existsSync(dir)) return out;

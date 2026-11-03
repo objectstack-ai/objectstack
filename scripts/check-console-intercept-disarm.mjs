@@ -55,7 +55,14 @@
 //
 //   1. A package-root vitest config must exist (`vitest.config.{ts,mts,cts,
 //      js,mjs,cjs}`). A package with no config runs vitest's defaults, and
-//      the default arms the intercept.
+//      the default arms the intercept. One exception, because it is not a
+//      waiver: a package with no config whose EVERY vitest script names
+//      `--root <dir>` never loads a config of its own — vitest looks for its
+//      config from that root (and resolves `--config` against it), so the
+//      config found there is the one judged in the package's place, by the
+//      rules below (`rootRedirectedConfigs`). The `ui/` packages run that way:
+//      `ui/vitest.config.mts` is their one test config, and `ui/AGENTS.md`
+//      forbids a per-package one.
 //   2. Its comment-masked source must set `disableConsoleIntercept: true` —
 //      masked via `scripts/js-comment-mask.mjs`, so a docblock ABOUT the
 //      setting (this repo's configs carry long rationale comments) never
@@ -91,6 +98,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { readWorkspaceGlobs } from './workspace-enumerator.mjs';
 
 // Why this gate reads `maskCommentsAndLiterals` — the tree's one
 // comments+literals projection, imported rather than re-derived here (#15776).
@@ -113,6 +121,64 @@ const VITEST_CONFIG_NAMES = [
   'vitest.config.js',
   'vitest.config.mjs',
   'vitest.config.cjs',
+];
+
+// The population this gate reads, declared for `scripts/pm/dispatch-gates.mjs`
+// (the ROOT_DIR_WATCH_HINTS idiom), so a card that edits a package-root
+// manifest or vitest config is told about this gate before CI is. `scan()`
+// below opens exactly two files per workspace package: its `package.json` and
+// its package-root vitest config. Nothing else under a package moves the
+// verdict, so a new test file under an existing package derives nothing.
+//
+// One pair per glob `workspaceGlobs()` reads, in that order. A `<dir>/*` glob
+// is spelled `<dir>/*/package.json` and `<dir>/*/vitest.config.*` — the glob in
+// a non-final segment makes the derivation judge it as a pattern, one path
+// segment per `*`. A literal member `<dir>` would be spelled `<dir>/package.json`
+// and `<dir>/vitest.config` (`watchHintsForGlob`): with no glob ahead of it a
+// trailing `.*` is collapsed to `<dir>/vitest.config.`, which names nothing,
+// while the bare stem reaches every one of VITEST_CONFIG_NAMES through the
+// derivation's module-extension equality: `ui` is one. The config a
+// `--root`-redirected package is judged by (`ui/vitest.config.mts` for the
+// `ui/` packages) is the `ui` member's own, so its pair covers that read too.
+//
+// ⛔ A literal array, never computed from the globs (`check:watch-hint-literal`):
+// the derivation reads source text, so a computed list contributes no hint.
+// Hand-kept, and `main()` holds it to the workspace file: a glob in
+// `pnpm-workspace.yaml` with no pair here, or a pair here for a glob that file
+// no longer lists, is a finding (`watchHintDrift`). Not readable from the
+// repo-root files themselves — `pnpm-workspace.yaml` and `vitest.preset.mts`
+// carry no separator, so no spelling of them is a hint the derivation admits.
+export const ROOT_DIR_WATCH_HINTS = [
+  'packages/*/package.json',
+  'packages/*/vitest.config.*',
+  'packages/apps/*/package.json',
+  'packages/apps/*/vitest.config.*',
+  'packages/drivers/*/package.json',
+  'packages/drivers/*/vitest.config.*',
+  'packages/plugins/*/package.json',
+  'packages/plugins/*/vitest.config.*',
+  'packages/qa/*/package.json',
+  'packages/qa/*/vitest.config.*',
+  'packages/triggers/*/package.json',
+  'packages/triggers/*/vitest.config.*',
+  'packages/services/*/package.json',
+  'packages/services/*/vitest.config.*',
+  'packages/adapters/*/package.json',
+  'packages/adapters/*/vitest.config.*',
+  'packages/connectors/*/package.json',
+  'packages/connectors/*/vitest.config.*',
+  'apps/*/package.json',
+  'apps/*/vitest.config.*',
+  'examples/*/package.json',
+  'examples/*/vitest.config.*',
+  'ui/package.json',
+  'ui/vitest.config',
+  'ui/packages/*/package.json',
+  'ui/packages/*/vitest.config.*',
+  'ui/apps/*/package.json',
+  'ui/apps/*/vitest.config.*',
+  'ui/examples/*/package.json',
+  'ui/examples/*/vitest.config.*',
 ];
 
 const DISARM_RE = /\bdisableConsoleIntercept\s*:\s*true\b/;
@@ -194,6 +260,36 @@ function presetReexport(root, dir, source) {
 
 /** A script that runs vitest — `vitest run`, `vitest --coverage`, a bare `vitest`. */
 const VITEST_SCRIPT_RE = /(?:^|\s|&&|;)vitest(?:\s|$)/;
+const ROOT_FLAG_RE = /\s(?:--root|-r)(?:=|\s+)(\S+)/;
+const CONFIG_FLAG_RE = /\s(?:--config|-c)(?:=|\s+)(\S+)/;
+
+/**
+ * For a package with NO package-root config: the configs vitest loads when
+ * every vitest script names `--root`. vitest (4.1, `createVitest`) resolves
+ * `--config` against that root and otherwise looks for `vitest.config.*` from
+ * it, never from the package directory. Only the flags of the vitest command
+ * itself are read (up to the next `&&`, `||`, `;` or `|`).
+ *
+ * @returns {string[] | null} absolute config paths, or null when any vitest
+ * script runs without `--root` or names a root holding no config — the
+ * no-config finding then stands.
+ */
+function rootRedirectedConfigs(dir, vitestScripts) {
+  const configs = new Set();
+  for (const script of vitestScripts) {
+    const command = script.slice(script.search(VITEST_SCRIPT_RE)).split(/&&|\|\||;|\|/)[0];
+    const rootFlag = ROOT_FLAG_RE.exec(command);
+    if (!rootFlag) return null;
+    const runRoot = resolve(dir, rootFlag[1]);
+    const configFlag = CONFIG_FLAG_RE.exec(command);
+    const config = configFlag
+      ? resolve(runRoot, configFlag[1])
+      : VITEST_CONFIG_NAMES.map((name) => join(runRoot, name)).find((path) => existsSync(path));
+    if (!config || !existsSync(config)) return null;
+    configs.add(config);
+  }
+  return [...configs];
+}
 
 const REMEDY = `    // Late console writes must not redden a green suite (#10374) — see the
     // mechanism docblock in examples/app-showcase/vitest.config.ts. Enforced
@@ -207,28 +303,8 @@ const REMEDY = `    // Late console writes must not redden a green suite (#10374
  * instead of silently emptying its population.
  */
 export function workspacePackageDirs(root) {
-  const raw = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8');
-  const globs = [];
-  let inPackages = false;
-  for (const line of raw.split('\n')) {
-    if (/^packages:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (inPackages) {
-      const m = line.match(/^\s+-\s+['"]?([^'"#\s]+)['"]?\s*$/);
-      if (m) {
-        globs.push(m[1]);
-        continue;
-      }
-      if (line.trim() !== '') inPackages = false;
-    }
-  }
-  if (globs.length === 0) {
-    throw new Error(`no package globs parsed from ${join(root, 'pnpm-workspace.yaml')}`);
-  }
   const dirs = [];
-  for (const glob of globs) {
+  for (const glob of workspaceGlobs(root)) {
     if (glob.endsWith('/*')) {
       const base = join(root, glob.slice(0, -2));
       if (!existsSync(base)) continue;
@@ -250,6 +326,59 @@ export function workspacePackageDirs(root) {
   return dirs;
 }
 
+/**
+ * `pnpm-workspace.yaml`'s `packages:` globs, in file order — the repo's one
+ * parse (`scripts/workspace-enumerator.mjs`), which skips a whole-line comment
+ * inside the list instead of ending the list there. Throws when none parse.
+ */
+export function workspaceGlobs(root) {
+  return readWorkspaceGlobs(root);
+}
+
+/**
+ * The watch-hint pair one workspace glob owes `ROOT_DIR_WATCH_HINTS`, spelled
+ * the way that declaration's comment explains. A glob wider than `<dir>/*` owes
+ * nothing here: `workspacePackageDirs()` already refuses it, loudly.
+ */
+export function watchHintsForGlob(glob) {
+  if (glob.endsWith('/*')) return [`${glob}/package.json`, `${glob}/vitest.config.*`];
+  if (!glob.includes('*')) return [`${glob}/package.json`, `${glob}/vitest.config`];
+  return [];
+}
+
+/**
+ * Where `ROOT_DIR_WATCH_HINTS` and the workspace globs disagree: `missing` are
+ * pairs a listed glob owes and the declaration lacks (a package there edits its
+ * config and no dispatch derivation names this gate); `stale` are declared
+ * hints no listed glob owes (a lead for a population this gate no longer reads).
+ */
+export function watchHintDrift(globs, hints = ROOT_DIR_WATCH_HINTS) {
+  const owed = globs.flatMap(watchHintsForGlob);
+  return {
+    missing: owed.filter((h) => !hints.includes(h)),
+    stale: hints.filter((h) => !owed.includes(h)),
+  };
+}
+
+function watchHintDriftFindings(root) {
+  const { missing, stale } = watchHintDrift(workspaceGlobs(root));
+  const findings = [];
+  if (missing.length > 0) {
+    findings.push(
+      `ROOT_DIR_WATCH_HINTS lacks ${missing.join(', ')} — pnpm-workspace.yaml lists the glob, so a ` +
+        `card editing a package-root manifest or vitest config there is not told about this gate ` +
+        `until CI. Add the pair to the declaration in scripts/check-console-intercept-disarm.mjs.`,
+    );
+  }
+  if (stale.length > 0) {
+    findings.push(
+      `ROOT_DIR_WATCH_HINTS declares ${stale.join(', ')}, which no pnpm-workspace.yaml glob owes — ` +
+        `remove it from the declaration in scripts/check-console-intercept-disarm.mjs.`,
+    );
+  }
+  return findings;
+}
+
 /** @returns {{findings: string[], vitestPackages: number}} */
 export function scan(root) {
   const findings = [];
@@ -262,12 +391,20 @@ export function scan(root) {
       findings.push(`${rel(root, dir)}/package.json: unreadable (${error.message})`);
       continue;
     }
-    const scripts = Object.values(manifest.scripts ?? {});
-    if (!scripts.some((s) => typeof s === 'string' && VITEST_SCRIPT_RE.test(s))) continue;
+    const vitestScripts = Object.values(manifest.scripts ?? {}).filter(
+      (s) => typeof s === 'string' && VITEST_SCRIPT_RE.test(s),
+    );
+    if (vitestScripts.length === 0) continue;
     vitestPackages += 1;
 
     const configName = VITEST_CONFIG_NAMES.find((name) => existsSync(join(dir, name)));
-    if (!configName) {
+    if (configName) {
+      const finding = judgeConfig(root, join(dir, configName), `${rel(root, dir)}/${configName}`);
+      if (finding) findings.push(finding);
+      continue;
+    }
+    const redirected = rootRedirectedConfigs(dir, vitestScripts);
+    if (!redirected) {
       findings.push(
         `${rel(root, dir)}: runs vitest with NO package-root vitest config — vitest's ` +
           `default ARMS console interception, exposing this suite to the #10374 ` +
@@ -275,46 +412,59 @@ export function scan(root) {
       );
       continue;
     }
-    const source = readFileSync(join(dir, configName), 'utf8');
-    const preset = presetReexport(root, dir, source);
-    const masked = maskCommentsAndLiterals(preset ? readFileSync(join(root, preset), 'utf8') : source);
-    const via = preset ? ` (via its re-export of ${preset}, which the gate judges in its place)` : '';
-    if (REARM_RE.test(masked)) {
-      findings.push(
-        `${rel(root, dir)}/${configName}${via}: sets disableConsoleIntercept: FALSE — this ` +
-          `re-arms the #10374 teardown race at the package root. The only sanctioned ` +
-          `home for that value is a fixture config BELOW the package root (the ` +
-          `teardown-race pin's positive control). Set it to true, or move the config ` +
-          `under the fixture directory that needs it.`,
-      );
-      continue;
-    }
-    if (!DISARM_RE.test(masked)) {
-      findings.push(
-        `${rel(root, dir)}/${configName}${via}: does not set disableConsoleIntercept: true ` +
-          `(a comment about it does not count) — this suite pays a console RPC per ` +
-          `write and any late console.log can fail its fully green run ` +
-          `(EnvironmentTeardownError: [vitest-worker]: Closing rpc while ` +
-          `"onUserConsoleLog" was pending). Add to the test block:\n${REMEDY}`,
-      );
-      continue;
-    }
-    if (PROJECTS_RE.test(masked)) {
-      const blocks = projectTestBlocks(masked);
-      const undisarmed = blocks.filter((b) => !DISARM_RE.test(b));
-      if (blocks.length === 0 || undisarmed.length > 0) {
-        findings.push(
-          `${rel(root, dir)}/${configName}${via}: defines inline projects, and ` +
-            `${blocks.length === 0 ? 'no project test block could be read' : `${undisarmed.length} of ${blocks.length} project test block(s) lack the setting`} ` +
-            `— a ROOT-level disableConsoleIntercept is INERT for project runs ` +
-            `(measured on vitest 4.1.10: a probe project's console write still ` +
-            `arrived over RPC with the root disarm in place). Put\n${REMEDY}\n` +
-            `inside EVERY project's own test block.`,
-        );
-      }
+    for (const config of redirected) {
+      const label =
+        `${rel(root, dir)} (its vitest scripts run with --root, so vitest loads ` +
+        `${rel(root, config)}, which the gate judges in its place)`;
+      const finding = judgeConfig(root, config, label);
+      if (finding) findings.push(finding);
     }
   }
   return { findings, vitestPackages };
+}
+
+/**
+ * The verdict on one vitest config: a finding naming `label`, or null when it
+ * disarms. A bare re-export of the root preset is judged as the preset.
+ */
+function judgeConfig(root, configPath, label) {
+  const source = readFileSync(configPath, 'utf8');
+  const preset = presetReexport(root, dirname(configPath), source);
+  const masked = maskCommentsAndLiterals(preset ? readFileSync(join(root, preset), 'utf8') : source);
+  const via = preset ? ` (via its re-export of ${preset}, which the gate judges in its place)` : '';
+  if (REARM_RE.test(masked)) {
+    return (
+      `${label}${via}: sets disableConsoleIntercept: FALSE — this ` +
+      `re-arms the #10374 teardown race at the package root. The only sanctioned ` +
+      `home for that value is a fixture config BELOW the package root (the ` +
+      `teardown-race pin's positive control). Set it to true, or move the config ` +
+      `under the fixture directory that needs it.`
+    );
+  }
+  if (!DISARM_RE.test(masked)) {
+    return (
+      `${label}${via}: does not set disableConsoleIntercept: true ` +
+      `(a comment about it does not count) — this suite pays a console RPC per ` +
+      `write and any late console.log can fail its fully green run ` +
+      `(EnvironmentTeardownError: [vitest-worker]: Closing rpc while ` +
+      `"onUserConsoleLog" was pending). Add to the test block:\n${REMEDY}`
+    );
+  }
+  if (PROJECTS_RE.test(masked)) {
+    const blocks = projectTestBlocks(masked);
+    const undisarmed = blocks.filter((b) => !DISARM_RE.test(b));
+    if (blocks.length === 0 || undisarmed.length > 0) {
+      return (
+        `${label}${via}: defines inline projects, and ` +
+        `${blocks.length === 0 ? 'no project test block could be read' : `${undisarmed.length} of ${blocks.length} project test block(s) lack the setting`} ` +
+        `— a ROOT-level disableConsoleIntercept is INERT for project runs ` +
+        `(measured on vitest 4.1.10: a probe project's console write still ` +
+        `arrived over RPC with the root disarm in place). Put\n${REMEDY}\n` +
+        `inside EVERY project's own test block.`
+      );
+    }
+  }
+  return null;
 }
 
 function rel(root, path) {
@@ -325,11 +475,12 @@ function main() {
   let result;
   try {
     result = scan(REPO_ROOT);
+    result.driftFindings = watchHintDriftFindings(REPO_ROOT);
   } catch (error) {
     console.error(`check-console-intercept-disarm: MEASUREMENT FAILED — ${error.message}`);
     process.exit(2);
   }
-  const { findings, vitestPackages } = result;
+  const { findings, vitestPackages, driftFindings } = result;
   if (vitestPackages === 0) {
     console.error(
       'check-console-intercept-disarm: MEASUREMENT FAILED — the scan found ZERO ' +
@@ -343,8 +494,14 @@ function main() {
       `check-console-intercept-disarm: ${findings.length} package(s) exposed to the ` +
         `vitest late-console teardown race (#10374):\n\n${findings.join('\n\n')}\n`,
     );
-    process.exit(1);
   }
+  if (driftFindings.length > 0) {
+    console.error(
+      `check-console-intercept-disarm: the declared watch population has drifted from ` +
+        `pnpm-workspace.yaml:\n\n${driftFindings.join('\n\n')}\n`,
+    );
+  }
+  if (findings.length > 0 || driftFindings.length > 0) process.exit(1);
   console.log(
     `OK: ${vitestPackages} vitest-running package(s), every one disarms console ` +
       `interception at the package root.`,
@@ -359,12 +516,18 @@ function main() {
 // invisible (case 6): those are the two silent-in-the-green-direction bugs a
 // textual gate can grow.
 
-function buildWorkspace(caseDir, packages, rootFiles = {}) {
+// A package name with a `/` is a repo-relative directory (for a fixture whose
+// `workspaceYaml` lists more than `packages/*`); a bare name lives under
+// packages/. A `rootFiles` path may name a subdirectory.
+function buildWorkspace(caseDir, packages, rootFiles = {}, workspaceYaml = 'packages:\n  - packages/*\n') {
   mkdirSync(join(caseDir, 'packages'), { recursive: true });
-  writeFileSync(join(caseDir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
-  for (const [file, content] of Object.entries(rootFiles)) writeFileSync(join(caseDir, file), content);
+  writeFileSync(join(caseDir, 'pnpm-workspace.yaml'), workspaceYaml);
+  for (const [file, content] of Object.entries(rootFiles)) {
+    mkdirSync(dirname(join(caseDir, file)), { recursive: true });
+    writeFileSync(join(caseDir, file), content);
+  }
   for (const [name, files] of Object.entries(packages)) {
-    const dir = join(caseDir, 'packages', name);
+    const dir = name.includes('/') ? join(caseDir, name) : join(caseDir, 'packages', name);
     mkdirSync(dir, { recursive: true });
     for (const [file, content] of Object.entries(files)) {
       mkdirSync(dirname(join(dir, file)), { recursive: true });
@@ -379,6 +542,14 @@ const DISARMED = `import { defineConfig } from 'vitest/config';
 export default defineConfig({ test: { disableConsoleIntercept: true } });
 `;
 const REEXPORT = `// nothing of its own\nexport { default } from '../../vitest.preset.mts';\n`;
+// The `ui/` shape: a nested workspace root whose packages run vitest with
+// `--root ../..` and carry no config of their own. Directory names are
+// assembled from segments so no fixture string reads as a path literal here.
+const NESTED = 'nested';
+const NESTED_PKG = [NESTED, 'packages', 'a'].join('/');
+const NESTED_YAML = `packages:\n  - packages/*\n  # a comment line between globs\n\n  - ${NESTED}\n  - ${NESTED}/packages/*\n`;
+const rootRunManifest = (extra = '') =>
+  JSON.stringify({ name: 'n', scripts: { test: `vitest run --root ../.. packages/a/${extra}` } });
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
@@ -408,7 +579,7 @@ const SELF_TEST_VERDICT = 'check-console-intercept-disarm self-test reached its 
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-console-intercept-disarm self-test': 16,
+  'check-console-intercept-disarm self-test': 21,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -598,15 +769,73 @@ function selfTest() {
       expectFindings: 1,
       expectText: 'does not set disableConsoleIntercept',
     },
+    {
+      name: 'a comment line between workspace globs keeps every glob after it',
+      workspaceYaml: NESTED_YAML,
+      rootFiles: { [`${NESTED}/package.json`]: TEST_MANIFEST },
+      packages: {},
+      expectGlobs: ['packages/*', NESTED, `${NESTED}/packages/*`],
+      expectFindings: 1,
+      expectText: 'NO package-root vitest config',
+    },
+    {
+      name: 'a --root package with no config is judged by the disarmed config at that root',
+      workspaceYaml: NESTED_YAML,
+      rootFiles: { [`${NESTED}/package.json`]: QUIET_MANIFEST, [`${NESTED}/vitest.config.ts`]: DISARMED },
+      packages: { [NESTED_PKG]: { 'package.json': rootRunManifest() } },
+      expectFindings: 0,
+      expectVitestPackages: 1,
+    },
+    {
+      name: 'a --root package fails when the config at that root does not disarm, naming that config',
+      workspaceYaml: NESTED_YAML,
+      rootFiles: {
+        [`${NESTED}/package.json`]: QUIET_MANIFEST,
+        [`${NESTED}/vitest.config.ts`]: `export default { test: { globals: true } };\n`,
+      },
+      packages: { [NESTED_PKG]: { 'package.json': rootRunManifest() } },
+      expectFindings: 1,
+      expectText: `vitest loads ${NESTED}/vitest.config.ts`,
+    },
+    {
+      name: 'a --config beside --root is resolved against that root',
+      workspaceYaml: NESTED_YAML,
+      rootFiles: {
+        [`${NESTED}/package.json`]: QUIET_MANIFEST,
+        [`${NESTED}/vitest.config.ts`]: DISARMED,
+        [`${NESTED}/other.config.mts`]: `export default { test: { globals: true } };\n`,
+      },
+      packages: { [NESTED_PKG]: { 'package.json': rootRunManifest(' --config other.config.mts') } },
+      expectFindings: 1,
+      expectText: `vitest loads ${NESTED}/other.config.mts`,
+    },
+    {
+      name: 'one vitest script without --root keeps the no-config finding',
+      workspaceYaml: NESTED_YAML,
+      rootFiles: { [`${NESTED}/package.json`]: QUIET_MANIFEST, [`${NESTED}/vitest.config.ts`]: DISARMED },
+      packages: {
+        [NESTED_PKG]: {
+          'package.json': JSON.stringify({
+            name: 'n',
+            scripts: { test: 'vitest run --root ../.. packages/a/', 'test:watch': 'vitest' },
+          }),
+        },
+      },
+      expectFindings: 1,
+      expectText: 'NO package-root vitest config',
+    },
   ];
 
   let failures = 0;
   for (const testCase of cases) {
     const caseDir = mkdtempSync(join(tmpdir(), 'ci-disarm-'));
     try {
-      buildWorkspace(caseDir, testCase.packages, testCase.rootFiles);
+      buildWorkspace(caseDir, testCase.packages, testCase.rootFiles, testCase.workspaceYaml);
       const { findings, vitestPackages } = scan(caseDir);
       const problems = [];
+      if (testCase.expectGlobs && workspaceGlobs(caseDir).join('|') !== testCase.expectGlobs.join('|')) {
+        problems.push(`expected globs ${testCase.expectGlobs.join(', ')}, parsed ${workspaceGlobs(caseDir).join(', ')}`);
+      }
       if (findings.length !== testCase.expectFindings) {
         problems.push(`expected ${testCase.expectFindings} finding(s), got ${findings.length}`);
       }
@@ -641,6 +870,54 @@ check(() => {
           `package(s); the population this gate was written against had 72. The ` +
           `workspace expansion has gone blind, which would pass every future arrival.`,
       );
+    }
+});
+
+  // The declared watch population (ROOT_DIR_WATCH_HINTS) against the REAL
+  // workspace file, and the drift reading in both directions. Fixture globs are
+  // assembled from segments so no fixture string reads as a path literal of
+  // this gate's own.
+  const realDrift = watchHintDrift(workspaceGlobs(REPO_ROOT));
+check(() => {
+    if (realDrift.missing.length > 0 || realDrift.stale.length > 0) {
+      failures += 1;
+      console.error(
+        `self-test FAIL: ROOT_DIR_WATCH_HINTS has drifted from pnpm-workspace.yaml — ` +
+          `missing: ${realDrift.missing.join(', ') || 'none'}; stale: ${realDrift.stale.join(', ') || 'none'}.`,
+      );
+    }
+});
+  const extraGlob = ['fixture-root', '*'].join('/');
+  const addedGlob = watchHintDrift([...workspaceGlobs(REPO_ROOT), extraGlob]);
+check(() => {
+    const want = watchHintsForGlob(extraGlob);
+    if (want.length !== 2 || addedGlob.missing.join('|') !== want.join('|') || addedGlob.stale.length !== 0) {
+      failures += 1;
+      console.error(`self-test FAIL: a workspace glob the declaration lacks is not read as missing: ${JSON.stringify(addedGlob)}`);
+    }
+});
+  const droppedGlob = watchHintDrift(workspaceGlobs(REPO_ROOT).filter((g) => g !== workspaceGlobs(REPO_ROOT)[0]));
+check(() => {
+    const want = watchHintsForGlob(workspaceGlobs(REPO_ROOT)[0]);
+    if (droppedGlob.stale.join('|') !== want.join('|') || droppedGlob.missing.length !== 0) {
+      failures += 1;
+      console.error(`self-test FAIL: a declared pair no workspace glob owes is not read as stale: ${JSON.stringify(droppedGlob)}`);
+    }
+});
+check(() => {
+    // A literal member is spelled with the bare config STEM, never a trailing
+    // `.*` (which the derivation collapses to a name no file has); a `<dir>/*`
+    // member keeps the `.*`, and a wider glob owes nothing.
+    const literal = watchHintsForGlob('fixture-root');
+    const starred = watchHintsForGlob(extraGlob);
+    const wide = watchHintsForGlob(['fixture-root', '**'].join('/'));
+    if (
+      literal[1] !== ['fixture-root', 'vitest.config'].join('/') ||
+      starred[1] !== [extraGlob, 'vitest.config.*'].join('/') ||
+      wide.length !== 0
+    ) {
+      failures += 1;
+      console.error(`self-test FAIL: watchHintsForGlob spelling — ${JSON.stringify({ literal, starred, wide })}`);
     }
 });
 
@@ -692,7 +969,7 @@ check(() => {
   }
 
   if (failures > 0) process.exit(1);
-  console.log(`self-test OK: ${cases.length} cases + real-tree population floor.`);
+  console.log(`self-test OK: ${cases.length} cases + real-tree population floor + watch-hint declaration.`);
 
   return SELF_TEST_VERDICT;
 }

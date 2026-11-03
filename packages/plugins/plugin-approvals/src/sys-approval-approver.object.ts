@@ -34,14 +34,14 @@ export const SysApprovalApprover = ObjectSchema.create({
   managedBy: 'engine-owned',
   description: 'Normalized pending-approver rows for indexed inbox queries',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` names. The pointer used to be `id`: once a
+  // same two columns `titleFormat` named. The pointer used to be `id`: once a
   // renderer honours ADR-0079's order (an explicit `nameField` wins over
-  // `titleFormat`), that made the record page's H1 the raw id. `titleFormat`
-  // stays for renderers that still read it first;
-  // `sys-approval-display-title.test.ts` holds the two to the same text.
+  // `titleFormat`), that made the record page's H1 the raw id. The retired
+  // `titleFormat` template beside it is gone (refused at save and by
+  // `os validate`); `sys-approval-display-title.test.ts` holds the formula to
+  // the text that template drew.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{approver} · {request_id}',
   highlightFields: ['request_id', 'approver', 'created_at'],
 
   fields: {

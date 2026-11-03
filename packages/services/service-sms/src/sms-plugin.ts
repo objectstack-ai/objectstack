@@ -2,7 +2,8 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IDataEngine, ISmsTransport } from '@objectstack/spec/contracts';
-import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
+import { createLazyCounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
+import { resolveKernelCache } from './kernel-cache.js';
 import { SmsService, LogSmsTransport, maskPhoneNumber, normalizeSmsRecipient } from './sms-service.js';
 import { SmsDailyQuota } from './sms-daily-quota.js';
 import { makeSmsTransport, smsProviderOptionsFrom, type SmsProviderTag } from './transports/index.js';
@@ -210,30 +211,24 @@ export class SmsServicePlugin implements Plugin {
   /**
    * Build the daily cost gate (#2814) over the kernel `cache` service.
    *
-   * `resolveCache` is copied in shape from `AuthPlugin.init()` on purpose, for
-   * the two reasons stated there: the `cache` service is registered ASYNC (so
-   * `getService` throws for it and `getServiceAsync` is the only accessor that
-   * works), and resolution has to happen when a counter is CONSUMED rather than
-   * at init, or a deployment that registers its cache after this plugin freezes
-   * a "no shared store" answer for the life of the process (#4772). The
-   * degraded case is announced by `createLazyCounterStore` itself, named for
-   * this subject.
+   * The cache is resolved by `resolveKernelCache`, the resolution `AuthPlugin`
+   * uses, for the two reasons stated there: a `cache` registered as a factory
+   * is answered only by the kernel's `getServiceAsync` (the plugin context has
+   * no such member, and its synchronous `getService` throws for an unbuilt
+   * factory), and resolution has to happen when a counter is CONSUMED rather
+   * than at init, or a deployment that registers its cache after this plugin
+   * freezes a "no shared store" answer for the life of the process (#4772).
+   * The degraded case is announced by `createLazyCounterStore` itself, named
+   * for this subject.
    */
   private buildDailyQuota(ctx: PluginContext): SmsDailyQuota {
-    const resolveCache = async (): Promise<CounterStore | undefined> => {
-      let cache: any;
-      try {
-        cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> })
-          .getServiceAsync?.('cache');
-      } catch {
-        return undefined;
-      }
-      if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') return cache;
-      return undefined;
-    };
     return new SmsDailyQuota({
       resolveStore: createLazyCounterStore({
-        resolveCache,
+        // ADR-0069 D2: the day counter counts in the registered `cache` service
+        // (a value or a factory registration), and only falls back to the
+        // bounded per-process store when none is — the kernel's own `degraded`
+        // stand-in included. The one resolution every budget counter shares.
+        resolveCache: () => resolveKernelCache(ctx),
         logger: ctx.logger,
         logPrefix: '[sms]',
         subject: 'daily SMS send quota',

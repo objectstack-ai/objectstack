@@ -101,15 +101,18 @@ for (const posture of ['isolated', 'group'] as const) {
       userB = await idOf(`w-b-${posture}@wall.test`);
 
       // The operator authors the catalog, and grants inside each organization:
-      // A holds `manage_metadata` and CRUD on the catalog and assignment tables
-      // in org A only (the stock `organization_admin` denies those tables, so
-      // without this grant the data door would refuse A on CRUD alone);
+      // A holds `manage_metadata` and CRUD on the assignment tables in org A
+      // only (the stock `organization_admin` denies those tables, so without
+      // this grant the data door would refuse A on CRUD alone). No grant names
+      // `sys_permission_set` / `sys_position`: C3 stage 8 retired those row
+      // objects, and the save door refuses a grant on an object that does not
+      // exist;
       // B's member holds the shared set in org B.
       const rbac = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
       for (const body of [
         { name: META_AUTHOR, label: 'Meta author', objects: {}, systemPermissions: ['manage_metadata'] },
         { name: SHARED, label: 'Shared', objects: {}, systemPermissions: [] },
-        { name: RBAC_WRITER, label: 'Catalog table writer', systemPermissions: [], objects: { sys_permission_set: rbac, sys_position: rbac, sys_user_permission_set: rbac, sys_user_position: rbac } },
+        { name: RBAC_WRITER, label: 'Catalog table writer', systemPermissions: [], objects: { sys_user_permission_set: rbac, sys_user_position: rbac } },
       ]) {
         const saved = await stack.apiAs(operator, 'PUT', `/meta/permission/${body.name}`, body);
         expect(saved.status, await saved.clone().text()).toBe(200);

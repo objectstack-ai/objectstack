@@ -262,9 +262,9 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
     expect(switcher()).toHaveTextContent('View 5');
   });
 
-  it('a record open beside the list (the split pane) keeps the same one switcher in the title', async () => {
+  it('a record open in the drawer over the list keeps the same one switcher in the title', async () => {
     setViewportWidth(1440);
-    localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
+    localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
     mountLeads('/apps/crm/crm_lead/view/v1?recordId=lead_1');
     await listToolbar();
 

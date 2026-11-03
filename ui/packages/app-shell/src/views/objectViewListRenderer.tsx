@@ -11,7 +11,7 @@
 import { useCallback, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
-import type { useObjectListPreferences, ListViewPreference } from '../context/ListPreferencesProvider.js';
+import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
@@ -19,7 +19,7 @@ import { ListView, type ListViewProps } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
-import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useLocalization, type useObjectLabel, type useObjectTranslation } from '@object-ui/i18n';
 import { resolveManagedByEmptyState } from '../utils/managedByEmptyState.js';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
@@ -72,6 +72,7 @@ export function useObjectViewListRenderer({
     recordOpen,
     openAsPage,
     phoneTitle,
+    handleListPersonalizationChange,
     urlFilters,
     initialUfSelections,
     handleUserFilterSelectionsChange,
@@ -113,6 +114,8 @@ export function useObjectViewListRenderer({
      * a chart; `null` elsewhere, where the page header draws it.
      */
     phoneTitle: ReactNode;
+    /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
+    handleListPersonalizationChange: ReturnType<typeof useObjectViewListUrlState>['handleListPersonalizationChange'];
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
@@ -164,6 +167,11 @@ export function useObjectViewListRenderer({
     const actionsRef = useRef(actions);
     actionsRef.current = actions;
     const createRecord = useCallback(() => actionsRef.current.create(), []);
+    // The workspace zone the authored filter's date macros resolve in
+    // (`resolveDateMacros` reads it from core). It is served after the first
+    // render, so it is a dependency of the callback below: when it lands, the
+    // view's filter is resolved again and a changed day reaches the list.
+    const { timezone: workspaceTimeZone } = useLocalization();
 
     const renderListView = useCallback(({ schema: listSchema, dataSource: ds, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
         // Combine local refreshKey with the plugin ObjectView's refreshKey for full propagation
@@ -391,6 +399,27 @@ export function useObjectViewListRenderer({
         const viewHiddenFields: ListViewSchema['hiddenFields'] = activeViewDeclaresColumns
             ? ((viewDef as any).hiddenFields ?? listSchema.hiddenFields)
             : undefined;
+        // objectstack#28948 — and the view's own sort, under the user's (the
+        // `sort` rung below lays a link's or the user's stored sort over it).
+        const viewSort: ListViewSchema['sort'] = (viewDef as any).sort ?? listSchema.sort;
+
+        /**
+         * objectstack#28948 — a reset to the view's own is not a choice. The
+         * list's "Reset to view default" (the Display control's, the sort
+         * popover's) names the parts it put back, and they are CLEARED from
+         * this user's stored state rather than stored as the view's values, so
+         * a later change to the view reaches them. A view left with nothing is
+         * removed (`patchViewPreference`).
+         * The sort leaves the URL too, which would otherwise seed it again.
+         * A deliberate `sort: []` or `hiddenFields: []` still arrives through
+         * `persistListSort` / `persistHiddenFields` and stays stored.
+         */
+        const restoreViewDefaults = (parts: ReadonlyArray<'sort' | 'hiddenFields' | 'rowHeight'>) => {
+            const patch: ListViewPreferencePatch = {};
+            for (const part of parts) patch[part] = null;
+            listPrefs.patchView(viewDef.id, patch);
+            if (parts.includes('sort')) writeListUrlState({ sort: null });
+        };
 
 
         /**
@@ -483,9 +512,9 @@ export function useObjectViewListRenderer({
             // objectui#11860 — a sort the URL carries is applied over the
             // view's: an opened link sorts as it was sorted. Without a link,
             // the seed carries the sort this user left the view with
-            // (objectui#12418). `ListView` reads this as the list's declared
-            // sort too, so its "reset to default" returns to the sort the list
-            // opened with; "Reset view" returns to the view's own.
+            // (objectui#12418). The view's own is `viewDefaults.sort`
+            // (objectstack#28948): the sort popover's "reset to default"
+            // returns there and clears the stored sort, as "Reset view" does.
             sort: listSeed?.sort ?? (viewDef as any).sort ?? listSchema.sort,
             // objectui#11860 — and a grouping the URL carries is laid over the
             // view's, which the caller composed into `listSchema` (the census
@@ -507,7 +536,8 @@ export function useObjectViewListRenderer({
                 // objectui#7237 — equal content keeps the identity `ListView`
                 // names (and hands the self-querying views); a real change —
                 // another URL filter, another session scope, a date macro that
-                // resolves differently — still hands over the new value.
+                // resolves differently (a new day, or the workspace zone
+                // arriving) — still hands over the new value.
                 if (isSameOptionsValue(heldListFilter.current, resolved)) {
                     return heldListFilter.current;
                 }
@@ -850,8 +880,18 @@ export function useObjectViewListRenderer({
                 key={identityKey}
                 schema={fullSchema}
                 // objectui#12949 — the view's own values under the user's
-                // preference, for the Display control's reset and count.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight }}
+                // preference, for the Display control's reset and count, and
+                // (objectstack#28948) the sort popover's reset.
+                // objectstack#28950 — and the view's own grouping, under a
+                // grouping the URL carries (the `grouping` rung above), so the
+                // list can tell the reader's from the view's.
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping }}
+                // objectstack#28948 — those resets clear the user's state.
+                onRestoreViewDefaults={restoreViewDefaults}
+                // objectstack#28950 — what of the list differs from the view,
+                // for the 「Personalized」 marker, which then owns the one reset
+                // (the Display control draws none of its own).
+                onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -939,7 +979,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone]);
 
     return { renderListView };
 }

@@ -9,14 +9,17 @@
 // the resolver then answered `TEMPLATE_NOT_FOUND` — which classifies
 // PERMANENT, so the delivery dead-letters with no retry — for `de-DE` and for
 // the literal `en-US`. The identical bundle with its English row tagged
-// `en-US` delivered for `de-DE`. `sendTemplate` matches `(name, locale)`
-// exactly and, for a call that NAMES a locale, retries exactly one rung — the
-// literal `en-US` — and stops; there is no language-subtag folding. A call that
-// names NO locale is the other case and does NOT dead-letter: it starts at
-// `en-US` by name and, when the bundle carries no `en-US` row, drops to that
-// bundle's lowest locale tag and renders it silently. That ladder's shape is a
-// settled ruling this change deliberately does not touch. The remedy is the
-// bundle, so the diagnostic is where the author is standing.
+// `en-US` delivered for `de-DE`. At that time `sendTemplate` matched
+// `(name, locale)` exactly and retried only the literal `en-US`. Since #28880,
+// over the built-in template loader, a call that NAMES a locale folds it
+// against the bundle's tags and then tries the stack's declared fallback
+// locale folded the same way, before `en-US`; a replacement `TemplateLoader`
+// keeps the exact ladder. `en-US` stays the one rung every loader retries,
+// which is the floor this diagnostic names. A call that names NO locale is the
+// other case and does NOT dead-letter: it starts at `en-US` by name and, when
+// the bundle carries no `en-US` row, drops to that bundle's lowest locale tag
+// and renders it silently. The remedy is the bundle, so the diagnostic is
+// where the author is standing.
 //
 // These pin the diagnostic ADVISORY: every case asserts the parse still
 // succeeds and the stack comes back unchanged. The diagnostic narrows what

@@ -987,6 +987,19 @@ describe('D3 credential resolution — fail-closed', () => {
     expect(factory.create).not.toHaveBeenCalled();
   });
 
+  // [#28928] A row sealed before the doors refused an empty `secret` decrypts
+  // to ''. Still fail-closed, but the reason names an empty credential, not a
+  // missing row or a changed key.
+  it('fails closed on a credential that decrypts to an empty value, and says it is empty', async () => {
+    const factory = fakeFactory();
+    const { service } = svc({ factory, secrets: { resolve: async () => '' } });
+    const result = await service.connect(credExternal, { context: { trigger: 'runtime-admin' } });
+    expect(result.status).toBe('failed-credentials');
+    expect(result.reason).toMatch(/credential 'sys_secret:abc' is empty/);
+    expect(result.reason).not.toMatch(/could not be resolved|missing sys_secret row|encryption key/);
+    expect(factory.create).not.toHaveBeenCalled();
+  });
+
   it('fails closed when the resolver throws', async () => {
     const factory = fakeFactory();
     const { service } = svc({

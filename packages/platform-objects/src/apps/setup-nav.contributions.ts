@@ -39,16 +39,19 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     ],
   },
   {
-    // Package ADMINISTRATION is a platform/operator concern (ADR-0084:
-    // packages are Operate, out of the builder) — so its home is Setup, not
-    // the application builder. The console binds `developer:packages` to the
-    // existing package-management page. Building/creating apps is a separate
-    // journey (Home cover → /studio); this entry is for install/inspect/admin.
+    // No unfiltered Packages entry here (#25098, ruling 甲 amending #23892 B):
+    // the full `developer:packages` list is a development surface, so its one
+    // unfiltered door is Studio's Overview → Packages (`studio.app.ts`). Setup
+    // reaches installed packages through the marketplace-filtered "Installed
+    // Apps" door (`nav_marketplace_installed`, `developer:packages` with
+    // `params: { source: 'marketplace' }`), which
+    // `@objectstack/cloud-connection` contributes to this group wherever the
+    // marketplace capability is present. `setup-packages-door.test.ts` pins
+    // both halves.
     app: 'setup',
     group: 'group_apps',
     priority: BASE_PRIORITY,
     items: [
-      { id: 'nav_packages', type: 'component', label: 'Packages', componentRef: 'developer:packages', icon: 'package' },
       // Packaged actions are OPERATIONAL state — on/off per packaged action
       // (ADR-0126 §7.4: "Studio keeps the editing; Setup gets the operational
       // state"). ADR-0146 D4 keeps the action switch here while the flow

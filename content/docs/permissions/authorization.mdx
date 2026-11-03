@@ -30,7 +30,7 @@ Authorization splits into three concerns that stay decoupled:
 1. **Capability** — *what can be done* (`manage_users`, `export_data`).
    Defined by the platform (curated `PLATFORM_CAPABILITIES`) or by a package
    via [`defineCapability`](#package-capability-declaration-adr-0066-d1); extended
-   by admins in Setup. A capability is **not** a contract and has no `inputs` — a
+   by admins in Studio. A capability is **not** a contract and has no `inputs` — a
    resource merely *references* one by name (see Requirement, below).
 2. **Assignment** — *who holds it* — permission sets and positions, which are
    catalog definitions served by name from the environment registry (a
@@ -153,9 +153,17 @@ implementation detail:
 <Callout type="warn">
 **FLS posture (ADR-0066 ⑧):** runtime field security is block-list-shaped —
 an **undeclared** field is visible by default, and field grants union (one
-set's `readable: true` out-votes another's `false`). Until the muting layer
-lands, protect sensitive fields by granting them only in the sets that need
-them, and treat "sensitive field on a public object" as a review smell.
+set's `readable: true` out-votes another's `false`). A set that holds View All
+(`viewAllRecords`) on an object also votes `readable: true` on every field of
+that object, and a set that holds Modify All (`modifyAllRecords`) votes
+`readable: true` and `editable: true`; View All never grants an edit. So no
+set's `readable: false` hides a field from a caller who holds a View All or
+Modify All set on its object; a field's `requiredPermissions` capability gate
+still applies to every caller. Otherwise union without deny is unchanged.
+Until the muting layer lands, protect sensitive fields by granting them only
+in the sets that need them, grant the object without those two bits to a set
+that must withhold a field from its own holders, and treat "sensitive field on
+a public object" as a review smell.
 </Callout>
 
 ## Package provenance & composition (ADR-0086)
@@ -248,10 +256,11 @@ only what it owns:
   **live** (config); the sets a position distributes are its definition's
   `permissionSets`. It owns environment-authored sets and assignments — not
   package sets. The set **definition** has one authoritative store, the
-  metadata layer (ADR-0094 D1, ADR-0131 D3): Setup → Access Control →
-  Permission Sets opens the catalog list
-  (`/apps/setup/metadata/permission?scope=environment`), and a create or edit
-  there is a metadata save (`PUT /api/v1/meta/permission/:name`) into the
+  metadata layer (ADR-0094 D1, ADR-0131 D3): Studio's **All metadata** area
+  lists the catalog (`/studio/~all/metadata/permission?scope=environment`;
+  Setup carries no metadata catalog, and its old
+  `/apps/setup/metadata/permission` address redirects there), and a create or
+  edit there is a metadata save (`PUT /api/v1/meta/permission/:name`) into the
   environment's definition ledger (`sys_metadata`), served from the registry
   beside the packages' sets. No row mirrors it: the `sys_permission_set`
   object is no longer registered, so no data route serves one. The save
@@ -416,8 +425,9 @@ discipline: **resolution-time filtering, fail-closed**, in
 No definition carries the switch, and no row does: the `active` column of the
 retired catalog row objects (`sys_permission_set.active`,
 `sys_position.active`) decides nothing, and neither object is registered any
-more (ADR-0131 D3). Setup's active switch on the Positions and Permission Sets
-catalog lists writes the ledger row, through the door below.
+more (ADR-0131 D3). The on/off switch on a position's or a permission set's
+page in Studio's **All metadata** area writes the ledger row, through the door
+below.
 
 The ledger row is written through
 `POST /api/v1/security/_activation/:type/:name`, with `:type` either

@@ -289,7 +289,31 @@ function pendingDataMigrations(stack: any, fromMajor: number, toMajor: number): 
 }
 
 /**
- * The answer a range holding NO migration step owes the author (#17134).
+ * What a run that replayed NO migration step owes its reader (#17134), on both
+ * faces: the human run renders it ({@link printReplayedNothing}) and `--json`
+ * carries it as `replayedNothing` (#28947). One reading, so the two faces
+ * cannot disagree about whether a step ran or what a wider range holds.
+ */
+interface ReplayedNothing {
+  /**
+   * Why no step ran: `inverted-range` when `--from` is above `--to`, so no
+   * major can lie between them; `empty-range` when the range is well-formed
+   * but this build carries no step inside it.
+   */
+  reason: 'empty-range' | 'inverted-range';
+  /**
+   * The widest range this build carries from the same `--from`, and how many
+   * mechanical and manual changes it holds for THIS stack (zero and zero when
+   * it has nothing either). `null` when no wider range is available: `--to`
+   * already reaches the terminus, or `--from` is at or above it, so any range
+   * from that `--from` to the terminus is itself empty or inverted.
+   */
+  widestRange: { from: number; to: number; applied: number; manual: number } | null;
+}
+
+/**
+ * The answer a range holding NO migration step owes the author (#17134), or
+ * `null` when the run replayed at least one step.
  *
  * `composeMigrationChain` keeps the majors `m > fromMajor && m <= toMajor`, so
  * `--from 17 --to 17` composes zero steps and every stack — canonical or not —
@@ -300,25 +324,54 @@ function pendingDataMigrations(stack: any, fromMajor: number, toMajor: number): 
  * (the first was the tombstone that named this command). So an empty range is
  * answered as an empty range, and — when a wider one would rewrite this very
  * stack — with the range that lists them, because "which `--to` do I need" is
- * the question the author is left holding.
+ * the question the author is left holding. An inverted range (`--from` above
+ * `--to`) composes zero steps the same way and is answered the same way, its
+ * reason naming the inversion; it is answered, never refused.
  *
  * The probe is exact rather than advisory: it replays the widest chain this
  * build carries against the SAME normalized stack, so it can only speak up
  * when there is real work for THIS source. A genuinely canonical stack in an
  * empty range is still told its range was empty — that much is a fact about
  * the invocation — but is offered no phantom conversions.
+ *
+ * ⛔ `--json` reads this function too. Its payload used to answer an empty
+ * range exactly like a clean replay (`applied: []`, `schemaValid: true`, exit
+ * 0), so a script with a wrong `--from` was told its metadata was migrated
+ * while the human run warned (#28947).
  */
-function printEmptyRangeAnswer(
+function readReplayedNothing(
   stack: Record<string, unknown>,
-  fromMajor: number,
-  toMajor: number,
-): void {
+  result: Pick<MigrationChainResult, 'hops' | 'fromMajor' | 'toMajor'>,
+): ReplayedNothing | null {
+  if (result.hops.length > 0) return null;
+  const { fromMajor, toMajor } = result;
+  const reason = fromMajor > toMajor ? 'inverted-range' : 'empty-range';
+  if (toMajor >= CHAIN_TERMINUS_MAJOR || fromMajor >= CHAIN_TERMINUS_MAJOR) {
+    return { reason, widestRange: null };
+  }
+  const wider = applyMetaMigrationsToPackages(stack, fromMajor, CHAIN_TERMINUS_MAJOR);
+  return {
+    reason,
+    widestRange: {
+      from: fromMajor,
+      to: CHAIN_TERMINUS_MAJOR,
+      applied: wider.applied.length,
+      manual: listedTodos(wider.todos, wider.absentTodos).length,
+    },
+  };
+}
+
+/** The human face of {@link readReplayedNothing}. */
+function printReplayedNothing(answer: ReplayedNothing, fromMajor: number, toMajor: number): void {
+  const notCanonical = 'this run replayed nothing — that is not a finding that the metadata is canonical.';
   printWarning(
-    `No migration step exists for protocol ${fromMajor} → ${toMajor}, so this run replayed nothing `
-    + '— that is not a finding that the metadata is canonical.',
+    answer.reason === 'inverted-range'
+      ? `--from ${fromMajor} is above --to ${toMajor}, so the range is inverted and ${notCanonical}`
+      : `No migration step exists for protocol ${fromMajor} → ${toMajor}, so ${notCanonical}`,
   );
 
-  if (toMajor >= CHAIN_TERMINUS_MAJOR) {
+  const { widestRange } = answer;
+  if (widestRange === null) {
     printInfo(
       `Protocol ${CHAIN_TERMINUS_MAJOR} is the highest major this build carries a step for, so no `
       + 'wider range is available; check `--from` against the major the metadata was authored '
@@ -327,20 +380,18 @@ function printEmptyRangeAnswer(
     return;
   }
 
-  const wider = applyMetaMigrationsToPackages(stack, fromMajor, CHAIN_TERMINUS_MAJOR);
-  const widerListed = listedTodos(wider.todos, wider.absentTodos);
-  if (wider.applied.length === 0 && widerListed.length === 0) {
+  if (widestRange.applied === 0 && widestRange.manual === 0) {
     printInfo(
-      `The widest range this build carries (protocol ${fromMajor} → ${CHAIN_TERMINUS_MAJOR}) has `
+      `The widest range this build carries (protocol ${widestRange.from} → ${widestRange.to}) has `
       + 'nothing for this stack either.',
     );
     return;
   }
 
   printWarning(
-    `Protocol ${fromMajor} → ${CHAIN_TERMINUS_MAJOR} has ${wider.applied.length} mechanical and `
-    + `${widerListed.length} manual change(s) for this stack — re-run with `
-    + `\`--to ${CHAIN_TERMINUS_MAJOR}\` to list them.`,
+    `Protocol ${widestRange.from} → ${widestRange.to} has ${widestRange.applied} mechanical and `
+    + `${widestRange.manual} manual change(s) for this stack — re-run with `
+    + `\`--to ${widestRange.to}\` to list them.`,
   );
 }
 
@@ -901,8 +952,9 @@ export function printMigrationReport(report: MigrationReport): void {
     // is a finding about the metadata. A range that contains no step at all
     // replayed nothing and therefore found nothing — saying "already
     // canonical" over it is a claim about a check that never ran.
-    if (result.hops.length === 0) {
-      printEmptyRangeAnswer(report.normalized, result.fromMajor, result.toMajor);
+    const replayedNothing = readReplayedNothing(report.normalized, result);
+    if (replayedNothing) {
+      printReplayedNothing(replayedNothing, result.fromMajor, result.toMajor);
     } else {
       printSuccess('Nothing to migrate — the metadata is already canonical for this range.');
     }
@@ -1207,6 +1259,7 @@ export default class MigrateMeta extends Command {
         : undefined;
 
       if (flags.json) {
+        const replayedNothing = readReplayedNothing(normalized, result);
         await emitJson({
               from: result.fromMajor,
               to: result.toMajor,
@@ -1236,6 +1289,10 @@ export default class MigrateMeta extends Command {
                     absentTodos: h.absentTodos,
                   }))
                 : undefined,
+              // Only when no step ran (an empty or inverted range): the answer the
+              // human run prints, from the same reading. A replay's payload is
+              // what it always was (#28947).
+              ...(replayedNothing ? { replayedNothing } : {}),
               specChanges,
               schemaValid: parsed.success,
               // Per-deployment data migrations this chain leaves to the

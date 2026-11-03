@@ -250,6 +250,34 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
 >   declared and not served, and its schema description says so: off `provider: 'mcp'` over http an
 >   instance that declares it is held degraded for a missing `clientId`, and on MCP over http the
 >   provider registers a client dynamically instead of taking the installer's.
+>
+>   > **Amended (2026-11-02, #29256) — the server slice landed (PR #29097).** The sentence above that
+>   > begins "Until the server slice lands" records the state before PR #29097, merged on 2026-11-02 as
+>   > `ec0316ea44`. The key names are the maintainer's ruling of record `6580268872`, letter A.
+>   >
+>   > - **The connect door takes the installer's client.** `POST
+>   >   /api/v1/automation/connectors/:name/connection` reads the closed body `{ clientId, clientSecret? }`
+>   >   and hands it to the service as `client`. An instance declaring `clientSource: 'installer'` begun
+>   >   without one, a client offered to an instance that declares its own or registers one dynamically,
+>   >   and any other body key are refused `400 VALIDATION_ERROR`. The read and revoke legs take no client.
+>   >   The rule is `packages/services/service-automation/src/plugin.ts#installerClientOfBegin`.
+>   > - **The grant handle uses it for authorize, exchange and refresh.** The authorization URL carries its
+>   >   id, the code is exchanged as it, and every refresh sends it. It is kept in the connection's client
+>   >   record, its secret encrypted at rest through the `secret` channel as D3 states, and read back by
+>   >   `packages/services/service-automation/src/oauth2-grant/installer-client.ts#parseKeptConnectionClient`.
+>   >   A kept client whose kind no longer matches the declaration is a reconnect, never used:
+>   >   `packages/services/service-automation/src/oauth2-grant/grant-handle.ts#endpointOf`.
+>   > - **The state never reads the secret.** The connection state answers
+>   >   `client { source: 'installer', clientId, hasSecret }`, and never the secret:
+>   >   `packages/spec/src/contracts/automation-service.ts#ConnectorConnectionState`.
+>   > - **The instance is served.** An instance declaring `clientSource: 'installer'` is no longer held
+>   >   degraded for a missing `clientId`, and on MCP over http discovery finds the endpoints and registers
+>   >   no client. The schema description no longer says the key is not served.
+>   > - **The ui slice is #28869, still open.** Until it lands, the Console begins a connect with no
+>   >   client, so such an instance is refused there with the 400 that names the vendor registration step;
+>   >   the door above connects it. The pins are
+>   >   `packages/services/service-automation/src/connector-connection-door.test.ts` and
+>   >   `packages/qa/dogfood/test/connector-installer-oauth-client.dogfood.test.ts`.
 
 ### D3 — Secrets are references; tokens are runtime state in a connection record
 

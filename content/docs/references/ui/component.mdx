@@ -233,6 +233,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
 | **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). A param name (its `name`, or the `field` a field-backed param reads) may repeat only for per-gate variants of ONE input (declarations that differ in `visible` / `requiresFeature`, e.g. one optional and one required); the params check treats the name as `required` only when EVERY declaration of it requires it, and judges its value by the FIRST declaration's shape (`type`, `multiple`, `options`), so keep that shape identical across them. |
 | **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
+| **description** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object } \| string \| Record<string, string>` | optional | Explanatory line shown under the title in the action's param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing `ai.description`. It is a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no hole is shown as written. Holes are `{{ path }}` or `{{ path \| formatter[:arg] }}` over `record`, the record the action runs against (the clicked row on a list, else the page's record); the values the dialog collects are not bound, since the line shows before they exist. Formatters come from the template engine's whitelist (`TEMPLATE_FORMATTERS`, `@objectstack/formula`); a hole holds no logic (no CEL, no arithmetic). Example: 'Choose the new role for `{{ record.name }}`.'. A hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole holding logic or an unknown formatter, and a blank sentence are named and refused at `objectstack validate`, `compile` and the publish gate; the text still parses, so a stored one loads until its next save. An inline locale map (`{ en, "zh-CN" }`) is accepted too, each value such a sentence. |
 | **confirmText** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object } \| string \| Record<string, string>` | optional | Confirmation message before execution — a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no hole is shown as written. Holes are `{{ path }}` or `{{ path \| formatter[:arg] }}` over `record`, the record the action runs against (the clicked row on a list, else the page's record), and — only when the action's `params` is an object of static values — `params` (`{{ params.tier }}`); an input list binds nothing, since its values are collected after the confirmation. Formatters come from the template engine's whitelist (`TEMPLATE_FORMATTERS`, `@objectstack/formula`); a hole holds no logic (no CEL, no arithmetic). Example: 'Delete `{{ record.name }}`?'. A hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole holding logic or an unknown formatter, and a blank sentence are named and refused at `objectstack validate`, `compile` and the publish gate; the text still parses, so a stored one loads until its next save. An inline locale map (`{ en, "zh-CN" }`) is accepted too, each value such a sentence. On a registered action, pairing this with a non-empty `params` is refused — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
 | **successMessage** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object } \| string \| Record<string, string>` | optional | Success message shown after the action succeeds — a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no hole is shown as written. Holes are `{{ path }}` or `{{ path \| formatter[:arg] }}` over `result`, the payload the action's handler answered (`{{ result.email }}`; for an `api` or `script` action the server response), and `record`, the record the action ran against. Formatters come from the template engine's whitelist (`TEMPLATE_FORMATTERS`, `@objectstack/formula`); a hole holds no logic (no CEL, no arithmetic). Example: 'Invitation sent to `{{ result.email }}`'. A hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole holding logic or an unknown formatter, and a blank sentence are named and refused at `objectstack validate`, `compile` and the publish gate; the text still parses, so a stored one loads until its next save. An inline locale map (`{ en, "zh-CN" }`) is accepted too, each value such a sentence. On a registered action that declares `outcomeMessages`, the entry named by the response's `outcome` is shown instead, and this message is the fallback. |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
@@ -517,7 +518,7 @@ View filter rule
 
 ### Nested Shape: `ObjectCalendarProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -740,7 +741,7 @@ View filter rule
 
 ### Nested Shape: `ObjectGanttProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -898,7 +899,7 @@ View filter rule
 
 ### Nested Shape: `ObjectGridProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1065,7 +1066,7 @@ View filter rule
 
 ### Nested Shape: `ObjectKanbanProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1148,7 +1149,7 @@ View filter rule
 
 ### Nested Shape: `ObjectMapProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1292,7 +1293,7 @@ View filter rule
 
 ### Nested Shape: `ObjectMetricProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1371,7 +1372,7 @@ View filter rule
 
 ### Nested Shape: `ObjectTimelineProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1470,7 +1471,7 @@ View filter rule
 
 ### Nested Shape: `ObjectTreeProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1937,7 +1938,7 @@ View filter rule
 
 ### Nested Shape: `RecordLineItemsProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2098,7 +2099,7 @@ View filter rule
 
 ### Nested Shape: `RecordRelatedListProps.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

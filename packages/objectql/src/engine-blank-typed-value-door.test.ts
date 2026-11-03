@@ -29,8 +29,9 @@
  *    runs BEFORE the caller-value snapshot the lock judges against;
  *  - the dry run (`validate()`) agrees with the write.
  *
- * The string-stored controls (`text`, `lookup`, `select`) keep their `''` —
- * the spec's `str_empty` side of the line.
+ * The text control keeps its `''` — the spec's `str_empty` side of the line;
+ * an optional `lookup` / `select` `''` is `null` since #29277
+ * (`validation/record-validator.single-value-blank.test.ts`).
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -155,7 +156,7 @@ describe('engine write doors: a blank on a non-string-typed column reaches the d
     await engine.insert('blank_door', payload);
     const sent = last('create');
     expectTypedNull(sent);
-    expect([sent.c_text, sent.c_lookup, sent.c_select]).toEqual(['', '', '']);
+    expect([sent.c_text, sent.c_lookup, sent.c_select]).toEqual(['', null, null]);
     // The caller's own object is never rewritten.
     expect(payload.f_number).toBe(blank);
   });
@@ -181,7 +182,7 @@ describe('engine write doors: a blank on a non-string-typed column reaches the d
     await engine.update('blank_door', { id: 'u1', ...blankTyped(''), ...STR_BLANK });
     const byId = last('update');
     expectTypedNull(byId);
-    expect([byId.c_text, byId.c_lookup, byId.c_select]).toEqual(['', '', '']);
+    expect([byId.c_text, byId.c_lookup, byId.c_select]).toEqual(['', null, null]);
 
     await engine.update('blank_door', blankTyped(''), { where: { id: { $in: ['u1'] } }, multi: true } as any);
     expectTypedNull(last('updateMany'));

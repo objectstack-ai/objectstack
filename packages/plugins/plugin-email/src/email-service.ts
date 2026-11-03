@@ -296,15 +296,59 @@ export function formatAddress(addr: EmailAddress): string {
   return `${quoted} <${address}>`;
 }
 
-function listToArray(v: EmailAddress | EmailAddress[] | undefined): string[] | undefined {
+/**
+ * The message fields whose addresses the CALLER supplies — every one of them
+ * is the caller's to correct, so a malformed address in any of them is the
+ * caller's `VALIDATION_FAILED`, never a server fault.
+ */
+type CallerAddressField = 'to' | 'cc' | 'bcc' | 'replyTo';
+
+/**
+ * {@link formatAddress} for an address the CALLER supplied: the same
+ * acceptance ({@link isSendableAddress}, one spelling of "valid enough to
+ * send"), refused as `VALIDATION_FAILED: invalid recipient address …` naming
+ * the field, so the REST send door answers 400 — the caller can fix it —
+ * instead of 500 `EMAIL_SEND_FAILED`.
+ *
+ * The SENDER deliberately stays on {@link formatAddress}'s plain
+ * `Invalid email address` throw: `from` is the deployment's configured sender
+ * (`OS_EMAIL_FROM`, the `mail` settings, or a caller `from` the REST door has
+ * already bound to that same configured value), so an unsendable one is a
+ * server-side fault that a 400 would wrongly pin on the caller.
+ */
+function formatCallerAddress(addr: EmailAddress, field: CallerAddressField): string {
+  const what = field === 'replyTo' ? 'reply-to address' : 'recipient address';
+  if (!isSendableAddress(addr)) {
+    const shown = addr == null ? '' : addressPart(addr);
+    throw new Error(`VALIDATION_FAILED: invalid ${what} in \`${field}\`: ${shown || '(empty)'}`);
+  }
+  // A JSON body can carry any value as the display name; a non-string one
+  // would otherwise fail inside `formatAddress` as a TypeError — a 500 for
+  // input the caller wrote.
+  const name: unknown = typeof addr === 'object' ? addr.name : undefined;
+  if (name !== undefined && name !== null && typeof name !== 'string') {
+    throw new Error(
+      `VALIDATION_FAILED: invalid ${what} in \`${field}\`: the display name of ${addressPart(addr)} must be a string`,
+    );
+  }
+  return formatAddress(addr);
+}
+
+function listToArray(
+  v: EmailAddress | EmailAddress[] | undefined,
+  field: Exclude<CallerAddressField, 'replyTo'>,
+): string[] | undefined {
   if (v === undefined) return undefined;
   const arr = Array.isArray(v) ? v : [v];
-  return arr.map(formatAddress);
+  return arr.map((addr) => formatCallerAddress(addr, field));
 }
 
 /**
  * Validate input + apply default-from + canonicalize recipients.
- * Throws Error('VALIDATION_FAILED: <reason>') for malformed payloads.
+ * Throws Error('VALIDATION_FAILED: REASON') for malformed payloads — a
+ * malformed caller-supplied address (`to` / `cc` / `bcc` / `replyTo`)
+ * included. An unsendable `from` is the one malformed address that is NOT a
+ * `VALIDATION_FAILED`: see {@link formatCallerAddress}.
  */
 export function normalizeMessage(
   input: SendEmailInput,
@@ -318,7 +362,7 @@ export function normalizeMessage(
   if (!input.text && !input.html) {
     throw new Error('VALIDATION_FAILED: at least one of text or html is required');
   }
-  const toArr = listToArray(input.to);
+  const toArr = listToArray(input.to, 'to');
   if (!toArr || toArr.length === 0) {
     throw new Error('VALIDATION_FAILED: at least one recipient (to) is required');
   }
@@ -335,11 +379,11 @@ export function normalizeMessage(
     ...(input.text !== undefined ? { text: input.text } : {}),
     ...(input.html !== undefined ? { html: input.html } : {}),
   };
-  const cc = listToArray(input.cc);
+  const cc = listToArray(input.cc, 'cc');
   if (cc && cc.length > 0) msg.cc = cc;
-  const bcc = listToArray(input.bcc);
+  const bcc = listToArray(input.bcc, 'bcc');
   if (bcc && bcc.length > 0) msg.bcc = bcc;
-  if (input.replyTo) msg.replyTo = formatAddress(input.replyTo);
+  if (input.replyTo) msg.replyTo = formatCallerAddress(input.replyTo, 'replyTo');
   if (input.attachments && input.attachments.length > 0) msg.attachments = input.attachments;
   if (input.headers && Object.keys(input.headers).length > 0) msg.headers = input.headers;
   return msg;

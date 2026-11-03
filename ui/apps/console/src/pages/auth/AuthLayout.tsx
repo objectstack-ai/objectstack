@@ -180,7 +180,7 @@ export function AuthLayout({ children, formWidth = 'sm' }: AuthLayoutProps) {
               href={OBJECTSTACK_SITE_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="underline-offset-4 hover:text-foreground hover:underline"
+              className="inline-flex min-h-[44px] items-center underline-offset-4 hover:text-foreground hover:underline sm:min-h-0"
             >
               {t('auth.shell.poweredBy', { defaultValue: 'Powered by ObjectStack' })}
             </a>

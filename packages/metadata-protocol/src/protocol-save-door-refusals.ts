@@ -62,7 +62,7 @@ import {
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
 import { itemDiscriminator } from '@objectstack/metadata-core';
-import { externalBindingDatasourceRefusal } from '@objectstack/spec/data';
+import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
@@ -204,13 +204,21 @@ export async function defaultRecordPageSaveRefusal(
     verb: 'saved' | 'published' | 'restored' = 'saved',
 ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
     if (type !== 'page') return undefined;
+    // Every slot the page holds: its object's default (no app), and the record
+    // page of its object inside each app its `apps` names (ruling A on
+    // objectstack#28979) — each judged by the one reading, `defaultRecordPageObject`.
+    const slots: Array<{ object: string; app?: string }> = [];
     const object = defaultRecordPageObject(item);
-    if (object === undefined) return undefined;
+    if (object !== undefined) slots.push({ object });
+    const apps = (item as { apps?: unknown } | null | undefined)?.apps;
+    if (Array.isArray(apps)) {
+        for (const app of new Set(apps.filter((a): a is string => typeof a === 'string'))) {
+            const scoped = defaultRecordPageObject(item, app);
+            if (scoped !== undefined) slots.push({ object: scoped, app });
+        }
+    }
+    if (slots.length === 0) return undefined;
 
-    // `shipped`: a page a package ships through the registry, which no save
-    // can edit; a stored row (bound to a package or not) is editable here.
-    type Holder = { page: string; packageId?: string; shipped: boolean };
-    const holders: Holder[] = [];
     let records: any[] = [];
     try {
         // [ADR-0131 D6] A save lands environment-wide, so the pages it meets
@@ -221,52 +229,75 @@ export async function defaultRecordPageSaveRefusal(
     }
     const stored = this.storedOverlayEntries({ type }, records);
     const storedNames = new Set(stored.map((entry) => entry.name));
-    for (const entry of stored) {
-        if (entry.name === saveName || defaultRecordPageObject(entry.data) !== object) continue;
-        holders.push(entry.packageId
-            ? { page: entry.name, packageId: entry.packageId, shipped: false }
-            : { page: entry.name, shipped: false });
-    }
     const registry = this.engine.registry;
-    if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
-        const registered = registry.defaultRecordPageHoldersOf(object) as Array<
-            { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
-        >;
-        for (const holder of registered) {
-            if (holder.page === saveName || storedNames.has(holder.page)) continue;
-            holders.push(holder.kind === 'package'
-                ? { page: holder.page, packageId: holder.packageId, shipped: true }
-                : { page: holder.page, shipped: false });
-        }
-    }
-    if (holders.length === 0) return undefined;
 
-    const seen = new Set<string>();
-    const unique = holders.filter((h) => {
-        const key = `${h.packageId ?? ''}|${h.page}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
-    const describe = (h: Holder) =>
-        h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this system`;
-    const named = unique.map(describe);
-    const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
-    const remedy = unique.some((h) => h.shipped)
-        ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
-          + `deployment is composed without that package's page.`
-        : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
-          + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
-    const err = new Error(
-        `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
-        + `'${object}': ${others}. ${remedy} At most one \`isDefault: true\` record page may exist for an object `
-        + `in a deployment: the record view opens that page with no tie-break.`,
-    ) as Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; holders: readonly Holder[] };
-    err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
-    err.status = 422;
-    err.object = object;
-    err.holders = unique;
-    return err;
+    // `shipped`: a page a package ships through the registry, which no save
+    // can edit; a stored row (bound to a package or not) is editable here.
+    type Holder = { page: string; packageId?: string; shipped: boolean };
+    for (const { object, app } of slots) {
+        const holders: Holder[] = [];
+        for (const entry of stored) {
+            if (entry.name === saveName || defaultRecordPageObject(entry.data, app) !== object) continue;
+            holders.push(entry.packageId
+                ? { page: entry.name, packageId: entry.packageId, shipped: false }
+                : { page: entry.name, shipped: false });
+        }
+        if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
+            const registered = (app === undefined
+                ? registry.defaultRecordPageHoldersOf(object)
+                : registry.defaultRecordPageHoldersOf(object, app)) as Array<
+                { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
+            >;
+            for (const holder of registered) {
+                if (holder.page === saveName || storedNames.has(holder.page)) continue;
+                holders.push(holder.kind === 'package'
+                    ? { page: holder.page, packageId: holder.packageId, shipped: true }
+                    : { page: holder.page, shipped: false });
+            }
+        }
+        if (holders.length === 0) continue;
+
+        const seen = new Set<string>();
+        const unique = holders.filter((h) => {
+            const key = `${h.packageId ?? ''}|${h.page}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        const describe = (h: Holder) =>
+            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this system`;
+        const named = unique.map(describe);
+        const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
+        const message = app === undefined
+            ? `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
+                + `'${object}': ${others}. `
+                + (unique.some((h) => h.shipped)
+                    ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
+                      + `deployment is composed without that package's page.`
+                    : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
+                      + `with \`isDefault: false\` to make '${saveName}' the default instead.`)
+                + ` At most one \`isDefault: true\` record page may exist for an object `
+                + `in a deployment: the record view opens that page with no tie-break.`
+            : `Default record page conflict: page '${saveName}' cannot be ${verb} as the record page of object `
+                + `'${object}' in app '${app}': ${others}. `
+                + (unique.some((h) => h.shipped)
+                    ? `Save '${saveName}' without '${app}' in \`apps\`: a page a package ships stays that app's page unless the `
+                      + `deployment is composed without that package's page.`
+                    : `Save '${saveName}' without '${app}' in \`apps\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
+                      + `without it to make '${saveName}' that app's page instead.`)
+                + ` At most one record page may name an app in \`apps\` for an object: that app's record view `
+                + `opens it with no tie-break.`;
+        const err = new Error(message) as Error & {
+            code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; app?: string; holders: readonly Holder[];
+        };
+        err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
+        err.status = 422;
+        err.object = object;
+        if (app !== undefined) err.app = app;
+        err.holders = unique;
+        return err;
+    }
+    return undefined;
 }
 
 /**
@@ -527,6 +558,88 @@ export async function unknownDatasourceSaveRefusal(
     return err;
 }
 
+/**
+ * The body of `ObjectStackProtocolImplementation#unknownGrantObjectSaveRefusal`;
+ * the method's docblock there is its contract. [#28990] Written here beside
+ * {@link unknownDatasourceSaveRefusal}, whose shape it follows: the engine's
+ * registered objects, then the by-name read (`readMetaItem`), then the pending
+ * drafts, then the definition the set already holds.
+ */
+export async function unknownGrantObjectSaveRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts' | 'readMetaItem'>,
+    singularType: string,
+    item: unknown,
+    name: string,
+    pending?: 'drafts' | ReadonlySet<string>,
+    writeFace?: MetadataWriteFace,
+    door: 'save' | 'publish' = 'save',
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (singularType !== 'permission') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const grants = (item as { objects?: unknown }).objects;
+    if (!grants || typeof grants !== 'object' || Array.isArray(grants)) return undefined;
+    // A registry that cannot look an object up by name cannot say a name is
+    // unknown, so nothing is refused on it.
+    const registry = this.engine?.registry as { getObject?: unknown } | undefined;
+    const getObject = registry?.getObject;
+    if (typeof getObject !== 'function') return undefined;
+    // `'*'` is the wildcard grant the permission evaluator falls back to for
+    // every object with no entry of its own: it names no object.
+    let unknown = Object.keys(grants).filter((key) => {
+        if (key === '*') return false;
+        // The object's own name, exactly: the registry's legacy `pkg__name`
+        // lookup answers an object the evaluator never keys a grant by.
+        const registered = getObject.call(registry, key) as { name?: unknown } | undefined;
+        return registered?.name !== key;
+    });
+    if (unknown.length === 0) return undefined;
+    // An object the environment stores, or the code layer defines, that the
+    // registry has not (yet) registered: known here, and judged where it is used.
+    const declared = await Promise.all(unknown.map(async (key) =>
+        Boolean((await this.readMetaItem({ type: 'object', name: key }))?.item)));
+    unknown = unknown.filter((_, index) => !declared[index]);
+    if (unknown.length === 0) return undefined;
+    // An object still pending: any object draft, for a draft save; the batch's
+    // own object drafts, for a package publish.
+    if (pending instanceof Set) {
+        unknown = unknown.filter((key) => !pending.has(key));
+    } else if (pending === 'drafts') {
+        const drafted = new Set((await this.listDrafts({ type: 'object' })).drafts.map((d) => d.name));
+        unknown = unknown.filter((key) => !drafted.has(key));
+    }
+    if (unknown.length === 0) return undefined;
+    // A grant the set already holds is not this save's: a re-save, a
+    // stored-row migration or a restore that keeps it is judged at the save
+    // that introduced it, and an object that has gone since is not the
+    // re-saving author's to answer for. (A declaration boot never runs
+    // `onEnable`, so what a plugin registers there is absent from it.)
+    const current = (await this.readMetaItem({ type: 'permission', name }))?.item as { objects?: unknown } | undefined;
+    const held = current?.objects && typeof current.objects === 'object' && !Array.isArray(current.objects)
+        ? new Set(Object.keys(current.objects))
+        : new Set<string>();
+    unknown = unknown.filter((key) => !held.has(key));
+    if (unknown.length === 0) return undefined;
+    // [#29279] What was looked for, as this door looked: a save also counts an
+    // object saved here; a draft's publish counts only what goes live with it.
+    const looked = door === 'publish'
+        ? 'no package registers an object of that name, and no published object, or object draft of this batch, carries it'
+        : 'no package registers an object of that name and none is saved here';
+    const issues: MetadataIssueEntry[] = unknown.map((key) => ({
+        path: `objects.${key}`,
+        message: `Permission '${name}' grants on object '${key}' which is not defined in objects: ${looked}, `
+            + 'so the grant applies to nothing. Correct the name to the '
+            + `object's full name (e.g. 'crm_lead', not 'lead'), create the object first, or remove the grant.`,
+        code: 'custom',
+    }));
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
+}
+
 /** The body of `ObjectStackProtocolImplementation#objectsBoundExternallyTo`; the method's docblock there is its contract. */
 export async function objectsBoundExternallyTo(
     this: Pick<SaveDoorRefusalHost, 'engine' | 'readActiveOverlayRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'storedOverlayEntries'>,
@@ -676,4 +789,84 @@ export function objectNamespacePrefixViolation(
     name: string, packageId: string | null | undefined): string | null {
     if (typeof packageId !== 'string' || packageId === '') return null;
     return validateObjectNamespacePrefix(name, this.engine?.registry?.getPackage?.(packageId)?.manifest?.namespace);
+}
+
+/** The seed modes whose load matches incoming records to existing rows by the dataset's `externalId`. */
+const KEYED_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update', 'ignore']);
+
+/**
+ * The body of `ObjectStackProtocolImplementation#seedExternalIdSaveRefusal`;
+ * the method's docblock there is its contract. Written here, beside the other
+ * refusals the save door and the publish promotion ask in turn, rather than
+ * moved: its reads are the engine's registered object and, on a draft save,
+ * the object drafts.
+ */
+export async function seedExternalIdSaveRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts'>,
+    singularType: string,
+    item: unknown,
+    name: string,
+    pending?: 'drafts' | ReadonlyArray<unknown>,
+    writeFace?: MetadataWriteFace,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (singularType !== 'seed') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const seed = item as { object?: unknown; mode?: unknown; externalId?: unknown };
+    if (typeof seed.object !== 'string' || seed.object === '') return undefined;
+    const objectName = seed.object;
+    // `SeedSchema`'s defaults, as the loader applies them (`mode: 'upsert'`,
+    // `externalId: 'name'`): a body read before the parse filled them keys the
+    // same way a parsed one does.
+    const mode = typeof seed.mode === 'string' ? seed.mode : 'upsert';
+    if (!KEYED_SEED_MODES.has(mode)) return undefined;
+    const declared = seed.externalId !== undefined;
+    const externalId = declared ? seed.externalId : 'name';
+    const composite = Array.isArray(externalId);
+    const members = (composite ? externalId : [externalId]) as unknown[];
+    // The object as the publish will have it: a draft of it in the same
+    // package batch, else the engine's registered definition (its fields as
+    // the runtime serves them, extension fields and injected columns
+    // included). On a draft save, an object that is itself still a draft may
+    // gain the field before it is published, so the seed is judged at its
+    // publish instead. An object resolved by neither is not judged here:
+    // the load reports an object it cannot find.
+    const pendingObject = Array.isArray(pending)
+        ? pending.find((o) => (o as { name?: unknown } | null)?.name === objectName) as { fields?: unknown } | undefined
+        : undefined;
+    if (!pendingObject && pending === 'drafts'
+        && (await this.listDrafts({ type: 'object' })).drafts.some((d) => d.name === objectName)) {
+        return undefined;
+    }
+    const registered = (this.engine?.registry as { getObject?(name: string): unknown } | undefined)
+        ?.getObject?.(objectName) as { fields?: unknown } | undefined;
+    if (!pendingObject && !registered) return undefined;
+    const fieldNames = new Set<string>(resolveInjectedSystemColumns(pendingObject ?? registered).names);
+    for (const def of [registered, pendingObject]) {
+        const fields = def?.fields;
+        if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+            for (const key of Object.keys(fields)) fieldNames.add(key);
+        }
+    }
+    const missing = members
+        .map((member, index) => ({ member, index }))
+        .filter(({ member }) => typeof member === 'string' && !fieldNames.has(member));
+    if (missing.length === 0) return undefined;
+    const consequence = `so a load in \`${mode}\` mode could never match a row it wrote before: each publish and each `
+        + `replay would ${mode === 'update' ? 'skip every record' : 'insert every record again'}. Name a field the object `
+        + "declares, or use `mode: 'insert'` for rows with no natural key.";
+    const issues: MetadataIssueEntry[] = missing.map(({ member, index }) => ({
+        path: composite ? `externalId.${index}` : 'externalId',
+        message: (declared
+            ? `Seed '${name}' keys on externalId member '${String(member)}', which is not a field of object '${objectName}', `
+            : `Seed '${name}' declares no externalId, so it keys on the default 'name', which is not a field of object '${objectName}', `)
+            + consequence,
+        code: 'custom',
+    }));
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
 }

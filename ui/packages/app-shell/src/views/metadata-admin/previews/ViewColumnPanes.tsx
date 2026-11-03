@@ -303,13 +303,21 @@ export function AddFieldPopover({
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
 
+  // The builder's own fields first, then the ones the platform injects
+  // (`system`), each in served order. The served object puts the injected
+  // audit and owner columns ahead of the author's fields, and they are not
+  // what a builder adds a column for first.
+  const ordered = React.useMemo(
+    () => [...fields.filter((f) => f.system !== true), ...fields.filter((f) => f.system === true)],
+    [fields],
+  );
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return fields;
-    return fields.filter(
+    if (!q) return ordered;
+    return ordered.filter(
       (f) => f.name.toLowerCase().includes(q) || f.label.toLowerCase().includes(q),
     );
-  }, [fields, query]);
+  }, [ordered, query]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

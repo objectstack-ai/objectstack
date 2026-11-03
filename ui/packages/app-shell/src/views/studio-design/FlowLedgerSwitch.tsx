@@ -21,6 +21,12 @@
  * own sentence for why (`notRunningReason`, rendered verbatim, ⛔ never parsed).
  * When the caller's posture facts say the door refuses them (`walledReason`),
  * the switch draws disabled, described by the console's own sentence.
+ *
+ * While a toggle is in flight (`busy`) the switch is `aria-disabled`, never
+ * `disabled`: a focused control that turns `disabled` drops focus to the page,
+ * and nothing hands it back when the answer lands, so a keyboard author would
+ * tab back from the top after every flip. The press is refused here instead,
+ * so a second Space sends no second request.
  */
 
 import * as React from 'react';
@@ -57,15 +63,18 @@ export function FlowLedgerSwitch({ checked, reading, notRunningReason, busy, wal
       aria-checked={checked}
       data-testid="auto-ledger-switch"
       data-reading={reading}
-      onClick={onToggle}
-      disabled={busy || !!walledReason}
+      onClick={() => {
+        if (!busy) onToggle();
+      }}
+      disabled={!!walledReason}
+      aria-disabled={busy || undefined}
       aria-describedby={describedBy}
       title={walledReason ? undefined : why ? `${hint}\n${why}` : hint}
       className={
         'inline-flex h-7 items-center gap-2 rounded-md px-1 text-[12px] ' +
         (walledReason
           ? 'text-muted-foreground disabled:pointer-events-none'
-          : 'text-foreground hover:bg-muted disabled:opacity-50')
+          : 'text-foreground hover:bg-muted aria-disabled:opacity-50')
       }
     >
       <span

@@ -28,7 +28,6 @@ export const SysTeam = ObjectSchema.create({
   description: 'Teams within organizations for fine-grained grouping',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{name}',
   highlightFields: ['name', 'organization_id'],
 
   // Custom actions calling better-auth's team endpoints. Generic CRUD is

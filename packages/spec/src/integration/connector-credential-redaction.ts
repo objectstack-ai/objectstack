@@ -28,6 +28,18 @@
  *     {@link ConnectorInstanceAuthSchema} itself, so a kind added to the union
  *     later is covered with nothing to edit here. A `type` that names no kind
  *     leaves `type` alone declared.
+ *
+ *     **Withheld and NOT carried forward** (#28640 ②B, ruling 6566912252):
+ *     each such position is named in `notCarriedForwardKeys` as well as in
+ *     `redactedKeys`. Every instance-auth kind is a strict shape, so the save
+ *     door refuses an undeclared `auth` key whatever its value, and nothing at
+ *     runtime reads one: a stored value there is cleartext a row written
+ *     before the shapes went strict still holds, and keeping it through a save
+ *     keeps nothing but the exposure. So a save of the served form drops it,
+ *     and the save names each key it dropped. For the same reason a CLEARED
+ *     value (`null`, `''`, an empty map) is withheld here too, unlike the
+ *     credential positions below: serving it back would make a plain read then
+ *     save meet the strict shape's refusal.
  *  2. **`authentication.<key>` — every key but `type`.** The runtime shape
  *     carries its secret inline (`token`, `key`, `password`), and an authored
  *     entry may hold only `{ type: 'none' }` (the publish refusal registered as
@@ -87,12 +99,29 @@
  *     at the save door, so serving its cleared form back makes a plain read
  *     then save meet that refusal. The carry-forward keeps the stored value
  *     (its dotted name included, by the whole-string fallback).
+ *  8. **Every key the two nested shapes the entry declares do not declare,
+ *     WHOLE — whatever its value: inside `retryConfig`, and inside each
+ *     element of `actions`.** A key no declared position names is one this
+ *     redactor cannot judge, and nothing reads it. The declared keys are read
+ *     from {@link RetryConfigSchema} and {@link ConnectorActionSchema}
+ *     themselves. An `actions` element is addressed by its index
+ *     (`actions.<i>.<key>`), which the carry-forward resolves to the element's
+ *     own `key`, so a save of a reordered list keeps each element's stored
+ *     value on that element. A `retryConfig` that is not an object, and an
+ *     `actions` that is not an array or holds an element that is not an
+ *     object, are withheld WHOLE (a cleared form excepted), as a non-object
+ *     `auth` is (item 4): the entry refuses each at every authoring door, so
+ *     only a row stored outside them carries one, and nothing in it can be
+ *     judged. An element is never removed on its own, which would shift every
+ *     later index; the carry-forward keeps the stored value at rest.
  *
  * ## Cleared forms, and what is never touched
  *
  * A position holding nothing — `null`, `''`, or an empty map — is served as
  * written and not reported, as the schema derivation serves its cleared forms:
- * a reader can tell "cleared" from "withheld". Every other key of the item is
+ * a reader can tell "cleared" from "withheld". The undeclared keys (items 1, 7
+ * and 8) are the exception, each for the reason its item gives: no door
+ * accepts them, so their cleared forms are withheld too. Every other key of the item is
  * left byte for byte, `_diagnostics` included, and the input is never mutated:
  * redaction is a SERVING act. The runtime reads connectors through the
  * protocol's execution read, which applies no serving decoration, so a
@@ -106,7 +135,7 @@
  */
 
 import { ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
-import { DeclarativeConnectorEntrySchema } from './connector.zod';
+import { ConnectorActionSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from './connector.zod';
 import { METADATA_READ_DECORATIONS } from '../kernel/metadata-read-decorations';
 import { CREDENTIAL_URL_QUERY_PARAM_NAMES } from '../data/driver/common.zod';
 import { redactUrlCredentialQueryParams } from '../data/datasource-credential-redaction';
@@ -243,20 +272,36 @@ function isClearedForm(value: unknown): boolean {
   return value === undefined || value === null || value === '' || (isPlainRecord(value) && Object.keys(value).length === 0);
 }
 
-/** `item` with the key at `path` removed, copying each container on the way; the input is never touched. */
-function withoutKeyAt(item: Record<string, unknown>, path: readonly string[]): Record<string, unknown> {
+/** The child at `segment`: a key of a plain object, or an index of an array (item 8's `actions` hop). */
+function childAt(node: unknown, segment: string): unknown {
+  if (isPlainRecord(node)) return node[segment];
+  if (Array.isArray(node) && /^(0|[1-9][0-9]*)$/.test(segment)) return node[Number(segment)];
+  return undefined;
+}
+
+/**
+ * `node` with the key at `path` removed, copying each container on the way (an
+ * array hop copies the array); the input is never touched.
+ */
+function withoutKeyAt<T>(node: T, path: readonly string[]): T {
   const [head, ...rest] = path as [string, ...string[]];
-  if (rest.length === 0) {
-    const { [head]: _withheld, ...kept } = item;
-    return kept;
+  if (Array.isArray(node)) {
+    const copy = node.slice();
+    copy[Number(head)] = withoutKeyAt(node[Number(head)], rest);
+    return copy as T;
   }
-  return { ...item, [head]: withoutKeyAt(item[head] as Record<string, unknown>, rest) };
+  const record = node as Record<string, unknown>;
+  if (rest.length === 0) {
+    const { [head]: _withheld, ...kept } = record;
+    return kept as T;
+  }
+  return { ...record, [head]: withoutKeyAt(record[head], rest) } as T;
 }
 
 /** The value at `path` in `item`, and whether its parent is a plain object holding the key. */
 function readAt(item: Record<string, unknown>, path: readonly string[]): { present: boolean; value: unknown } {
   let parent: unknown = item;
-  for (const key of path.slice(0, -1)) parent = isPlainRecord(parent) ? parent[key] : undefined;
+  for (const key of path.slice(0, -1)) parent = childAt(parent, key);
   const leaf = path[path.length - 1] as string;
   if (!isPlainRecord(parent) || !Object.prototype.hasOwnProperty.call(parent, leaf)) return { present: false, value: undefined };
   return { present: true, value: parent[leaf] };
@@ -297,17 +342,62 @@ function undeclaredRootKeysOf(item: Record<string, unknown>): string[][] {
   return paths;
 }
 
-/** Every credential position present in `item` that is withheld by removal, as item-relative paths. */
+/** Read once, on first use: the keys item 8's two nested shapes declare (the schemas are lazy). */
+let declaredNestedKeys: { retryConfig: ReadonlySet<string>; action: ReadonlySet<string> } | undefined;
+function nestedKeys(): { retryConfig: ReadonlySet<string>; action: ReadonlySet<string> } {
+  // No readable shape ⇒ nothing is declared, and every nested key is withheld: fail closed.
+  declaredNestedKeys ??= {
+    retryConfig: new Set(Object.keys(objectShapeOf(RetryConfigSchema) ?? {})),
+    action: new Set(Object.keys(objectShapeOf(ConnectorActionSchema) ?? {})),
+  };
+  return declaredNestedKeys;
+}
+
+/**
+ * Item 8: every key `retryConfig` and each `actions` element do not declare,
+ * as item-relative paths (an `actions` hop is the element's index), or the
+ * container itself when it is not the shape the entry declares.
+ */
+function undeclaredNestedKeysOf(item: Record<string, unknown>): string[][] {
+  const declared = nestedKeys();
+  const paths: string[][] = [];
+  const retryConfig = item.retryConfig;
+  if (isPlainRecord(retryConfig)) {
+    for (const key of Object.keys(retryConfig)) if (!declared.retryConfig.has(key)) paths.push(['retryConfig', key]);
+  } else if (!isClearedForm(retryConfig)) {
+    paths.push(['retryConfig']);
+  }
+  const actions = item.actions;
+  if (Array.isArray(actions) && actions.every(isPlainRecord)) {
+    actions.forEach((action, index) => {
+      for (const key of Object.keys(action)) if (!declared.action.has(key)) paths.push(['actions', String(index), key]);
+    });
+  } else if (!isClearedForm(actions)) {
+    // Not an array, or an element is not an object: withheld whole (an element
+    // removed on its own would shift every later index).
+    paths.push(['actions']);
+  }
+  return paths;
+}
+
+/**
+ * Item 1: every key the item's instance-auth kind does not declare, as
+ * item-relative paths — withheld whatever its value, and not carried forward
+ * (see the module note). `[]` when `auth` is not an object (item 4 judges that).
+ */
+function undeclaredAuthKeysOf(item: Record<string, unknown>): string[][] {
+  const auth = item.auth;
+  if (!isPlainRecord(auth)) return [];
+  const declared = declaredConnectorAuthKeys(auth);
+  return Object.keys(auth).filter((key) => !declared.has(key)).map((key) => ['auth', key]);
+}
+
+/** Every other credential position present in `item` that is withheld by removal, as item-relative paths. */
 function credentialPathsOf(item: Record<string, unknown>): string[][] {
   const paths: string[][] = [];
-  const auth = item.auth;
-  if (isPlainRecord(auth)) {
-    const declared = declaredConnectorAuthKeys(auth);
-    for (const key of Object.keys(auth)) if (!declared.has(key)) paths.push(['auth', key]);
-  } else {
-    // Item 4: not an object, so withheld whole (a cleared form is skipped by the caller).
-    paths.push(['auth']);
-  }
+  // Item 4: `auth` that is not an object is withheld whole (a cleared form is
+  // skipped by the caller); an object `auth` is item 1's, judged key by key.
+  if (!isPlainRecord(item.auth)) paths.push(['auth']);
   const authentication = item.authentication;
   if (isPlainRecord(authentication)) {
     for (const key of Object.keys(authentication)) if (key !== 'type') paths.push(['authentication', key]);
@@ -380,19 +470,30 @@ function credentialUrlRewritesOf(
 
 /**
  * The built-in `connector` redactor: withholds the positions the module note
- * lists, names each in `redactedKeys` (dotted, sorted), and returns the input
- * by reference when there is nothing to withhold.
+ * lists, names each in `redactedKeys` (dotted, sorted) and item 1's in
+ * `notCarriedForwardKeys` too, and returns the input by reference when there
+ * is nothing to withhold.
  */
 export function redactConnectorItem(item: Record<string, unknown>): MetadataRedactionResult {
   let served = item;
   const redactedKeys: string[] = [];
-  // Item 7, first: an undeclared root key is withheld whatever its value — a
-  // cleared one included — because the entry refuses it at the save door.
-  for (const path of undeclaredRootKeysOf(item)) {
+  const notCarriedForwardKeys: string[] = [];
+  // Items 7 and 8, first: an undeclared key is withheld whatever its value —
+  // a cleared one included — because nothing can judge it.
+  for (const path of [...undeclaredRootKeysOf(item), ...undeclaredNestedKeysOf(item)]) {
     const { present } = readAt(served, path);
     if (!present) continue;
     served = withoutKeyAt(served, path);
     redactedKeys.push(path.join('.'));
+  }
+  // Item 1: an undeclared `auth` key, whatever its value, withheld and not
+  // carried forward — a save of the served form drops it.
+  for (const path of undeclaredAuthKeysOf(item)) {
+    const { present } = readAt(served, path);
+    if (!present) continue;
+    served = withoutKeyAt(served, path);
+    redactedKeys.push(path.join('.'));
+    notCarriedForwardKeys.push(path.join('.'));
   }
   for (const path of credentialPathsOf(item)) {
     const { present, value } = readAt(served, path);
@@ -406,5 +507,10 @@ export function redactConnectorItem(item: Record<string, unknown>): MetadataReda
     redactedKeys.push(path.join('.'));
   }
   if (redactedKeys.length === 0) return { item, redactedKeys: [] };
-  return { item: served, redactedKeys: redactedKeys.sort() };
+  return {
+    item: served,
+    redactedKeys: redactedKeys.sort(),
+    // Set only when it names a position: absent means none (the contract's own reading).
+    ...(notCarriedForwardKeys.length > 0 ? { notCarriedForwardKeys: notCarriedForwardKeys.sort() } : {}),
+  };
 }

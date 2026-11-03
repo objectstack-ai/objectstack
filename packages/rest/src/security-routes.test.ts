@@ -294,9 +294,11 @@ describe('[#8326] POST/GET /security/explain with recordIds (batch form)', () =>
     // The object-level trace rides along, without a singular `record` verdict.
     expect(res.body.allowed).toBe(true);
     expect(res.body.record).toBeUndefined();
-    // Evaluation is the singular pipeline per unique id + one object-level
-    // pass — the service never sees `recordIds`.
-    for (const call of explain.mock.calls) expect(call[0].recordIds).toBeUndefined();
+    // [#29112] The service is handed the batch first; this one predates it
+    // (it answers no `records`), so evaluation falls back to the singular
+    // pipeline per unique id — none of which carries `recordIds`.
+    expect(explain.mock.calls[0][0].recordIds).toEqual(recordIds);
+    for (const call of explain.mock.calls.slice(1)) expect(call[0].recordIds).toBeUndefined();
     expect(explain.mock.calls.map((c: any[]) => c[0].recordId).sort((a: any, b: any) => String(a).localeCompare(String(b))))
       .toEqual([undefined, 'a_ok', 'b_no', 'r_gone'].sort((a: any, b: any) => String(a).localeCompare(String(b))));
   });
@@ -321,6 +323,69 @@ describe('[#8326] POST/GET /security/explain with recordIds (batch form)', () =>
     expect(res.statusCode).toBe(200);
 
     expect(res.body.records).toEqual(singularVerdicts);
+  });
+
+  // [#29112] A service that takes the batch settles the object-level part once.
+  /** {@link deterministicExplain}, answering the batch itself as the spec's batch decision. */
+  function batchExplain() {
+    const single = deterministicExplain();
+    return vi.fn(async (request: any) => {
+      if (!request.recordIds) return single(request);
+      const { recordIds, ...objectLevel } = request;
+      const decision = await single(objectLevel);
+      const records: unknown[] = [];
+      for (const recordId of recordIds) records.push(((await single({ ...objectLevel, recordId })) as { record?: unknown }).record);
+      return { ...decision, records };
+    });
+  }
+
+  it('[#29112] hands a batch-capable service the whole batch ONCE and relays its records', async () => {
+    const explain = batchExplain();
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    const recordIds = ['a_ok', 'b_no', 'r_gone', 'a_ok'];
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds } } as any, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(explain).toHaveBeenCalledTimes(1);
+    expect(explain).toHaveBeenCalledWith({ object: 'task', operation: 'update', recordIds }, CALLER);
+    expect(res.body.records).toEqual([
+      { recordId: 'a_ok', visible: true, decidedBy: 'sharing' },
+      { recordId: 'b_no', visible: false, decidedBy: 'rls' },
+      { recordId: 'r_gone', visible: false },
+      { recordId: 'a_ok', visible: true, decidedBy: 'sharing' },
+    ]);
+    expect(res.body.allowed).toBe(true);
+    expect(res.body.record).toBeUndefined();
+  });
+
+  it('[#29112] AGREEMENT: the batch-capable answer equals N singular answers through the real handler', async () => {
+    const recordIds = ['a_ok', 'b_no', 'r_gone', 'c_ok'];
+    const singularVerdicts: unknown[] = [];
+    for (const recordId of recordIds) {
+      const { post } = buildServer(async () => ({ explain: batchExplain() }), { callerCtx: CALLER });
+      const res = mockRes();
+      await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordId } } as any, res);
+      singularVerdicts.push(res.body.record);
+    }
+    const { post } = buildServer(async () => ({ explain: batchExplain() }), { callerCtx: CALLER });
+    const res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.records).toEqual(singularVerdicts);
+  });
+
+  it('[#29112] a position the batch answer leaves without a verdict fails CLOSED, no decider fabricated', async () => {
+    const explain = vi.fn().mockResolvedValue({ ...DECISION, records: [{ recordId: 'a', visible: true, decidedBy: 'sharing' }, null] });
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds: ['a', 'b'] } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(explain).toHaveBeenCalledTimes(1);
+    expect(res.body.records).toEqual([
+      { recordId: 'a', visible: true, decidedBy: 'sharing' },
+      { recordId: 'b', visible: false },
+    ]);
   });
 
   it('refuses a batch over the 200-id cap with 400 VALIDATION_FAILED (never truncates)', async () => {

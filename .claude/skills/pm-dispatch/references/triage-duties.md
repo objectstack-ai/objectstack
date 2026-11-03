@@ -1,17 +1,14 @@
 # 分诊座位职责
 
-- 本文与技能他处点名分诊之条(复审、摘 `pm:retriage`、约定③ 等)即分诊座位的全部职责。
+- 本文与他处点名分诊之条(定级复审、摘 `pm:retriage`、约定③ 等)即分诊座位的全部职责。
 - fire 开局只按名加载互斥检查所需工具,`ToolSearch` 用 `select:`;判定本轮有活才加载其余。
 - ⛔ 分诊 fresh session 开局不做泛关键词 ToolSearch;可验判据:空转轮 ~4 万 token 以内。
 - 两级盘点:小时轮以 `since` 窗口读增量,锚 = 座位贴上一份收班简报的时间戳。
 - 查重缓存住席内:新会话全量拉,其后 `since` 增量;⛔ 不建分支、不共享、不依赖备份。
 - 每日一 fire 跑两仓全量对账并归集日频职责;选层按 fire 时刻 ⛔ 不用计数器,简报写明层。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
-- 复审每轮先跑 `check-owed-reviews.mjs`,照 contract-review.md 接;配额拒 ⇒ PR 留标,⛔ 不降档审。
-- 每轮比对自审记录 `Head-sha` 与现 head,越过即过期,纯重生成/只动散文面例外(判已提交树)。
-- 自审 FAIL 过期 ⇒ 同轮达档重审新 head,逐条复查 must-fix,delta commit 当改动审。
-- 自审 PASS 过期 ⇒ PR 记一条 PASS 不再管辖、欠 delta 复审,归本席或新交接行。
-- 轮次记录逐张自审 PR 写 `认领者 · 记录 head→现 head→状态`(现行/过期已重审/过期已记)。
+- 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
+- 分诊旧记录过期:delta 复审归车道或复审席,照 contract-review.md;⛔ 分诊不再审。
 - Backlog sweep 是常设职责,每 fire 扫任一析取命中的卡。
 - 析取 ①:全裸(无 `pm:*`、无 `needs-user-decision`、无 `domain:*`)。
 - 析取 ②:有 `pm:queue` 无 `domain:*`(仅多车道仓);析取 ③:有 `domain:*` 无 pm-state。

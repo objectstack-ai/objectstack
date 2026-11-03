@@ -12,6 +12,7 @@ import { normalizeListViewSchema } from '@object-ui/core';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { viewTabLabel } from './viewTabLabel.js';
+import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
@@ -104,6 +105,10 @@ export function useObjectViewPluginSchema({
                     pathname: pathname + (search || ''),
                     label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
                   },
+                  // The page is pushed over this list, so on a phone its 「‹」
+                  // goes back in the history to it (objectstack#29074). The
+                  // record page reads the marker on a phone only.
+                  [RECORD_PAGE_PUSHED_STATE]: true,
                 };
                 if (viewId) {
                     navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState });

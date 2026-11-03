@@ -52,7 +52,9 @@ export interface ApplyConversionsOptions {
    * have no author to teach, so each replays the FULL chain, retired entries
    * included — ADR-0087's `## Addendum (2026-07-31)` for the first two, the
    * #12772 ruling for the third. The fixture CI sets it as well, so graduated
-   * transforms stay covered forever (ADR-0087 D3).
+   * transforms stay covered while the installed release carries them; a
+   * retirement kit ages out one major after it retires (ADR-0087 as amended,
+   * ruling 6434038284), and its transform leaves coverage with it.
    *
    * `objectstack migrate meta` is NOT one of these callers: `applyMetaMigrations`
    * (`../migrations/chain.js`) looks each step's conversion up in

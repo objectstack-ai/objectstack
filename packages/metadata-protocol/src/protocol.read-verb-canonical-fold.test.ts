@@ -60,6 +60,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { META_URL_TO_SINGULAR, PLURAL_TO_SINGULAR, metaUrlSpellingRefusal } from '@objectstack/spec/shared';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -247,23 +248,61 @@ describe('#9157 — the population, re-derived from the code rather than from th
             return lines.slice(line, end === undefined || end < 0 ? lines.length : end).join('\n');
         };
         const METHOD_OR_PRIVATE = /^ {4}(?:private |protected )?(?:static )?(?:async )?[A-Za-z_][A-Za-z0-9_]*\s*\(/;
+        // [#25467 E0] The four door request aliases moved with the rest of the
+        // protocol.ts preamble to `protocol-door-requests.ts`; an alias is read
+        // there only when protocol.ts imports it from that module, so the
+        // signature judged is still the one the class names.
+        const doorRequests = readFileSync(fileURLToPath(new URL('./protocol-door-requests.ts', import.meta.url)), 'utf8');
+        const doorImport = /\nimport type \{([^}]*)\} from '\.\/protocol-door-requests\.js';/.exec(src)?.[1] ?? '';
         const aliasLiteral = (name: string): string | undefined => {
-            const at = src.indexOf(`\ntype ${name} = {`);
+            const home = src.includes(`\ntype ${name} = {`) ? src
+                : new RegExp(`\\b${name}\\b`).test(doorImport) ? doorRequests : src;
+            const at = home.indexOf(`\ntype ${name} = {`);
             if (at < 0) return undefined;
-            const open = src.indexOf('{', at);
+            const open = home.indexOf('{', at);
             let depth = 0;
-            for (let i = open; i < src.length; i++) {
-                if (src[i] === '{') depth++;
-                else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1);
+            for (let i = open; i < home.length; i++) {
+                if (home[i] === '{') depth++;
+                else if (home[i] === '}' && --depth === 0) return home.slice(open, i + 1);
             }
             return undefined;
         };
+        // [#25467 E1] A member whose body moved out of protocol.ts (ruling E's
+        // host split, or the per-member series before it) keeps its signature
+        // here and its body in a `protocol-*.ts` module: the stub's last line is
+        // `return fn(protocolHost(this), …)` or `return fn.call(host, …)`, `fn` a
+        // named import from that module. The verb is judged by the moved body,
+        // read from the module protocol.ts imports `fn` from: every module, by
+        // this one rule.
+        const moduleImports = new Map<string, string>();
+        for (const m of maskComments(src).matchAll(/\nimport \{([^}]*)\} from '\.\/(protocol-[a-z0-9-]+)\.js';/g)) {
+            for (const spec of m[1]!.split(',')) {
+                const local = /^\s*(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)\s*$/.exec(spec)?.[1];
+                if (local !== undefined) moduleImports.set(local, `${m[2]}.ts`);
+            }
+        }
+        // The stub's last statement, right before the member's own closing brace
+        // (a member slice runs on to the next scanned member's header).
+        const STUB = /\n {8}return (?:await )?([A-Za-z_$][\w$]*)(?:\(protocolHost\(this\)|\.call\([A-Za-z_$][\w$]*)[,)][^\n]*\n {4}\}\n/;
+        const throughSplit: string[] = [];
+        const movedBody = (body: string): string => {
+            const own = body.slice(0, body.indexOf('\n    }\n') + 7);
+            const fn = STUB.exec(own)?.[1];
+            if (fn === undefined || !moduleImports.has(fn)) return body;
+            const file = moduleImports.get(fn)!;
+            throughSplit.push(fn);
+            const text = readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8');
+            const at = text.search(new RegExp(`\\nexport (?:async )?function ${fn}\\b`));
+            expect(at, `the stub hands its body to '${fn}', which ${file} does not export`).toBeGreaterThanOrEqual(0);
+            const end = text.indexOf('\n}\n', at + 1);
+            return text.slice(at, end < 0 ? text.length : end + 2);
+        };
         const delegateBody = (body: string): string => {
             const to = /this\.([A-Za-z_][A-Za-z0-9_]*Unaudited)\(request\)/.exec(body)?.[1];
-            if (to === undefined) return body;
+            if (to === undefined) return movedBody(body);
             const line = lines.findIndex((l) => l.startsWith(`    private async ${to}(`));
             expect(line, `the wrapper delegates to '${to}', which the scan cannot find`).toBeGreaterThanOrEqual(0);
-            return memberSlice(line);
+            return movedBody(memberSlice(line));
         };
 
         const unfolded: string[] = [];
@@ -291,6 +330,10 @@ describe('#9157 — the population, re-derived from the code rather than from th
             (/canonicalizeMetaRequestType\(request\)/.test(body) ? folded : unfolded).push(starts[k]!.name);
         }
 
+        // [#25467 E1] Non-vacuity of the split resolution: the host split's pilot
+        // is judged by its moved body, so a stub regex that stopped matching
+        // would fail here instead of silently judging a one-line stub.
+        expect(throughSplit).toContain('tenantAuthoredWriteRefusal');
         expect(
             unfolded,
             'A `/meta` verb takes a required `type` without folding it at the request boundary. '

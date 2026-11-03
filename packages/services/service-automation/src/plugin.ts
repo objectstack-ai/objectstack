@@ -88,6 +88,11 @@ import {
     reconnectRequiredReason,
     requestOAuth2Token,
     retryOnVendorTokenRefusal,
+    INSTALLER_CLIENT_ID_MAX_LENGTH,
+    parseKeptConnectionClient,
+    serializeInstallerClient,
+    takesInstallerClient,
+    type InstallerClient,
     type McpAuthorizationClient,
     type OAuth2GrantHandle,
     type PendingAuthorizationStore,
@@ -713,12 +718,16 @@ function credentialHandleNotAppliedReason(name: string, provider: string, kind: 
  * ADR-0143 D2.1 — the MCP server URL of an `oauth2` instance whose endpoints or
  * client the MCP authorization flow discovers: `provider: 'mcp'` over an http
  * transport, the `authorization_code` grant, and at least one of
- * `authorizationUrl`, `tokenUrl` and `clientId` left undeclared. `undefined`
+ * `authorizationUrl`, `tokenUrl` and the client left undeclared. The client is
+ * not left to the flow when the instance declares `clientId`, or takes the
+ * installer's (`clientSource: 'installer'`, the 2026-11-02 amendment): the
+ * flow then only discovers the endpoints, and registers nothing. `undefined`
  * for every other instance, which declares what its handle needs.
  */
 function mcpDiscoveryServerUrl(entry: { provider?: unknown; providerConfig?: Record<string, unknown> }, auth: OAuth2InstanceAuth): string | undefined {
     if (entry.provider !== 'mcp' || auth.grant !== 'authorization_code') return undefined;
-    if (auth.authorizationUrl !== undefined && auth.tokenUrl !== undefined && auth.clientId !== undefined) return undefined;
+    const clientSupplied = auth.clientId !== undefined || takesInstallerClient(auth);
+    if (auth.authorizationUrl !== undefined && auth.tokenUrl !== undefined && clientSupplied) return undefined;
     const transport = entry.providerConfig?.transport as { kind?: unknown; url?: unknown } | undefined;
     if (transport?.kind !== 'http' || typeof transport.url !== 'string' || transport.url.length === 0) return undefined;
     return transport.url;
@@ -733,7 +742,9 @@ function mcpDiscoveryServerUrl(entry: { provider?: unknown; providerConfig?: Rec
  * `provider: 'mcp'` over http with the `authorization_code` grant they may be
  * omitted: each connect runs the MCP authorization flow
  * (`./oauth2-grant/mcp-authorization.ts`), and the connection keeps the client
- * it found. An endpoint over plain `http:` off loopback, or any other scheme,
+ * it found. The client alone may be omitted by an `authorization_code` instance
+ * declaring `clientSource: 'installer'`: the administrator enters it on each
+ * connection (ADR-0143 D2.1, 2026-11-02 amendment). An endpoint over plain `http:` off loopback, or any other scheme,
  * is refused by field (`./oauth2-grant/endpoint-transport.ts`): the client
  * secret and the refresh token would cross the network in the clear — and so
  * is such an MCP server's own URL, which the access token travels to.
@@ -754,7 +765,7 @@ function oauth2NotServableReason(
     }
     const missing = discoveredAt !== undefined ? [] : [
         auth.tokenUrl === undefined ? 'tokenUrl' : undefined,
-        auth.clientId === undefined ? 'clientId' : undefined,
+        auth.clientId === undefined && !takesInstallerClient(auth) ? 'clientId' : undefined,
         auth.grant === 'authorization_code' && auth.authorizationUrl === undefined ? 'authorizationUrl' : undefined,
     ].filter((k): k is string => k !== undefined);
     if (missing.length > 0) {
@@ -3574,7 +3585,9 @@ export class AutomationServicePlugin implements Plugin {
                     : 'instance registered degraded (no actions)') +
                 `; ${changed ? 're-checking' : 'retrying'} with backoff, attempt ${attempts}.`,
             undefined,
-            describeThrownForLog(info.cause),
+            // No thrown value (the connection store could not be read): the
+            // reason rides `meta`, never `describeThrownForLog(undefined)`.
+            info.cause === undefined ? { reason: info.reason } : describeThrownForLog(info.cause),
         );
     }
 
@@ -3620,14 +3633,17 @@ export class AutomationServicePlugin implements Plugin {
                 );
             }
         }
-        // #5575 — the provider's message rides `meta`, never the message.
+        // #5575 — the provider's message rides `meta`, never the message. A
+        // platform refusal (an `oauth2` instance this server cannot serve) has
+        // no thrown value: its reason rides `meta` instead, so the record never
+        // renders `describeThrownForLog(undefined)`, the string "undefined".
         ctx.logger.error(
             `[Automation] failed to materialize connector instance '${info.name}' via provider '${info.provider}' (ADR-0097): ` +
                 'a configuration fault, so the instance is no longer retried. ' +
                 (info.hasLive ? 'The previously-materialized connector keeps serving. ' : '') +
                 'Fix its declaration; an edit or a restart re-attempts it.',
             undefined,
-            describeThrownForLog(info.cause),
+            info.cause === undefined ? { reason: info.reason } : describeThrownForLog(info.cause),
         );
     }
 
@@ -3679,11 +3695,13 @@ export class AutomationServicePlugin implements Plugin {
         clientSecret: string | undefined,
     ): OAuth2GrantHandle {
         // `oauth2NotServableReason` passed: both are declared, or each
-        // connection keeps the client the MCP authorization flow found.
+        // connection keeps the client the MCP authorization flow found, or
+        // the client its administrator entered (`clientSource: 'installer'`).
         return createOAuth2GrantHandle({
             connector: name,
             config: {
                 grant: auth.grant,
+                ...(takesInstallerClient(auth) ? { clientSource: 'installer' as const } : {}),
                 ...(auth.tokenUrl === undefined ? {} : { tokenUrl: auth.tokenUrl }),
                 ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
                 ...(clientSecret === undefined ? {} : { clientSecret }),
@@ -3692,11 +3710,10 @@ export class AutomationServicePlugin implements Plugin {
             },
             connections: this.connectorConnectionStoreOrNone(),
             lock: () => this.clusterService(ctx)?.lock,
-            onGrantRefused: (organizationId) => {
-                ctx.logger.warn(
-                    `[Automation] connector instance '${name}': the authorization server refused the grant of organization `
-                        + `'${organizationId}'; it needs to be reconnected there (ADR-0143 D4).`,
-                );
+            onGrantRefused: (_organizationId, reason) => {
+                // The reason the connection stored: it names the instance, the
+                // organization and the cause that happened on that refresh path.
+                ctx.logger.warn(`[Automation] ${reason}.`);
                 void this.materializeDeclaredConnectors(ctx, { fatal: false }).catch(() => { /* logged by the reconcile */ });
             },
             ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
@@ -3833,12 +3850,25 @@ export class AutomationServicePlugin implements Plugin {
         return this.memoryPendingAuthorizations;
     }
 
-    /** ADR-0143 D5 — the deployment's fixed redirect URI, or the `503` naming how to configure one. */
-    private connectorOAuthRedirectUri(): string {
+    /**
+     * ADR-0143 D5 — the deployment's fixed redirect URI: the
+     * `connectorOAuthRedirectUri` option, else the callback path under
+     * `OS_AUTH_URL`, else under `OS_BASE_URL`; `undefined` when there is no
+     * base to derive it from. ⛔ Never taken from a request. The one
+     * derivation both the connection read (which then leaves `redirectUri`
+     * out) and a begun connect (which then refuses `503`) answer from.
+     */
+    private derivedConnectorOAuthRedirectUri(): string | undefined {
         if (this.options.connectorOAuthRedirectUri) return this.options.connectorOAuthRedirectUri;
         const env = typeof process !== 'undefined' ? process.env : undefined;
         const origin = (env?.OS_AUTH_URL || env?.OS_BASE_URL || '').trim().replace(/\/+$/, '');
-        if (/^https?:\/\//i.test(origin)) return `${origin}/api/v1/automation/connectors/oauth/callback`;
+        return /^https?:\/\//i.test(origin) ? `${origin}/api/v1/automation/connectors/oauth/callback` : undefined;
+    }
+
+    /** ADR-0143 D5 — the deployment's fixed redirect URI, or the `503` naming how to configure one. */
+    private connectorOAuthRedirectUri(): string {
+        const redirectUri = this.derivedConnectorOAuthRedirectUri();
+        if (redirectUri !== undefined) return redirectUri;
         throw credentialDoorRefusal(
             'This deployment has no fixed public origin for the OAuth redirect, so a connector instance cannot be connected: '
                 + 'set OS_BASE_URL (or OS_AUTH_URL) to the URL it is served at, or pass connectorOAuthRedirectUri to the '
@@ -3854,9 +3884,12 @@ export class AutomationServicePlugin implements Plugin {
      * The organization's connection keeps the client it was connected with,
      * reused on a reconnect while the declaration still leaves the same fields
      * to discovery; otherwise the MCP authorization flow runs, registering a
-     * client when none is declared. Its refusals answer the door: `400` for a
-     * server that does not say what the flow needs, `503` for one that did not
-     * answer.
+     * client when none is declared. An instance taking the installer's client
+     * (`installerClient`, ADR-0143 D2.1's 2026-11-02 amendment) always runs
+     * the flow with that client in place of a declared one — a reconnect may
+     * bring a new client — and so never registers one. Its refusals answer the
+     * door: `400` for a server that does not say what the flow needs, `503`
+     * for one that did not answer.
      */
     private async mcpAuthorizationClient(
         ctx: PluginContext,
@@ -3865,11 +3898,12 @@ export class AutomationServicePlugin implements Plugin {
         auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
         organizationId: string,
         redirectUri: string,
+        installerClient?: InstallerClient,
     ): Promise<McpAuthorizationClient | undefined> {
         const serverUrl = mcpDiscoveryServerUrl(entry, auth);
         if (serverUrl === undefined) return undefined;
         const store = this.connectorConnectionStoreOrNone();
-        const existing = await store.readOrRefuse(organizationId, name);
+        const existing = installerClient ? undefined : await store.readOrRefuse(organizationId, name);
         if (existing?.hasRegisteredClient) {
             let kept: McpAuthorizationClient | undefined;
             try {
@@ -3889,6 +3923,8 @@ export class AutomationServicePlugin implements Plugin {
                     ...(auth.authorizationUrl === undefined ? {} : { authorizationUrl: auth.authorizationUrl }),
                     ...(auth.tokenUrl === undefined ? {} : { tokenUrl: auth.tokenUrl }),
                     ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
+                    ...(installerClient ? { clientId: installerClient.clientId } : {}),
+                    ...(installerClient?.clientSecret === undefined ? {} : { clientSecret: installerClient.clientSecret }),
                     ...(auth.resource === undefined ? {} : { resource: auth.resource }),
                 },
                 redirectUri,
@@ -3949,7 +3985,8 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const notServable = oauth2NotServableReason(name, { ...entry, provider: entry.provider as string }, auth, true);
-        if (notServable !== undefined) throw credentialDoorRefusal(`${notServable}.`, 'VALIDATION_ERROR', 400);
+        // The reason ends its own sentence: the door answers it as it is.
+        if (notServable !== undefined) throw credentialDoorRefusal(notServable, 'VALIDATION_ERROR', 400);
         const organizationId = request?.context?.tenantId;
         if (typeof organizationId !== 'string' || organizationId.length === 0) {
             throw credentialDoorRefusal(
@@ -3975,13 +4012,125 @@ export class AutomationServicePlugin implements Plugin {
             ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
             ...(record.connectedAt ? { connectedAt: record.connectedAt } : {}),
             ...(record.connectedBy ? { connectedBy: record.connectedBy } : {}),
+            // ADR-0143 D2.1 (2026-11-02 amendment): which client the
+            // administrator entered, from the plain columns — never the secret,
+            // which only the encrypted client column holds.
+            ...(record.installerClientId
+                ? { client: { source: 'installer' as const, clientId: record.installerClientId, hasSecret: record.installerClientHasSecret } }
+                : {}),
         };
     }
 
-    /** ADR-0143 D3 — `IAutomationService.getConnectorConnection`. */
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the read and revoke legs take no
+     * client: one is entered only when a connect is begun.
+     */
+    private refuseClientOffLeg(name: string, request: ConnectorConnectionRequest | undefined, leg: 'read' | 'revoke'): void {
+        if (request?.client === undefined) return;
+        throw credentialDoorRefusal(
+            `Connector instance '${name}': ${leg === 'read' ? 'reading a connection' : 'revoking a connection'} takes no OAuth `
+                + 'client. A client is entered only when a connect is begun (POST /api/v1/automation/connectors/'
+                + `${name}/connection). Nothing was ${leg === 'read' ? 'read' : 'revoked'}.`,
+            'VALIDATION_ERROR',
+            400,
+        );
+    }
+
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the client a begun connect
+     * authorizes with when the instance declares `clientSource: 'installer'`,
+     * or `undefined` for any other instance. A begin of such an instance
+     * that names a client replaces the kept one; one that names none reuses
+     * the client the organization's connection keeps (a reconnect: the
+     * Console can never resend a secret it never reads back), and with none
+     * kept is refused naming the vendor's registration step. A client offered
+     * to an instance that declares its client, or leaves it to MCP dynamic
+     * registration, is refused rather than ignored: no published form lets a
+     * connect replace a declared client. ⛔ No refusal carries a value the
+     * caller sent — only key names.
+     */
+    private async installerClientOfBegin(
+        name: string,
+        auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
+        request: ConnectorConnectionRequest,
+        organizationId: string,
+        redirectUri: string,
+    ): Promise<InstallerClient | undefined> {
+        const offered = request.client as unknown;
+        const refuse = (message: string): Error => credentialDoorRefusal(`${message} Nothing was connected.`, 'VALIDATION_ERROR', 400);
+        if (!takesInstallerClient(auth)) {
+            if (offered === undefined) return undefined;
+            throw refuse(
+                `Connector instance '${name}' does not take its OAuth client from the installer: its definition names the client, `
+                    + 'or leaves it to the MCP server\'s dynamic registration, so a connect cannot supply one. Begin the connect '
+                    + 'without `clientId` and `clientSecret`.',
+            );
+        }
+        if (offered === undefined) {
+            const kept = await this.keptInstallerClient(name, organizationId);
+            if (kept) return kept;
+            throw refuse(
+                `Connector instance '${name}' takes its OAuth client from the installer (\`clientSource: 'installer'\`), and this `
+                    + 'connect names none. Register an OAuth client for this deployment with the vendor, giving it the redirect '
+                    + `URI ${redirectUri}, then begin the connect again with its \`clientId\`, and its \`clientSecret\` when the `
+                    + 'vendor issued one.',
+            );
+        }
+        if (typeof offered !== 'object' || offered === null || Array.isArray(offered)) {
+            throw refuse(`Connector instance '${name}': the OAuth client of a connect is an object naming \`clientId\`.`);
+        }
+        const fields = offered as Record<string, unknown>;
+        const unknownKeys = Object.keys(fields).filter((k) => k !== 'clientId' && k !== 'clientSecret').sort();
+        if (unknownKeys.length > 0) {
+            throw refuse(
+                `Connector instance '${name}': the OAuth client of a connect takes only \`clientId\` and \`clientSecret\`; `
+                    + `unrecognised: ${unknownKeys.map((k) => `\`${k}\``).join(', ')}.`,
+            );
+        }
+        const { clientId, clientSecret } = fields;
+        if (typeof clientId !== 'string' || clientId.trim().length === 0 || clientId.length > INSTALLER_CLIENT_ID_MAX_LENGTH) {
+            throw refuse(
+                `Connector instance '${name}': \`clientId\` must be the client id the vendor issued, a non-empty text of at most `
+                    + `${INSTALLER_CLIENT_ID_MAX_LENGTH} characters.`,
+            );
+        }
+        if (clientSecret !== undefined && (typeof clientSecret !== 'string' || clientSecret.length === 0)) {
+            throw refuse(
+                `Connector instance '${name}': \`clientSecret\`, when given, must be the client secret the vendor issued, a `
+                    + 'non-empty text. Omit it for a public client.',
+            );
+        }
+        return { clientId, ...(clientSecret === undefined ? {} : { clientSecret: clientSecret as string }) };
+    }
+
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the installer's client the
+     * organization's connection of `name` keeps, read back whole from the
+     * encrypted client column, or `undefined` when it keeps none. A store
+     * that cannot read or decrypt it refuses (`503`), never "keeps none".
+     */
+    private async keptInstallerClient(name: string, organizationId: string): Promise<InstallerClient | undefined> {
+        const store = this.connectorConnectionStoreOrNone();
+        const record = await store.readOrRefuse(organizationId, name);
+        if (record?.installerClientId === undefined) return undefined;
+        const kept = parseKeptConnectionClient(await store.resolveRegisteredClient(record));
+        if (!kept?.installer) return undefined;
+        return { clientId: kept.clientId, ...(kept.clientSecret === undefined ? {} : { clientSecret: kept.clientSecret }) };
+    }
+
+    /**
+     * ADR-0143 D3 — `IAutomationService.getConnectorConnection`. The answer
+     * carries the deployment's `redirectUri` whatever the status, so the
+     * Connect step can show it before an administrator registers a client
+     * with the vendor (ADR-0143 D2.1); with no base to derive it from the key
+     * is absent, never a refusal: the read still answers the status.
+     */
     private async getConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
         const { name, organizationId } = await this.connectionDoorSubject(ctx, request);
-        return this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
+        this.refuseClientOffLeg(name, request, 'read');
+        const state = this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
+        const redirectUri = this.derivedConnectorOAuthRedirectUri();
+        return redirectUri === undefined ? state : { ...state, redirectUri };
     }
 
     /**
@@ -4000,12 +4149,15 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const redirectUri = this.connectorOAuthRedirectUri();
-        const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri);
+        const installerClient = await this.installerClientOfBegin(name, auth, request, organizationId, redirectUri);
+        const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri, installerClient);
         const state = createAuthorizationState();
         const { verifier, challenge } = createPkcePair();
         const expiresAt = Date.now() + PENDING_AUTHORIZATION_TTL_SECONDS * 1000;
         await this.pendingAuthorizations(ctx).put(state, {
-            connector: name, organizationId, userId, verifier, redirectUri, expiresAt, ...(client ? { client } : {}),
+            connector: name, organizationId, userId, verifier, redirectUri, expiresAt,
+            ...(client ? { client } : {}),
+            ...(installerClient ? { installerClient } : {}),
         });
         ctx.logger.info(`[Automation] connect of connector instance '${name}' begun for organization '${organizationId}' by user '${userId}'.`);
         const resource = auth.resource ?? client?.resource;
@@ -4014,7 +4166,7 @@ export class AutomationServicePlugin implements Plugin {
             organizationId,
             authorizationUrl: buildAuthorizationUrl({
                 authorizationUrl: client?.authorizationUrl ?? (auth.authorizationUrl as string),
-                clientId: client?.clientId ?? (auth.clientId as string),
+                clientId: client?.clientId ?? installerClient?.clientId ?? (auth.clientId as string),
                 redirectUri,
                 state,
                 challenge,
@@ -4083,8 +4235,19 @@ export class AutomationServicePlugin implements Plugin {
             context: request.context,
         });
         const client = pending.client;
-        let clientSecret: string | undefined = client?.registered ? client.clientSecret : undefined;
-        if (!client?.registered && auth.credentialRef !== undefined) {
+        // ADR-0143 D2.1 (2026-11-02 amendment): an instance that takes the
+        // installer's client exchanges as the client its connect was begun
+        // with. A declaration that changed which kind of client it takes while
+        // the browser was away answers no connect this server began.
+        const installerClient = pending.installerClient;
+        if (takesInstallerClient(auth) !== (installerClient !== undefined)) {
+            throw refuse(
+                `Connector instance '${name}' changed where its OAuth client comes from while this connect was waiting for its `
+                    + 'callback, so the code was not used. Nothing was connected; begin the connect again.',
+            );
+        }
+        let clientSecret: string | undefined = client?.registered ? client.clientSecret : installerClient?.clientSecret;
+        if (!client?.registered && installerClient === undefined && auth.credentialRef !== undefined) {
             const chain = await this.connectorCredentialChain(ctx);
             const rows = chain.store ? await chain.store.list() : new Map();
             const resolution = await resolveConnectorCredential(chain, auth.credentialRef, rows);
@@ -4111,7 +4274,10 @@ export class AutomationServicePlugin implements Plugin {
             token = await requestOAuth2Token({
                 connector: name,
                 tokenUrl: client?.tokenUrl ?? (auth.tokenUrl as string),
-                client: { clientId: client?.clientId ?? (auth.clientId as string), ...(clientSecret === undefined ? {} : { clientSecret }) },
+                client: {
+                    clientId: client?.clientId ?? installerClient?.clientId ?? (auth.clientId as string),
+                    ...(clientSecret === undefined ? {} : { clientSecret }),
+                },
                 params,
             });
         } catch (err) {
@@ -4132,8 +4298,15 @@ export class AutomationServicePlugin implements Plugin {
                 ...(token.refreshToken === undefined ? {} : { refreshToken: token.refreshToken }),
                 ...(token.scope === undefined ? {} : { scopes: token.scope }),
                 ...(token.expiresAt === undefined ? {} : { expiresAt: new Date(token.expiresAt) }),
+                // The installer's client is kept whole, encrypted (ADR-0143 D2.1,
+                // 2026-11-02 amendment), and its id alone in plain text for reads.
                 // A declared client's secret stays behind its credentialRef; only a registered one is kept.
-                ...(client
+                ...(installerClient
+                    ? {
+                        registeredClient: serializeInstallerClient(installerClient, client),
+                        installerClient: { clientId: installerClient.clientId, hasSecret: installerClient.clientSecret !== undefined },
+                    }
+                    : client
                     ? {
                         registeredClient: JSON.stringify(client.registered
                             ? client
@@ -4157,6 +4330,7 @@ export class AutomationServicePlugin implements Plugin {
     /** ADR-0143 D5 — `IAutomationService.revokeConnectorConnection`. */
     private async revokeConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
         const { name, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        this.refuseClientOffLeg(name, request, 'revoke');
         const removed = await this.onReconcileQueue(async () => {
             const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId);
             if (!gone) return false;

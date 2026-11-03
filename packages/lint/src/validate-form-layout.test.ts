@@ -612,6 +612,52 @@ describe('#16168 — falls back to the container list binding', () => {
 // [#22161] Slice 21: the `fix:` line of `form-section-group-unknown` is one
 // remedy line. It names the nearest declared group ("Did you mean") instead of
 // echoing the object's whole group list, and how a section inherits a group's
+// [#29309] A stored form ViewItem — `{ name, object, viewKind: 'form', config }`,
+// the shape Studio saves through `PUT /meta/view` — keeps its form under
+// `config`. The view walk read only the container rungs, so the runtime publish
+// gate (which hands the rule the written body as authored) judged such a form
+// not at all. Same two findings, located under `config`.
+describe('#29309 — a form ViewItem\'s `config` rung', () => {
+  const formItem = (config: AnyRec, patch: AnyRec = {}) => ({
+    objects: groupedObjects,
+    views: [{ name: 'contract.edit', object: 'contract', viewKind: 'form', config, ...patch }],
+  });
+
+  it('flags an unknown field and an undeclared group in `config.sections`, at the `config` path', () => {
+    const findings = validateFormLayout(formItem({
+      type: 'simple',
+      sections: [{ name: 'main', fields: ['name', 'no_such_field'] }, { group: 'no_such_group' }],
+    }));
+    expect(findings.map((f) => [f.rule, f.path, f.where])).toEqual([
+      [FORM_SECTION_GROUP_UNKNOWN, 'views[0].config.sections[1].group', 'view "contract.edit" · config'],
+      [FORM_FIELD_UNKNOWN, 'views[0].config.sections[0].fields[1]', 'view "contract.edit" · config'],
+    ]);
+    expect(findings.every((f) => f.severity === 'warning')).toBe(true);
+  });
+
+  it('honors the config\'s own `data.object` binding over the item\'s `object`', () => {
+    const findings = validateFormLayout(formItem(
+      { data: { provider: 'object', object: 'contract' }, sections: [{ fields: ['nope'] }] },
+      { object: 'not_an_object' },
+    ));
+    expect(findings.map((f) => f.rule)).toEqual([FORM_FIELD_UNKNOWN]);
+  });
+
+  it('control: a form item naming only real fields and a declared group is clean', () => {
+    expect(validateFormLayout(formItem({
+      type: 'simple',
+      sections: [{ name: 'main', fields: ['name', 'amount'] }, { group: 'basics' }],
+    }))).toEqual([]);
+  });
+
+  it('control: a LIST item\'s `config` is not a form and is not walked', () => {
+    expect(validateFormLayout(formItem(
+      { type: 'grid', sections: [{ fields: ['no_such_field'] }] },
+      { viewKind: 'list' },
+    ))).toEqual([]);
+  });
+});
+
 // members is the id's `os explain` entry.
 describe('[#22161] one-line fix — form-section-group-unknown', () => {
   it('a misspelt group key names the nearest declared group', () => {

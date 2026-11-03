@@ -194,6 +194,9 @@ export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
 // instead. The class stays exported exactly as it was — this adds an
 // affordance, it removes nothing.
 export { SummaryRecomputeError, SUMMARY_RECOMPUTE_CODE } from './summary-errors.js';
+// [#29527] The QuickJS runner asks it of a host call's rejection, so a sandboxed
+// body that lets a converted refusal leave hands back the engine's own error.
+export { isUnlandedWriteRefusal } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
 // [#5126] Thrown by `update` when `options.strictReadonlyWrites` is set and the
 // payload would have had read-only fields stripped. Exported so an in-process

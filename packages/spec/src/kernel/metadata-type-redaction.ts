@@ -31,7 +31,11 @@
  *    as before. Redaction is a read-path SERVING act.
  *
  * The write-path carry-forward (a redacted-body PUT must not persist credential
- * deletion) is also #8154's, deliberately not represented here.
+ * deletion) is also #8154's, and lives with the consumer. The one fact about
+ * it a redactor states is which withheld positions it must NOT carry forward
+ * (`MetadataRedactionResult.notCarriedForwardKeys`, #28640 ②B): the redactor is
+ * the only party that knows a position is dead, and the carry-forward reads it
+ * off the same result it already re-grafts from.
  *
  * ## Why `datasource` is a BUILT-IN, not a plugin registration
  *
@@ -82,7 +86,24 @@ import {
   isStoredMetadataBodyObject,
 } from './stored-metadata-body-objects';
 
-/** What a {@link MetadataTypeRedactor} returns: the servable item, and what was withheld. */
+/**
+ * What a {@link MetadataTypeRedactor} returns: the servable item, what was
+ * withheld, and which of the withheld positions a save drops instead of
+ * keeping.
+ *
+ * ## What a caller does with each list
+ *
+ *  - A READ exit serves `item` and treats `redactedKeys` as the whole answer
+ *    to "was anything withheld?" — every withheld position is in it, whichever
+ *    class it belongs to, so a reader that knows only `redactedKeys` withholds
+ *    and reports exactly what it did before `notCarriedForwardKeys` existed.
+ *  - A SAVE's carry-forward (the write-path inverse in
+ *    `@objectstack/metadata-protocol`) re-grafts the stored value at each
+ *    `redactedKeys` position the incoming body sends back as served — EXCEPT
+ *    the positions `notCarriedForwardKeys` names. Those it never re-grafts, so
+ *    a save of the served form drops them from the stored row, and the save
+ *    names each one it dropped on its answer, so a drop at rest is loud.
+ */
 export interface MetadataRedactionResult {
   /** The item with credential material removed. A NEW object — never the input mutated. */
   item: Record<string, unknown>;
@@ -93,8 +114,27 @@ export interface MetadataRedactionResult {
    * {@link getMetadataTypeRedactor} answering `undefined`. Serving this beside
    * the item is the difference between a caller that knows a credential is
    * being withheld and one that infers it from an absence.
+   *
+   * Names EVERY withheld position, the {@link notCarriedForwardKeys} ones
+   * included: an empty list still means "nothing withheld".
    */
   redactedKeys: string[];
+  /**
+   * [#28640 ②B, ruling 6566912252] The positions among {@link redactedKeys}
+   * that are withheld AND NOT CARRIED FORWARD — the same dotted spelling,
+   * sorted, each one also in `redactedKeys`. A save of the served form drops
+   * the stored value at each of them instead of re-grafting it: the class is
+   * for a position nothing reads and no door accepts any more, where keeping
+   * the stored value only keeps cleartext at rest (a connector's undeclared
+   * `auth` keys, refused at the save door since the instance-auth shapes went
+   * strict).
+   *
+   * Optional, and absent means `[]`: every withheld position is carried
+   * forward, which is what every redactor that does not set it — the
+   * derivation, the `datasource` built-in, any registered one — has always
+   * meant. A redactor sets it only when it names at least one position.
+   */
+  notCarriedForwardKeys?: string[];
 }
 
 /**

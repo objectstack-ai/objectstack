@@ -949,6 +949,13 @@ export interface FlowRuntimeState {
  *   notice would be refused by name and strand the run. Author remedy: move the
  *   `save_notice` ahead of that node or use a `notify` node, or republish the
  *   child without a node that suspends, and the flow arms.
+ * - `suspending_subflow_in_region` — the arming gate declined the flow because
+ *   a `subflow` / `map` node inside one of its region bodies (a `loop` body, a
+ *   `parallel` branch, a `try_catch` slot) calls a child flow that can suspend
+ *   (#28897): a region body cannot carry a durable pause, so the run would fail
+ *   at the region boundary the first time that child suspends. Author remedy:
+ *   move the call onto the top-level graph, or republish the child without a
+ *   node that suspends, and the flow arms.
  * - `missing_trigger` — no trigger of the declared type is registered on this
  *   kernel. Author remedy: depend on the trigger package
  *   (`requires: ['triggers']`).
@@ -959,6 +966,7 @@ export const FLOW_UNBOUND_CAUSES = [
     'deployment_policy',
     'disabled_subflow',
     'notice_after_suspending_subflow',
+    'suspending_subflow_in_region',
     'missing_trigger',
     'binding_failure',
 ] as const;
@@ -1143,9 +1151,9 @@ export interface ConnectorConnectionState {
      * dispatches nothing for this organization); `connected`; or
      * `reconnect_required` — the grant stopped working: the authorization
      * server refused it on refresh, the connection keeps nothing to renew an
-     * expired access token with (no refresh token was issued, or no client to
-     * refresh with), or the upstream refused the connection's token while an
-     * `mcp` instance discovered its tools. `statusReason` says which.
+     * access token it has to renew with (no refresh token was issued, or no
+     * client to refresh with), or the upstream refused the connection's token
+     * while an `mcp` instance discovered its tools. `statusReason` says which.
      */
     status: 'not_connected' | 'connected' | 'reconnect_required';
     /** Why the grant stopped working, when `status` is `reconnect_required`. */
@@ -1157,6 +1165,39 @@ export interface ConnectorConnectionState {
     /** When it was last connected, and by whom. */
     connectedAt?: string;
     connectedBy?: string;
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the OAuth client the
+     * administrator entered on this connection, for an instance that declares
+     * `clientSource: 'installer'`: its id, and whether a client secret is kept
+     * with it. ⛔ Never the secret itself, which stays encrypted in the
+     * connection record. Absent for an instance whose client is declared or
+     * registered dynamically.
+     */
+    client?: {
+        source: 'installer';
+        clientId: string;
+        hasSecret: boolean;
+    };
+    /**
+     * ADR-0143 D5 — the redirect URI this deployment's connect names: the
+     * absolute URL of `GET /api/v1/automation/connectors/oauth/callback` that
+     * the administrator registers with the vendor's OAuth client, answered so
+     * the Connect step can show it before any client is entered (ADR-0143 D2.1,
+     * `clientSource: 'installer'`). Derived by the server and fixed per
+     * deployment, never taken from a request: the automation plugin's
+     * `connectorOAuthRedirectUri` option, else that path under `OS_AUTH_URL`,
+     * else under `OS_BASE_URL`.
+     *
+     * Present on {@link IAutomationService.getConnectorConnection}'s answer
+     * whenever the server can derive it, whatever `status` says. Absent when
+     * the deployment has no base to derive it from — a connect is then refused
+     * `503` — and ⛔ never guessed from the request's origin. Only an
+     * `authorization_code` instance has a connection, so no other grant ever
+     * carries it. Read-only: no connection request takes it. Declared ahead of
+     * the service that answers it: until the automation service sets it, no
+     * answer carries it.
+     */
+    redirectUri?: string;
 }
 
 /** What {@link IAutomationService.getConnectorConnection} and its revoke / begin siblings are asked about. */
@@ -1165,6 +1206,20 @@ export interface ConnectorConnectionRequest {
     connector: string;
     /** The caller — its organization selects the connection, its user stamps the row. */
     context?: ExecutionContext;
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the OAuth client the
+     * administrator registered with the vendor against this deployment's
+     * redirect URI, for an instance that declares `clientSource: 'installer'`.
+     * Read by {@link IAutomationService.beginConnectorConnection} only, which
+     * requires it for such an instance and refuses it for any other (`400
+     * VALIDATION_ERROR`); the read and revoke members refuse it. The secret,
+     * when the vendor issued one, is kept encrypted in the connection record
+     * and never answered back.
+     */
+    client?: {
+        clientId: string;
+        clientSecret?: string;
+    };
 }
 
 /** What {@link IAutomationService.beginConnectorConnection} answers: where to send the administrator's browser. */
@@ -1511,7 +1566,9 @@ export interface IAutomationService {
      * URL to send the browser to. Nothing is stored in the connection record
      * until the callback completes. Rejects as {@link getConnectorConnection}
      * does, plus `503 SERVICE_UNAVAILABLE` when the deployment has no fixed
-     * origin for the redirect URI.
+     * origin for the redirect URI, and `400 VALIDATION_ERROR` for an instance
+     * declaring `clientSource: 'installer'` begun without `client`, or any
+     * other instance begun with one (ADR-0143 D2.1, 2026-11-02 amendment).
      */
     beginConnectorConnection?(request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin>;
 

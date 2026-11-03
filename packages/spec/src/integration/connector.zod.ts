@@ -1133,9 +1133,13 @@ const ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE =
  * parse), and every read exit serves that body. On an open shape an undeclared
  * key therefore parsed green and was kept, while `defineStack`, `os validate`
  * and `os compile` dropped it without a word. Closed, every door that parses
- * this schema refuses it by name, located at the key: `defineConnector()`,
+ * this schema refuses it by name: `defineConnector()`,
  * `defineStack({ connectors })`, `os validate` / `os compile`, the artifact load
- * at boot and reload, and the save door with `422 INVALID_METADATA`. The ADR-0010 protection envelope
+ * at boot and reload, and the save door with `422 INVALID_METADATA`. The refusal
+ * is ONE zod `unrecognized_keys` issue located at the entry, not at the key: its
+ * path is the entry's own (empty when the entry is parsed alone, `connectors.N`
+ * inside a stack), and it names every undeclared key in its `keys` and in its
+ * message. The ADR-0010 protection envelope
  * is declared in the shape, so a stamped, package-loaded entry still parses.
  *
  * The refusal is terminal ({@link strictObject}): a body with an undeclared key
@@ -1229,9 +1233,11 @@ const DefineConnectorSchema = lazySchema(() =>
  * shorthand) — preferred over a bare `: Connector` literal.
  *
  * The parse is CLOSED: a top-level key the connector does not declare is
- * refused by name, located at the key, with the prescription the authored
- * entry gives (a credential-shaped key → `auth.credentialRef`, a provider
- * setting → `providerConfig`, `timeout` → `requestTimeoutMs`). The def a plugin
+ * refused by name, in one `unrecognized_keys` issue located at the root (path
+ * `[]`, not the key's) that lists every such key in `keys`, with the
+ * prescription the authored entry gives (a credential-shaped key →
+ * `auth.credentialRef`, a provider setting → `providerConfig`, `timeout` →
+ * `requestTimeoutMs`). The def a plugin
  * hands to `registerConnector` is parsed there by the open
  * {@link ConnectorSchema}, whose posture this does not change.
  */

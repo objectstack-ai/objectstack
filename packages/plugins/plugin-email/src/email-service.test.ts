@@ -53,6 +53,74 @@ describe('normalizeMessage', () => {
   });
 });
 
+describe('normalizeMessage — a malformed CALLER address is the caller\'s VALIDATION_FAILED', () => {
+  const FROM = 'no-reply@example.test';
+  const base = { subject: 'Hi', text: 'x' };
+  const refusal = (input: Record<string, unknown>) => {
+    try {
+      normalizeMessage({ ...base, ...input } as any, FROM);
+    } catch (err) {
+      return String((err as Error).message);
+    }
+    throw new Error('expected normalizeMessage to refuse the input');
+  };
+
+  it.each([
+    ['a malformed `to`', { to: 'not-an-email' }, 'invalid recipient address in `to`: not-an-email'],
+    ['an empty `to` string', { to: '' }, 'invalid recipient address in `to`: (empty)'],
+    ['one bad member of a `to` list', { to: ['a@b.com', 'nope'] }, 'invalid recipient address in `to`: nope'],
+    ['an object `to` with a bad address', { to: { name: 'A', address: 'a@localhost' } }, 'invalid recipient address in `to`: a@localhost'],
+    ['a malformed `cc`', { to: 'a@b.com', cc: 'bad cc' }, 'invalid recipient address in `cc`: bad cc'],
+    ['a malformed `bcc`', { to: 'a@b.com', bcc: ['c@d.com', 'x@'] }, 'invalid recipient address in `bcc`: x@'],
+    ['a malformed `replyTo`', { to: 'a@b.com', replyTo: 'reply' }, 'invalid reply-to address in `replyTo`: reply'],
+    [
+      'a non-string display name',
+      { to: 'a@b.com', cc: { name: 5, address: 'c@d.com' } },
+      'invalid recipient address in `cc`: the display name of c@d.com must be a string',
+    ],
+  ])('%s is refused VALIDATION_FAILED, naming the field', (_label, input, reason) => {
+    expect(refusal(input)).toBe(`VALIDATION_FAILED: ${reason}`);
+  });
+
+  it('a malformed CONFIGURED sender is NOT a VALIDATION_FAILED — it is the server\'s fault, not the caller\'s', () => {
+    let message = '';
+    try {
+      normalizeMessage({ to: 'a@b.com', ...base }, { name: 'ObjectOS Local', address: 'noreply@localhost' });
+    } catch (err) {
+      message = String((err as Error).message);
+    }
+    expect(message).toBe('Invalid email address: noreply@localhost');
+    expect(message.startsWith('VALIDATION_FAILED')).toBe(false);
+  });
+
+  it('well-formed caller addresses in every field still normalize', () => {
+    const msg = normalizeMessage(
+      { ...base, to: ['a@b.com'], cc: 'c@d.com', bcc: { name: 'B', address: 'b@c.com' }, replyTo: 'r@s.com' },
+      FROM,
+    );
+    expect(msg).toMatchObject({ to: ['a@b.com'], cc: ['c@d.com'], bcc: ['B <b@c.com>'], replyTo: 'r@s.com' });
+  });
+
+  it('EmailService.send rejects the same way, delivers nothing, and still records the rejection row', async () => {
+    const rows: Array<Record<string, any>> = [];
+    const persistence: EmailPersistence = {
+      async insert(row) { rows.push({ ...row }); return { id: row.id }; },
+      async update() { /* no-op */ },
+    };
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const svc = new EmailService({ transport, defaultFrom: FROM, persistence });
+
+    await expect(svc.send({ to: ['a@b.com', 'nope'], ...base }))
+      .rejects.toThrow(/^VALIDATION_FAILED: invalid recipient address in `to`: nope$/);
+    expect(transport.send).not.toHaveBeenCalled();
+    // Unchanged by the reclassification: a pre-delivery refusal is still an
+    // audit row at `failed`, never a re-deliverable `queued` one.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'failed', attempt_count: 0 });
+    expect(String(rows[0].error)).toContain('invalid recipient address in `to`: nope');
+  });
+});
+
 describe('LogTransport', () => {
   it('returns a synthetic Message-ID and logs', async () => {
     const logger = { info: vi.fn() };

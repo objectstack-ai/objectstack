@@ -48,6 +48,7 @@ import {
 import { FORWARD_CREDENTIAL_HEADER, redeemForwardCredential } from '@objectstack/rest';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { ActionActivationProjection } from '@objectstack/objectql';
+import { apiKeyManagementCredentialRefusal, API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE } from '@objectstack/core';
 
 const OBJECT = 'crm_lead';
 const BAN_LEAD = {
@@ -99,6 +100,18 @@ const FLAG_BY_EMAIL = {
     ai: { exposed: true, description: 'Flag the lead by email.' },
 };
 
+/**
+ * [#29173] The showcase's "Recalculate Selection" shape: the recalc target run
+ * ONCE for a whole bulk selection (`execution: 'aggregate'`), with every
+ * selected id in `params._selectedIds` and no `recordId` — and the same
+ * `recordIdParam` a per-record run seeds from its row.
+ */
+const RECALC_SELECTION = {
+    name: 'recalc_selection', label: 'Recalculate Selection', objectName: OBJECT, type: 'api',
+    execution: 'aggregate', target: '/api/v1/apps/showcase/recalc', recordIdParam: 'recordId',
+    ai: { exposed: true, description: 'Recalculate the selected leads.' },
+};
+
 /** An api action whose `target` carries no record token. */
 const PING_LOCAL = {
     name: 'ping_local', label: 'Ping', objectName: OBJECT, type: 'api', method: 'POST',
@@ -112,6 +125,10 @@ function boot(opts: {
     /** What the target answers: status, JSON body, extra response headers. */
     answer?: { status?: number; body?: unknown; text?: string; headers?: Array<[string, string]> };
     noServer?: boolean;
+    /** Actions declared on the object beside the shared roster above. */
+    extraActions?: unknown[];
+    /** [#28943] Objects served beside `crm_lead` (by name), e.g. a `sys_api_key` carrying its revoke action. */
+    extraObjects?: any[];
 } = {}) {
     const disabled = new Set(opts.disabled ?? []);
     const injected: Injected[] = [];
@@ -128,15 +145,16 @@ function boot(opts: {
     });
     const server = { getRawApp: () => ({ request }) };
     const executeAction = vi.fn(async () => ({ ran: 'script' }));
-    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD, NOTE_OWNER, FLAG_BY_EMAIL, PING_LOCAL] };
+    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD, NOTE_OWNER, FLAG_BY_EMAIL, PING_LOCAL, ...(opts.extraActions ?? [])] };
+    const served: Record<string, any> = Object.fromEntries([objectDef, ...(opts.extraObjects ?? [])].map((o) => [o.name, o]));
     const ql: any = {
         executeAction,
-        getSchema: (name: string) => (name === OBJECT ? objectDef : undefined),
-        registry: { getObject: (name: string) => (name === OBJECT ? objectDef : undefined), getItem: () => undefined },
+        getSchema: (name: string) => served[name],
+        registry: { getObject: (name: string) => served[name], getItem: () => undefined },
         // The subject rows the doors load under the caller's scope.
         find: vi.fn(async (_object: string, q: any) => {
             const id = q?.where?.id;
-            return id === 'u_target' || id === 'lead 7' ? [{ id, email: 'target@example.test' }] : [];
+            return id === 'u_target' || id === 'lead 7' || id === 'key_1' ? [{ id, email: 'target@example.test' }] : [];
         }),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
         isActionEnabled: (name: string) => !disabled.has(name),
@@ -147,8 +165,8 @@ function boot(opts: {
         load: vi.fn(async () => null),
         loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
         loadMany: vi.fn(async () => []),
-        listObjects: vi.fn(async () => [objectDef]),
-        getObject: vi.fn(async () => objectDef),
+        listObjects: vi.fn(async () => Object.values(served)),
+        getObject: vi.fn(async (name?: string) => (name && served[name]) || objectDef),
     };
     const resolve = (n: string) =>
         n === 'objectql' || n === 'data' ? ql
@@ -1000,6 +1018,161 @@ describe('[#28178] the credential × target-door table: an OAuth caller with no 
     });
 });
 
+// [#28943] The 18.3.0 RC's one FAIL: `list_actions` offered `revoke_api_key`
+// to an API-key caller as runnable, because the table above only asks whether
+// the target's DOOR reads the credential, and the data door reads an API key.
+// The `sys_api_key` row's per-object gate then refuses every write from a
+// key-admitted principal (`@objectstack/core` `apiKeyManagementCredentialRefusal`,
+// the signed-in-session rule `/keys` also keeps), so `run_action` answered
+// `403 PERMISSION_DENIED`. The marker now reads that rule itself: the listing
+// carries the rule's own code and sentence, the run doors answer that refusal
+// before forwarding, and the session caller's listing and run are unchanged.
+describe('[#28943] an API-key caller is never offered a `sys_api_key` write as runnable: the mark is the guard\'s own refusal', () => {
+    /** `@objectstack/platform-objects` `sys_api_key`'s Revoke, as declared. */
+    const REVOKE_API_KEY = {
+        name: 'revoke_api_key', label: 'Revoke API Key', objectName: 'sys_api_key', type: 'api', method: 'PATCH',
+        target: '/api/v1/data/sys_api_key/{id}', bodyExtra: { revoked: true },
+        ai: { exposed: true, description: 'Revoke an API key.', requiresConfirmation: true },
+    };
+    const API_KEY_OBJECT = { name: 'sys_api_key', actions: [REVOKE_API_KEY] };
+    /** The same shape on an object no per-object rule guards: the control. */
+    const CLOSE_CASE = {
+        name: 'close_case', label: 'Close Case', objectName: 'crm_case', type: 'api', method: 'PATCH',
+        target: '/api/v1/data/crm_case/{id}', bodyExtra: { status: 'closed' },
+        ai: { exposed: true, description: 'Close the case.' },
+    };
+    const CASE_OBJECT = { name: 'crm_case', actions: [CLOSE_CASE] };
+    const bootWithKeys = (opts: Parameters<typeof boot>[0] = {}) => boot({ ...opts, extraObjects: [API_KEY_OBJECT, CASE_OBJECT] });
+
+    const KEY_CTX = (): HttpProtocolContext => {
+        const ctx: any = CTX({ 'x-api-key': 'osk_member_key' });
+        delete ctx.request.headers.authorization;
+        delete ctx.request.headers.cookie;
+        ctx.admission = { credential: 'api_key', authGate: undefined };
+        return ctx as HttpProtocolContext;
+    };
+    const SESSION_CTX = (): HttpProtocolContext =>
+        ({ ...CTX(), admission: { credential: 'session', authGate: undefined } } as unknown as HttpProtocolContext);
+    const runViaMcp = async (h: ReturnType<typeof boot>, ctx: HttpProtocolContext, objectName: string, name: string, recordId: string) => {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+        return invokeBusinessAction(deps, ctx as any, name, { objectName, recordId, confirm: true }, {
+            driver: h.ql,
+            ec: { userId: 'u_member', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id } }),
+        });
+    };
+    const listFor = async (h: ReturnType<typeof boot>, ctx: HttpProtocolContext): Promise<Record<string, any>> =>
+        Object.fromEntries(((await (h.dispatcher as any).buildMcpBridge(ctx).listActions()) as any[]).map((a) => [a.name, a]));
+
+    /** What the guard itself answers for this request: the one source of the code and the sentence. */
+    const GUARD = apiKeyManagementCredentialRefusal({ object: 'sys_api_key', operation: 'update', credential: 'api_key' })!;
+
+    it('`list_actions` under an API key marks `revoke_api_key` with the guard\'s own code and sentence', async () => {
+        const listed = await listFor(bootWithKeys(), KEY_CTX());
+
+        expect(listed[REVOKE_API_KEY.name]).toBeDefined();
+        expect(listed[REVOKE_API_KEY.name].unavailable).toEqual({ code: GUARD.code, reason: GUARD.message });
+        expect(listed[REVOKE_API_KEY.name].unavailable).toEqual({
+            code: 'PERMISSION_DENIED', reason: API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE,
+        });
+    });
+
+    it('MCP `run_action` and the REST action door under an API key answer that same refusal, and nothing is forwarded', async () => {
+        const h = bootWithKeys();
+        const listed = await listFor(h, KEY_CTX());
+
+        const thrown = await runViaMcp(h, KEY_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as any).status).toBe(403);
+        expect((thrown as any).code).toBe(listed[REVOKE_API_KEY.name].unavailable.code);
+        expect(String(thrown.message)).toBe(listed[REVOKE_API_KEY.name].unavailable.reason);
+
+        const res = await h.dispatcher.handleActions(`/sys_api_key/${REVOKE_API_KEY.name}`, 'POST', { recordId: 'key_1' }, KEY_CTX());
+        expect(statusOf(res)).toBe(403);
+        expect(codeOf(res)).toBe('PERMISSION_DENIED');
+        expect(messageOf(res)).toBe(API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE);
+
+        expect(h.request).not.toHaveBeenCalled();
+    });
+
+    it('control: under a signed-in session `revoke_api_key` is listed with no mark, and `run_action` revokes', async () => {
+        const h = bootWithKeys({ answer: { body: { success: true, data: { id: 'key_1', revoked: true } } } });
+
+        const listed = await listFor(h, SESSION_CTX());
+        expect(listed[REVOKE_API_KEY.name]).toBeDefined();
+        expect(listed[REVOKE_API_KEY.name].unavailable).toBeUndefined();
+
+        const result: any = await runViaMcp(h, SESSION_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1');
+        expect(result.ok).toBe(true);
+        expect(h.injected).toHaveLength(1);
+        expect(h.injected[0].url).toBe('http://app.example.test/api/v1/data/sys_api_key/key_1');
+        expect(h.injected[0].init.method).toBe('PATCH');
+        expect(JSON.parse(String(h.injected[0].init.body))).toMatchObject({ revoked: true });
+    });
+
+    it('control: the same data-door write on an object no rule guards stays runnable under an API key', async () => {
+        const h = bootWithKeys({ answer: { body: { success: true, data: { id: 'key_1', status: 'closed' } } } });
+
+        const listed = await listFor(h, KEY_CTX());
+        expect(listed[CLOSE_CASE.name]).toBeDefined();
+        expect(listed[CLOSE_CASE.name].unavailable).toBeUndefined();
+
+        const result: any = await runViaMcp(h, KEY_CTX(), 'crm_case', CLOSE_CASE.name, 'key_1');
+        expect(result.ok).toBe(true);
+        expect(h.injected[0].url).toBe('http://app.example.test/api/v1/data/crm_case/key_1');
+        expect(headersOf(h.injected[0].init)['x-api-key']).toBe('osk_member_key');
+    });
+
+    it('the reading, request by request: every `sys_api_key` write the guard refuses is refused, its reads are not, and only for a key', () => {
+        const api = (method: string, target: string) => ({ name: 'probe', type: 'api', method, target });
+        const refused = (ctx: HttpProtocolContext, method: string, target: string) => {
+            const r = apiForwardCredentialRefusal(ctx, api(method, target));
+            if (r === null) return 'ok';
+            expect(r).toEqual({ status: 403, code: GUARD.code, message: GUARD.message });
+            return 'refused';
+        };
+        const requests: Array<[string, string]> = [
+            ['POST', '/api/v1/data/sys_api_key'],
+            ['PATCH', '/api/v1/data/sys_api_key/{id}'],
+            ['PUT', '/api/v1/data/sys_api_key/k1'],
+            ['DELETE', '/api/v1/data/sys_api_key/k1'],
+            ['POST', '/api/v1/data/sys_api_key/batch'],
+            ['POST', '/api/v1/data/sys_api_key/k1/clone'],
+            ['PATCH', '/api/v1/environments/env_1/data/sys_api_key/k1?x=1'],
+            ['GET', '/api/v1/data/sys_api_key'],
+            ['GET', '/api/v1/data/sys_api_key/k1'],
+            ['POST', '/api/v1/data/sys_api_key/query'],
+            ['POST', '/api/v1/data/sys_api_key/k1/page'],
+            ['PATCH', '/api/v1/data/sys_api_key_audit/k1'],
+        ];
+        const verdicts = (ctx: () => HttpProtocolContext) => requests.map(([m, t]) => `${m} ${t} ${refused(ctx(), m, t)}`);
+        expect(verdicts(KEY_CTX)).toEqual([
+            'POST /api/v1/data/sys_api_key refused',
+            'PATCH /api/v1/data/sys_api_key/{id} refused',
+            'PUT /api/v1/data/sys_api_key/k1 refused',
+            'DELETE /api/v1/data/sys_api_key/k1 refused',
+            'POST /api/v1/data/sys_api_key/batch refused',
+            'POST /api/v1/data/sys_api_key/k1/clone refused',
+            'PATCH /api/v1/environments/env_1/data/sys_api_key/k1?x=1 refused',
+            'GET /api/v1/data/sys_api_key ok',
+            'GET /api/v1/data/sys_api_key/k1 ok',
+            'POST /api/v1/data/sys_api_key/query ok',
+            'POST /api/v1/data/sys_api_key/k1/page ok',
+            'PATCH /api/v1/data/sys_api_key_audit/k1 ok',
+        ]);
+        // A session caller, and a caller whose door recorded no credential, keep today's answer everywhere.
+        for (const ctx of [SESSION_CTX, CTX]) expect(verdicts(ctx).filter((v) => v.endsWith('refused'))).toEqual([]);
+    });
+});
+
 describe('[ADR-0090 D10 rule 5, #28367] the two flipped cells: an OAuth agent is forwarded with a forward credential, under the scope-family rule', () => {
     /** The agent principal the MCP door assembles from a verified OAuth access token. */
     const AGENT_CTX = (scopes: string[] = ['actions:execute', 'data:read', 'data:write'], over: Record<string, unknown> = {}): HttpProtocolContext => {
@@ -1447,5 +1620,84 @@ describe('an api action whose target names its record, called with no record id,
         // `{id}` without a row is filled from the routed id, as `recordIdParam` is.
         const rowless = buildApiActionRequest(APPROVE_LEAD, { recordId: 'areq 1', params: {}, ec });
         expect((rowless as any).path).toBe('/api/v1/approvals/requests/areq%201/approve');
+    });
+});
+
+describe('[#29173] a record-less aggregate api action declaring `recordIdParam` is forwarded, and invents no record', () => {
+    const SELECTED = ['u_target', 'lead 7'];
+    const runViaMcp = async (h: ReturnType<typeof boot>, name: string, input: any = {}) => {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+        return invokeBusinessAction(deps, CTX() as any, name, input, {
+            driver: h.ql,
+            ec: { userId: 'u_agent', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id } }),
+        });
+    };
+
+    it('REST: the bulk bar\'s one aggregate request reaches the target with the selection, and no `recordId` key', async () => {
+        const { dispatcher, injected } = boot({ extraActions: [RECALC_SELECTION], answer: { body: { success: true, data: { selected: 2, acted: 2 } } } });
+
+        const res = await dispatcher.handleActions(
+            `/${OBJECT}/${RECALC_SELECTION.name}`, 'POST', { params: { _selectedIds: SELECTED } }, CTX(),
+        );
+
+        expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+        expect(injected).toHaveLength(1);
+        expect(injected[0].url).toBe('http://app.example.test/api/v1/apps/showcase/recalc');
+        const body = JSON.parse(String(injected[0].init.body));
+        expect(body).toEqual({ _selectedIds: SELECTED });
+        expect(body).not.toHaveProperty('recordId');
+        expect(res?.response?.body?.data).toEqual({ selected: 2, acted: 2 });
+    });
+
+    it('MCP `run_action`: the same record-less run is forwarded, and no `recordId` key is invented', async () => {
+        const h = boot({ extraActions: [RECALC_SELECTION] });
+
+        const result: any = await runViaMcp(h, RECALC_SELECTION.name, { params: { _selectedIds: SELECTED } });
+
+        expect(result.ok).toBe(true);
+        expect(h.injected).toHaveLength(1);
+        const body = JSON.parse(String(h.injected[0].init.body));
+        expect(body).toEqual({ _selectedIds: SELECTED });
+        expect(body).not.toHaveProperty('recordId');
+    });
+
+    it('REST, the per-record control: the same action run on one record still seeds `recordIdParam` from that row', async () => {
+        for (const recordId of SELECTED) {
+            const { dispatcher, injected } = boot({ extraActions: [RECALC_SELECTION] });
+
+            const res = await dispatcher.handleActions(`/${OBJECT}/${RECALC_SELECTION.name}`, 'POST', { recordId }, CTX());
+
+            expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+            expect(JSON.parse(String(injected[0].init.body))).toEqual({ recordId });
+        }
+    });
+
+    it('buildApiActionRequest: the empty subject record of a record-less dispatch is no row; a dispatch naming a record keeps both #8018 refusals', () => {
+        const ec = { userId: 'u1', tenantId: 'org_9' };
+        for (const record of [{}, null, undefined]) {
+            const built = buildApiActionRequest(RECALC_SELECTION, { record, params: { _selectedIds: SELECTED }, ec });
+            expect(built, JSON.stringify(record)).toEqual({ method: 'POST', path: '/api/v1/apps/showcase/recalc', body: { _selectedIds: SELECTED } });
+        }
+        // An empty id is no id, as the path half reads it.
+        expect((buildApiActionRequest(RECALC_SELECTION, { recordId: '', record: {}, params: {}, ec }) as any).body).toEqual({});
+
+        const byToken = { ...RECALC_SELECTION, recordIdParam: 'token', recordIdField: 'token' };
+        const absent = buildApiActionRequest(byToken, { recordId: 's1', record: { id: 's1' }, params: {}, ec });
+        expect((absent as any).status).toBe(400);
+        expect(absent).not.toHaveProperty('path');
+        expect((absent as any).message).toContain('"token"');
+        const nulled = buildApiActionRequest(byToken, { recordId: 's1', record: { id: 's1', token: null }, params: {}, ec });
+        expect((nulled as any).status).toBe(400);
+        expect(nulled).not.toHaveProperty('path');
+        expect((nulled as any).message).toContain('"token"');
     });
 });

@@ -9,14 +9,20 @@
 import * as React from 'react';
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuilder, SortBuilder, NavigationOverlay, GroupingEditor, RefreshIndicator, DataErrorState, resolveIcon, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import type { SortItem } from '@object-ui/components';
-import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
+import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
-import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion, useRecordListFace } from '@object-ui/components';
+import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
-import { ViewSettingsPopover, type ViewSettingsRecordOpen } from './components/ViewSettingsPopover';
-import { UserFilters } from './UserFilters';
+import {
+  ViewSettingsPopover,
+  type ViewSettingsRecordOpen,
+  PHONE_POPOVER_GUTTER,
+  PHONE_TOUCH_TARGET,
+  useBelowSm,
+} from './components/ViewSettingsPopover';
+import { UserFilters, type UserFiltersHandle } from './UserFilters';
 import {
   calendarWindowCovers,
   calendarWindowFilter,
@@ -266,6 +272,23 @@ export interface ListViewRowGroup {
   rows: ReadonlyArray<Record<string, unknown>>;
 }
 
+/**
+ * A part of a list that can differ from its view (objectstack#28950): what a
+ * host's 「personalized」 marker names. See `onPersonalizationChange`.
+ */
+export type ListPersonalizationPart =
+  | 'sort'
+  | 'filters'
+  | 'search'
+  | 'grouping'
+  | 'columns'
+  | 'hiddenFields'
+  | 'density'
+  | 'layout'
+  | 'rowColor'
+  | 'rowNumbers'
+  | 'inlineEdit';
+
 export interface ListViewProps {
   schema: ListViewSchema;
   className?: string;
@@ -429,21 +452,72 @@ export interface ListViewProps {
    */
   recordLinkAdornment?: (record: Record<string, unknown>) => React.ReactNode;
   /**
-   * The VIEW'S OWN hidden fields and row height, for a host that lays the
-   * user's own preference over them in `schema` (objectui#12949). The Display
-   * control's trigger count and its "Reset to view default" compare these two
-   * settings against this value rather than against `schema`, and the reset
-   * hands it back through the same doors the controls write through
-   * (`onHiddenFieldsChange`, `schema.onDensityChange`), so the user's
-   * preference follows.
+   * The VIEW'S OWN hidden fields, row height and sort, for a host that lays
+   * the user's own preference over them in `schema` (objectui#12949). The
+   * Display control's trigger count and its "Reset to view default" compare
+   * hidden fields and density against this value rather than against
+   * `schema`, and the sort popover's "Reset to view default" compares and
+   * restores the sort against it. Without `onRestoreViewDefaults` a reset
+   * hands the value back through the same doors the controls write through
+   * (`onHiddenFieldsChange`, `schema.onDensityChange`, `onSortChange`).
    *
    * When it is passed, its members are the whole baseline: an absent
    * `hiddenFields` means the view hides nothing, an absent `rowHeight` means
-   * the view's default density. Absent ⇒ `schema` is the view's own, exactly
-   * as before. A HOST prop, never a schema key: it is the host's split of one
-   * composed value into its two sources, nothing an author writes.
+   * the view's default density, an absent `sort` means the view declares no
+   * sort. Absent ⇒ `schema` is the view's own, exactly as before. A HOST prop,
+   * never a schema key: it is the host's split of one composed value into its
+   * two sources, nothing an author writes.
+   *
+   * `grouping` (objectstack#28950) is read only to tell a personalized list
+   * (`onPersonalizationChange`), for a host that lays a grouping the URL
+   * carries over the view's in `schema`. Unlike the three above, a
+   * `viewDefaults` without the `grouping` key leaves the grouping `schema`
+   * opened with as the view's own.
    */
-  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight'>;
+  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort' | 'grouping'>;
+  /**
+   * A reset to the view's own, told apart from a choice (objectstack#28948).
+   * For a host that stores the user's preference and passes `viewDefaults`:
+   * when it is wired, the Display control's "Reset to view default" and the
+   * sort popover's "Reset to view default" do NOT write the view's values
+   * through the controls' doors, which a host would store as the user's own
+   * choice. They call this instead, naming the parts the reset returned to the
+   * view's own, and the host CLEARS those parts of the stored preference, so
+   * the user follows later changes to the view.
+   *
+   * `sort` and `hiddenFields` are put back in the list at once; the density
+   * follows `schema.rowHeight` once the host's clear lays the view's own back
+   * there. A deliberate choice is unchanged: removing every sort level or
+   * showing every column still goes through `onSortChange` /
+   * `onHiddenFieldsChange` as an empty list. Settings outside the three parts
+   * (layout, grouping, row color, row numbers, inline edit, gallery card size)
+   * reset exactly as without it. A HOST prop, never a schema key.
+   */
+  onRestoreViewDefaults?: (parts: ReadonlyArray<'sort' | 'hiddenFields' | 'rowHeight'>) => void;
+  /**
+   * What of the list on screen differs from the view (objectstack#28950), for
+   * a host that marks a personalized list and owns the one way back to the
+   * view. Called with the parts each time that set changes, and once at
+   * mount; an empty list means the list on screen is the view's own.
+   *
+   * Every part is judged against the VIEW: `sort`, `hiddenFields`, the table
+   * density and the grouping against `viewDefaults` when the host passes it
+   * (else against `schema`); `filters` is the reader's query apart from the
+   * search (the Filter panel's finished conditions, the user-filter chips, the
+   * "In a queue" toggle; the view's declared `filter` is never one); `search`
+   * is a term the list applies. The Display-only settings (`layout`,
+   * `rowColor`, `rowNumbers`, `inlineEdit`) are those the Display control
+   * counts. The gallery card size is not a part: it is kept per object, not
+   * per view. `columns` is never reported here, since the column layout is
+   * the host's own stored state; it is in the type so a host can add it.
+   *
+   * When it is passed the host owns the reset, so the Display control draws
+   * no "Reset to view default" of its own. The sort popover's reset and the
+   * Filter panel's "Clear all" stay: each puts back one control. A HOST prop,
+   * never a schema key. Absent ⇒ nothing is reported and the Display control
+   * keeps its reset, exactly as before.
+   */
+  onPersonalizationChange?: (parts: ReadonlyArray<ListPersonalizationPart>) => void;
   /**
    * Draw the COMPACT posture (objectui#12703): a header with the list's title
    * and record count over two-line rows (the view's first visible column, its
@@ -504,7 +578,7 @@ export interface ListViewProps {
   /**
    * The Display control's Open records section (objectstack#26681): how a row
    * opens its record — the mode the host resolved for this object and view,
-   * the reader's own drawer | split preference and its setter. See
+   * the reader's own drawer | page preference and its setter. See
    * `ViewSettingsRecordOpen`.
    *
    * A HOST prop, never a schema key: the preference is the reader's, kept by
@@ -1076,6 +1150,8 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.noMatches': 'No matching records',
   'list.noMatchesMessage': 'No records match your current filters or search. Try adjusting or clearing them.',
   'list.clearSearch': 'Clear search',
+  // objectstack#28908 — the empty state's way out of a filter the reader applied.
+  'list.clearFilters': 'Clear filters',
   // Emptied by the VIEW's own declared filter, with no user filter or search
   // applied (objectui#11687): the "your filters" wording above would name
   // filters the user never set.
@@ -1191,8 +1267,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.sittingInQueue': 'In a queue',
   'list.sittingInQueueHint': 'Show only records waiting in a queue for someone to claim them',
   'list.share': 'Share',
-  'list.sharingPersonal': 'Personal view',
-  'list.sharingCollaborative': 'Shared view',
   'list.sharingLockedBy': 'Locked by {{user}}',
   'list.print': 'Print',
   // objectui#4462 — the Print button's tooltip/aria sentence. Borrowed from
@@ -1218,7 +1292,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // The Display control's Open records section (objectstack#26681).
   'list.recordOpen': 'Open records',
   'list.recordOpenDrawer': 'Drawer',
-  'list.recordOpenSplit': 'Split',
   'list.recordOpenPage': 'Full page',
   'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
   'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
@@ -1288,6 +1361,22 @@ function readSpecDisplayPageSize(): number {
   return declared;
 }
 const DEFAULT_LIST_DISPLAY_PAGE_SIZE = readSpecDisplayPageSize();
+
+/**
+ * Who locked the view configuration, when the `sharing` block names someone —
+ * the one live key of the spec's `ViewSharingSchema`, and the only thing the
+ * toolbar's sharing indicator draws.
+ *
+ * objectstack#29037 retired the block's ownership `type` (ADR-0049): this
+ * indicator was its one reader, and it labelled a view "Personal view" that
+ * every user who can read the object was shown, because nothing restricts a
+ * view to one user. No view is labelled personal or shared any more; a block
+ * without `lockedBy` draws nothing.
+ */
+function sharingLockedBy(sharing: { lockedBy?: unknown } | undefined): string | undefined {
+  const lockedBy = sharing?.lockedBy;
+  return typeof lockedBy === 'string' && lockedBy !== '' ? lockedBy : undefined;
+}
 
 /**
  * The `$top` of the ONE unpaged fetch a list view makes when no usable page
@@ -1659,6 +1748,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onTotalChange,
   onRowsChange,
   viewDefaults,
+  onRestoreViewDefaults,
+  onPersonalizationChange,
   recordOpen,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
@@ -1813,12 +1904,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // `show*` flags are folded into it by `normalizeListViewSchema` above, so
     // there is no dual-read here — one vocabulary, one place.
     //
-    // The DEFAULTS are per-toggle and deliberately asymmetric, matching what
-    // these flags have always done: the four view-shaping affordances plus
-    // grouping are on unless turned off; column visibility and row coloring are
-    // off unless turned on. (`hideFields`/`rowColor` default OFF is objectui's
-    // historical behavior, kept deliberately — flipping it would grow two
-    // buttons on every existing view.)
+    // The DEFAULTS are per-toggle and read the spec's own defaults
+    // (`UserActionsConfigSchema`): the four view-shaping affordances, grouping
+    // and column visibility are on unless turned off; row coloring is off
+    // unless turned on. `hideFields` defaults ON by maintainer ruling on #28912
+    // — a reader hides and shows columns for themselves, and an app withholds
+    // the control with `hideFields: false`. Where the choice is stored (the
+    // reader's own list state, or session-only on a system view with no
+    // `columns`) is the host's call, not this read's.
     //
     // This is the VIEW half of a NAME COLLISION, and the right half here:
     // `userActions` on a VIEW is toolbar policy (`UserActionsConfigSchema`),
@@ -1844,7 +1937,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       showRefresh: ua?.refresh !== false,
       showDensity: ua?.rowHeight !== false,
       showGroup: ua?.group !== false,
-      showHideFields: ua?.hideFields === true,
+      showHideFields: ua?.hideFields !== false,
       showColor: ua?.rowColor === true,
       // The bundled "Display" form is the default (objectui#12423): the bar
       // keeps Filter, Sort, Display and Search. `compactToolbar: false` is the
@@ -1870,7 +1963,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // names it re-runs on a switch into or out of such a view and on nothing else.
   const searchTerm = searchlessViewOnScreen || searchlessObject ? '' : searchInput;
   const [showSearchPopover, setShowSearchPopover] = React.useState(false);
-  
+  // Below `sm` the list search is an icon that expands into a field in place.
+  const [phoneSearchOpen, setPhoneSearchOpen] = React.useState(false);
+
   // Sort State
   const [showSort, setShowSort] = React.useState(false);
   const [currentSort, setCurrentSort] = React.useState<SortItem[]>(() =>
@@ -1902,12 +1997,18 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * "what did this view declare" must have exactly one answer, or the reset
    * button and the first render could disagree about it.
    */
+  //
+  // objectstack#28948 — a host that lays the user's own sort over the view's
+  // in `schema` hands the view's in `viewDefaults`, and that is the default a
+  // reset returns to: the label says "view default", and the host clears the
+  // stored sort on it, so the list must show what a reload would.
+  const viewDefaultSortKey = JSON.stringify((viewDefaults ? viewDefaults.sort : schema.sort) || []);
   const declaredSort = React.useMemo(
-    () => parseSortConfig(schema.sort),
-    // Keyed on the same stringified payload as the effect above; `schema.sort`
-    // is a fresh array identity on every parent render.
+    () => parseSortConfig(viewDefaults ? viewDefaults.sort : schema.sort),
+    // Keyed on the stringified payload; `schema.sort` and `viewDefaults.sort`
+    // are fresh array identities on every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [schemaSortKey],
+    [viewDefaultSortKey],
   );
 
   // Compared by (field, order) IN ORDER — never by `id`, which `parseSortConfig`
@@ -2141,6 +2242,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
   // User Filters State (Airtable Interfaces-style)
   const [userFilterConditions, setUserFilterConditions] = React.useState<any[]>([]);
+  // The mounted chip bar's handle: the empty state's "Clear filters" clears
+  // the chips through it (objectstack#29052). The selection stays the bar's.
+  const userFiltersRef = React.useRef<UserFiltersHandle>(null);
 
   // The user filter this component APPLIES — its fetch, the export, the node of
   // a view that queries for itself, the empty-state copy. Empty while a
@@ -2545,6 +2649,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const handlePullRefresh = React.useCallback(async () => {
     setRefreshKey(k => k + 1);
   }, []);
+
+  // Below `sm` the Filter and Sort panels keep 16 px from both screen edges.
+  const belowSm = useBelowSm();
 
   const { ref: pullRef, isRefreshing, pullDistance } = usePullToRefresh<HTMLDivElement>({
     onRefresh: handlePullRefresh,
@@ -3893,6 +4000,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     onSearchChange?.(value);
   }, [onSearchChange]);
 
+  // objectstack#28908 — the empty state's "Clear filters": removes the
+  // reader's whole query (the panel's conditions, the user-filter chips, the
+  // "In a queue" toggle and the search) and leaves the view's declared filter
+  // alone, which is not the reader's. The panel's group goes through the same
+  // emit as a panel edit, so the toolbar badge clears and the host stores the
+  // empty group. The chips clear through the bar's own handle, which reports
+  // the cleared selection to the host as a chip's × does (objectstack#29052).
+  const handleClearReaderQuery = React.useCallback(() => {
+    const cleared: FilterBuilderRowGroup = { ...currentFilters, conditions: [] };
+    setCurrentFilters(cleared);
+    onFilterChange?.(cleared);
+    userFiltersRef.current?.clear();
+    setSittingInQueueOnly(false);
+    if (searchInput) handleSearchChange('');
+  }, [currentFilters, onFilterChange, searchInput, handleSearchChange]);
+
   // objectstack#27520 row 17 — see `toolbarFlags.emptyStateAddRecord`.
   // A view that declares the inline block keeps its empty-state Create as
   // before; a host-supplied create path now offers it too.
@@ -5165,14 +5288,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    *
    * The header click's own semantics are untouched by this: it still replaces
    * the whole array. The ruling adds a way back; it does not change the click.
+   *
+   * objectstack#28948 — under `onRestoreViewDefaults` the host is told it was
+   * a reset instead, and clears the user's stored sort rather than storing the
+   * view's as their choice. `declaredSort` is the view's own there.
    */
   const handleResetSort = React.useCallback(() => {
-    const restored = parseSortConfig(schema.sort);
+    const restored = parseSortConfig(viewDefaults ? viewDefaults.sort : schema.sort);
     setCurrentSort(restored);
     setServerPage(1);
-    emitSortChange(restored);
+    if (onRestoreViewDefaults) onRestoreViewDefaults(['sort']);
+    else emitSortChange(restored);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schemaSortKey, emitSortChange]);
+  }, [viewDefaultSortKey, emitSortChange, onRestoreViewDefaults]);
 
   // Export handler
   const handleExport = React.useCallback((format: 'csv' | 'xlsx' | 'json' | 'pdf') => {
@@ -5428,9 +5556,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * `schema`, so `schema` there is the user's own choice, and a comparison
    * against it reads "nothing to reset" straight after a reload. Such a host
    * hands the view's own value in `viewDefaults`, and these two settings
-   * compare against that; the reset writes it through the controls' doors, so
-   * the user's preference follows. Without `viewDefaults`, `schema` is the
-   * view's own. Plain per-render values, never memo identities (AGENTS.md #10).
+   * compare against that; the reset clears them through
+   * `onRestoreViewDefaults` where the host wires it (objectstack#28948), else
+   * writes them through the controls' doors. Without `viewDefaults`, `schema`
+   * is the view's own. Plain per-render values, never memo identities
+   * (AGENTS.md #10).
    */
   const authoredGalleryCardSize: GalleryCardSize = (schema.gallery?.cardSize as GalleryCardSize | undefined) ?? 'medium';
   const viewDefaultHiddenFields = viewDefaults ? viewDefaults.hiddenFields : schema.hiddenFields;
@@ -5452,22 +5582,78 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     inlineEdit: currentView === 'grid' && inlineEditOffered && inlineEdit !== !!schema.inlineEdit,
   };
   const displayChangedCount = Object.values(displayDeviation).filter(Boolean).length;
-  /** Every setting back to the view's own, each through the door its control writes through. */
+
+  /**
+   * objectstack#28950 — what of this list differs from its view, reported to a
+   * host that marks a personalized list (`onPersonalizationChange`). Judged
+   * against the view's own wherever the host composes the reader's state into
+   * `schema`: the sort and the grouping against `viewDefaults`, as the Display
+   * deviations above already are for hidden fields and density. The gallery
+   * card size is kept per object, so it is no part of this view's list.
+   * Reported by its joined key, so an equal set re-renders nothing upstream
+   * (AGENTS.md #10: no memo identity is named).
+   */
+  const viewGroupingFields = viewDefaults && 'grouping' in viewDefaults
+    ? viewDefaults.grouping?.fields
+    : initialGroupingConfig?.fields;
+  const groupingKey = (fields: ReadonlyArray<{ field: string; order?: string }> | undefined) =>
+    JSON.stringify((fields ?? []).map((f) => [f.field, f.order ?? 'asc']));
+  const personalizationParts: ListPersonalizationPart[] = [];
+  if (sortDiffersFromDeclared) personalizationParts.push('sort');
+  if (
+    appliedFilterGroup(currentFilters).conditions.length > 0
+    || userFilterConditions.length > 0
+    || appliedQueueSittingConditions.length > 0
+  ) personalizationParts.push('filters');
+  if (searchTerm.trim()) personalizationParts.push('search');
+  if (groupingKey(groupingConfig?.fields) !== groupingKey(viewGroupingFields)) personalizationParts.push('grouping');
+  if (displayDeviation.hiddenFields) personalizationParts.push('hiddenFields');
+  if (displayDeviation.density && currentView !== 'gallery') personalizationParts.push('density');
+  if (displayDeviation.layout) personalizationParts.push('layout');
+  if (displayDeviation.color) personalizationParts.push('rowColor');
+  if (displayDeviation.rowNumbers) personalizationParts.push('rowNumbers');
+  if (displayDeviation.inlineEdit) personalizationParts.push('inlineEdit');
+  const personalizationKey = personalizationParts.join(',');
+  const onPersonalizationChangeRef = React.useRef(onPersonalizationChange);
+  React.useEffect(() => {
+    onPersonalizationChangeRef.current = onPersonalizationChange;
+  });
+  React.useEffect(() => {
+    onPersonalizationChangeRef.current?.(personalizationKey ? (personalizationKey.split(',') as ListPersonalizationPart[]) : []);
+  }, [personalizationKey]);
+  /**
+   * Every setting back to the view's own, each through the door its control
+   * writes through. objectstack#28948 — except, under `onRestoreViewDefaults`,
+   * the two the host stores as the user's preference: hidden fields and the
+   * table density. Those are named to the host as a reset in one call, which
+   * clears them, so the user follows the view afterwards.
+   */
   const resetDisplayToViewDefault = () => {
+    const restoredParts: Array<'hiddenFields' | 'rowHeight'> = [];
     if (displayDeviation.layout) handleViewChange(schema.viewType as ListViewVisualization);
     if (displayDeviation.group) changeGrouping(initialGroupingConfig);
     if (displayDeviation.color) setRowColorConfig(schema.rowColor);
-    if (displayDeviation.hiddenFields) updateHiddenFields(new Set(viewDefaultHiddenFields || []));
+    if (displayDeviation.hiddenFields) {
+      if (onRestoreViewDefaults) {
+        setHiddenFields(new Set(viewDefaultHiddenFields || []));
+        restoredParts.push('hiddenFields');
+      } else {
+        updateHiddenFields(new Set(viewDefaultHiddenFields || []));
+      }
+    }
     if (displayDeviation.density) {
       if (currentView === 'gallery') {
         setGalleryCardSize(authoredGalleryCardSize);
         try { window.localStorage.setItem(galleryDensityKey, authoredGalleryCardSize); } catch { /* private mode */ }
+      } else if (onRestoreViewDefaults) {
+        restoredParts.push('rowHeight');
       } else {
         density.setMode(viewDefaultDensity);
       }
     }
     if (displayDeviation.rowNumbers) setRowNumbers(defaultRowNumbers);
     if (displayDeviation.inlineEdit) updateInlineEdit(!!schema.inlineEdit);
+    if (onRestoreViewDefaults && restoredParts.length > 0) onRestoreViewDefaults(restoredParts);
   };
 
   /**
@@ -5567,11 +5753,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // not take the summaries down with the count.
   const recordCountShown =
     !loading && data.length > 0 && surfaceDrawsFetchedRows && schema.showRecordCount !== false;
-  // objectstack#27545 — beside a record pane (a narrowed face) the host prints
-  // the count under the list it handed over, so the bar does not print it a
-  // second time. The rest of the row (the cap warning, the summaries) stays.
-  const recordListFace = useRecordListFace();
-  const recordCountInBar = recordCountShown && recordListFace === 'full';
   const dataLimitWarningShown =
     recordCountShown && dataLimitReached && !(paginate && serverTotal != null);
   // objectui#12619 — a board that pages its own lanes draws every record of the
@@ -5609,6 +5790,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const cappedPosture = cappedWindow && surfaceDrawsFetchedRows;
   // Either short posture draws none of the object list's chrome.
   const listChromeShown = !compactPosture && !cappedPosture;
+  // The user-filter bar is on screen (the toolbar draws it below). Its chips
+  // are the reader's filter, so the empty state's "Clear filters" counts them;
+  // preset tabs are the view's presets and are not cleared.
+  const userFilterBarShown = listChromeShown && !!filterElements && toolbarFlags.showUserFilters;
+  const userFilterChipsClearable =
+    userFilterBarShown && filterElements?.element !== 'tabs' && appliedUserFilterConditions.length > 0;
   // The records the query matched, once a load settles: the server's total, or
   // the rows in hand when the whole result is in memory. The capped list's
   // 「View all N」 and the tab badge (`onTotalChange`) both say this number.
@@ -5690,6 +5877,85 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     onRowsChangeRef.current?.(shownRowsRef.current);
   }, [shownRowsKey, shownRowsSettled]);
 
+  // The Display panel (objectui#12423) is the default form of the toolbar's
+  // settings cluster, drawn whenever it has a control to offer.
+  const displayOffered = toolbarFlags.compactToolbar && !!(
+    viewSwitcherOffered || toolbarFlags.showGroup || toolbarFlags.showColor || toolbarFlags.showDensity
+    || toolbarFlags.showHideFields || currentView === 'grid' || toolbarFlags.showRefresh
+    || (resolvedExportOptions && exportPermitted && exportableFormats.length > 0)
+  );
+  // Below `sm` the bar keeps Filter and Display only, so Sort rides in the
+  // Display panel there. Without a Display panel the Sort trigger stays on the
+  // bar at every width. Either way it follows `userActions.sort`.
+  const sortInDisplay = toolbarFlags.showSort && displayOffered;
+  // The Sort panel: the toolbar Sort popover draws it, and so does the
+  // Display panel below `sm` (`sortInDisplay`).
+  const sortPanelBody = (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between border-b pb-2">
+        <div className="flex items-center gap-1">
+          <h4 className="font-medium text-sm">{t('list.sortRecords')}</h4>
+          {/* objectui#12528 — the note on why linked columns are not
+              listed, as this control's tooltip and accessible name
+              beside the field list, instead of a standing paragraph
+              that took about half the popover on every open. Drawn
+              under the paragraph's own condition: a relational field
+              was left out. */}
+          {sortHasRelationalField && (
+            <span
+              role="img"
+              tabIndex={0}
+              title={t('list.sortRelationalHint')}
+              aria-label={t('list.sortRelationalHint')}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="sort-relational-info"
+            >
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+          )}
+        </div>
+        {/* Reset to the view's declared sort (objectui#4243).
+            Rendered only when the view DECLARES one: with nothing
+            declared there is no default to return to, and a control
+            under this label that merely cleared the sort would be a
+            second, differently-named way to do what removing the
+            rows already does. Disabled — not hidden — while the
+            active sort already equals the declared one, so the
+            affordance stays discoverable and says "you are at the
+            default" instead of vanishing. */}
+        {declaredSort.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-primary"
+            disabled={!sortDiffersFromDeclared}
+            onClick={handleResetSort}
+            data-testid="sort-reset-default"
+          >
+            {t('list.resetSortToDefault')}
+          </Button>
+        )}
+      </div>
+      <SortBuilder
+        fields={sortFields}
+        value={currentSort}
+        onChange={(newSort) => {
+          // `setCurrentSort` takes the array WHOLE (the in-use
+          // exception depends on it); `emitSortChange` is what the
+          // host persists. See the boundary's docblock above.
+          setCurrentSort(newSort);
+          emitSortChange(newSort);
+        }}
+      />
+      {sortPicksRelationalField && (
+        <p className="truncate text-xs text-muted-foreground" data-testid="sort-relational-picked">
+          {t('list.sortRelationalPicked')}
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <div
       ref={pullRef}
@@ -5755,9 +6021,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               them visible (single line, scrollable) to match the Airtable
               Interface pattern. Withheld on a dataset-bound chart, which they
               cannot reach (`datasetChartOnScreen`, objectui#10327). */}
-          {filterElements && toolbarFlags.showUserFilters && (
+          {filterElements && userFilterBarShown && (
               <div className="shrink-0 min-w-0 overflow-x-auto" data-testid="user-filters">
                 <UserFilters
+                  ref={userFiltersRef}
                   config={filterElements}
                   objectDef={objectDef}
                   objectDefPending={!objectDefLoaded}
@@ -5914,6 +6181,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 size="sm"
                 className={cn(
                   "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  PHONE_TOUCH_TARGET,
                   hasFilters && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-filter-trigger"
@@ -5934,7 +6202,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between border-b pb-2">
                   <h4 className="font-medium text-sm">{t('list.filterRecords')}</h4>
@@ -6004,8 +6272,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           </Popover>
           )}
 
-          {/* Sort — desktop only. Mobile relies on the (typically pre-sorted)
-              default view; users who need ad-hoc sorting switch to desktop. */}
+          {/* Sort. Below `sm` the Display panel carries the Sort panel when it
+              is drawn (`sortInDisplay`), so this trigger hides there while no
+              sort is active; with no Display panel it stays on the bar at
+              every width. */}
           {toolbarFlags.showSort && (
           <Popover open={showSort} onOpenChange={setShowSort}>
             <PopoverTrigger asChild>
@@ -6013,7 +6283,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "hidden sm:inline-flex h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  PHONE_TOUCH_TARGET,
+                  // On a phone an active sort keeps this trigger, with its
+                  // level count, on the bar: the Display panel holds the
+                  // builder, but only the bar can show the list is sorted.
+                  // The open search field takes its slot while it is open.
+                  sortInDisplay && (currentSort.length === 0 || phoneSearchOpen) && "hidden sm:inline-flex",
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
@@ -6030,70 +6306,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <div className="flex items-center gap-1">
-                    <h4 className="font-medium text-sm">{t('list.sortRecords')}</h4>
-                    {/* objectui#12528 — the note on why linked columns are not
-                        listed, as this control's tooltip and accessible name
-                        beside the field list, instead of a standing paragraph
-                        that took about half the popover on every open. Drawn
-                        under the paragraph's own condition: a relational field
-                        was left out. */}
-                    {sortHasRelationalField && (
-                      <span
-                        role="img"
-                        tabIndex={0}
-                        title={t('list.sortRelationalHint')}
-                        aria-label={t('list.sortRelationalHint')}
-                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        data-testid="sort-relational-info"
-                      >
-                        <Info className="h-3.5 w-3.5" aria-hidden="true" />
-                      </span>
-                    )}
-                  </div>
-                  {/* Reset to the view's declared sort (objectui#4243).
-                      Rendered only when the view DECLARES one: with nothing
-                      declared there is no default to return to, and a control
-                      under this label that merely cleared the sort would be a
-                      second, differently-named way to do what removing the
-                      rows already does. Disabled — not hidden — while the
-                      active sort already equals the declared one, so the
-                      affordance stays discoverable and says "you are at the
-                      default" instead of vanishing. */}
-                  {declaredSort.length > 0 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-muted-foreground hover:text-primary"
-                      disabled={!sortDiffersFromDeclared}
-                      onClick={handleResetSort}
-                      data-testid="sort-reset-default"
-                    >
-                      {t('list.resetSortToDefault')}
-                    </Button>
-                  )}
-                </div>
-                <SortBuilder
-                  fields={sortFields}
-                  value={currentSort}
-                  onChange={(newSort) => {
-                    // `setCurrentSort` takes the array WHOLE (the in-use
-                    // exception depends on it); `emitSortChange` is what the
-                    // host persists. See the boundary's docblock above.
-                    setCurrentSort(newSort);
-                    emitSortChange(newSort);
-                  }}
-                />
-                {sortPicksRelationalField && (
-                  <p className="truncate text-xs text-muted-foreground" data-testid="sort-relational-picked">
-                    {t('list.sortRelationalPicked')}
-                  </p>
-                )}
-              </div>
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
+              {sortPanelBody}
             </PopoverContent>
           </Popover>
           )}
@@ -6227,11 +6441,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               Every control writes through the same door as its wide-form
               button above; the panel adds no storage of its own. Drawn on
               mobile too (icon only): Refresh and Export live in it. */}
-          {toolbarFlags.compactToolbar && (
-            viewSwitcherOffered || toolbarFlags.showGroup || toolbarFlags.showColor || toolbarFlags.showDensity
-            || toolbarFlags.showHideFields || currentView === 'grid' || toolbarFlags.showRefresh
-            || (resolvedExportOptions && exportPermitted && exportableFormats.length > 0)
-          ) && (
+          {displayOffered && (
             <ViewSettingsPopover
               t={t as any}
               allFields={allFields as any}
@@ -6248,6 +6458,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 />
               ) : undefined}
               recordOpen={recordOpen}
+              sort={sortInDisplay ? sortPanelBody : undefined}
               showGroup={toolbarFlags.showGroup}
               groupingConfig={groupingConfig}
               setGroupingConfig={changeGrouping}
@@ -6276,7 +6487,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               inlineEdit={inlineEdit}
               setInlineEdit={updateInlineEdit}
               changedCount={displayChangedCount}
-              onReset={resetDisplayToViewDefault}
+              // objectstack#28950 — a host that marks a personalized list owns
+              // the one reset; the Display control then offers none of its own.
+              onReset={onPersonalizationChange ? undefined : resetDisplayToViewDefault}
               onRefresh={toolbarFlags.showRefresh ? () => setRefreshKey(k => k + 1) : undefined}
               refreshing={loading}
               exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
@@ -6356,32 +6569,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             </Popover>
           )}
 
-          {/* Sharing — a read-only indicator of the spec's `ViewSharingSchema`
-              (`type` + optional `lockedBy`), never a button. No view-sharing
+          {/* Sharing — a read-only lock indicator from the spec's
+              `ViewSharingSchema.lockedBy`, never a button: no view-sharing
               control or endpoint exists to open, so a clickable "Share" here
               was a dead button. `lockedBy` is the spec's free string ("User
-              who locked the view configuration"), rendered as written. */}
-          {schema.sharing?.type && (() => {
-            const sharingLabel = schema.sharing.type === 'personal'
-              ? t('list.sharingPersonal')
-              : t('list.sharingCollaborative');
-            const lockedBy = schema.sharing.lockedBy;
-            const lockedLabel = lockedBy ? t('list.sharingLockedBy', { user: lockedBy }) : undefined;
-            const hint = lockedLabel ? `${sharingLabel} · ${lockedLabel}` : sharingLabel;
+              who locked the view configuration"), rendered as written. The
+              block's ownership `type` is retired (objectstack#29037): it
+              claimed "Personal view" for a view everyone could read. */}
+          {(() => {
+            const lockedBy = sharingLockedBy(schema.sharing);
+            if (!lockedBy) return null;
+            const lockedLabel = t('list.sharingLockedBy', { user: lockedBy });
             return (
               <span
                 className="inline-flex h-7 items-center px-2 text-muted-foreground text-xs"
-                title={hint}
-                data-testid="share-button"
+                title={lockedLabel}
+                data-testid="sharing-locked-by"
               >
-                <Share2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                <span className="hidden sm:inline">{sharingLabel}</span>
-                {lockedLabel && (
-                  <span className="inline-flex items-center ml-1.5" data-testid="sharing-locked-by">
-                    <Lock className="h-3 w-3 mr-1" aria-hidden="true" />
-                    <span className="hidden sm:inline">{lockedLabel}</span>
-                  </span>
-                )}
+                <Lock className="h-3 w-3 mr-1" aria-hidden="true" />
+                <span className="hidden sm:inline">{lockedLabel}</span>
               </span>
             );
           })()}
@@ -6414,17 +6620,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
           {/* --- Separator: Print/Share/Export | Search --- */}
           {(() => {
-            const hasLeftSideItems = schema.allowPrinting || !!schema.sharing?.type
+            const hasLeftSideItems = schema.allowPrinting || sharingLockedBy(schema.sharing) !== undefined
               || (!toolbarFlags.compactToolbar && resolvedExportOptions && exportPermitted && exportableFormats.length > 0);
             return toolbarFlags.showSearch && hasLeftSideItems ? (
               <div className="h-5 w-px bg-border/50 mx-1 shrink-0" />
             ) : null;
           })()}
 
-          {/* Search (icon button + popover) — desktop only. The global
-              top-bar search (⌘K) is already prominent on mobile, so an
-              additional list-scoped search popover would be redundant chrome.
-              Filter remains the primary way to narrow data on phones. */}
+          {/* Search, scoped to this list. From `sm` up an icon button opens
+              a popover; below `sm` the icon expands into a field in place (the
+              phone form after this popover). Both write the same term. */}
           {toolbarFlags.showSearch && (
             <Popover open={showSearchPopover} onOpenChange={setShowSearchPopover}>
               <PopoverTrigger asChild>
@@ -6480,6 +6685,71 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               </PopoverContent>
             </Popover>
           )}
+
+          {/* Search, phone form: the icon expands into a field in place, with
+              the bar's touch size. Enter or Escape folds it back to the icon,
+              which then carries the active keyword as the desktop trigger
+              does; the clear button empties the term and folds it. */}
+          {toolbarFlags.showSearch && (phoneSearchOpen ? (
+            <div className="relative flex items-center sm:hidden" data-testid="phone-search">
+              <Search
+                className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Input
+                type="search"
+                placeholder={t('table.search')}
+                aria-label={t('list.search')}
+                value={searchTerm}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'Escape') setPhoneSearchOpen(false);
+                }}
+                onBlur={() => {
+                  if (!searchTerm) setPhoneSearchOpen(false);
+                }}
+                // 16px text: a smaller font makes iOS Safari zoom on focus.
+                className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
+                autoFocus
+                data-testid="phone-search-input"
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
+                aria-label={t('list.clearSearch')}
+                title={t('list.clearSearch')}
+                onClick={() => {
+                  handleSearchChange('');
+                  setPhoneSearchOpen(false);
+                }}
+                data-testid="phone-search-clear"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                PHONE_TOUCH_TARGET,
+                searchTerm && "text-foreground font-medium",
+              )}
+              aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+              title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+              onClick={() => setPhoneSearchOpen(true)}
+              data-testid="phone-search-trigger"
+            >
+              <Search className="h-3.5 w-3.5" />
+              {searchTerm && (
+                <span className="max-w-[5rem] truncate text-[11px]" data-testid="phone-search-active-keyword">
+                  {searchTerm}
+                </span>
+              )}
+            </Button>
+          ))}
 
           {/* Add Record (top position) */}
           {toolbarFlags.showAddRecordTop && (
@@ -6619,12 +6889,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               />
             ))}
           </div>
-        ) : !loading && data.length === 0 && (currentView === 'grid' || currentView === 'gallery') ? (
+        ) : !loading && data.length === 0 && (currentView === 'grid' || currentView === 'gallery' || currentView === 'tree') ? (
           // objectui#12217 — the gallery draws the grid's empty state, through
           // the one shared component: the authored `emptyState`, resolved
           // against the display locale, otherwise the localized `list.*` copy.
           // It used to hand the empty list to `ObjectGallery`, which drew a
           // hard-coded English line and never read the view's `emptyState`.
+          // The tree takes the same branch: `ObjectTree` reads no `emptyState`
+          // and drew the generic `common.noData`. This component's fetch runs
+          // with the very filter the tree's own query is handed
+          // (`selfQueryFilter`) and no search term (`searchlessViewOnScreen`),
+          // so an empty `data` is the tree's empty answer too.
           <ListEmptyState
             title={schema.emptyState?.title}
             message={schema.emptyState?.message}
@@ -6670,6 +6945,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // navigation, so a user can come back to a list their own search
             // emptied: the empty state offers the way out.
             onClearSearch={searchTerm && searchTerm.trim() ? () => handleSearchChange('') : undefined}
+            // objectstack#28908 — a filter the reader applied (the panel's
+            // finished conditions, the user-filter chips, the queue toggle) is
+            // part of the empty query: the one clear action removes it, the
+            // search with it.
+            onClearFilters={
+              userFilterChipsClearable ||
+              appliedQueueSittingConditions.length > 0 ||
+              (Array.isArray(appliedFilters?.conditions) && appliedFilterGroup(appliedFilters).conditions.length > 0)
+                ? handleClearReaderQuery
+                : undefined
+            }
             t={t}
             displayLocale={displayLocale}
           />
@@ -6921,7 +7207,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           tooltip when they do not fit. */}
       {/* The compact posture prints its count in its header (objectui#12703),
           the capped one in its 「View all N」 link (objectstack#26613). */}
-      {listChromeShown && (recordCountInBar || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
+      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -6931,7 +7217,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {t('list.recordCount', { count: fetchedTotal })}
           </span>
           )}
-          {recordCountInBar && (
+          {recordCountShown && (
           <span className="shrink-0 font-medium text-foreground/80">
             {/* Under server pagination `data` is only the current page, so the
                 honest record count is the server's grand total (#586). When the

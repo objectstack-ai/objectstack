@@ -4,6 +4,7 @@ import { NumberFieldMetadata } from '@object-ui/types';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatNumberFieldValue } from './number-format.js';
 
@@ -82,7 +83,7 @@ export function NumberField({ value, onChange, field, readonly, error, ...props 
         onBlur={handleBlur}
         placeholder={numberField?.placeholder}
         disabled={readonly || domProps.disabled}
-        className={cn(refusal ? BAD_INPUT_BORDER : '', domProps.className)}
+        className={cn(PHONE_TOUCH_HEIGHT, refusal ? BAD_INPUT_BORDER : '', domProps.className)}
         // Surface the field's declared range so the browser's spinner/keyboard
         // affordances respect it (server-side validation still owns enforcement).
         min={typeof numberField?.min === 'number' ? numberField.min : undefined}

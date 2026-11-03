@@ -33,7 +33,10 @@ export const SysAttachment = ObjectSchema.create({
   isSystem: true,
   managedBy: 'platform',
   description: 'Polymorphic link between a sys_file and any other record',
-  titleFormat: '{file_name} → {parent_object}/{parent_id}',
+  // [ADR-0079] The record title: the file's name, the field the registry
+  // stamped when the retired `titleFormat` template stood here (an object
+  // definition that declares one is refused at save and by `os validate`).
+  nameField: 'file_name',
   highlightFields: ['created_at', 'parent_object', 'file_name', 'mime_type', 'size'],
 
   fields: {

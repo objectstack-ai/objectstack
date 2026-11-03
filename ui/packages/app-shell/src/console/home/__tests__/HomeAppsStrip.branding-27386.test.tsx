@@ -24,6 +24,7 @@ function renderStrip(apps: Record<string, unknown>[], favorites: { id: string }[
     <MemoryRouter initialEntries={['/home']}>
       <HomeAppsStrip
         apps={apps}
+        routeApps={apps}
         favorites={favorites as any}
         onBrowseMarketplace={() => {}}
         isAdmin={false}

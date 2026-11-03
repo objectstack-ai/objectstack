@@ -54,7 +54,7 @@ import { createConsoleServerActionHandler } from '../utils/consoleServerAction.j
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
-import { resolveHostAppSegment } from '../utils/appRoute.js';
+import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
@@ -396,15 +396,40 @@ function pageShowsNodeOnOpen(page: unknown, types: ReadonlySet<string>, activeTa
 }
 
 /**
- * Which of a record's two feed reads the server REFUSED (objectui#11195):
- * 401 / 403, or a permission envelope, judged by plugin-detail's
- * `isRefusedFeedRead`. A read that answered, even with zero rows, and a read
- * that failed for any other reason are both `false` here. Only a refusal is a
- * different answer from "nothing to show".
+ * How each of a record's two feed reads ended, per source.
+ *
+ *   - `answered`: the read answered, even with zero rows (a bare 404, a table
+ *     this deployment does not provision, answers empty), or it was refused
+ *     for a reason no retry or grant changes (the object withholds its API, a
+ *     400). The panel draws the rows, or its empty state.
+ *   - `refused`: the server REFUSED it (objectui#11195): 401 / 403, or a
+ *     permission envelope, judged by plugin-detail's `isRefusedFeedRead`. The
+ *     panel says the reader may not see that half. Never retried.
+ *   - `failed`: it FAILED (objectstack#29188): a 5xx or a network failure
+ *     (`feedReadVerdictOf`). The panel says it could not load that
+ *     half and offers a Retry, which re-reads only the failed sources.
  */
-interface FeedRefusal {
-  activity: boolean;
-  comments: boolean;
+type FeedReadVerdict = 'answered' | 'refused' | 'failed';
+type FeedSource = 'activity' | 'comments';
+type FeedReadVerdicts = Record<FeedSource, FeedReadVerdict>;
+
+/**
+ * A feed read's rejection, as a {@link FeedReadVerdict}. `failed` is a 5xx or
+ * a rejection with no status at all (the request never got an answer):
+ * `classifyLoadError`'s `network`, less the 4xx statuses it also folds there.
+ * A 404 (a system table this deployment does not serve) stays the empty
+ * answer it has always been.
+ */
+function feedReadVerdictOf(err: unknown): FeedReadVerdict {
+  if (isRefusedFeedRead(err)) return 'refused';
+  if (classifyLoadError(err) !== 'network') return 'answered';
+  const e = err as { httpStatus?: unknown; status?: unknown; statusCode?: unknown; message?: unknown } | null;
+  let status = [e?.httpStatus, e?.status, e?.statusCode].find((v): v is number => typeof v === 'number');
+  if (status === undefined) {
+    const m = /HTTP (\d{3})\b/.exec(String(e?.message ?? ''));
+    if (m) status = Number(m[1]);
+  }
+  return status === undefined || status >= 500 ? 'failed' : 'answered';
 }
 
 /**
@@ -888,10 +913,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The discussion feed, stored PER RECORD (objectui#3268). See the
   // `feedRecordKey` block below for why this is a map and not a `FeedItem[]`.
   const [feedItemsByRecord, setFeedItemsByRecord] = useState<Record<string, FeedItem[]>>({});
-  // Which feed reads were refused, stored under the same per-record key as the
-  // rows (objectui#11195), so a refusal on record A never reaches record B's
-  // panel.
-  const [feedRefusalByRecord, setFeedRefusalByRecord] = useState<Record<string, FeedRefusal>>({});
+  // How each feed read ended (refused, objectui#11195; failed,
+  // objectstack#29188), stored under the same per-record key as the rows, so a
+  // refusal or a failure on record A never reaches record B's panel.
+  const [feedVerdictByRecord, setFeedVerdictByRecord] = useState<Record<string, FeedReadVerdicts>>({});
+  // objectstack#29188 — the sources a Retry asked to read again, per record.
+  // The feed effect takes them when it runs on the bumped nonce, and reads only
+  // those, directly (never from the page payload, which already answered).
+  const feedRetryRef = useRef(new Map<string, Set<FeedSource>>());
+  const [feedRetryNonce, setFeedRetryNonce] = useState(0);
   // objectstack#28737 — the 动态 stream's count the page payload answered, per
   // record (`recordPageTimeline`): `null` when it carried none.
   const [timelineCountByRecord, setTimelineCountByRecord] = useState<Record<string, { total: number; comments: number } | null>>({});
@@ -1011,13 +1041,23 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // overrides, not by the host route, so it never reads the segment. On the
   // record route itself `requestedPageName` is undefined and the lookup is the
   // object's default record page, exactly as before.
+  //
+  // The app the record opens in picks its own record page first
+  // (`PageSchema.apps`, maintainer ruling A on objectstack#28979): the
+  // route's `:appName` segment is resolved to its app and the app's NAME is
+  // what the assignment compares, never the segment itself, which carries the
+  // package id when the app has one (`appRouteSegment`). Where a package ships
+  // two apps, the package id resolves to the first (`matchAppBySegment`), so
+  // the second app's scoped page opens under its name segment only. A record
+  // drawer reads the same segment: it is opened inside the host route's app.
   const requestedPageName = embedded ? undefined : params.pageName;
+  const { pages: metadataPages, apps: metadataApps } = useMetadata();
+  const routeAppName = matchAppBySegment(metadataApps, appName)?.name;
   const {
     page: resolvedPage,
     slots: resolvedSlots,
     loading: pageAssignmentLoading,
-  } = usePageAssignment(objectName, requestedPageName ? { pageName: requestedPageName } : undefined);
-  const metadataPages = useMetadata().pages;
+  } = usePageAssignment(objectName, requestedPageName ? { pageName: requestedPageName } : { app: routeAppName });
   const namedPageState: 'none' | 'pending' | 'accepted' | 'refused' = useMemo(() => {
     if (!requestedPageName) return 'none';
     if (pageAssignmentLoading) return 'pending';
@@ -1564,7 +1604,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // (objectui#13433). Only the route's app: outside an app route it is
   // undefined and the form keeps the app-less route.
   const { currentAppName } = useNavigationContext();
-  const metadataApps = useMetadata().apps;
   const hostAppSegment = appName ?? resolveHostAppSegment(metadataApps, currentAppName);
 
   const navigateHandler = useCallback((url: string, options?: { external?: boolean; newTab?: boolean }) => {
@@ -2973,7 +3012,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   //     a spinner while the re-read confirms them (#3205).
   const feedRecordKey = objectName && pureRecordId ? `${objectName}:${pureRecordId}` : null;
   const feedItems = (feedRecordKey ? feedItemsByRecord[feedRecordKey] : undefined) ?? EMPTY_FEED;
-  const feedRefusal = feedRecordKey ? feedRefusalByRecord[feedRecordKey] : undefined;
+  const feedVerdict = feedRecordKey ? feedVerdictByRecord[feedRecordKey] : undefined;
   const feedFetchKey =
     dataSource && feedRecordKey && (feedsEnabled || activitiesEnabled) ? feedRecordKey : null;
   const [settledFeedKey, setSettledFeedKey] = useState<string | null>(null);
@@ -3031,28 +3070,35 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // The payload this open asked, when it is this record's: the discussion
     // and the activity it carries are taken from it, never read again. A read
     // it was not asked for is this effect's own, as before.
+    // objectstack#29188 — a Retry of this record's failed reads: only those
+    // sources are read, each directly, and the page's stream count is left as
+    // it stands.
+    const retrying = feedRetryRef.current.get(threadId) ?? null;
+    if (retrying) feedRetryRef.current.delete(threadId);
     const opened = recordPageRead.current;
-    const fromPage = opened && opened.feedKey === threadId ? opened : null;
+    const fromPage = !retrying && opened && opened.feedKey === threadId ? opened : null;
     // The two reads below run in PARALLEL and are collected here so the
     // loading flag can close over BOTH of them — see the `allSettled` at the
     // end of this effect.
     const inFlight: Promise<unknown>[] = [];
 
-    // objectui#11195: each read's verdict on REFUSAL, recorded under THIS
-    // record's key when it settles. An answered read clears it, so a grant
-    // the member receives shows on the next read. Returning `prev` for an
-    // unchanged verdict keeps the map's identity when nothing moved. Nothing
-    // here re-issues a read: a refusal is recorded, never retried.
-    const recordRefusal = (source: keyof FeedRefusal, refused: boolean) => {
-      setFeedRefusalByRecord(prev => {
+    // objectui#11195 / objectstack#29188: each read's verdict, recorded under
+    // THIS record's key when it settles. An answered read clears a refusal or
+    // a failure, so a grant the member receives, or a server that recovered,
+    // shows on the next read. Returning `prev` for an unchanged verdict keeps
+    // the map's identity when nothing moved. Nothing here re-issues a read: a
+    // refusal is recorded, never retried, and a failure waits for the panel's
+    // Retry.
+    const recordVerdict = (source: FeedSource, verdict: FeedReadVerdict) => {
+      setFeedVerdictByRecord(prev => {
         const current = prev[threadId];
-        if ((current?.[source] ?? false) === refused) return prev;
+        if ((current?.[source] ?? 'answered') === verdict) return prev;
         return {
           ...prev,
           [threadId]: {
-            activity: current?.activity ?? false,
-            comments: current?.comments ?? false,
-            [source]: refused,
+            activity: current?.activity ?? 'answered',
+            comments: current?.comments ?? 'answered',
+            [source]: verdict,
           },
         };
       });
@@ -3089,14 +3135,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       return toReactions(parsed);
     };
 
-    const commentsRead: Promise<{ data?: any[]; reactionRows?: Array<Record<string, unknown>> | null }> | null = !feedsEnabled
+    const commentsRead: Promise<{ data?: any[]; reactionRows?: Array<Record<string, unknown>> | null }> | null = !feedsEnabled || (retrying && !retrying.has('comments'))
       ? null
       : fromPage?.discussion
         ? recordPageComments(fromPage.payload)
         : dataSource.find('sys_comment', { $filter: { thread_id: threadId }, $orderby: { created_at: 'asc' } });
     if (commentsRead) inFlight.push(commentsRead
       .then(async (res: any) => {
-        recordRefusal('comments', false);
+        recordVerdict('comments', 'answered');
         if (!res?.data?.length) return;
         // The `records` store (objectui#12078): ONE batched read of the
         // comments' reaction rows (paged only past REACTION_READ_COMMENT_IDS
@@ -3171,8 +3217,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       })
       // A refused comment read is the same panel's other half (objectui#11195):
       // the panel says the member may not see the comments, instead of "No
-      // comments yet". Any other failure still lands on the empty state.
-      .catch((err: unknown) => { recordRefusal('comments', isRefusedFeedRead(err)); }));
+      // comments yet". A failed one (5xx, network) says the comments could not
+      // be loaded, with a Retry (objectstack#29188).
+      .catch((err: unknown) => { recordVerdict('comments', feedReadVerdictOf(err)); }));
 
     // M10.11: Fetch sys_activity rows for this record and merge into the
     // timeline. plugin-audit's writers populate sys_activity on every
@@ -3208,7 +3255,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // activity to sees the panel say so, not "no activity". The verdict is
     // `isRefusedFeedRead`, the one the `record:activity` block's self-fetch
     // uses, so the two surfaces cannot disagree about what a refusal is.
-    const activityRead: Promise<any> | null = !activitiesEnabled
+    const activityRead: Promise<any> | null = !activitiesEnabled || (retrying && !retrying.has('activity'))
       ? null
       : fromPage?.activity
         // objectstack#28470 — the payload's activity: the newest rows it
@@ -3220,7 +3267,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // Collected with the reads, so the panel leaves its loading state with the
     // count it names. A read without the payload holds the whole window and
     // counts its own rows.
-    if (fromPage?.timeline) {
+    if (retrying) {
+      // A Retry keeps the stream's count as it stands.
+    } else if (fromPage?.timeline) {
       inFlight.push(recordPageTimeline(fromPage.payload).then((count) => {
         setTimelineCountByRecord(prev => ({ ...prev, [threadId]: count }));
       }));
@@ -3229,7 +3278,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     if (activityRead) inFlight.push(activityRead
       .then((res: any) => {
-        recordRefusal('activity', false);
+        recordVerdict('activity', 'answered');
         // objectstack#28737 — the payload asked only the 动态 panel's rows and
         // the record holds more: the 动态 tab reads the window when it opens.
         const peek = !!fromPage?.activity
@@ -3248,7 +3297,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           [threadId]: mergeFeedRows(prev[threadId] ?? EMPTY_FEED, mapped),
         }));
       })
-      .catch((err: unknown) => { recordRefusal('activity', isRefusedFeedRead(err)); }));
+      .catch((err: unknown) => { recordVerdict('activity', feedReadVerdictOf(err)); }));
 
     // The panel leaves the loading state exactly once, when BOTH reads have
     // answered. `allSettled` over promises that already carry their own
@@ -3264,7 +3313,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     });
 
     return () => { cancelled = true; };
-  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady]);
+  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce]);
+
+  // objectstack#29188 — the load-failure notice's Retry: read this record's
+  // FAILED feed reads again, and only those. The feed shows its loading state
+  // until they settle (a panel with rows keeps them), and each read records
+  // its new verdict as it lands.
+  const handleRetryFeed = useCallback(() => {
+    if (!feedRecordKey || !feedVerdict) return;
+    const failed = new Set<FeedSource>();
+    if (feedVerdict.activity === 'failed') failed.add('activity');
+    if (feedVerdict.comments === 'failed') failed.add('comments');
+    if (failed.size === 0) return;
+    feedRetryRef.current.set(feedRecordKey, failed);
+    setSettledFeedKey(null);
+    setFeedRetryNonce(n => n + 1);
+  }, [feedRecordKey, feedVerdict]);
 
   // ── The 动态 tab's activity window (objectstack#28737) ─────────────────
   //
@@ -4066,13 +4130,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // stack has no right column), no ⤡ (there is no drawer to collapse to).
   const phonePushed = phonePage && isRecordPagePushed(location.state);
   const phoneBackClass =
-    'inline-flex min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+    'inline-flex min-h-[44px] min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const phoneBack = phonePage ? (() => {
     const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
     const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
     const label = parent
       ? parent.t || shortRecordId(parent.i)
-      : phonePushed || (originFromState?.pathname && !originIsObjectList)
+      // A page a list pushed (objectstack#29074) still reads the object's
+      // plural, as Target 3 says; a page pushed from a record, of this
+      // object or another, reads that record's label.
+      : (phonePushed && !(originIsObjectList && !originPathOnly!.startsWith(`${objectListPath}/record/`)))
+        || (originFromState?.pathname && !originIsObjectList)
         ? originFromState?.label ?? plural
         : plural;
     const face = (
@@ -4094,8 +4162,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       : originFromState?.pathname
         ? (originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname)
         : objectListPath;
+    // objectstack#29071 — the way back replaces the record's own history
+    // entry, so the browser's Back after 「‹」 does not open the record again.
+    // A page pushed from a parent goes back in the history (above); a page a
+    // list opened carries no mark that its list is the entry below it, so it
+    // cannot pop safely and replaces instead.
     return to ? (
-      <Link to={to} className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
+      <Link to={to} replace className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
     ) : (
       <span className={phoneBackClass}>{face}</span>
     );
@@ -4862,8 +4935,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         <DiscussionContextProvider
           items={feedItems as any}
           loading={feedLoading}
-          activityDenied={feedRefusal?.activity ?? false}
-          commentsDenied={feedRefusal?.comments ?? false}
+          activityDenied={feedVerdict?.activity === 'refused'}
+          commentsDenied={feedVerdict?.comments === 'refused'}
+          activityFailed={feedVerdict?.activity === 'failed'}
+          commentsFailed={feedVerdict?.comments === 'failed'}
+          onRetryFeed={feedVerdict?.activity === 'failed' || feedVerdict?.comments === 'failed' ? handleRetryFeed : undefined}
           // objectui#12082: each write is handed over only where its row of
           // the affordance-to-grant map allows it, and the panel draws the
           // composer, the reply input and the reaction picker from the

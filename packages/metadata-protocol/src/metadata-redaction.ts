@@ -48,7 +48,13 @@
  *
  * ⛔ It does NOT create cleartext, and does not migrate it out either: it
  * preserves what is already at rest. Getting stored cleartext OUT of the store
- * is #8081 item 3's migration and is deliberately not attempted here.
+ * is #8081 item 3's migration and is deliberately not attempted here — with
+ * ONE exception the redactor itself declares. A position it names in
+ * `notCarriedForwardKeys` (#28640 ②B, ruling 6566912252: a connector's
+ * undeclared `auth` keys, which no door accepts and nothing reads) is never
+ * re-grafted, so a save of the served form drops it from the row, and the
+ * save names each dropped position on its answer
+ * ({@link carryForwardRedactedValuesReportingDrops}).
  *
  * ## Why nothing is stamped on the wire
  *
@@ -151,11 +157,17 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** An element's identity for an array hop: a non-empty string `id`, or none. */
+/**
+ * An element's identity for an array hop: a non-empty string `id`; for an
+ * element with no `id`, a non-empty string `key` (a connector action's machine
+ * name); otherwise none.
+ */
 function identityOf(element: unknown): string | undefined {
     if (!isPlainRecord(element)) return undefined;
     const id = element.id;
-    return typeof id === 'string' && id !== '' ? id : undefined;
+    if (typeof id === 'string' && id !== '') return id;
+    const key = element.key;
+    return typeof key === 'string' && key !== '' ? key : undefined;
 }
 
 /**
@@ -190,7 +202,9 @@ function elementWithIdentity(
  * into an identity, and every body — served and incoming — is then walked by
  * that identity, never by the index. Two kinds of identity:
  *
- *  - **the element's own `id`** (`{ elementId }`) — a flow node;
+ *  - **the element's own `id`** (`{ elementId }`) — a flow node — or, for an
+ *    element with no `id`, its own `key` — a connector action, whose `key` is
+ *    its machine name;
  *  - **for an element with no `id`, the identified element below it on the
  *    same path** (`{ anchor }`, #20590). A `parallel` block's branch carries no
  *    `id`, and a credential inside one sits at
@@ -201,8 +215,8 @@ function elementWithIdentity(
  *    is that walk: the hops from inside the element down to, and including,
  *    the first identified element beneath it.
  *
- * An array hop that reaches neither — an element with no `id` and no
- * identified element below it on the path, or an `id` shared with a sibling —
+ * An array hop that reaches neither — an element with no `id` or `key` and no
+ * identified element below it on the path, or an identity shared with a sibling —
  * resolves to nothing, and the path is skipped.
  */
 type PathHop =
@@ -440,6 +454,11 @@ function sameValue(a: unknown, b: unknown): boolean {
  *  - the incoming body has no container for that path at all ⇒ nothing is
  *    grafted, because a removed container is also the author's word.
  *
+ * Those three are for a path in `redactedKeys` only. A path the redactor also
+ * names in `notCarriedForwardKeys` (#28640 ②B) is never grafted, whatever the
+ * incoming body holds there: a save of the served form drops it, and
+ * {@link carryForwardRedactedValuesReportingDrops} reports the drop.
+ *
  * A path through an ARRAY (a flow's start node, `nodes.<i>.config.secret`,
  * #20552) is walked by the stored element's `id`, not by its index, so a body
  * that reorders the array still carries the value onto the element it came
@@ -512,9 +531,39 @@ export function redactedPathsCarriedForward(type: string, incoming: unknown, sto
 }
 
 /**
- * The one decision behind {@link carryForwardRedactedValues} and
- * {@link redactedPathsCarriedForward}: the grafted body, and where each graft
- * landed. `landed` is empty exactly when `out` is `incoming` by reference.
+ * [#28640 ②B] {@link carryForwardRedactedValues}, and what the same save DROPS
+ * from the row at rest: every position the type's redactor names in
+ * `notCarriedForwardKeys` for the stored body (withheld AND not carried
+ * forward — a connector's undeclared `auth` keys) where the stored body holds
+ * a value and the incoming body holds none. Such a position is never
+ * re-grafted, so a save of the served form persists the row without it; the
+ * dotted paths (the redactor's spelling, sorted) are what the save names on
+ * its answer, so the drop is loud rather than silent.
+ *
+ * A position the incoming body DOES hold a value at is not dropped: that
+ * value is the author's word and is judged at the door like any other (an
+ * `auth` kind the author switched to may declare the key). Not on the
+ * package entry: the save door's half, consumed inside this package only.
+ *
+ * @param type     request-shaped metadata type (plural or singular).
+ * @param incoming the body about to be persisted.
+ * @param stored   the body currently at rest, RAW (never a served copy).
+ */
+export function carryForwardRedactedValuesReportingDrops<T>(
+    type: string,
+    incoming: T,
+    stored: unknown,
+): { item: T; dropped: string[] } {
+    const plan = planCarryForward(type, incoming, stored);
+    return { item: plan.out, dropped: plan.dropped };
+}
+
+/**
+ * The one decision behind {@link carryForwardRedactedValues},
+ * {@link redactedPathsCarriedForward} and
+ * {@link carryForwardRedactedValuesReportingDrops}: the grafted body, where
+ * each graft landed, and which not-carried-forward stored positions the body
+ * drops. `landed` is empty exactly when `out` is `incoming` by reference.
  */
 /**
  * A `redactedKeys` entry resolved against the STORED body into the container
@@ -551,22 +600,39 @@ function resolveRedactedPath(
     return undefined;
 }
 
-function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out: T; landed: string[] } {
-    const unchanged = { out: incoming, landed: [] as string[] };
-    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return unchanged;
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return unchanged;
+function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out: T; landed: string[]; dropped: string[] } {
+    const none = { out: incoming, landed: [] as string[], dropped: [] as string[] };
+    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return none;
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return none;
     const redactor = redactorFor(type);
-    if (!redactor) return unchanged;
+    if (!redactor) return none;
 
     // What a read exit WOULD have served for the row at rest. Computed from the
     // stored body rather than remembered from a response, so the comparison
     // holds for any caller — Studio, the CLI, a raw `curl` — and needs no
     // session state.
     const served = redactor(stored as Record<string, unknown>);
-    if (served.redactedKeys.length === 0) return unchanged;
+    if (served.redactedKeys.length === 0) return none;
+
+    // [#28640 ②B] The withheld positions the redactor marks NOT carried
+    // forward: never re-grafted, so the save drops each one the stored row
+    // holds and the incoming body does not — and reports it (`dropped`).
+    const notCarriedForward = new Set(served.notCarriedForwardKeys ?? []);
+    const dropped: string[] = [];
+    const unchanged = { out: incoming, landed: [] as string[], dropped };
 
     const grafts: Array<{ at: string[]; key: string; value: unknown }> = [];
     for (const path of served.redactedKeys) {
+        if (notCarriedForward.has(path)) {
+            const resolved = resolveRedactedPath(stored, path);
+            if (!resolved) continue;
+            const target = locate(incoming, resolved.hops);
+            const authored = target !== undefined
+                && Object.prototype.hasOwnProperty.call(target.container, resolved.key)
+                && target.container[resolved.key] !== undefined;
+            if (!authored) dropped.push(path);
+            continue;
+        }
         // Dotted, item-relative — the registry's documented contract for
         // `redactedKeys` (`config.password`; an array hop is an index into the
         // stored body, `nodes.0.config.secret`, resolved to an identity by
@@ -613,7 +679,7 @@ function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out:
         if (kept.length === 0) return unchanged;
         const withheld = new Set(redactor(out as Record<string, unknown>).redactedKeys);
         const next = kept.filter((graft) => withheld.has(landing(graft)));
-        if (next.length === kept.length) return { out: out as T, landed: kept.map(landing) };
+        if (next.length === kept.length) return { out: out as T, landed: kept.map(landing), dropped };
         kept = next;
     }
 }

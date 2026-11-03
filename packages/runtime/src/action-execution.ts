@@ -22,7 +22,7 @@ import { templateSlotSource } from '@objectstack/spec/automation';
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
-import type { IHttpServer, IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
@@ -65,7 +65,8 @@ import {
 // Who may START a flow by name — the one rule the trigger door, this door and
 // the declared endpoint share (the maintainer's rulings, letters B and A, and
 // the flow's own `requiredPermissions`).
-import { flowStartRefusal } from './flow-start-admission.js';
+import { flowDeclaredRecordReads, flowRunsElevated, flowStartRefusal } from './flow-start-admission.js';
+import { validationFailure } from './validation-failure.js';
 // [ADR-0066 D4] The capability arithmetic the action gate and the flow start
 // gate share.
 import { missingCapabilities } from './required-capabilities.js';
@@ -88,8 +89,11 @@ import {
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
+    SummaryRecomputeError,
 } from '@objectstack/objectql';
 import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+// [#28861] A landed write answers its success to the action handler's code.
+import { answerLandedWritesDespiteStaleSummary, landedWriteAnswer } from './landed-write-answer.js';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
 // @objectstack/objectql (the engine owns the map they describe, and its
@@ -558,6 +562,19 @@ export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     if (credentialRefusal) throw credentialRefusal;
 }
 
+/**
+ * Ask `engine` the `internal: true` evaluate refusal (`QueryEvaluationGate`
+ * on the `objectql` slot contract, `IObjectQLEngine`) for `object` and
+ * `query`, for every caller — or nothing, when the value handed in is not an
+ * engine that carries it (a test double, a foreign engine, the raw driver the
+ * MCP multi-env path threads through), which then answers for itself.
+ */
+function assertNoInternalFieldEvaluatedBy(engine: unknown, object: string, query: InternalFieldEvaluationQuery): void {
+    const gate = (engine as Partial<QueryEvaluationGate> | null | undefined)?.assertNoInternalFieldEvaluated;
+    if (typeof gate !== 'function') return;
+    gate.call(engine, object, query);
+}
+
 export async function callData(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: string,
@@ -846,6 +863,11 @@ export async function callData(deps: ActionExecutionDeps,
             if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId);
             }
+            // …and the `internal: true` evaluate refusal for every caller, as
+            // the protocol path asks it inside `findData` — the engine's one
+            // definition (see the `aggregate` arm). A raw driver on the MCP
+            // multi-env path carries no such member and is not an engine.
+            assertNoInternalFieldEvaluatedBy(ql, params.object, bag);
             let all = await ql.find(params.object, findOpts(bag));
             if (!Array.isArray(all) && all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
@@ -880,22 +902,23 @@ export async function callData(deps: ActionExecutionDeps,
             if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
             }
-            // The data door's evaluate refusal for a field declared
-            // `internal: true` — a filter (`where`, an aggregation's own
-            // `filter`), a group key or an aggregation operand on it. The query
-            // arm meets it inside `findData`; this arm never reaches `findData`,
-            // so it asks the protocol's ONE gate itself, before the engine, and
-            // throws the door's `400 INVALID_FIELD` word for word. ⛔ Never a
-            // copy of the gate here (route-ownership rule 1). Every caller, as
-            // at the door; a host with no protocol has no door to agree with
-            // and is served as before.
-            if (protocol && typeof protocol.assertNoInternalFieldEvaluated === 'function') {
-                protocol.assertNoInternalFieldEvaluated(params.object, {
-                    where: params.where,
-                    groupBy: params.groupBy,
-                    aggregations: params.aggregations,
-                });
-            }
+            // The `internal: true` evaluate refusal — a filter (`where`, an
+            // aggregation's own `filter`), a group key or an aggregation operand
+            // on such a field — asked of the ENGINE's one definition
+            // (`QueryEvaluationGate` on the `objectql` slot contract), the one
+            // the data door asks too, so the refusal is the door's word for
+            // word whether or not this host registers a `protocol` service.
+            // `engine.aggregate` applies it itself to every non-system caller;
+            // it is asked here as well so a system context this arm admits is
+            // refused like every caller at the door. ⛔ Never a copy of the
+            // walk here (route-ownership rule 1). The probe tolerates a test
+            // double or foreign engine without the member, which then answers
+            // for itself.
+            assertNoInternalFieldEvaluatedBy(engine, params.object, {
+                where: params.where,
+                groupBy: params.groupBy,
+                aggregations: params.aggregations,
+            });
             const rows = await engine.aggregate(
                 params.object,
                 {
@@ -1474,8 +1497,16 @@ export function buildApiActionRequest(
     // left out. Without a row (a record-less dispatch) only `id` can be seeded,
     // from the routed `recordId`; anything else has no source and the request
     // goes without it, exactly as a console click from a record-less location.
+    //
+    // [#29173] "Record-less" has ONE meaning here, the one the path half above
+    // uses: the dispatch names no record (`routedRecordId` is empty). The
+    // subject load hands a record-less dispatch an EMPTY object as its
+    // `ctx.record`, and that `{}` is not a row: read as one, every
+    // `execution: 'aggregate'` api action declaring `recordIdParam` was refused
+    // for lacking `id`, and its target never ran. A dispatch that names a record
+    // keeps both #8018 refusals for a row that lacks the field or holds null.
     const recordIdParam: string | undefined = typeof action?.recordIdParam === 'string' && action.recordIdParam ? action.recordIdParam : undefined;
-    if (recordIdParam) {
+    if (recordIdParam && routedRecordId) {
         const field: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
         const row: Record<string, unknown> | undefined =
             input.record && typeof input.record === 'object' ? input.record
@@ -1632,14 +1663,19 @@ export function apiForwardCredentialKind(requestContext: HttpProtocolContext | u
  * A forward refusal: the status and standard code, and the sentence that says
  * why. `401` when the target's door cannot read the caller's credential (the
  * status the target would have answered); `403` when the scope-family rule
- * refuses an agent the consent did not grant the forward's family.
+ * refuses an agent the consent did not grant the forward's family, or when the
+ * target's door accepts the credential and its per-object gate refuses the
+ * request for it ({@link apiForwardDataDoorGuardRefusal}, that gate's own code
+ * and sentence).
  */
 export type ApiForwardCredentialRefusal = { status: 401 | 403; code: string; message: string };
 
 /**
  * The refusal for running `action` by forward with this caller's credential —
- * `null` when the target's door accepts it ({@link API_FORWARD_DOOR_ACCEPTS}),
- * or when the action is not a same-origin `type: 'api'` action at all.
+ * `null` when the target's door accepts it ({@link API_FORWARD_DOOR_ACCEPTS})
+ * and the target's per-object gate would not refuse the request for it
+ * ({@link apiForwardDataDoorGuardRefusal}), or when the action is not a
+ * same-origin `type: 'api'` action at all.
  *
  * `target` is the forward's path, which decides the door; the listing passes
  * the declared `target`, whose door prefix is the same before its tokens are
@@ -1659,7 +1695,7 @@ export function apiForwardCredentialRefusal(
     const kind = apiForwardCredentialKind(requestContext);
     if (!kind) return null;
     const door = apiForwardTargetDoor(target);
-    if (API_FORWARD_DOOR_ACCEPTS[door].has(kind)) return null;
+    if (API_FORWARD_DOOR_ACCEPTS[door].has(kind)) return apiForwardDataDoorGuardRefusal(kind, action, target);
     const path = (typeof action?.target === 'string' ? action.target : target).split('?')[0]!;
     // [ADR-0090 D10 rule 5] The two flipped cells: an agent principal is carried
     // by a forward credential, bounded by the scope-family rule.
@@ -1671,6 +1707,62 @@ export function apiForwardCredentialRefusal(
         ? apiActionIdentityRouteKeyRefusal(action, path)
         : apiActionOAuthForwardRefusal(action, path, door);
     return { status: 401, code: standardErrorCodeForHttpStatus(401), message };
+}
+
+/**
+ * [#28943] The data-door operation a forward to `/api/v1/data/<object>[/…]`
+ * asks, by the door's own operation names — `undefined` for a path the data
+ * door does not serve. A safe method (`GET`, `HEAD`) and the door's two reads
+ * by `POST` (`/:object/query`, `/:object/:id/page`) are reads; `PATCH` and
+ * `PUT` are `update`, `DELETE` is `delete`, `POST` to the collection is
+ * `create`, and every other `POST` (`batch`, `createMany`, `import`, `clone`,
+ * …) is a write the door names on its own route. Only the read-or-write
+ * reading is load-bearing: the per-object rule this feeds refuses every
+ * operation it does not list as a read.
+ */
+function apiForwardDataDoorOperation(method: string, path: string): { object: string; operation: string } | undefined {
+    const m = /^\/api\/v1(?:\/environments\/[^/]+)?\/data\/([^/?#]+)(?:\/([^?#]*))?/.exec(path);
+    if (!m) return undefined;
+    const object = m[1]!;
+    const rest = (m[2] ?? '').replace(/\/+$/, '').split('/').filter(Boolean);
+    const verb = method.toUpperCase();
+    if (verb === 'GET' || verb === 'HEAD') return { object, operation: rest.length ? 'get' : 'list' };
+    if (verb === 'PATCH' || verb === 'PUT') return { object, operation: 'update' };
+    if (verb === 'DELETE') return { object, operation: 'delete' };
+    if (rest.length === 0) return { object, operation: 'create' };
+    if (rest.length === 1 && rest[0] === 'query') return { object, operation: 'list' };
+    if (rest.length === 2 && rest[1] === 'page') return { object, operation: 'get' };
+    return { object, operation: rest[rest.length - 1]! };
+}
+
+/**
+ * [#28943] A forward the target's door ACCEPTS the caller's credential for,
+ * which the target's per-object gate then refuses for that credential: today
+ * one rule, a write to `sys_api_key` from a principal an API key admitted
+ * (`@objectstack/core` `apiKeyManagementCredentialRefusal`, the predicate
+ * every data door's gate asks, read here and never restated). The refusal is
+ * the rule's own: its `403`, its `PERMISSION_DENIED`, its sentence. So
+ * `list_actions` marks `revoke_api_key` unavailable to an `osk_` caller with
+ * the answer the target gives, and the run doors answer that same refusal
+ * before forwarding instead of after. A session caller, and a caller whose
+ * door recorded no credential, are never refused here (the rule is positive
+ * on `api_key`).
+ *
+ * `method` is the forward's (`action.method`, default `POST`, as
+ * {@link buildApiActionRequest} reads it), so the listing (the declared
+ * `target`, tokens unfilled) and the run door (the filled path) judge the same
+ * request: the object segment is never a token.
+ */
+function apiForwardDataDoorGuardRefusal(
+    kind: ApiForwardCredentialKind,
+    action: any,
+    target: string,
+): ApiForwardCredentialRefusal | null {
+    if (kind !== 'api_key') return null;
+    const request = apiForwardDataDoorOperation(String(action?.method || 'POST'), target);
+    if (!request) return null;
+    const refusal = apiKeyManagementCredentialRefusal({ ...request, credential: kind });
+    return refusal ? { status: refusal.status, code: refusal.code, message: refusal.message } : null;
 }
 
 /**
@@ -2260,6 +2352,68 @@ function flowActionCallerParamKeys(action: any, objectName: string, params: Reco
 }
 
 /**
+ * The row slots the CALLER's own `params` fill at this door, as flow start
+ * admission's third question reads them ({@link refuseUnreadableFlowStartRecords}):
+ * each row-id key ({@link flowActionRowIdKeys}) the caller's bag names, whose
+ * value reaches the run over the seeded id because the caller's params win
+ * ({@link seedFlowActionParams}). Two cases name none:
+ *
+ *  - an action whose `recordIdField` names a field other than `id`: the door
+ *    seeds every row slot with that field's VALUE, never an id of this
+ *    object, so there is no row of this object to load a slot's value as;
+ *  - a value equal to the routed `recordId` this door's subject load already
+ *    delivered (an object-bound action): that row was judged by that load.
+ */
+function flowActionCallerRecordKeys(
+    action: any,
+    objectName: string,
+    params: Record<string, unknown>,
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): Array<readonly [string, unknown]> {
+    const idField: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+    if (idField !== 'id') return [];
+    const judged = recordId !== undefined && recordId !== '' && !isObjectLessActionKey(objectName) && !subject.recordLoadDenied
+        ? recordId
+        : undefined;
+    const keys: Array<readonly [string, unknown]> = [];
+    for (const key of flowActionRowIdKeys(action, objectName)) {
+        if (!Object.prototype.hasOwnProperty.call(params, key)) continue;
+        const value = params[key];
+        if (judged !== undefined && (typeof value === 'string' || typeof value === 'number') && String(value) === judged) continue;
+        keys.push([key, value]);
+    }
+    return keys;
+}
+
+/**
+ * The inputs this door hands a run from the REQUEST, each with the value the
+ * run receives under it ({@link seedFlowActionParams}'s bag), as flow start
+ * admission's third question judges them against the object the flow's own
+ * definition reads them from ({@link refuseUnreadableFlowStartRecords}): every
+ * key of the caller's own `params`, and each row slot carrying the routed
+ * record id. Two kinds of key are left out, because their values come from a
+ * row the caller has already shown it can read, not from the request:
+ *
+ *  - the subject row's own fields, which the bag carries under their names;
+ *  - the row slots of an action whose `recordIdField` names a field other than
+ *    `id`, which carry that field's value.
+ */
+function flowActionStartInputs(
+    action: any,
+    objectName: string,
+    params: Record<string, unknown>,
+    runParams: Record<string, unknown>,
+): Array<readonly [string, unknown]> {
+    const keys = new Set<string>(Object.keys(params));
+    const idField: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+    if (idField === 'id') {
+        for (const key of flowActionRowIdKeys(action, objectName)) keys.add(key);
+    }
+    return [...keys].map((key) => [key, runParams[key]] as const);
+}
+
+/**
  * Brand for {@link FlowActionRefusal} — `Symbol.for`, so recognition keeps
  * working even if two module instances of this file ever coexist (src vs
  * dist), where an `instanceof` would silently answer false.
@@ -2475,6 +2629,32 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
             code: startRefusal.code,
         });
     }
+    // Flow start admission's third question, the row the start addresses
+    // (`flow-start-admission.ts`): the routed row was judged by this door's
+    // subject load upstream, so what is asked here is every row slot the
+    // CALLER's own params fill, whose value reaches the run over that row's id.
+    // Each is loaded in the caller's scope by the read the subject load makes
+    // (the request's own driver, environment and identity, as both entrances
+    // load the routed row), and refused with that load's 404 before the run
+    // exists. Thrown with `code` + `status`, like the refusals above.
+    //
+    // The same question then follows every value this door hands the run's
+    // inputs that came from the request (the caller's params, and the routed
+    // id under the row slots) to the object the flow's own definition reads it
+    // from, where it declares one: the routed row was judged against the
+    // action's object, which is not always the object the flow reads.
+    const runParams = seedFlowActionParams(deps, action, { objectName, record, params, recordId });
+    await refuseUnreadableFlowStartRecords(
+        automation,
+        action.target,
+        {
+            objectName,
+            recordKeys: flowActionCallerRecordKeys(action, objectName, params, recordId, subject),
+            inputs: flowActionStartInputs(action, objectName, params, runParams),
+        },
+        ec,
+        (object, id) => callData(deps, requestContext, 'get', { object, id }, requestContext?.dataDriver, envId, ec),
+    );
     // Pass a proper AutomationContext (the engine never read the former
     // `triggerData` envelope).
     const result: any = await automation.execute(action.target, {
@@ -2501,7 +2681,7 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
         ...(typeof ec?.locale === 'string' && ec.locale.length > 0 ? { locale: ec.locale } : {}),
-        params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
+        params: runParams,
         // [#19846] Which of those keys the CALLER supplied, stated here where it
         // is known rather than inferred downstream from the merged bag.
         callerParamKeys: flowActionCallerParamKeys(action, objectName, params),
@@ -3111,22 +3291,34 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * hash keyed) and never the stored row. [#21594] An action BODY's API is built
  * over this one by the sandbox (`buildSandboxApi`), whose body layers refuse a
  * family read or write before it reaches this seam.
+ *
+ * [#28861] A write through it that the engine stored, whose parent roll-up
+ * could not be recomputed after it, answers the write's success to the
+ * handler (`landed-write-answer.ts`), on this context and every one it
+ * derives. That layer sits beneath the reader seam, so the answer is served
+ * like any write's return.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
+    const served = (scoped: unknown) =>
+        serveStoredMetadataReadsThrough(answerLandedWritesDespiteStaleSummary(scoped, ACTION_API_SURFACE), ql);
     try {
-        return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(ec)), ql);
+        return served(ql.createContext(buildActionExecutionContext(ec)));
     } catch {
         // A malformed caller envelope must not sink the action — fall back to
         // the bare elevated context (the same shape hooks default to), marked
         // as the body's elevation like every other (#25653).
         try {
-            return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(undefined)), ql);
+            return served(ql.createContext(buildActionExecutionContext(undefined)));
         } catch {
             return undefined;
         }
     }
 }
+
+/** [#28861] The surfaces the stale-column line names, for an action handler's two data handles. */
+const ACTION_API_SURFACE = 'action ctx.api';
+const ACTION_ENGINE_SURFACE = 'action ctx.engine';
 
 /**
  * The sentence a caller still on the WITHDRAWN bare-filter shape must read
@@ -3215,17 +3407,31 @@ function assertActionEngineFindEnvelope(object: string, query: Record<string, un
  * use. Every call carries {@link buildActionExecutionContext} so `ctx.engine`
  * and `ctx.api` write under the SAME identity (#3914); passing `ec` is what
  * separates a trusted write from a context-less one.
+ *
+ * [#28861] A write the engine stored, whose parent roll-up could not be
+ * recomputed after it, answers the write's success here, as on `ctx.api`
+ * ({@link landedWriteAnswer}): the handler's next line runs. Every other
+ * throw, a refusal before the write among them, reaches the handler as is.
  */
 export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?: any): any {
     const context = buildActionExecutionContext(ec);
     return {
         async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data, { context });
+            let res: unknown;
+            try {
+                res = await ql.insert(object, data, { context });
+            } catch (e) {
+                res = landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+            }
             const id = (res && (res as any).id) ?? (data as any).id;
             return { id };
         },
         async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id }, context });
+            try {
+                await ql.update(object, data, { where: { id }, context });
+            } catch (e) {
+                landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+            }
         },
         // Both spellings are DECLARED contract (#15117), not a tolerance: the
         // spec's `ActionEngineFacade.delete` takes `string | string[]`.
@@ -3244,10 +3450,17 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
         // it pulls the runtime back onto the contract that is already on the
         // record, here, in the spec member doc, and in the `never a null id`
         // pin at `packages/spec/src/ui/action-params.test.ts`.
+        //
+        // [#28861] Each id's landed delete is answered on its own, so a stale
+        // roll-up after one id's delete does not leave the later ids undeleted.
         async delete(object: string, idOrIds: string | string[]): Promise<void> {
             const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
             for (const id of ids) {
-                await ql.delete(object, { where: { id }, context });
+                try {
+                    await ql.delete(object, { where: { id }, context });
+                } catch (e) {
+                    landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+                }
             }
         },
         // [#15124] The ENVELOPE goes through — this arm no longer builds one.
@@ -3547,6 +3760,144 @@ export function apiForwardSubjectRecord(
 ): Record<string, unknown> {
     if (!subject.recordLoadDenied) return subject.record;
     return recordId ? { id: recordId } : {};
+}
+
+/**
+ * The row-slot keys a start hands a run, each with the value the run will
+ * receive under it — what {@link refuseUnreadableFlowStartRecords} loads.
+ */
+export type FlowStartRecordKeys = ReadonlyArray<readonly [key: string, value: unknown]>;
+
+/**
+ * Flow start admission's THIRD question, the row a start addresses
+ * (`flow-start-admission.ts`), as the ONE function every door that starts a
+ * flow by name calls after `flowStartRefusal` and before `execute()`.
+ *
+ * ## The rule
+ *
+ * Every record key a door hands the run in a row slot the door defines
+ * (`recordId`, the `<object>Id` alias, an action's declared `recordIdParam`)
+ * is loaded first, in the CALLER's own scope, through
+ * {@link loadActionSubjectRecord}, and a key that scope does not deliver is
+ * refused by {@link refuseDeniedSubjectLoad}: the action door's own
+ * `404 RECORD_NOT_FOUND`, one envelope for a row the caller cannot read and an
+ * id that names nothing, so no door is an existence oracle the action door
+ * declines to be. Before `execute()`, so a refused start persists no run.
+ *
+ * It holds for every run, as the action door's load does: a persisted run is
+ * built only on a row the caller has shown it can read. A `runAs: 'system'`
+ * run is where the rule bites, because its nodes read and write past the
+ * caller's own access.
+ *
+ * ## The object a key is loaded from
+ *
+ * `objectName` is the object the start names: the action's own object at the
+ * action door, the request's `objectName` (or `object`) at the trigger routes
+ * and a declared endpoint, the object the door hands the run as `object` and
+ * derives the `<object>Id` alias from. A start whose keys come with no object
+ * to load them from (none named, or an object-less action key) cannot be
+ * judged:
+ *
+ *  - an ELEVATED run ({@link flowRunsElevated}) is refused
+ *    `400 VALIDATION_FAILED` naming `objectName`, the one thing the caller
+ *    adds to be judged;
+ *  - a user run starts as before: it reads in the caller's own scope.
+ *
+ * A key whose value is not one record id (a string or a number) is never
+ * loaded and is refused `400 VALIDATION_FAILED` naming the key: only an id
+ * names one row.
+ *
+ * ## The object the flow reads a start input from
+ *
+ * The object the start names is not always the object the run reads. A flow's
+ * own definition can state that it reads a start input as the id of a row of
+ * a fixed object ({@link flowDeclaredRecordReads}: a CRUD node's `filter.id`,
+ * a screen edit form's `recordId`, handed on through `subflow` and `map`
+ * inputs). Every such input the start hands the run (`start.inputs`, the
+ * `params` the run's input variables are bound from, row slots included) is
+ * judged against THAT object too, by the same load and the same refusals: the
+ * value must be one record id (a list of ids where the flow reads a list), or
+ * the start is refused `400 VALIDATION_FAILED` naming the input, and each id
+ * is loaded in the caller's own scope from the object the flow reads it from,
+ * or the start is refused `404 RECORD_NOT_FOUND` for that object. This holds
+ * whether or not the start names an object, and whatever object it names.
+ *
+ * ## What stays as it was
+ *
+ *  - **The system principal** (`isSystem`, never set on inbound HTTP) starts
+ *    every flow on every row, as the two admission rules let it.
+ *  - **A start that names no record key**, to a flow that declares no record
+ *    read of what it was handed, loads nothing.
+ *  - **A key the door already loaded** is not passed in `recordKeys`: the
+ *    action door's subject load judged the routed id against the action's
+ *    object, and its tests stay as they are.
+ *
+ * `readRecord` is the door's own caller-scope read, the `callData('get', …)`
+ * its subject load uses, so there is no second loader.
+ */
+export async function refuseUnreadableFlowStartRecords(
+    automation: unknown,
+    flowName: string,
+    start: { objectName: unknown; recordKeys: FlowStartRecordKeys; inputs?: FlowStartRecordKeys },
+    executionContext: { isSystem?: boolean } | null | undefined,
+    readRecord: (objectName: string, recordId: string) => Promise<unknown>,
+): Promise<void> {
+    if (executionContext?.isSystem === true) return;
+    const loaded = new Set<string>();
+    const loadOrRefuse = async (objectName: string, recordId: string): Promise<void> => {
+        const once = `${objectName}\u0000${recordId}`;
+        if (loaded.has(once)) return;
+        const subject = await loadActionSubjectRecord(objectName, recordId, () => readRecord(objectName, recordId));
+        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        loaded.add(once);
+    };
+    const named = start.recordKeys.filter(([, value]) => isNamedStartValue(value));
+    if (named.length > 0) {
+        const objectName = typeof start.objectName === 'string' && start.objectName !== '' && !isObjectLessActionKey(start.objectName)
+            ? start.objectName
+            : undefined;
+        if (objectName === undefined) {
+            if (await flowRunsElevated(automation, flowName)) {
+                const message = 'A start that names a record must also name the record\'s object (`objectName`), '
+                    + 'so the caller\'s access to that record can be checked before the flow starts.';
+                throw validationFailure(message, [{ field: 'objectName', code: 'required', message }]);
+            }
+        } else {
+            for (const [key, value] of named) {
+                await loadOrRefuse(objectName, oneRecordIdOrRefuse(key, value));
+            }
+        }
+    }
+    const inputs = (start.inputs ?? []).filter(([, value]) => isNamedStartValue(value));
+    if (inputs.length === 0) return;
+    const reads = await flowDeclaredRecordReads(automation, flowName);
+    for (const [key, value] of inputs) {
+        for (const read of reads.get(key) ?? []) {
+            const ids = read.many ? recordIdListOrRefuse(key, value) : [oneRecordIdOrRefuse(key, value)];
+            for (const recordId of ids) await loadOrRefuse(read.object, recordId);
+        }
+    }
+}
+
+/** Whether a start names something under a key: absent, `null` and `''` name nothing. */
+function isNamedStartValue(value: unknown): boolean {
+    return value !== undefined && value !== null && value !== '';
+}
+
+/** One record id (a string or a number), or the `400` naming the key: only an id names one row. */
+function oneRecordIdOrRefuse(key: string, value: unknown): string {
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    const message = `The record key \`${key}\` must name one record by its id.`;
+    throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
+}
+
+/** A list of record ids, or the `400` naming the key: a flow that reads a list of ids reads nothing else. */
+function recordIdListOrRefuse(key: string, value: unknown): string[] {
+    if (Array.isArray(value) && value.every((id) => typeof id === 'string' || typeof id === 'number')) {
+        return value.map(String);
+    }
+    const message = `The record key \`${key}\` must name a list of records by their ids.`;
+    throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
 }
 
 /**
@@ -4018,13 +4369,37 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     } catch (err) {
         // [#28856] A refusal carrying the action's answer is answered as the
         // success it is by the `run_action` tool, so the row records that.
-        await recordActionInvocation(deps, requestContext, envId, earnedAnswerOf(err)
+        //
+        // [#28861] Read on the declarative-update arm only: that arm composes
+        // the ACTION's answer and attaches it (`dispatchAdmittedBusinessAction`).
+        // Any other arm's refusal can carry only a WRITE's data answer — a
+        // handler that let out a refusal a data door attached its answer to —
+        // and the action that threw has no result. It is answered as the
+        // failure it is, and leaves this door with nothing attached, so the
+        // `run_action` tool, which reads every throw, cannot relay it either.
+        const declarative = isDeclarativeUpdateAction(action);
+        await recordActionInvocation(deps, requestContext, envId, declarative && earnedAnswerOf(err)
             ? { ...invocation, outcome: 'succeeded' }
             : { ...invocation, outcome: 'failed', ...actionInvocationFailure(err) });
-        throw err;
+        throw declarative ? err : withoutWriteAnswer(err);
     }
     await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
     return answer;
+}
+
+/**
+ * [#28861] `err` with no write answer attached: a stale-roll-up refusal a data
+ * door attached its answer to comes back as the same refusal — objectql's
+ * class, `failures`, `written`, message and stack — with nothing attached;
+ * every other value is returned as is. For a non-declarative arm's throw,
+ * whose attached answer is a write's, never the action's.
+ */
+function withoutWriteAnswer(err: unknown): unknown {
+    if (earnedAnswerOf(err) === undefined) return err;
+    const stale = err as SummaryRecomputeRefusal;
+    const bare = new SummaryRecomputeError([...(stale.failures ?? [])] as SummaryRecomputeError['failures'], stale.written);
+    if (typeof stale.stack === 'string') bare.stack = stale.stack;
+    return bare;
 }
 
 /**

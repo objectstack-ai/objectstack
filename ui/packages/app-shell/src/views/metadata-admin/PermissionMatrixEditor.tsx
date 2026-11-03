@@ -126,7 +126,7 @@ import { CatalogItemActiveSwitch } from './CatalogActiveSwitch.js';
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { errorCodeIs } from '@object-ui/types';
-import type { MetadataError } from '@object-ui/data-objectstack';
+import { formatMetadataError, type MetadataError } from '@object-ui/data-objectstack';
 import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
 import { isStudioHiddenSystemField } from '../studio-design/studioHiddenSystemField.js';
 import type { PermissionSetCloned } from './permission-set-clone.js';
@@ -149,6 +149,7 @@ import {
   type ObjectPermFlag,
   type FieldPerm,
   type PermissionSetDraft,
+  permissionObjectScopePackages,
 } from './permission-slice.js';
 import type { ObjectAccessScope } from '@objectstack/spec/security';
 
@@ -846,6 +847,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const [savedAt, setSavedAt] = React.useState<Date | null>(null);
   const displayLocale = useDisplayLocale();
   const [error, setError] = React.useState<string | null>(null);
+  // objectstack#29148 — the server refused to read this set's pending package
+  // draft (`403`: the row is there and withheld from this author). No matrix
+  // is installed over it, so nothing is shown to edit and the autosave has
+  // nothing to send: one seeded from the published set would be saved over
+  // the draft, dropping every change it holds. Held as thrown, worded at render.
+  const [draftRefused, setDraftRefused] = React.useState<{ error: unknown } | null>(null);
   // objectui#9484 — the ENVIRONMENT door's post-save baseline re-read REJECTED.
   // The write itself has already landed when that read runs, so this is an
   // advisory notice about the DISPLAY being un-refreshed, and it deliberately
@@ -921,6 +928,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     setSaveRefusedAsLocked(null);
     setCloned((c) => (c && c.name === name ? c : null));
     setServedLabel(null);
+    setDraftRefused(null);
     (async () => {
       try {
         // ADR-0086 P2 (D6): under the package door a set is draft/published
@@ -971,13 +979,25 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           // first publish: each pending draft is served with a `_draft` mark
           // (the object picker's read, `useObjectCatalog`). The environment
           // door keeps the published list: only the package door authors drafts.
+          // objectstack#29674 — a pair's set is scoped to its base's objects
+          // too (`permissionObjectScopePackages`), each list read the same way.
           (packageId
-            ? client.withPreviewDrafts(true).list<any>('object', { packageId })
+            ? Promise.all(
+                permissionObjectScopePackages(packageId).map((scopeId) =>
+                  client.withPreviewDrafts(true).list<any>('object', { packageId: scopeId }),
+                ),
+              ).then((lists) => lists.flat())
             : client.list<any>('object', {})
           ).catch(() => []),
           draftReadForSave,
         ]);
         if (cancelled) return;
+        // objectstack#29148 — a refused draft read is no absence: see `draftRefused`.
+        if (pendingRead && 'refused' in pendingRead) {
+          forgetSetVersion();
+          setDraftRefused({ error: pendingRead.refused });
+          return;
+        }
         const pendingDraft = pendingRead?.answer ?? null;
         verdictReadSeq.current += 1;
         setServedVerdict(
@@ -1025,7 +1045,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               ...(item?._draft === true ? { draft: true } : {}),
             };
           })
-          .filter((o) => !!o.name)
+          // One row per object: a name two scope packages both answer keeps
+          // the first one's row (the set's own package lists first).
+          .filter((o, i, rows) => !!o.name && rows.findIndex((r) => r.name === o.name) === i)
           .sort((a, b) => a.name.localeCompare(b.name));
         setObjects(list);
         const full: PermissionSetDraft = {
@@ -1634,9 +1656,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const autosaveTarget = `${type}:${name}`;
   useDraftAutoSave({
     target: autosaveTarget,
-    loadedFor: loading ? '' : autosaveTarget,
+    loadedFor: loading || draftRefused ? '' : autosaveTarget,
     dirty: isDirty,
-    blocked: !packageId || !writable || saving || saveHeld || destructive !== null,
+    blocked: !packageId || !writable || saving || saveHeld || destructive !== null || draftRefused !== null,
     snapshot: draft,
     save: (sent) => doSave(false, undefined, sent),
   });
@@ -1805,6 +1827,22 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         ) : null
       )}
     </>
+  );
+  // objectstack#29148 — in place of the matrix: why no set is open, the
+  // server's own sentence behind Details (the Studio refusal strip's look).
+  const draftRefusedEl = draftRefused && (
+    <div
+      data-testid="perm-draft-unreadable"
+      className="m-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+    >
+      <p role="alert" className="whitespace-pre-line">
+        {t('engine.studio.refusal.draftUnreadable')}
+      </p>
+      <details className="mt-1">
+        <summary className="cursor-pointer select-none opacity-80">{t('engine.studio.refusal.details')}</summary>
+        <pre className="mt-1 whitespace-pre-wrap break-words font-mono opacity-90">{formatMetadataError(draftRefused.error)}</pre>
+      </details>
+    </div>
   );
   const noticesEl = (
     <>
@@ -2240,6 +2278,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> {t('perm.loading').replace('{name}', name)}
           </div>
+        ) : draftRefusedEl ? (
+          draftRefusedEl
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {noticesEl}
@@ -2268,7 +2308,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 t={t}
               />
               {objectInheritedLegendEl}
-              <MatrixScrollPane className="flex-1" testId="perm-matrix-pane">
+              <MatrixScrollPane className={MATRIX_PANE} testId="perm-matrix-pane">
                 <StudioObjectMatrix
                   objects={filteredObjects}
                   draft={draft}
@@ -2333,6 +2373,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin" /> {t('perm.loading').replace('{name}', name)}
         </div>
+      </PageShell>
+    );
+  }
+
+  if (draftRefusedEl) {
+    return (
+      <PageShell entry={entry} itemName={name} embedded={embedded} readOnly={readOnly}>
+        {draftRefusedEl}
       </PageShell>
     );
   }
@@ -2461,7 +2509,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         {objectInheritedLegendEl}
 
         {/* Matrix */}
-        <MatrixScrollPane className="flex-1" testId="perm-matrix-pane">
+        <MatrixScrollPane className={MATRIX_PANE} testId="perm-matrix-pane">
           <PermissionTable
             objects={filteredObjects}
             draft={draft}
@@ -3158,11 +3206,27 @@ function StudioObjectRow({
 }
 
 /**
- * objectstack#26846 — the field sub-table's name cell, header and rows alike:
- * pinned to the left edge of the matrix's scroll container, over an opaque
- * background so the boxes scrolling under it do not show through.
+ * objectstack#29677 — the matrix's scroll pane is a size container, so the
+ * field panel under an expanded object can be as wide as the pane shows
+ * ({@link FIELD_PANEL}).
  */
-const FIELD_NAME_CELL = 'sticky left-0 z-[1] bg-background pr-2';
+const MATRIX_PANE = 'flex-1 @container';
+
+/**
+ * objectstack#29677 — the field panel under an expanded object (toolbar,
+ * legend and sub-table): pinned at the expanded cell's own left inset (`pl-12`
+ * on both hosts) while the matrix scrolls sideways, and no wider than the
+ * pane shows less both insets. The field table needs four columns, not the
+ * matrix's floor, so it never scrolls with the object columns: every Read and
+ * Edit box stays in view and clickable at any scroll offset, and the field
+ * name beside it stays readable.
+ *
+ * It replaces objectstack#26846's pinned name column. That column was the
+ * table's flexible one, so it took all the width the floor left over (697 px
+ * at a 1304 px matrix), and once pinned it covered both boxes from a scroll of
+ * 80 px on; below 1304 px of pane the boxes could not be reached at all.
+ */
+const FIELD_PANEL = 'sticky left-12 max-w-[calc(100cqi-6rem)]';
 
 /**
  * objectstack#27866 — the field sub-table's header cells: pinned to the top of
@@ -3350,7 +3414,7 @@ function FieldsSubTable({
   }
   const sharesLabel = (f: FieldSummary) => (labelCounts.get((f.label ?? f.name).trim().toLowerCase()) ?? 0) > 1;
   return (
-    <div className="space-y-2">
+    <div className={cn('space-y-2', FIELD_PANEL)} data-testid={`perm-field-panel-${objectName}`}>
       {/* Field toolbar (B4): filter + bulk over the visible field set. The
           filter only appears once one-by-one would actually hurt. */}
       {/* objectstack#26846 — the count sits beside the filter it counts. At
@@ -3417,12 +3481,13 @@ function FieldsSubTable({
         <table className="w-full text-xs">
           <thead data-testid={`perm-field-head-${objectName}`}>
             <tr className="text-muted-foreground">
-              {/* objectstack#26846 — the name column stays in view while the
-                  matrix scrolls sideways (FIELD_NAME_CELL).
+              {/* objectstack#29677 — the whole panel stays in view while the
+                  matrix scrolls sideways (FIELD_PANEL), so the name column
+                  needs no pin of its own.
                   objectstack#27866 — the header pins under the matrix's own
                   (FIELD_HEAD_CELL), so a long field list scrolled into view is
                   labelled by its own columns, not by the object columns above. */}
-              <th className={cn('text-left py-1 font-medium', FIELD_NAME_CELL, FIELD_HEAD_CELL, 'z-[3]')}>{t('perm.field.col.name')}</th>
+              <th className={cn('text-left py-1 pr-2 font-medium', FIELD_HEAD_CELL)}>{t('perm.field.col.name')}</th>
               <th className={cn('px-2 py-1 font-medium w-16 text-center', FIELD_HEAD_CELL)} title={t('perm.field.read')}>{t('perm.field.read')}</th>
               <th className={cn('px-2 py-1 font-medium w-16 text-center', FIELD_HEAD_CELL)} title={t('perm.field.edit')}>{t('perm.field.edit')}</th>
               <th className={cn('px-2 py-1 font-medium text-left', FIELD_HEAD_CELL)} title={t('perm.field.when.tip')}>{t('perm.field.when')}</th>
@@ -3439,7 +3504,7 @@ function FieldsSubTable({
                 <React.Fragment key={f.name}>
                   <tr className="border-t border-muted">
                     <td
-                      className={cn('py-1', FIELD_NAME_CELL)}
+                      className="py-1 pr-2"
                       data-testid={`perm-field-name-${objectName}-${f.name}`}
                       data-shared-label={sharesLabel(f) || undefined}
                     >

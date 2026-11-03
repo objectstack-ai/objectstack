@@ -244,6 +244,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      list_platform_admins: {
+        label: "プラットフォーム管理者",
+        resultDialog: {
+          title: "プラットフォーム管理者",
+          description: "現在プラットフォーム管理者の資格を持つ全員：既定の組織が所有する有効期間内の admin_full_access 付与を持つ人、またはデプロイの所有者リストに確認済みのアドレスが載っている人。",
+          acknowledge: "閉じる",
+          fields: {
+            entries: "プラットフォーム管理者"
+          }
+        }
+      },
       update_my_profile: {
         label: "プロフィール更新",
         successMessage: "プロフィールを更新しました"
@@ -1400,6 +1411,38 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       by_user: {
         label: "ユーザー別"
+      }
+    }
+  },
+  sys_personal_view: {
+    label: "個人ビュー",
+    pluralLabel: "個人ビュー",
+    description: "閲覧者自身が名前を付けたリストビュー（マイビュー）。所有者だけに表示されます。",
+    fields: {
+      id: {
+        label: "個人ビュー ID"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      },
+      user_id: {
+        label: "所有者",
+        help: "このビューが属するユーザー。このユーザーだけが参照・変更できます。"
+      },
+      object_name: {
+        label: "オブジェクト",
+        help: "このビューが一覧表示するオブジェクト（マシン名）。"
+      },
+      label: {
+        label: "名前",
+        help: "所有者がこのビューに付けた名前。"
+      },
+      config: {
+        label: "ビュー設定",
+        help: "spec の ListView 形式のリスト設定。保存のたびに検証されます。"
       }
     }
   },

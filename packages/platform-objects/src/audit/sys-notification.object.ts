@@ -44,7 +44,6 @@ export const SysNotification = ObjectSchema.create({
   description: 'Every notification the platform sent, one row per event.',
   displayNameField: 'topic',
   nameField: 'topic', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{topic}',
   highlightFields: ['topic', 'severity', 'source_object', 'created_at'],
 
   listViews: {

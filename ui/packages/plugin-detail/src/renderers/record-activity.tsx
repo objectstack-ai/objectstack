@@ -323,6 +323,11 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   const activityDenied =
     hostItems !== undefined ? false : discussion ? !!discussion.activityDenied : canSelfFetch && selfDenied;
   const commentsDenied = hostItems === undefined && !!discussion?.commentsDenied;
+  // objectstack#29188: which of the host's reads FAILED (5xx, network). Only a
+  // mounted DiscussionContext reports it; host `items` and the self-fetch
+  // carry no failure verdict, as before.
+  const activityFailed = hostItems === undefined && !!discussion?.activityFailed;
+  const commentsFailed = hostItems === undefined && !!discussion?.commentsFailed;
 
   // The timeline takes `filterMode` as a CONTROLLED prop, so the authored
   // `filterMode` becomes the initial state here and the dropdown stays usable —
@@ -346,7 +351,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   const wholeTotal = asStream && hostTotal !== null ? hostTotal : applied.total;
   const reportCount = asPeek ? timelinePanel?.onCount : asStream ? (countReporter ?? undefined) : undefined;
   const reportsWhole = asPeek || streamFilter === 'all';
-  const streamCount = !loading && !activityDenied && !commentsDenied ? wholeTotal : null;
+  const streamCount = !loading && !activityDenied && !commentsDenied && !activityFailed && !commentsFailed ? wholeTotal : null;
   React.useEffect(() => {
     if (reportsWhole) reportCount?.(streamCount);
   }, [reportCount, reportsWhole, streamCount]);
@@ -379,6 +384,9 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         onUploadAttachments={discussion?.onUploadAttachments as any}
         activityDenied={activityDenied}
         commentsDenied={commentsDenied}
+        activityFailed={activityFailed}
+        commentsFailed={commentsFailed}
+        onRetryFeed={hostItems === undefined ? discussion?.onRetryFeed : undefined}
         {...(asPeek
           ? {
               variant: 'peek' as const,
@@ -443,7 +451,10 @@ export function RecordTimelineCountProbe({
   const read = (key: string) => node?.[key] ?? bag[key];
   const hostItems = Array.isArray(read('items')) ? (read('items') as FeedItem[]) : undefined;
   const loading: boolean = read('loading') ?? discussion?.loading ?? false;
-  const denied = hostItems !== undefined ? false : !!discussion?.activityDenied || !!discussion?.commentsDenied;
+  // objectstack#29188: a failed read leaves the count as unknown as a refused one.
+  const denied = hostItems !== undefined
+    ? false
+    : !!discussion?.activityDenied || !!discussion?.commentsDenied || !!discussion?.activityFailed || !!discussion?.commentsFailed;
   const sourceItems = hostItems ?? (discussion?.items as FeedItem[] | undefined);
   const types = read('types');
   const showCompleted = read('showCompleted');

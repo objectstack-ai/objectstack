@@ -443,6 +443,7 @@ import {
   isRefusedTextComparand,
   normalizeFilterComparandTypes,
   parseFilterAST,
+  RETIRED_FILTER_OPERATORS,
   textComparandRefusalReason,
   VALID_AST_OPERATORS,
 } from '@objectstack/spec/data';
@@ -1934,6 +1935,88 @@ function assertBooleanNullFlags(node: unknown, path = 'where'): void {
 }
 
 /**
+ * [#28945] A RETIRED filter operator (`$regex`, `$options`, every key of
+ * `RETIRED_FILTER_OPERATORS` in `@objectstack/spec/data`) in a field constraint,
+ * refused in this door's envelope with the retirement's own prescription.
+ *
+ * The data door answers `{ name: { $regex: 'acme' } }` with "… is RETIRED …
+ * Write "$icontains" instead", and the D3 retirement entry
+ * `filter-regex-options-retired` promises that answer everywhere. This door
+ * fell through to {@link fieldLeaves}' unsupported-operator list instead: the
+ * right envelope, but a vocabulary list where the author needs the one-line
+ * fix, on the door that serves stored dashboard widget filters.
+ *
+ * The sentence is the data door's, built the way each of its faces builds it
+ * (`driver-memory`'s and `driver-sql`'s `retiredFilterOperatorError`,
+ * `driver-mongodb`, `driver-turso`'s remote transport, `objectql`'s `having`):
+ * a lead-in naming the operator and the field, ` Write "TO" instead.`, then
+ * `RETIRED_FILTER_OPERATORS[op].why` VERBATIM, then every OTHER retired key of
+ * the same constraint, because `{ $regex: '^acme', $options: 'i' }` is ONE
+ * mistake with ONE fix. No word of the prescription is this package's: the
+ * spec table is the only place it is written. None of those builders is
+ * exported from a package this one depends on (a driver is the wrong direction
+ * for a dependency), so the lead-in is composed here the way each of them
+ * composes its own: `driver-sql`'s (the data door on a SQL stack) word for
+ * word, less its "by this driver".
+ *
+ * The lead-in names no path, on purpose: a client reads at most 500 characters
+ * of a refusal (`CLIENT_MESSAGE_MAX`, `@objectstack/types`), and the table's
+ * `why` puts everything the author must WRITE in its opening sentences for
+ * exactly that budget (#27098). A path deep in an `$or` would push those
+ * sentences past the cut; the field name is what the author repairs.
+ *
+ * Returns `null` when `op` is not retired, so an unknown operator keeps the
+ * generic list {@link fieldLeaves} gives it.
+ */
+function retiredFilterOperatorError(op: string, field: string, siblings: readonly string[]): Error | null {
+  const guidance = RETIRED_FILTER_OPERATORS[op];
+  if (!guidance) return null;
+  const replacement = guidance.to ? ` Write "${guidance.to}" instead.` : '';
+  const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
+  const also = alsoRetired.length
+    ? ` The same field constraint also carries the retired ` +
+      `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${guidance.to}" replaces the whole ` +
+      `shape, so this is ONE mistake with ONE fix, not one per key.`
+    : '';
+  return invalidFilterError(
+    `[analytics] Filter operator "${op}" on field "${field}" is RETIRED and is no longer evaluated.` +
+      `${replacement} ${guidance.why}${also}`,
+  );
+}
+
+/**
+ * [#28945] Refuse every retired operator of an object-form `where`, at any
+ * depth, before any node is built — see {@link retiredFilterOperatorError} for
+ * the sentence.
+ *
+ * Over {@link forEachWhereFieldEntry}'s one traversal, so a retired key is
+ * found in exactly the positions the shared faces judge (`$and` / `$or`
+ * members, `$not`, field entries, a nested relation's entries). It is the LAST
+ * pass of
+ * {@link normalizeWhereComparands}, so every face of this package answers it
+ * from the one call: the native execute, the `/analytics/sql` echo, the
+ * ObjectQL engine path (all through {@link lowerAnalyticsWhere}) and the draft
+ * preview (which calls {@link normalizeWhereComparands} itself, ahead of its
+ * own operator vocabulary). Last, so no refusal this door already gave moves:
+ * a shape, type or flag defect anywhere in the same `where` is still answered
+ * first, and the only cell that changes is the one that fell to the
+ * unsupported-operator list. The `FilterArray` spelling needs no pass: it has
+ * no retired operator name (`isFilterAST` refuses one before lowering).
+ */
+function assertNoRetiredOperators(node: unknown, path = 'where'): void {
+  forEachWhereFieldEntry(node, path, (key, spec) => {
+    if (!isFilterObject(spec)) return;
+    // Only `$`-keys reach the table: none of them is an `Object.prototype`
+    // member, so the plain lookup the data door's builders use is exact here.
+    const ops = Object.keys(spec).filter((k) => k.startsWith('$'));
+    for (const op of ops) {
+      const refusal = retiredFilterOperatorError(op, key, ops);
+      if (refusal) throw refusal;
+    }
+  });
+}
+
+/**
  * [#20035] The analytics `where` door's comparand gate: the shared
  * comparand-SHAPE face, then the shared comparand-TYPE face, on an object-form
  * condition, before any node is built. Returns the condition to lower — the
@@ -2024,6 +2107,9 @@ export function normalizeWhereComparands<T>(node: T, path = 'where'): T {
   // [#20040] Then the null flags' boolean domain, before any node is built —
   // see {@link assertBooleanNullFlags} for the order and why it is here.
   assertBooleanNullFlags(node, path);
+  // [#28945] Then a retired operator, with the retirement's prescription — see
+  // {@link assertNoRetiredOperators} for why it is the last pass.
+  assertNoRetiredOperators(node, path);
   return narrowed;
 }
 

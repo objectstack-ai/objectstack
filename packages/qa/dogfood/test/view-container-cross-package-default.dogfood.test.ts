@@ -110,14 +110,25 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     expect(defaults.map((r) => r.name), 'one list default, the packaged one').toEqual([DEFAULT]);
   };
 
-  it('control, first: the sanctioned override — a write to showcase_task.default by name — reaches both doors', async () => {
+  it('control, first: the sanctioned override — a write to showcase_task.default by name in its pair — reaches both doors', async () => {
     // First, on the pristine stack, so no other case's residue can decide it.
-    const saved = await stack.apiAs(token, 'PUT', `/meta/view/${DEFAULT}`, {
+    const body = {
       name: DEFAULT,
       object: OBJECT,
       viewKind: 'list',
       label: 'Overridden',
       config: { type: 'grid', columns: [{ field: 'title' }] },
+    };
+    // [#28576, ADR-0146 D11] The write naming no package onto the packaged
+    // default is closed, naming the base's pair; the override is written there.
+    const closed = await stack.apiAs(token, 'PUT', `/meta/view/${DEFAULT}`, body);
+    expect(closed.status).toBe(403);
+    expect(await closed.text()).toContain(`'${SHOWCASE}.custom' (?package=${SHOWCASE}.custom)`);
+    const pair = await stack.apiAs(token, 'POST', `/packages/${SHOWCASE}/ensure-customization`);
+    expect([200, 201]).toContain(pair.status);
+    const saved = await stack.apiAs(token, 'PUT', `/meta/view/${DEFAULT}?package=${SHOWCASE}.custom`, {
+      ...body,
+      overrides: { package: SHOWCASE, basedOn: '0.1.0' },
     });
     expect(saved.status).toBe(200);
 
@@ -129,7 +140,7 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     expect(read.config).toEqual(listed[0].config);
 
     // Deleting the override hands both doors back the packaged default.
-    const deleted = await stack.apiAs(token, 'DELETE', `/meta/view/${DEFAULT}`);
+    const deleted = await stack.apiAs(token, 'DELETE', `/meta/view/${DEFAULT}?package=${SHOWCASE}.custom`);
     expect(deleted.status).toBe(200);
     await expectDefaultUnchangedOnBothDoors();
   });

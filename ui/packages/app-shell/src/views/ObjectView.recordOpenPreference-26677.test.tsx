@@ -7,23 +7,23 @@
  */
 
 /**
- * objectstack#26677 — the console object page draws the split pane from the
- * READER's preference, not from metadata.
+ * objectstack#26677 — how the console object page opens a record is the
+ * READER's preference, not metadata.
  *
- * `split` left `NavigationModeSchema` (maintainer ruling 2026-10-27: an object
- * opens its records in the drawer, which expands to the full page; a
- * side-by-side pane is each reader's own choice). The console's `ObjectView`
- * now reads `os:record-open-mode` (`utils/recordOpenPreference.ts`) where it
- * used to read `navOverlay.mode === 'split'`. Three rows, one mount each, the
- * record opened the way a row click opens it (`?recordId=`):
+ * An object opens its records in the drawer, which expands to the full page
+ * (maintainer ruling 2026-10-27); how a row opens a drawer-mode record is
+ * each reader's own choice, read from `os:record-open-mode`
+ * (`utils/recordOpenPreference.ts`). objectstack#28915 retired the split pane
+ * beside the list (「默认改抽屉，分屏彻底退役，只留抽屉和整页」). Rows, one
+ * mount each, the record opened the way a link opens it (`?recordId=`):
  *
- *   - preference `split` → the split face: the list in the left pane with its
- *     record-count footer (drawn only there) and the pane's own close control;
- *   - preference `drawer` → the drawer: a dialog-role sheet, no footer, no pane;
- *   - no preference → the split face: the default since objectstack#27545
- *     (maintainer ruling 2026-10-29, Target 1);
+ *   - no preference → the drawer: a dialog-role sheet, nothing beside the list;
+ *   - preference `drawer` → the drawer, the same;
+ *   - a stored `split` → an unknown value: the drawer, the default;
+ *   - preference `page` → a `?recordId=` link still opens the drawer (a row
+ *     click is what the page preference changes);
  *   - a view that DECLARES `page` → the declaration wins over the preference:
- *     neither the pane nor the drawer is drawn on the list.
+ *     no drawer is drawn on the list.
  *
  * The record itself is not what this file reads, so `RecordDetailView` is a
  * null sink.
@@ -159,34 +159,42 @@ async function openRecord(objects: ReturnType<typeof objectsWith>) {
   await new Promise((settle) => setTimeout(settle, 80));
 }
 
-describe('objectstack#26677 — the split pane is the reader\'s preference', () => {
-  it('preference `split`: the record opens beside the list', async () => {
-    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
+describe('objectstack#26677 — how a record opens is the reader\'s preference', () => {
+  const drawnBesideList = () => screen.queryByTestId('record-split-pane');
+
+  it('objectstack#28915 — no preference: the record opens in the drawer, nothing beside the list', async () => {
     await openRecord(objectsWith());
-    expect(await screen.findByTestId('record-count-footer', undefined, { timeout: 5000 })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Close panel' })).toBeTruthy();
+    expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+    expect(drawnBesideList()).toBeNull();
+    expect(screen.queryByTestId('record-count-footer')).toBeNull();
   });
 
   it('preference `drawer`: the record opens in the drawer, and nothing is drawn beside the list', async () => {
     window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'drawer');
     await openRecord(objectsWith());
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
-    expect(screen.queryByTestId('record-count-footer')).toBeNull();
+    expect(drawnBesideList()).toBeNull();
     expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
   });
 
-  it('objectstack#27545 — no preference: the record opens beside the list', async () => {
-    await openRecord(objectsWith());
-    expect(await screen.findByTestId('record-split-pane', undefined, { timeout: 5000 })).toBeTruthy();
-    expect(screen.getByTestId('record-count-footer')).toBeTruthy();
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('a view that declares `page` keeps its declaration: the preference draws no pane', async () => {
+  it('objectstack#28915 — a stored `split` reads as the default: the drawer', async () => {
     window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
-    await openRecord(objectsWith({ mode: 'page' }));
-    expect(screen.queryByTestId('record-count-footer')).toBeNull();
+    await openRecord(objectsWith());
+    expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+    expect(drawnBesideList()).toBeNull();
     expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
+  });
+
+  it('preference `page`: a `?recordId=` link still opens the drawer', async () => {
+    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'page');
+    await openRecord(objectsWith());
+    expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+  });
+
+  it('a view that declares `page` keeps its declaration: no drawer over the list', async () => {
+    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'drawer');
+    await openRecord(objectsWith({ mode: 'page' }));
+    expect(drawnBesideList()).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

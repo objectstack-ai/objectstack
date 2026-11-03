@@ -41,6 +41,7 @@ import {
 } from './_shared.js';
 import { AddFieldPopover, FieldListRow } from '../previews/ViewColumnPanes.js';
 import { toFieldNameLoose, toFieldNameOrEmpty } from '../previews/object-fields-io.js';
+import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
 import type { ObjectFieldInfo } from '../previews/useObjectFields.js';
@@ -86,6 +87,14 @@ const REPORT_CURATED_FIELDS = new Set([
  * `blocks[]`, or delete it", PR objectstack#20160) and has always refused a
  * container `order` ("a `joined` report orders per block"). `chart` is inert
  * on a joined container (objectstack#20161) and is hidden by the same switch.
+ * `dateRange` and `exportOptions` are keys of ONE table over ONE dataset, and
+ * the joined arm refuses both whatever their value (objectstack#26548); the
+ * spec form's "Period & export" section hides them on a joined report.
+ *
+ * The list is every container key the joined arm of `ReportSchema` refuses.
+ * The spec exports no such list, so `ReportSchema` is the judge in the tests:
+ * a report carrying every key a non-joined report can carry, switched to
+ * `joined` here, must parse (`joinedClearsRefused-29195.test.tsx`).
  *
  * Why CLEAR rather than un-hide: the moment the type becomes `joined` this
  * inspector hides its dataset / values / rows / columns / chart controls
@@ -102,7 +111,16 @@ const REPORT_CURATED_FIELDS = new Set([
  * refinement skips. `runtimeFilter` and `drilldown` are deliberately NOT here:
  * the joined branch reads both.
  */
-const JOINED_CONTAINER_CLEARED_KEYS = ['dataset', 'values', 'rows', 'columns', 'chart', 'order'] as const;
+const JOINED_CONTAINER_CLEARED_KEYS = [
+  'dataset',
+  'values',
+  'rows',
+  'columns',
+  'chart',
+  'order',
+  'dateRange',
+  'exportOptions',
+] as const;
 
 /**
  * Chart types offered in the curated Chart panel. A dataset-bound report plots
@@ -343,8 +361,17 @@ export function ReportDefaultInspector({
   // objectui#12789 — the comparison uses the same derivation as the Label
   // handler below, so a Name left empty by a non-Latin Label still follows a
   // later Latin one, and a Name the author typed is never mistaken for the
-  // `field` placeholder.
-  const nameFollowsLabel = createMode && (nameValue === '' || nameValue === toFieldNameOrEmpty(labelValue));
+  // `field` placeholder. A Chinese Label derives through its pinyin
+  // (`romanizeHan`), on both sides of that comparison.
+  const nameFollowsLabel =
+    createMode && (nameValue === '' || nameValue === toFieldNameOrEmpty(romanizeHan(labelValue)));
+  // A Chinese Label typed before the pinyin dictionary landed left the Name
+  // empty; when it lands, an empty Name takes the derived one.
+  useWhenRomanizerLands(() => {
+    if (!createMode || readOnly || nameValue !== '' || !labelValue) return;
+    const derived = toFieldNameOrEmpty(romanizeHan(labelValue));
+    if (derived) onPatch({ name: derived });
+  }, labelValue);
   const datasetName =
     typeof draft.dataset === 'string' ? (draft.dataset as string) : '';
   const values = React.useMemo(() => readNames(draft.values), [draft.values]);
@@ -519,7 +546,7 @@ export function ReportDefaultInspector({
           // script, or a cleared Label) leaves the Name empty, as the object
           // designer does, so the save path asks the author for one; it never
           // writes the `field` placeholder.
-          if (nameFollowsLabel) patch.name = toFieldNameOrEmpty(v);
+          if (nameFollowsLabel) patch.name = toFieldNameOrEmpty(romanizeHan(v));
           onPatch(patch);
         }}
         placeholder={tr('engine.inspector.report.labelPlaceholder')}

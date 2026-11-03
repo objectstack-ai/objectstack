@@ -31,6 +31,7 @@ import {
   InspectorSelectField,
   InspectorRemoveButton,
   InspectorEmptyState,
+  InspectorReadOnlyReason,
 } from './_shared.js';
 import {
   mergeServerFlowFields,
@@ -284,7 +285,16 @@ function FlowNodeIdField({
   );
 }
 
-export function FlowNodeInspector({ selection, draft, onPatch, onClearSelection, onSelectionChange, locale, readOnly }: MetadataInspectorProps) {
+export function FlowNodeInspector({
+  selection,
+  draft,
+  onPatch,
+  onClearSelection,
+  onSelectionChange,
+  locale,
+  readOnly,
+  readOnlyReason,
+}: MetadataInspectorProps) {
   // Resolve the selection to a node + how to write it back — a top-level draft
   // node, or a node nested inside a container region (#2670). Every edit goes
   // through loc.write, so the inspector never branches on where the node lives.
@@ -694,7 +704,7 @@ export function FlowNodeInspector({ selection, draft, onPatch, onClearSelection,
   // read-only — those live on the container's Advanced JSON).
   const nested = !!loc?.nested;
 
-  return (
+  const shell = (
     <InspectorShell
       kindLabel={t('engine.inspector.flowNode.kind', locale)}
       title={node.label || node.id}
@@ -883,5 +893,18 @@ export function FlowNodeInspector({ selection, draft, onPatch, onClearSelection,
         )
       )}
     </InspectorShell>
+  );
+
+  // Read-only with a reason from the host: every control above is disabled for
+  // that one reason, so the panel carries it (`InspectorReadOnlyReason`).
+  return (
+    <InspectorReadOnlyReason
+      readOnly={readOnly}
+      reason={readOnlyReason}
+      label={flowNodeDisplayName(node, locale)}
+      testId="flow-node-readonly-reason"
+    >
+      {shell}
+    </InspectorReadOnlyReason>
   );
 }

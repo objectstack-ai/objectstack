@@ -14,9 +14,16 @@
  * - 📌, the reader's pin: the pinned view is the one this object's list opens
  *   when the address names none (`LIST_PINNED_VIEW_PREFERENCE`, per object).
  *
- * The dropdown ends with New view (the Create View dialog) and, for an admin,
- * Manage views (`ManageViewsDialog`): the rename, delete, shared default and
- * configure acts that each tab's ▾ menu used to carry.
+ * The reader's own views, My views (objectstack#29635, `./personalViews.ts`),
+ * are a section of their own, My views, beside the views the object's
+ * packages and environment declare. Their rows offer Rename and Delete too,
+ * and their 📌 is the same pin: a personal view pinned is the reader's default.
+ *
+ * The dropdown ends with Save as my view (the list on screen saved as one of
+ * the reader's own views, offered to any reader the server lets save one),
+ * New view (the Create View dialog) and, for an admin, Manage views
+ * (`ManageViewsDialog`): the rename, delete, shared default and configure acts
+ * that each tab's ▾ menu used to carry.
  *
  * Below `sm` the page header is not drawn. On a phone the same switcher leads
  * the list's toolbar row (`ListView`'s `toolbarLeading`) or heads a chart
@@ -30,7 +37,7 @@ import type { ViewTabItem } from '@object-ui/plugin-view';
 import { resolveViewId } from '@object-ui/core';
 import { useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { Check, ChevronDown, ListOrdered, Pin, Plus, Star } from 'lucide-react';
+import { BookmarkPlus, Check, ChevronDown, ListOrdered, Pencil, Pin, Plus, Star, Trash2 } from 'lucide-react';
 import { viewRowId } from '../utils/viewIdentity.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useListViewFavorites, type ListViewFavorites } from '../layout/listViewFavorites.js';
@@ -53,6 +60,8 @@ export interface TitleSwitcherView {
     type: string;
     /** Authored in the object's metadata (read-only), as opposed to a view saved at runtime. */
     authored: boolean;
+    /** One of the reader's own views (My views, a `sys_personal_view` row). */
+    personal?: boolean;
 }
 
 export interface ObjectViewTitleSwitcherProps {
@@ -80,12 +89,22 @@ export interface ObjectViewTitleSwitcherProps {
     onAddView?: () => void;
     /** Manage views: the admin's dialog. Absent ⇒ not offered. */
     onManageViews?: () => void;
+    /** Save as my view: the list on screen as one of the reader's own views. Absent ⇒ not offered. */
+    onSavePersonalView?: () => void;
+    /** Rename one of the reader's own views. Absent ⇒ not offered. */
+    onRenamePersonalView?: (viewId: string) => void;
+    /** Delete one of the reader's own views. Absent ⇒ not offered. */
+    onDeletePersonalView?: (viewId: string) => void;
     t: TFn;
 }
 
-/** The authored views first, then the saved ones, each in the list's order. */
+/** The authored views first, then the saved ones, each in the list's order; the reader's own last. */
 function authoredFirst(views: readonly TitleSwitcherView[]): TitleSwitcherView[] {
-    return [...views.filter((v) => v.authored), ...views.filter((v) => !v.authored)];
+    return [
+        ...views.filter((v) => v.authored),
+        ...views.filter((v) => !v.authored && !v.personal),
+        ...views.filter((v) => v.personal),
+    ];
 }
 
 function SectionLabel({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
@@ -111,6 +130,9 @@ export function ObjectViewTitleSwitcher({
     viewTypeIcons = VIEW_TYPE_ICONS,
     onAddView,
     onManageViews,
+    onSavePersonalView,
+    onRenamePersonalView,
+    onDeletePersonalView,
     t,
 }: ObjectViewTitleSwitcherProps) {
     const [open, setOpen] = useState(false);
@@ -120,6 +142,8 @@ export function ObjectViewTitleSwitcher({
 
     const byId = useMemo(() => new Map(views.map((v) => [v.id, v])), [views]);
     const all = useMemo(() => authoredFirst(views), [views]);
+    const shared = all.filter((v) => !v.personal);
+    const mine = all.filter((v) => v.personal);
     const pinned = pinnedViewId ? byId.get(pinnedViewId) : undefined;
     const recent = recentViewIds
         .filter((id) => id !== pinned?.id)
@@ -152,9 +176,13 @@ export function ObjectViewTitleSwitcher({
         const pinLabel = isPinned
             ? t('view.switcher.unpin', { defaultValue: 'Unpin: the list opens its default view again' })
             : t('view.switcher.pin', { defaultValue: 'Pin: open this view by default' });
+        const renameLabel = t('view.rename', { defaultValue: 'Rename' });
+        const deleteLabel = t('view.deleteView', { defaultValue: 'Delete View' });
+        const iconButton = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
         // Shown on hover or focus, and always while set, so a starred or pinned
         // view says so without a hover.
-        const reveal = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100';
+        // A touch screen has no hover, so there they always show.
+        const reveal = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100';
         return (
             <div
                 key={`${section}:${view.id}`}
@@ -167,7 +195,7 @@ export function ObjectViewTitleSwitcher({
                     onClick={() => choose(view.id)}
                     aria-current={active ? 'true' : undefined}
                     className={cn(
-                        'flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
+                        'flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm max-sm:min-h-11',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         active ? 'font-medium text-foreground' : 'text-foreground/90',
                     )}
@@ -188,7 +216,7 @@ export function ObjectViewTitleSwitcher({
                         aria-disabled={inMenu || undefined}
                         onClick={() => { if (!inMenu) favorites.toggle(view.id, view.label); }}
                         className={cn(
-                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm',
+                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm max-sm:h-11 max-sm:w-11',
                             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                             inMenu
                                 ? 'cursor-default text-muted-foreground/40'
@@ -207,13 +235,37 @@ export function ObjectViewTitleSwitcher({
                     aria-pressed={isPinned}
                     onClick={() => onPinnedViewChange(isPinned ? null : view.id)}
                     className={cn(
-                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground',
+                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         isPinned ? 'text-foreground' : reveal,
                     )}
                 >
                     <Pin className={cn('h-3.5 w-3.5', isPinned && 'fill-current')} />
                 </button>
+                {view.personal && onRenamePersonalView && (
+                    <button
+                        type="button"
+                        data-testid="view-switcher-rename"
+                        aria-label={renameLabel}
+                        title={renameLabel}
+                        onClick={() => { onOpenChange(false); onRenamePersonalView(view.id); }}
+                        className={cn(iconButton, reveal)}
+                    >
+                        <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                )}
+                {view.personal && onDeletePersonalView && (
+                    <button
+                        type="button"
+                        data-testid="view-switcher-delete"
+                        aria-label={deleteLabel}
+                        title={deleteLabel}
+                        onClick={() => { onOpenChange(false); onDeletePersonalView(view.id); }}
+                        className={cn(iconButton, reveal)}
+                    >
+                        <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                )}
             </div>
         );
     };
@@ -229,7 +281,8 @@ export function ObjectViewTitleSwitcher({
                         // No negative margin: the title's width is its content's, and a
                         // margin pulled out of it truncated the label it was sized for.
                         className={cn(
-                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left',
+                            // Below `sm` the trigger is a 44 px touch target.
+                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left max-sm:min-h-11 max-sm:min-w-11',
                             // Inset: the title clips what overflows it (`truncate`), an outer ring included.
                             'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             open && 'bg-muted',
@@ -253,7 +306,7 @@ export function ObjectViewTitleSwitcher({
                             placeholder={t('view.searchViews', { defaultValue: 'Search views' })}
                             aria-label={t('view.searchViews', { defaultValue: 'Search views' })}
                             data-testid="list-view-switcher-search"
-                            className="h-8"
+                            className="h-8 max-sm:h-11"
                         />
                     </div>
                     <div className="max-h-80 overflow-y-auto p-1">
@@ -281,21 +334,40 @@ export function ObjectViewTitleSwitcher({
                                         {recent.map((v) => row(v, 'recent'))}
                                     </div>
                                 )}
-                                <div data-testid="list-view-switcher-all">
-                                    <SectionLabel>{t('view.switcher.all', { defaultValue: 'All views' })}</SectionLabel>
-                                    {all.map((v) => row(v, 'all'))}
-                                </div>
+                                {mine.length > 0 && (
+                                    <div data-testid="list-view-switcher-mine">
+                                        <SectionLabel>{t('view.switcher.myViews', { defaultValue: 'My views' })}</SectionLabel>
+                                        {mine.map((v) => row(v, 'mine'))}
+                                    </div>
+                                )}
+                                {shared.length > 0 && (
+                                    <div data-testid="list-view-switcher-all">
+                                        <SectionLabel>{t('view.switcher.all', { defaultValue: 'All views' })}</SectionLabel>
+                                        {shared.map((v) => row(v, 'all'))}
+                                    </div>
+                                )}
                             </>
                         )}
                     </div>
-                    {(onAddView || onManageViews) && (
+                    {(onSavePersonalView || onAddView || onManageViews) && (
                         <div className="border-t p-1">
+                            {onSavePersonalView && (
+                                <button
+                                    type="button"
+                                    data-testid="list-view-switcher-save-mine"
+                                    onClick={() => { onOpenChange(false); onSavePersonalView(); }}
+                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
+                                >
+                                    <BookmarkPlus className="h-4 w-4 text-muted-foreground" />
+                                    {t('view.switcher.saveAsMyView', { defaultValue: 'Save as my view' })}
+                                </button>
+                            )}
                             {onAddView && (
                                 <button
                                     type="button"
                                     data-testid="list-view-switcher-new"
                                     onClick={() => { onOpenChange(false); onAddView(); }}
-                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
                                 >
                                     <Plus className="h-4 w-4 text-muted-foreground" />
                                     {t('view.addNewView', { defaultValue: 'Add new view' })}
@@ -306,7 +378,7 @@ export function ObjectViewTitleSwitcher({
                                     type="button"
                                     data-testid="list-view-switcher-manage"
                                     onClick={() => { onOpenChange(false); onManageViews(); }}
-                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
                                 >
                                     <ListOrdered className="h-4 w-4 text-muted-foreground" />
                                     {t('view.manageViews', { defaultValue: 'Manage views' })}
@@ -349,6 +421,10 @@ export function useObjectViewTitleSwitcher({
     setPinnedViewId,
     appSegment,
     viewTotal,
+    personalViewIds,
+    onSavePersonalView,
+    onRenamePersonalView,
+    onDeletePersonalView,
 }: {
     views: ReturnType<typeof buildViewTabs>;
     savedViews: Parameters<typeof buildViewTabs>[0]['savedViews'];
@@ -371,6 +447,11 @@ export function useObjectViewTitleSwitcher({
     appSegment: string | undefined;
     /** The records the list reported for a view, when it did. */
     viewTotal: { viewId: string; total: number } | null;
+    /** The ids of the reader's own views among `views` (objectstack#29635). */
+    personalViewIds: ReadonlySet<string>;
+    onSavePersonalView?: () => void;
+    onRenamePersonalView?: (viewId: string) => void;
+    onDeletePersonalView?: (viewId: string) => void;
 }) {
     // objectui#12528 — the view's description is shown once. A list face
     // draws it itself, as the info control at the start of its toolbar row
@@ -380,15 +461,20 @@ export function useObjectViewTitleSwitcher({
     // the display locale), and gated on the same switch the relay hands
     // `ListView` as `appearance.showDescription`: `false` shows it nowhere.
     const displayLocale = useDisplayLocale();
-    const viewTabItems: ViewTabItem[] = views.map((view: any) => {
+    const viewItems: ViewTabItem[] = views.map((view: any) => {
         const saved = savedViews.find((sv: any) => viewRowId(sv) === view.id);
+        // objectstack#29635 — the reader's own view is named by the name its
+        // owner gave it, drawn as given: it is no package's view to translate.
+        const personal = personalViewIds.has(view.id);
         // System views (loaded from objectDef.listViews / metadata) are
         // *read-only*. Only sys_view-backed records can be mutated by
         // the user; admins must duplicate a system view to customize it.
         const isSystem = !saved;
         return {
             id: view.id,
-            label: viewTabLabel(view, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
+            label: personal
+                ? String(view.label ?? '')
+                : viewTabLabel(view, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
             type: view.type,
             hasActiveFilters: Array.isArray(view.filter) && view.filter.length > 0,
             hasActiveSort: Array.isArray(view.sort) && view.sort.length > 0,
@@ -405,12 +491,19 @@ export function useObjectViewTitleSwitcher({
         } as ViewTabItem;
     });
 
-    const switcherViews: TitleSwitcherView[] = viewTabItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-        type: item.type,
-        authored: !!item.readonly,
-    }));
+    // The reader's own views are switched to here but are no view the admin's
+    // Manage views lists: they are each reader's data, not the object's views.
+    const viewTabItems = viewItems.filter((item) => !personalViewIds.has(item.id));
+    const switcherViews: TitleSwitcherView[] = viewItems.map((item) => {
+        const personal = personalViewIds.has(item.id);
+        return {
+            id: item.id,
+            label: item.label,
+            type: item.type,
+            authored: !personal && !!item.readonly,
+            ...(personal ? { personal: true } : {}),
+        };
+    });
     const viewIds = switcherViews.map((v) => v.id);
 
     // The views the reader opened lately (objectui#12604 records each list
@@ -432,7 +525,7 @@ export function useObjectViewTitleSwitcher({
     });
 
     const openViewId = viewAccess.refusal ? '' : activeViewId ?? '';
-    const openView = viewTabItems.find((item) => item.id === openViewId);
+    const openView = viewItems.find((item) => item.id === openViewId);
     const titleLabel = openView?.label ?? unlabelledViewText;
     const titleSwitcher = views.length >= 1 ? (
         <ObjectViewTitleSwitcher
@@ -448,6 +541,9 @@ export function useObjectViewTitleSwitcher({
             favorites={favorites}
             onAddView={isAdmin ? handleAddView : undefined}
             onManageViews={isAdmin ? () => setManageViewsOpen(true) : undefined}
+            onSavePersonalView={onSavePersonalView}
+            onRenamePersonalView={onRenamePersonalView}
+            onDeletePersonalView={onDeletePersonalView}
             t={t}
         />
     ) : null;

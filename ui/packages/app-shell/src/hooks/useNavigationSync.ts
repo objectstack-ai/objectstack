@@ -201,10 +201,22 @@ export function isPlatformArtifact(item: unknown): boolean {
  * 'no-overlay' reject PUT with 403 — a navigation write into such an app can
  * never succeed, so don't attempt it (each attempt surfaced as a red
  * "Failed to update navigation" toast).
+ *
+ * ADR-0131 D6: an app a managed package ships is sealed. `app` has no per-org
+ * overlay channel (`allowEnvironmentOverlay: false`), so the server refuses
+ * every package-less write onto a packaged app with `403 NOT_OVERRIDABLE`,
+ * whatever its lock (objectstack#29182). The app read marks such an app by its
+ * ADR-0010 provenance: the artifact loader stamps `_provenance: 'package'`
+ * (the stock showcase serves `showcase_app` so, with no `_lock`). A stored row
+ * carries no such stamp: a package-less app is served with no provenance keys,
+ * and an app of a package authored at runtime with `_packageId` alone, and the
+ * server takes a navigation write into either. So provenance decides, never
+ * `_packageId`.
  */
 export function isNavigationSyncableApp(app: unknown): boolean {
   if (!app || typeof app !== 'object') return false;
-  const a = app as { _lock?: string; protection?: { lock?: string } };
+  const a = app as { _lock?: string; protection?: { lock?: string }; _provenance?: unknown };
+  if (a._provenance === 'package') return false;
   const lock = a._lock ?? a.protection?.lock;
   return lock !== 'full' && lock !== 'no-overlay';
 }
@@ -601,6 +613,38 @@ export function isNavigationTargetType(type: unknown): type is NavigationTargetT
   return type === 'page' || type === 'dashboard';
 }
 
+/**
+ * The page kinds (`PageSchema.type`) that cannot render without a record, so a
+ * `type: 'page'` navigation entry, which opens `/apps/{app}/page/{name}` with
+ * no record id, can never open one. Today that is `record` alone: the nav
+ * target picker leaves it out for the same reason (`isStaticPageOption` in
+ * `views/metadata-admin/inspectors/nav-target.ts`). `home`, `app`, `utility`
+ * and `list` render without one.
+ */
+const RECORD_BOUND_PAGE_TYPES: ReadonlySet<string> = new Set(['record']);
+
+/**
+ * The page kind a page body states. A body that leaves `type` out is a record
+ * page: `PageSchema` declares `type` with the default `PAGE_TYPE_DEFAULT`
+ * (`'record'`, `@objectstack/spec` `ui/default-record-page.ts`), which judges
+ * an unparsed body the same way.
+ */
+function pageTypeOf(body: Record<string, unknown>): unknown {
+  return body.type === undefined ? 'record' : body.type;
+}
+
+/**
+ * Whether a page body may be written into app navigation: a page whose kind
+ * renders without a record. A page that needs one (a `record` page) is never
+ * navigable on its own, so a navigation entry for it opens a page with no
+ * record (objectstack#29182).
+ */
+export function isNavigablePage(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const type = pageTypeOf(body as Record<string, unknown>);
+  return typeof type === 'string' && !RECORD_BOUND_PAGE_TYPES.has(type);
+}
+
 export interface UseNavigationWritesReturn {
   /**
    * A page or dashboard was just published for the FIRST time (it held no
@@ -609,7 +653,9 @@ export interface UseNavigationWritesReturn {
    *
    * `item` is the published body when the caller holds one: its provenance
    * (`_packageId`, `_provenance`) decides, with the name, whether it is a
-   * platform artifact, which never writes navigation.
+   * platform artifact, which never writes navigation. A page's `type` decides
+   * whether it is navigable at all; a caller that holds no body has the page
+   * read by name.
    */
   created: (type: string, name: string, item?: unknown) => Promise<void>;
   /** A page or dashboard was just deleted, leaving no baseline behind. Removes its entries from every app that may be written. */
@@ -626,6 +672,9 @@ export interface UseNavigationWritesReturn {
  * that diff's rules, so the same items reach navigation from the console:
  *
  *  - only a `page` or a `dashboard`;
+ *  - on create, only a page that renders without a record
+ *    ({@link isNavigablePage}, objectstack#29182): a `record` page joins no
+ *    app's navigation;
  *  - never a platform artifact ({@link isPlatformArtifact}): an item a package
  *    install or a CLI deploy brings carries `_packageId`, and its package ships
  *    the navigation that exposes it;
@@ -641,6 +690,10 @@ export interface UseNavigationWritesReturn {
  */
 export function useNavigationWrites(): UseNavigationWritesReturn {
   const previewDrafts = usePreviewDrafts();
+  const adapter = useAdapter();
+  const adapterRef = useRef(adapter);
+  adapterRef.current = adapter;
+  const { t } = useObjectTranslation();
   const {
     syncPageCreatedAllApps,
     syncDashboardCreatedAllApps,
@@ -657,15 +710,42 @@ export function useNavigationWrites(): UseNavigationWritesReturn {
     [previewDrafts],
   );
 
+  /**
+   * The body of a page just created: the one the caller holds, else the
+   * published one, read by name (a publish of every pending draft holds only
+   * the draft list's rows). `undefined` when that read fails.
+   */
+  const createdPageBody = useCallback(
+    async (name: string, item: unknown): Promise<unknown> => {
+      if (item && typeof item === 'object') return item;
+      try {
+        const client = adapterRef.current?.getClient();
+        const res = (await client?.meta.getItem('page', name)) as { item?: unknown } | undefined;
+        return res?.item;
+      } catch {
+        return undefined;
+      }
+    },
+    [],
+  );
+
   const created = useCallback(
     async (type: string, name: string, item?: unknown) => {
       if (!writes(type, name, item)) return;
       // No author label: the entry inherits its target's label at render time
       // (objectui#9868), as the diff's entries did.
-      if (type === 'page') await syncPageCreatedAllApps(name);
-      else await syncDashboardCreatedAllApps(name);
+      if (type === 'page') {
+        // objectstack#29182 — a page that needs a record joins no app.
+        const body = await createdPageBody(name, item);
+        if (body === undefined) {
+          toast.error(t('navigationSync.updateFailed'));
+          return;
+        }
+        if (!isNavigablePage(body)) return;
+        await syncPageCreatedAllApps(name);
+      } else await syncDashboardCreatedAllApps(name);
     },
-    [writes, syncPageCreatedAllApps, syncDashboardCreatedAllApps],
+    [writes, createdPageBody, t, syncPageCreatedAllApps, syncDashboardCreatedAllApps],
   );
 
   const deleted = useCallback(

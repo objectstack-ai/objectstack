@@ -244,6 +244,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      list_platform_admins: {
+        label: "平台管理员",
+        resultDialog: {
+          title: "平台管理员",
+          description: "当前持有平台管理员资格的所有人：持有默认组织所有、仍在有效期内的 admin_full_access 授权，或其已验证邮箱在部署的所有者名单上。",
+          acknowledge: "关闭",
+          fields: {
+            entries: "平台管理员"
+          }
+        }
+      },
       update_my_profile: {
         label: "更新资料",
         successMessage: "已更新资料"
@@ -1400,6 +1411,38 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       by_user: {
         label: "按用户"
+      }
+    }
+  },
+  sys_personal_view: {
+    label: "个人视图",
+    pluralLabel: "个人视图",
+    description: "读者自己命名的列表视图（我的视图），仅本人可见。",
+    fields: {
+      id: {
+        label: "个人视图 ID"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      },
+      user_id: {
+        label: "所有者",
+        help: "此视图所属的用户。只有该用户可以读取或修改它。"
+      },
+      object_name: {
+        label: "对象",
+        help: "此视图列出的对象（其机器名）。"
+      },
+      label: {
+        label: "名称",
+        help: "所有者为此视图起的名字。"
+      },
+      config: {
+        label: "视图配置",
+        help: "列表配置，采用 spec 的 ListView 结构。每次保存都会校验。"
       }
     }
   },

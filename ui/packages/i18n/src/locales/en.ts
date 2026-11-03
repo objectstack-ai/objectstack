@@ -10,6 +10,7 @@ const en = {
     banner: {
       message: 'You are impersonating {{user}} — every action is recorded as them.',
       startedBy: 'Started by administrator {{admin}}.',
+      startedByUnnamed: 'Started by an administrator.',
       stop: 'Stop impersonating',
       stopping: 'Stopping…',
       stopFailed: 'Could not stop impersonating: {{reason}}',
@@ -145,7 +146,6 @@ const en = {
   actions: {
     decisionOutput: {
       help: 'Handed to the flow as a decision output.',
-      helpMultiValue: 'Handed to the flow as a decision output. Comma-separate multiple values.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -232,6 +232,12 @@ const en = {
     // allows it: sharing, ownership or row-level security (objectstack#27138).
     noPermissionToEditRecord: "You don't have permission to edit this record. The fields are read-only.",
     submitFailed: 'Could not save. Please try again.',
+    // The banner an edit form shows when its record read is refused: a
+    // denial, a not-found (which row-level security answers for a hidden row,
+    // so the line never tells the two apart), and any other failure.
+    noPermissionToOpenRecord: "You don't have access to this record.",
+    recordNotFoundOrHidden: "This record doesn't exist, or you don't have access to it.",
+    openRecordFailed: 'Could not open this record. Please try again.',
     uploadInFlight: 'Wait for the upload to finish before saving.',
     // The notice the record form raises when a field's own `visibleWhen` turns
     // it invisible and the form clears the value it held (objectui#8070 names
@@ -416,6 +422,11 @@ const en = {
       uploadIncomplete: 'Upload of "{{name}}" did not complete: no file id was returned, so nothing was saved',
       restricted: 'Restricted file',
       restrictedHint: 'You do not have access to the details of this file',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Scan code',
+      failed: 'Could not scan',
     },
     image: {
       upload: 'Upload image',
@@ -1069,6 +1080,7 @@ const en = {
     noMatches: 'No matching records',
     noMatchesMessage: 'No records match your current filters or search. Try adjusting or clearing them.',
     clearSearch: 'Clear search',
+    clearFilters: 'Clear filters',
     viewFilterNoMatchesMessage: 'No records match this view’s filter.',
     ownedNoneTitle: 'Nothing of yours yet',
     ownedNoneMessage: 'This view lists only records that are yours, and you don’t have any yet.',
@@ -1117,8 +1129,6 @@ const en = {
     pullToRefresh: 'Pull to refresh',
     refreshing: 'Refreshing…',
     share: 'Share',
-    sharingPersonal: 'Personal view',
-    sharingCollaborative: 'Shared view',
     sharingLockedBy: 'Locked by {{user}}',
     print: 'Print',
     hideFieldsTitle: 'Hide Fields',
@@ -1129,7 +1139,6 @@ const en = {
     resetToViewDefault: 'Reset to view default',
     recordOpen: 'Open records',
     recordOpenDrawer: 'Drawer',
-    recordOpenSplit: 'Split',
     recordOpenPage: 'Full page',
     recordOpenNote: 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
     recordOpenDeclaredPage: 'This object is declared to open as a full page',
@@ -1384,6 +1393,10 @@ const en = {
       pin: 'Pin: open this view by default',
       unpin: 'Unpin: the list opens its default view again',
       inMenu: 'Already in the menu',
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: 'My views',
+      saveAsMyView: 'Save as my view',
+      myViewName: 'View name',
     },
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
@@ -1704,6 +1717,9 @@ const en = {
     noActivity: 'No activity recorded',
     activityAccessDenied: "You don't have permission to view activity on this record.",
     commentsAccessDenied: "You don't have permission to view comments on this record.",
+    activityLoadFailed: "We couldn't load the activity for this record.",
+    commentsLoadFailed: "We couldn't load the comments for this record.",
+    retryLoadFeed: 'Retry',
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
     // `detail.*` pack did not already name, and the `formatFieldChange`
     // sentences, which are assembled in code and so need interpolation holes.
@@ -1849,7 +1865,6 @@ const en = {
     undo: 'Undo',
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
-    versionHistory: 'Version history',
   },
   dashboard: {
     total: 'Total',
@@ -2227,7 +2242,9 @@ const en = {
       title: 'Settings',
       subtitle: 'Configure your system, integrations, and feature flags.',
       loadError: 'Failed to load settings',
-      empty: 'No settings registered. Plugins can register settings manifests via the SettingsService.',
+      empty: 'No settings pages are available yet. They appear here when an installed app provides them.',
+      adminManaged: 'Settings are managed by your administrator',
+      adminManagedDescription: 'Your account cannot view or change these settings. Ask an administrator if something needs to change.',
       settingsCount: '{{n}} settings',
       beta: 'Beta',
       // Section headers, keyed by the manifest `category` value. Unknown
@@ -2833,8 +2850,23 @@ const en = {
       // (rename / pin / set-as-default / configure), so the copy has to cover
       // any change to a built-in view rather than name one operation.
       cannotEditMetaView: 'This view is built in and defined in code — it cannot be changed.',
-      resetView: 'Reset view',
-      resetViewTitle: 'Set this view back to its own sort, filters and column widths. Only yours change.',
+      resetView: 'Reset to view',
+      resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
+      personalized: 'Personalized',
+      personalizedHeading: 'Your list differs from this view in',
+      personalizedParts: {
+        filters: 'Filters',
+        search: 'Search',
+        sort: 'Sort',
+        grouping: 'Grouping',
+        columns: 'Column layout',
+        hiddenFields: 'Hidden fields',
+        density: 'Density',
+        layout: 'Layout',
+        rowColor: 'Row color',
+        rowNumbers: 'Row numbers',
+        inlineEdit: 'Inline editing',
+      },
       cannotDeleteMetaView: 'This view is built in and defined in code — it cannot be deleted.',
       expandToPage: 'Open as full page',
       openAsPage: 'Open as full page',
@@ -3193,8 +3225,22 @@ const en = {
       // the same with or without the pack.
       ssoButton: 'Sign in with SSO',
       ssoOnlyDescription: "Sign in with your organization's single sign-on",
+      noSignInMethodText: 'No sign-in method is available. Contact your administrator.',
       usePasswordText: 'Use a password instead',
       backToSsoText: 'Back to single sign-on',
+      // objectstack#29105 — the second step of a password sign-in for an account
+      // with two-factor sign-in on: the code from the authenticator app, or a
+      // backup code. Each English value is `LoginForm`'s own default.
+      twoFactorTitle: 'Two-factor authentication',
+      twoFactorDescription: 'Enter the 6-digit code from your authenticator app.',
+      twoFactorBackupDescription: 'Enter one of the backup codes you saved when you set up two-factor authentication.',
+      twoFactorCodeLabel: 'Authentication code',
+      twoFactorBackupCodeLabel: 'Backup code',
+      twoFactorVerifyButton: 'Verify',
+      twoFactorVerifyingButton: 'Verifying…',
+      twoFactorUseBackupCodeText: 'Use a backup code instead',
+      twoFactorUseAuthenticatorText: 'Use your authenticator app instead',
+      twoFactorBackText: 'Back to sign in',
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: 'Welcome back',
@@ -3232,6 +3278,13 @@ const en = {
         invalidCredentials: 'Invalid email or password. Please try again.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
+        // objectstack#29105 — refusals of the two-factor sign-in step, by the
+        // server's code (`signInRefusalMessages`).
+        twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',
+        twoFactorInvalidBackupCode: 'That backup code is not valid or has already been used.',
+        twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
+        twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
+        twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
       },
     },
     register: {
@@ -3730,8 +3783,6 @@ const en = {
     browseMarketplace: 'Browse App Marketplace',
     quickActions: {
       title: 'Quick Actions',
-      manageObjects: 'Manage Objects',
-      manageObjectsDesc: 'Configure data models',
       systemSettings: 'System Settings',
       systemSettingsDesc: 'Configure your system',
     },
@@ -3775,7 +3826,6 @@ const en = {
       systemSettings: 'System Settings',
       applications: 'Applications',
       appMarketplace: 'App Marketplace',
-      objectManager: 'Object Manager',
       users: 'Users',
       organizations: 'Organizations',
       roles: 'Roles',
@@ -3903,6 +3953,8 @@ const en = {
     changes: {
       title: 'Pending changes',
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
+      // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
+      savedToCustomization: 'Saved to {{package}}’s customizations',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',
@@ -5499,85 +5551,33 @@ const en = {
       bulkOperationFailed: 'Bulk operation failed: {{reason}}',
     },
   },
-  // objectui#6301 — Setup › Packaged automation (ADR-0126 §7.4): the
-  // operational surface for the flows an installed package ships. Authoring
+  // objectui#6301 — Setup › Packaged actions (ADR-0126 §7.4, §8 item 2): the
+  // operational surface for the actions an installed package ships. Authoring
   // stays in Studio, so this group has no editing vocabulary at all; it is
-  // on/off, clone, and the states those two produce.
+  // on/off and the states that produces. The flows half of the page (its list
+  // and its clone dialog) retired into Studio's Automations pillar (ADR-0146
+  // D11), and its keys left every pack with it.
   //
   // ⛔ No drift or ancestry wording anywhere in this group (ADR-0126 §9). There
   // is deliberately no "customized", no "based on v3", no "out of date" — the
   // platform does not track that lineage, and a translatable string for it is
   // the cheapest way for the surface to grow one.
   //
-  // ⛔ Server refusals are NOT in this group either. The posture gate, the
-  // subflow guard and the clone name conflict all arrive as server-authored
-  // prose and are rendered verbatim; the four `*Failed*` keys below are the
-  // last-resort fallbacks for a response that carried no message at all.
+  // ⛔ Server refusals are NOT in this group either. They arrive as
+  // server-authored prose and are rendered verbatim; the `*Failed*` keys below
+  // are the last-resort fallbacks for a response that carried no message at all.
   packagedAutomation: {
-    title: 'Packaged automation',
-    // Covers BOTH sections since ADR-0126 §8 item 2 put packaged actions on
-    // this page: only flows can be cloned, so the clone clause names them.
-    subtitle:
-      'Flows and actions shipped by installed packages. Turn one off for this deployment, or clone a flow under a new name to customize it. Editing happens in Studio.',
     refresh: 'Refresh',
-    // Section headings — the page carries two tables.
-    flowsHeading: 'Packaged flows',
     actionsHeading: 'Packaged actions',
-    colFlow: 'Flow',
     colActivation: 'Activation',
-    colActions: 'Actions',
-    // The switch's accessible name — the only place a row's label is spoken.
-    toggleLabel: 'Activation for {{label}}',
     on: 'On',
     off: 'Off',
-    // The Activation badge on a flow whose switch is ON but whose trigger the
-    // engine has not armed on this deployment (objectui#13159): the switch
-    // keeps the flag, this says the flow does not run. The same words as
-    // Studio's rail for the same state (`engine.studio.auto.notRunning`).
-    notRunning: 'Not running here',
-    // The same row when the engine's cause is `deployment_policy` (objectstack#27378):
-    // package-authored scheduled work is off on this deployment. Plain words for the
-    // admin; the platform's sentence, which names the operator switch, stays behind
-    // the Details chip.
-    notRunningDeploymentPolicy: 'On, but this deployment does not run scheduled work',
-    clone: 'Clone',
-    cloneTitle: 'Clone packaged flow',
-    cloneBody:
-      'The copy carries the whole definition and takes a new machine name and label. Edit the copy in Studio.',
-    cloneName: 'New machine name',
-    cloneLabel: 'New label',
-    // The Clone dialog's prefilled label (objectui#13344): the source flow's
-    // label, or its machine name when it has none, marked as the copy.
-    cloneCopyLabel: '{{label}} (copy)',
     cancel: 'Cancel',
-    cloneConfirm: 'Create clone',
-    cloneCreated: 'Created flow "{{name}}".',
-    // The clone result's next steps (objectui#13270): switch the flow the
-    // admin cloned from off through its own toggle, or open the clone where
-    // it is edited. The sharing-rule clone's words for the same offer.
-    cloneSwitchSourceOff: 'Switch "{{label}}" off',
-    cloneSourceOff: 'The packaged flow "{{label}}" is switched off.',
-    cloneOpen: 'Open the clone in Studio',
-    emptyTitle: 'No packaged flows',
-    emptyBody:
-      'No installed package ships an automation flow on this deployment. Flows you author yourself live in Studio.',
-    loadFailed: 'Could not load packaged automation.',
     // Two keys per action, not one: the response arm has an HTTP status to
     // name and the transport-exception arm does not, and a single key cannot
     // carry a hole only half its call sites can fill.
-    // Artifact-neutral by wording, and shared by BOTH sections' toggles: the
-    // sentence says nothing about flows, so the actions half reuses it rather
-    // than defining a second key with the same English in ten packs.
     toggleFailedHttp: 'Could not change activation (HTTP {{status}}).',
     toggleFailed: 'Could not change activation.',
-    cloneFailedHttp: 'Could not clone this flow (HTTP {{status}}).',
-    cloneFailed: 'Could not clone this flow.',
-    // The chip an unarmed flow row's platform sentence opens from
-    // (objectui#12609). ⛔ Generic on purpose: the same word on every row that
-    // carries a sentence, whatever the sentence says. The sentence itself is
-    // the server's and is never kept in a pack; a label naming its cause would
-    // be the console classifying a field the contract says not to parse.
-    reasonDetails: 'Details',
 
     // ── Packaged ACTIONS section (ADR-0126 §8 item 2, ruling 3) ────────────
     // ⛔ No clone key here on purpose: the action-clone half is unchartered,
@@ -5593,7 +5593,7 @@ const en = {
     actionsEmptyBody:
       'No installed package declares an action on this deployment. Actions you author yourself live in Studio.',
     actionsLoadFailed: 'Could not load packaged actions.',
-    // The toast after a switch the server accepted, in both sections, and
+    // The toast after a switch the server accepted, and
     // the confirm a packaged action's switch-off asks first (objectstack#27521).
     switchedOn: '"{{label}}" is switched on.',
     switchedOff: '"{{label}}" is switched off for this deployment.',
@@ -5684,6 +5684,26 @@ const en = {
     retry: 'Try again',
     emptyTitle: 'No connector needs connecting',
     emptyBody: 'None of the installed apps has a connector that an administrator signs in to with OAuth.',
+    clientKeptWithSecret: 'OAuth client {{clientId}}, secret stored',
+    clientKept: 'OAuth client {{clientId}}, no secret',
+    clientTitle: 'OAuth client for {{name}}',
+    clientIntro: 'This connector signs in with an OAuth client your organization registers with the vendor for this deployment, using the redirect URI below. Enter the client\'s ID, and its secret if the vendor issued one, then continue to the vendor\'s sign-in.',
+    clientStored: 'Stored client: {{clientId}}',
+    clientStoredSecret: 'A client secret is stored with it. It is never shown.',
+    clientStoredNoSecret: 'No client secret is stored with it.',
+    clientResend: 'Replacing it sends a new client: enter its client ID, and its secret if the vendor issued one.',
+    clientId: 'Client ID',
+    clientSecret: 'Client secret',
+    clientSecretHint: 'Leave it empty for a public client. The secret is stored encrypted with the connection and never shown again.',
+    clientContinue: 'Continue to sign-in',
+    redirectUriLabel: 'Redirect URI',
+    redirectUriCopy: 'Copy',
+    redirectUriCopied: 'Copied',
+    redirectUriHint: 'Register this exact URI with the vendor\'s OAuth client before you continue.',
+    redirectUriMissing: 'This deployment has no fixed public address, so it has no redirect URI and a connect is refused. Set OS_BASE_URL (or OS_AUTH_URL) on the server.',
+    clientKeepHint: 'Reconnecting keeps this client and its stored secret; nothing is entered here.',
+    clientKeep: 'Keep the stored client',
+    clientReplace: 'Replace the stored client',
   },
   // Setup → People & organization: Position holders and Permission set
   // assignment (ADR-0146 D7).

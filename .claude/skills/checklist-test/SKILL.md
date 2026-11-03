@@ -263,10 +263,9 @@ QA-source: #运行记录号 · area.item · 条款
   blocked 判定是一次成功运行;伪造的 pass 不是。
 - **每个产品问题同一轮经 §4 立 issue。** `fail` 条款与条款外探测同样,⛔ 不只留在运行记
   录或聊天;安全发现按下一条。
-- **安全发现不立卡,复现不上 GitHub**(安全发现 = 认证 / 授权漏洞,或复现即利用配方的发
-  现):⛔ 不立任何卡,锚卡、跟踪卡不提;复现经会话间消息私报给**派发它的 PM 会话**(无此
-  通道则留本会话,终报报 blocked),由它经 pm-dispatch 派修复:席内 `os-dev` 子代理、`xhigh`,复现只
-  进派发令,PR、提交与 changeset 只写加固;要定契约的交维护者。运行记录只留一行
+- **安全发现不立卡,复现不上 GitHub**:定义、私卡与修复派发全照 pm-dispatch
+  `references/security-findings.md`,⛔ 这里不复述。runner 只把复现经会话间消息私报给
+  **派发它的 PM 会话**(无此通道则留本会话,终报报 blocked)。运行记录只留一行
   `area.item · 条款 · security finding — detail withheld, reported to PM`,算已完成判定、标题计 `FAIL`。
 - **runner 只测试。** 记录、缺陷卡、评论与 issue / PR 的每步处理都走 §4 写入门;⛔ 不派
   `os-dev`,⛔ 不驱动 PR:一轮产出的每个 PR 归派发的 PM 会话复核、欠时契约复审、翻 ready 与

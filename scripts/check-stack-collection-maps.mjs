@@ -661,17 +661,22 @@ const SITES = [
       },
       {
         direction: 'missing',
-        keys: ['datasets', 'jobs', 'datasources', 'translations'],
+        keys: ['jobs', 'datasources', 'translations'],
         reason:
-          'DRIFT with a real, bounded consequence — #6242 row 4(b). All four are consumed '
+          'DRIFT with a real, bounded consequence — #6242 row 4(b). All three are consumed '
           + 'functionally by AppPlugin straight off the bundle, so boot is not broken; what they never do is '
           + 'register as METADATA ITEMS, so under `bootstrap: \'artifact-only\'` (edge / serverless / '
-          + 'immutable image) `GET /meta/job`, `/meta/translation`, `/meta/datasource` and `/meta/dataset` '
-          + 'answer empty for a package that ships them. Adding them changes what a sealed runtime serves '
-          + 'and must be measured on a real artifact-only boot first — the filing card says so, and this '
-          + 'gate does not smuggle it in. `capabilities` was the FIFTH key on this row and left it at '
+          + 'immutable image) `GET /meta/job`, `/meta/translation` and `/meta/datasource` answer empty for '
+          + 'a package that ships them. Adding them changes what a sealed runtime serves and must be '
+          + 'measured on a real artifact-only boot first — the filing card says so, and this gate does not '
+          + 'smuggle it in. `datasets` left this row when the residual rule began walking it: it was never '
+          + 'the same fact, since AppPlugin reads no dataset off the bundle (the ObjectQL registry takes a '
+          + 'package body\'s datasets through its own collection loop), and with no entry here a '
+          + '`packages[]` stack\'s top-level dataset that no body declared was neither registered nor '
+          + 'refused. Measured on an artifact boot before the entry landed. `capabilities` was the FIFTH key '
+          + 'on this row and left it at '
           + '#12892 step 1 (maintainer ruling, option 1: the door owns the registration route for the five '
-          + 'security collections). It was never the same fact as the other four: AppPlugin registers it as '
+          + 'security collections). It was never the same fact as the other three: AppPlugin registers it as '
           + 'a METADATA ITEM through `registerInMemory`, so `GET /meta/capability` was already non-empty on '
           + 'an artifact-only boot — what was missing from that answer was the strict-parsed shape, the '
           + '`scope` default and the ADR-0010 provenance stamp. Driven on a real artifact-only boot before '

@@ -37,6 +37,7 @@ import {
   InspectorCheckboxField,
   InspectorRemoveButton,
   InspectorEmptyState,
+  InspectorReadOnlyReason,
   spliceArray,
 } from './_shared.js';
 import { Label } from '@object-ui/components';
@@ -73,6 +74,7 @@ export function FlowEdgeInspector({
   onSelectionChange,
   locale,
   readOnly,
+  readOnlyReason,
 }: MetadataInspectorProps) {
   const edges = Array.isArray((draft as any).edges) ? ((draft as any).edges as FlowDesignerEdge[]) : [];
   const index = edges.findIndex((e, i) => edgeKey(e, i) === selection.id);
@@ -204,7 +206,7 @@ export function FlowEdgeInspector({
 
   const edgeType = (typeof edge.type === 'string' && edge.type) || 'default';
 
-  return (
+  const shell = (
     <InspectorShell
       kindLabel={t('engine.inspector.flowEdge.kind', locale)}
       // Read off the edge itself, each end by its node's name (objectui#13143):
@@ -375,5 +377,18 @@ export function FlowEdgeInspector({
         </p>
       )}
     </InspectorShell>
+  );
+
+  // Read-only with a reason from the host: every control above is disabled for
+  // that one reason, so the panel carries it, as the node inspector's does.
+  return (
+    <InspectorReadOnlyReason
+      readOnly={readOnly}
+      reason={readOnlyReason}
+      label={flowEdgeDisplayName(edge, nodes, locale)}
+      testId="flow-edge-readonly-reason"
+    >
+      {shell}
+    </InspectorReadOnlyReason>
   );
 }

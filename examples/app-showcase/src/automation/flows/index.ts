@@ -8,7 +8,7 @@ import { RecalcEstimatesFlow, RecalcTaskEstimateFlow } from './recalc-estimate.f
 /**
  * Task Completed → Notify — an autolaunched, record-triggered flow that fires
  * when a task transitions to Done, composes a one-line summary in a registered
- * function, and notifies the assignee.
+ * function, and notifies the assignee (the organization's owners when it has none).
  *
  * It also carries the two node types #4343 sorted out from each other:
  *
@@ -81,11 +81,12 @@ export const TaskCompletedFlow = defineFlow({
         // `record.project.owner` would not resolve unless the start node
         // declared `expand: ['project']`; the sibling
         // `showcase_task_done_notify_owner` is where that hop is demonstrated.
-        // A CEL value envelope, evaluated per run. `assignee` is optional and
-        // CEL refuses an absent key, so it is guarded: an unset assignee
-        // evaluates to `null`, which adds no recipient, and the node — left
-        // with none — fails as it did when the template resolved to nothing.
-        recipients: { dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' },
+        // A CEL value envelope, evaluated per run. `assignee` is optional, and
+        // the trigger record carries it as `null` when unset (`has()` is true
+        // on a null column, so it guards nothing here). A task with no
+        // assignee tells the organization's owners instead, because a notify
+        // left with no recipient fails the run.
+        recipients: { dialect: 'cel', source: "isBlank(record.assignee) ? 'role:owner' : record.assignee" },
         title: '✅ Task done: {{ record.title }}',
         message: '{{ summary }}',
         sourceObject: 'showcase_task',
@@ -180,13 +181,16 @@ export const TaskAssignedNotifyFlow = defineFlow({
         condition: 'assignee != previous.assignee',
       },
     },
+    // Unassigning a task also changes `assignee`, to `null`. There is nobody
+    // to tell "you have been assigned", so the run ends there.
+    { id: 'has_assignee', type: 'decision', label: 'Assigned to someone?' },
     {
       id: 'notify_assignee',
       type: 'notify',
       label: 'Notify Assignee',
       config: {
         topic: 'task.assigned',
-        recipients: [{ dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' }],
+        recipients: [{ dialect: 'cel', source: 'record.assignee' }],
         channels: ['inbox'],
         severity: 'info',
         title: 'New task assigned: {{ record.title }}',
@@ -197,7 +201,9 @@ export const TaskAssignedNotifyFlow = defineFlow({
     { id: 'end', type: 'end', label: 'End' },
   ],
   edges: [
-    { id: 'e1', source: 'start', target: 'notify_assignee' },
+    { id: 'e1', source: 'start', target: 'has_assignee' },
+    { id: 'e1a', source: 'has_assignee', target: 'notify_assignee', label: 'assigned', condition: '!isBlank(record.assignee)' },
+    { id: 'e1b', source: 'has_assignee', target: 'end', label: 'unassigned', isDefault: true },
     { id: 'e2', source: 'notify_assignee', target: 'end' },
   ],
 });
@@ -236,7 +242,10 @@ export const BudgetApprovalFlow = defineFlow({
         // project — otherwise any unrelated edit (status, health, …) re-opens
         // an approval and collides with other approval flows on the same
         // record (the approvals service dedupes pending requests per record).
-        condition: 'budget > 100000 && budget != previous.budget',
+        // `budget` is optional, and clearing it hands the trigger `null`,
+        // which CEL cannot compare: `!= null` first, so a cleared budget
+        // starts nothing instead of faulting the condition.
+        condition: 'budget != null && budget > 100000 && budget != previous.budget',
       },
     },
     {
@@ -663,13 +672,16 @@ export const TaskFollowUpFlow = defineFlow({
       // `wait` has no timeout, and this run resumes when the timer elapses.
       waitEventConfig: { eventType: 'timer', timerDuration: 'PT1M' },
     },
+    // The reminder asks the assignee to update the task. A task created with
+    // no assignee has nobody to ask, so the run ends there.
+    { id: 'has_assignee', type: 'decision', label: 'Assigned to someone?' },
     {
       id: 'remind',
       type: 'notify',
       label: 'Remind Assignee',
       config: {
         topic: 'task.followup',
-        recipients: [{ dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' }],
+        recipients: [{ dialect: 'cel', source: 'record.assignee' }],
         channels: ['inbox'],
         severity: 'info',
         title: 'Follow up on: {{ record.title }}',
@@ -681,7 +693,9 @@ export const TaskFollowUpFlow = defineFlow({
   ],
   edges: [
     { id: 'e1', source: 'start', target: 'hold' },
-    { id: 'e2', source: 'hold', target: 'remind' },
+    { id: 'e2', source: 'hold', target: 'has_assignee' },
+    { id: 'e2a', source: 'has_assignee', target: 'remind', label: 'assigned', condition: '!isBlank(record.assignee)' },
+    { id: 'e2b', source: 'has_assignee', target: 'end', label: 'unassigned', isDefault: true },
     { id: 'e3', source: 'remind', target: 'end' },
   ],
 });
@@ -886,7 +900,10 @@ export const ProjectClosureFlow = defineFlow({
       label: 'Notify Owner of Decision',
       config: {
         topic: 'project.closure',
-        recipients: [{ dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }],
+        // A project with no owner tells the organization's owners: the
+        // decision still needs a reader, and a notify left with no recipient
+        // fails the run after the sign-off already happened.
+        recipients: [{ dialect: 'cel', source: "isBlank(record.owner) ? 'role:owner' : record.owner" }],
         channels: ['inbox'],
         severity: 'info',
         title: 'Closure sign-off: {{ record.name }}',
@@ -1039,7 +1056,10 @@ export const FanOutNotifyFlow = defineFlow({
                 type: 'notify',
                 label: 'Notify Owner',
                 config: {
-                  recipients: { dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' },
+                  // A failed branch fails the whole block, the Slack post
+                  // with it, so a task with no assignee tells the
+                  // organization's owners instead.
+                  recipients: { dialect: 'cel', source: "isBlank(record.assignee) ? 'role:owner' : record.assignee" },
                   title: '✅ Done: {{ record.title }}',
                   sourceObject: 'showcase_task',
                   sourceId: { dialect: 'cel', source: 'record.id' },
@@ -1116,9 +1136,11 @@ export const FanOutNotifyFlow = defineFlow({
  * demonstrated by `BatchRemindersFlow` instead.
  *
  * Input rows are task-shaped — `{ id, title, owner, watcher }`. `owner` and
- * `watcher` are the two recipients and `notify` refuses an empty resolved
- * recipient set, so a row missing either ends the sweep; drive it with at least
- * two rows so the `(iteration, branch)` pairs have something to distinguish.
+ * `watcher` are the two recipients. A row is caller data, so either key may be
+ * absent as well as null or blank; such a branch tells the organization's
+ * owners instead, because `notify` refuses an empty resolved recipient set and
+ * one failed branch would end the sweep. Drive it with at least two rows so the
+ * `(iteration, branch)` pairs have something to distinguish.
  *
  * Fixture for `docs/qa/platform-checklist/areas/automation.json`
  * → `automation.flow-run-step-nesting`, the `loop { parallel }` clause.
@@ -1164,7 +1186,7 @@ export const NestedFanOutRemindersFlow = defineFlow({
                         type: 'notify',
                         label: 'Notify Owner',
                         config: {
-                          recipients: { dialect: 'cel', source: 'has(task.owner) ? task.owner : null' },
+                          recipients: { dialect: 'cel', source: "has(task.owner) && !isBlank(task.owner) ? task.owner : 'role:owner'" },
                           title: 'Overdue ({{ taskIndex }}): {{ task.title }}',
                           sourceObject: 'showcase_task',
                           sourceId: { dialect: 'cel', source: 'task.id' },
@@ -1181,7 +1203,7 @@ export const NestedFanOutRemindersFlow = defineFlow({
                         type: 'notify',
                         label: 'Notify Watcher',
                         config: {
-                          recipients: { dialect: 'cel', source: 'has(task.watcher) ? task.watcher : null' },
+                          recipients: { dialect: 'cel', source: "has(task.watcher) && !isBlank(task.watcher) ? task.watcher : 'role:owner'" },
                           title: 'Watching ({{ taskIndex }}): {{ task.title }}',
                           sourceObject: 'showcase_task',
                           sourceId: { dialect: 'cel', source: 'task.id' },
@@ -2012,6 +2034,9 @@ export const TaskDueReminderFlow = defineFlow({
         // schedule: { type: 'cron', expression: '0 8 * * *' }
       },
     },
+    // "Your task is due" has nobody to address on a task with no assignee, so
+    // that task's run ends here.
+    { id: 'has_assignee', type: 'decision', label: 'Assigned to someone?' },
     {
       id: 'remind_owner',
       type: 'notify',
@@ -2021,7 +2046,7 @@ export const TaskDueReminderFlow = defineFlow({
         // The contract's required audience — this node used to omit it, so
         // every sweep run FAILED here ("at least one recipient is required")
         // and the #1874 demo never delivered (surfaced by #4277's parse).
-        recipients: [{ dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' }],
+        recipients: [{ dialect: 'cel', source: 'record.assignee' }],
         channels: ['inbox'],
         severity: 'warning',
         title: 'Task due soon: {{ record.title }}',
@@ -2032,7 +2057,9 @@ export const TaskDueReminderFlow = defineFlow({
     { id: 'end', type: 'end', label: 'End' },
   ],
   edges: [
-    { id: 'e1', source: 'start', target: 'remind_owner' },
+    { id: 'e1', source: 'start', target: 'has_assignee' },
+    { id: 'e1a', source: 'has_assignee', target: 'remind_owner', label: 'assigned', condition: '!isBlank(record.assignee)' },
+    { id: 'e1b', source: 'has_assignee', target: 'end', label: 'unassigned', isDefault: true },
     { id: 'e2', source: 'remind_owner', target: 'end' },
   ],
 });
@@ -2078,11 +2105,11 @@ export const UrgentTaskAlertFlow = defineFlow({
         // Notify the assignee and whoever raised the priority (`current_user`,
         // the triggering user) so an as-yet-unassigned urgent task still pings
         // someone. Each entry is a CEL value envelope; one that evaluates to
-        // `null` is dropped — an unset `assignee`, and `current_user` under a
-        // system write, which has no user — so the node fails only when both
-        // are absent.
+        // `null` is dropped. A system write has no user, so an unassigned
+        // urgent task written by one tells the organization's owners instead
+        // of leaving the node with no recipient.
         recipients: [
-          { dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' },
+          { dialect: 'cel', source: "!isBlank(record.assignee) ? record.assignee : current_user == null ? 'role:owner' : null" },
           { dialect: 'cel', source: 'current_user != null ? current_user.id : null' },
         ],
         channels: ['inbox'],

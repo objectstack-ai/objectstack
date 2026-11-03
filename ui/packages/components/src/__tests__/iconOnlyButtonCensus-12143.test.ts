@@ -272,12 +272,14 @@ describe('no shipped icon-only Button goes unnamed unless it is frozen in the ba
    * Since objectui#12620 `ObjectGrid.tsx` holds a SECOND such pager: a
    * server-grouped group's own pager, drawn in its band footer (it used to be
    * the per-group `data-table`'s pager), so that file reads two of each.
+   * Since objectstack#29074 it holds a THIRD: the phone card list's pager at
+   * the end of its scroller, named by the same `table.*` strings, so three.
    */
   it('the repaired pagers are read as four named icon-only Buttons each', () => {
     const PAGER = ['ChevronLeft', 'ChevronRight', 'ChevronsLeft', 'ChevronsRight'];
     for (const [file, pagers] of [
       ['packages/components/src/renderers/complex/data-table.tsx', 1],
-      ['packages/plugin-grid/src/ObjectGrid.tsx', 2],
+      ['packages/plugin-grid/src/ObjectGrid.tsx', 3],
     ] as const) {
       const chevrons = iconOnly
         .filter((j) => j.file === file && /^Chevrons?(Left|Right)$/.test(j.icon))

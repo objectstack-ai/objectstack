@@ -39,6 +39,8 @@ import {
 import { useOccSave } from './occSave';
 import {
   NO_LOAD_FAILURES,
+  RecordNotFoundError,
+  RecordNotFoundState,
   beginLoadRun,
   shownLoadFailure,
   type LoadFailures,
@@ -673,10 +675,16 @@ export const WizardForm: React.FC<WizardFormProps> = ({
       try {
         const data = await dataSource.findOne(schema.objectName, schema.recordId);
         if (cancelled) return;
+        // `findOne` answers `null` for a record that does not exist: there is
+        // nothing to edit, so the read failed, and the form is not seeded.
+        if (data == null) {
+          run.fail(new RecordNotFoundError(schema.objectName, schema.recordId));
+          return;
+        }
         loadedRecordIdRef.current = schema.recordId;
         loadedRecordRef.current = snapshotLoadedRecord(schema, data);
-        setFormData(data || {});
-        setPersistedRecord(data || {});
+        setFormData(data);
+        setPersistedRecord(data);
         // What the wizard holds is now the record as read: no step's answer is
         // unsaved (objectui#10715).
         unsavedStepValuesRef.current = false;
@@ -1198,6 +1206,9 @@ export const WizardForm: React.FC<WizardFormProps> = ({
     }
   }, [canOpenStep, goToStep]);
 
+  if (error instanceof RecordNotFoundError) {
+    return <RecordNotFoundState testId="wizard-form-record-not-found" />;
+  }
   if (error) {
     return (
       <div className="p-4 border border-red-300 bg-red-50 rounded-md">

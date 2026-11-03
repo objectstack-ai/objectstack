@@ -77,7 +77,10 @@ import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
  *     organization's withdrawal wins), by writing it onto each active
  *     environment `view` of that name that still serves the form open,
  *     through the metadata door; the same predicate the anonymous doors
- *     judge by (`anonymousFormIntakeWithdrawnIn`) decides. Then, under
+ *     judge by (`anonymousFormIntakeWithdrawnIn`) decides. A view a
+ *     read-only package ships takes it in that package's `.custom` pair,
+ *     declared as the override of the base (ADR-0146 D1, D2, D3:
+ *     {@link CustomizationPairPort}). Then, under
  *     `single`, each organization-scoped `sys_metadata` row of the five
  *     presentational types whose overlay key no other row holds becomes an
  *     environment row in place, its history with it (its `organization_id`
@@ -266,6 +269,49 @@ export interface MetadataDoorPort {
     body: Record<string, unknown>,
     target?: { packageId: string | null },
   ): Promise<void>;
+}
+
+/**
+ * [ADR-0146 D1, D2, D3] The customization pair of a read-only package, for the
+ * one write the ceremony makes onto an item such a package ships: the
+ * withdrawal carry. The read-only base itself takes no customization, so the
+ * carry saves into `<base>.custom`, declaring `overrides: { package: <base>,
+ * basedOn }` ({@link carryFormWithdrawals}).
+ */
+export interface CustomizationPairPort {
+  /** Whether the installed package is read-only: the server's own writability verdict, negated (ADR-0070 D2). */
+  readOnly(packageId: string): Promise<boolean>;
+  /**
+   * Ensure the base's pair through the ensure door (`POST
+   * /packages/:id/ensure-customization`, in process). Throws the door's
+   * refusal. Answers the pair's id and the base's version now: the `basedOn`
+   * the override declares.
+   */
+  ensure(basePackageId: string): Promise<{ packageId: string; basedOn: string }>;
+}
+
+/**
+ * The command's {@link CustomizationPairPort}, over the booted stack: the
+ * writability predicate the save door judges by, and the protocol's ensure
+ * door. `basedOn` is the installed base's `manifest.version`, the value the
+ * package-less overlay ceremony records too.
+ */
+export function protocolCustomizationPairs(deps: {
+  ensureCustomizationPackage(request: { basePackageId: string }): Promise<{ packageId: string }>;
+  isWritablePackage(packageId: string): boolean;
+  baseVersion(packageId: string): unknown;
+}): CustomizationPairPort {
+  return {
+    readOnly: async (packageId) => !deps.isWritablePackage(packageId),
+    ensure: async (basePackageId) => {
+      const { packageId } = await deps.ensureCustomizationPackage({ basePackageId });
+      const basedOn = deps.baseVersion(basePackageId);
+      if (typeof basedOn !== 'string' || basedOn === '') {
+        throw new Error(`the installed package '${basePackageId}' declares no version, so no basedOn can be declared`);
+      }
+      return { packageId, basedOn };
+    },
+  };
 }
 
 /** The env-wide `view` list the anonymous form doors read (every package's item of a name). */
@@ -641,6 +687,12 @@ export interface ApplyOptions {
   notNull?: NotNullPort;
   /** The served views, for carrying form withdrawals. */
   views: ServedViewsPort;
+  /**
+   * The customization pair a withdrawal onto a read-only package's view is
+   * carried into. Absent, the carry saves naming the served package, and the
+   * door's refusal of that save blocks.
+   */
+  pairs?: CustomizationPairPort;
   /** The door's lock verdict, for the one write the ceremony makes in place. */
   lock: MetadataLockPort;
   columnDrops: ColumnDropPort;
@@ -1546,6 +1598,8 @@ const servedPackageOf = (item: Readonly<Record<string, unknown>>): string | null
   return typeof pkg === 'string' && pkg !== '' && pkg !== METADATA_OBJECT ? pkg : null;
 };
 
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 /** A served item as a body the door accepts: its runtime annotations (`_`-prefixed keys) dropped. */
 const authoredBodyOf = (item: Readonly<Record<string, unknown>>): Record<string, unknown> =>
   JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(item).filter(([k]) => !k.startsWith('_'))))) as Record<string, unknown>;
@@ -1564,6 +1618,16 @@ const authoredBodyOf = (item: Readonly<Record<string, unknown>>): Record<string,
  * that row is promoted in place (its withdrawal travels with it) or is a
  * conflict the operator resolves, and a door save there would make a conflict
  * of a promotion.
+ *
+ * [ADR-0146 D1, D2, D3] A view a READ-ONLY package ships is not saved naming
+ * that package: the read-only base itself takes no customization, and the
+ * door refuses the write where the pair can take it. It is carried into the
+ * base's `.custom` pair instead ({@link carryIntoPair}), declared as the
+ * override of the base, which every read of the base's name then serves. A
+ * writable package's view is saved in place. Where the pair cannot take it
+ * (it cannot be ensured, or the door refuses the declared save), the save
+ * naming the served package is made as before, and the door's refusal of
+ * that one blocks, the pair's refusal named beside it.
  */
 async function carryFormWithdrawals(run: Run, rows: readonly MetadataKeyRow[], summary: Record<string, number>, blockers: string[]): Promise<void> {
   const t = METADATA_OBJECT;
@@ -1599,6 +1663,19 @@ async function carryFormWithdrawals(run: Run, rows: readonly MetadataKeyRow[], s
     for (const candidate of closing) {
       candidate.form.sharing = { ...(candidate.form.sharing as Record<string, unknown>), enabled: false };
     }
+    let pairRefusal: string | undefined;
+    if (packageId !== null && run.opts.pairs) {
+      const outcome = await carryIntoPair(run, run.opts.pairs, name, packageId, body);
+      if (outcome.carried) {
+        summary.withdrawalsCarried += closing.length;
+        run.opts.onProgress?.(
+          `carried ${closing.length} public-form withdrawal(s) onto the view ${name} through the customization package ` +
+            `${outcome.pair}, declared as the override of ${packageId} at ${outcome.basedOn}`,
+        );
+        continue;
+      }
+      pairRefusal = outcome.refusal;
+    }
     try {
       await run.opts.door.save('view', name, body, { packageId });
       summary.withdrawalsCarried += closing.length;
@@ -1607,11 +1684,52 @@ async function carryFormWithdrawals(run: Run, rows: readonly MetadataKeyRow[], s
       blockers.push(
         `An organization withdrew the public form(s) ${closing.map((c) => c.slug).join(', ')} of the view ${name}` +
           `${packageId ? ` (package ${packageId})` : ''}, and the metadata door refused to carry that withdrawal onto ` +
-          `the environment: ${error instanceof Error ? error.message : String(error)}. Withdraw the form there ` +
-          '(sharing.enabled false), then re-run. An upgrade never reopens a withdrawn form (ruling record 6020151485).',
+          `the environment: ${messageOf(error)}.${pairRefusal ? ` Nor could its customization package take it: ${pairRefusal}.` : ''} ` +
+          'Withdraw the form there (sharing.enabled false), then re-run. An upgrade never reopens a withdrawn form ' +
+          '(ruling record 6020151485).',
       );
     }
   }
+}
+
+/**
+ * [ADR-0146 D1, D2, D3] Carry a withdrawal onto `base`'s view `name` into the
+ * base's `.custom` pair, when `base` is read-only: the pair ensured through
+ * the ensure door, then `body` saved into it through the metadata door,
+ * declaring `overrides: { package: base, basedOn }` (a body that already
+ * declares the base, the pair's own override as served, keeps its
+ * declaration). `carried: false` with no refusal: `base` is writable, and its
+ * view is saved in place. With one: the pair could not take it, in the
+ * door's or the ensure door's own words.
+ */
+async function carryIntoPair(
+  run: Run,
+  pairs: CustomizationPairPort,
+  name: string,
+  base: string,
+  body: Record<string, unknown>,
+): Promise<{ carried: true; pair: string; basedOn: string } | { carried: false; refusal?: string }> {
+  try {
+    if (!(await pairs.readOnly(base))) return { carried: false };
+  } catch (error) {
+    return { carried: false, refusal: `whether the package ${base} is read-only could not be read: ${messageOf(error)}` };
+  }
+  let pair: { packageId: string; basedOn: string };
+  try {
+    pair = await pairs.ensure(base);
+  } catch (error) {
+    return { carried: false, refusal: `the customization package of ${base} could not be ensured: ${messageOf(error)}` };
+  }
+  const own = body.overrides as { package?: unknown; basedOn?: unknown } | undefined;
+  const overrides = own && typeof own === 'object' && own.package === base && typeof own.basedOn === 'string'
+    ? { package: base, basedOn: own.basedOn }
+    : { package: base, basedOn: pair.basedOn };
+  try {
+    await run.opts.door.save('view', name, { ...body, overrides }, { packageId: pair.packageId });
+  } catch (error) {
+    return { carried: false, refusal: `the metadata door refused the save into ${pair.packageId}: ${messageOf(error)}` };
+  }
+  return { carried: true, pair: pair.packageId, basedOn: overrides.basedOn };
 }
 
 /** One conflict the operator chose a row for. */

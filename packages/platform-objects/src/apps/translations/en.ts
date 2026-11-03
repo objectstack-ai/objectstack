@@ -70,12 +70,6 @@ export const en: TranslationData = {
         nav_system_overview: { label: 'System Overview' },
 
         // Apps / Marketplace
-        // `nav_packages` is a SETUP entry (package administration is an
-        // operator concern — ADR-0084), distinct from the same-id entry under
-        // `apps.studio.navigation`. Two apps carrying one nav id is normal;
-        // each app resolves its own subtree, so the studio copy never answers
-        // for this one. Its absence here was #5750's first cause.
-        nav_packages: { label: 'Packages' },
         nav_packaged_actions: { label: 'Packaged Actions' },
         nav_marketplace_browse: { label: 'Browse Marketplace' },
         nav_marketplace_installed: { label: 'Installed Apps' },

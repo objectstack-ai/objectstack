@@ -138,23 +138,21 @@ function makeDataSource() {
 }
 
 /**
- * The same object, opened in the split pane with a record open: the list sits
- * in the overlay's left pane, the page's other place the list is drawn. The
- * pane is the READER's preference since objectstack#26677 (`split` left
- * `navigation.mode`), so the object declares nothing and the browser
- * remembers `split`.
+ * The same object with a record open: the list sits under the record drawer,
+ * handed to the overlay as its `mainContent`, the page's other place the list
+ * is drawn. The split pane beside the list retired (objectstack#28915), so a
+ * record opens in the drawer over the full list.
  */
-function openView(viewId: string, access: Record<string, unknown>, opts: { split?: boolean } = {}) {
+function openView(viewId: string, access: Record<string, unknown>, opts: { recordOpen?: boolean } = {}) {
   const probeMetaItemAccess = vi.fn(async () => access);
   const objects = OBJECTS;
-  if (opts.split) window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
-  else window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
+  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
   render(
     <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
       <AdapterCtx.Provider value={{ probeMetaItemAccess } as never}>
         <MePermissionsProvider initialPermissions={PERMISSIONS}>
           <ExpressionProvider user={{ id: 'u_author', name: 'Author' }}>
-            <MemoryRouter initialEntries={[`/apps/clm/${OBJECT_NAME}/view/${viewId}${opts.split ? '?recordId=r1' : ''}`]}>
+            <MemoryRouter initialEntries={[`/apps/clm/${OBJECT_NAME}/view/${viewId}${opts.recordOpen ? '?recordId=r1' : ''}`]}>
               <Routes>
                 <Route
                   path="/apps/:appName/:objectName/view/:viewId"
@@ -197,8 +195,8 @@ describe('objectui#12112 — a refused list view, opened by name, says it was re
     expect(menu.querySelector('[aria-current]')).toBeNull();
   });
 
-  it('the same refusal in split navigation, where the list sits beside an open record', async () => {
-    openView('clm_contract.legal_review', { verdict: 'denied', message: REFUSAL }, { split: true });
+  it('the same refusal with a record open, where the list sits under the record drawer', async () => {
+    openView('clm_contract.legal_review', { verdict: 'denied', message: REFUSAL }, { recordOpen: true });
 
     const refusal = await screen.findByTestId('view-access-denied');
     expect(refusal.textContent).toContain(REFUSAL);
