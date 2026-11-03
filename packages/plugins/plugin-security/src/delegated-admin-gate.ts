@@ -220,7 +220,7 @@ function stampWriter(opCtx: any, userId: unknown): void {
 }
 
 export interface DelegatedAdminGateDeps {
-  /** ObjectQL engine handle (system-context reads for pre-images/lookups). */
+  /** ObjectQL engine handle (pre-images and lookups). */
   ql: any;
   /** Shared permission-set resolution (same path as the CRUD middleware). */
   resolveSets: (context: any) => Promise<PermissionSet[]>;
@@ -756,6 +756,10 @@ export class DelegatedAdminGate {
    * Every permission set the row distributes must be inside the boundary
    * ({@link organizationBoundaryFailure}); for a position, every set it carries
    * ({@link setsCarriedByPosition}). One set outside puts the row outside.
+   *
+   * The row a removal targets is judged as the CALLER reads it
+   * ({@link organizationTargets}), so a row the caller cannot read is answered
+   * exactly as an id naming no row is (ruling of record 5985885287).
    */
   private async organizationAdminFailure(
     opCtx: any,
@@ -778,8 +782,10 @@ export class DelegatedAdminGate {
       };
     }
 
-    for (const t of await this.materializeTargets(opCtx, opCtx.object)) {
+    for (const t of await this.organizationTargets(opCtx)) {
       const row = t.next ?? t.prev;
+      // No row answers an id naming none and a row the caller cannot read
+      // alike: one refusal, and never a fall-through to the engine.
       if (!row) return { reason: 'the assignment row to remove could not be read', meta: {} };
 
       const rowOrg = rowOrganizationId(row);
@@ -819,6 +825,29 @@ export class DelegatedAdminGate {
       }
     }
     return null;
+  }
+
+  /**
+   * [ADR-0090 D12; ruling of record 5985885287] The rows an organization
+   * administrator's insert or removal targets: an insert's payload rows, or the
+   * one row a removal addresses, as the CALLER reads it.
+   *
+   * The pre-image is the caller's own by-id read through the engine — the read
+   * door's answer to this caller, every read visibility and wall included —
+   * never a system read: a row the caller cannot read answers what an id naming
+   * no row answers. A row it reads is judged on what it read, so its guidance
+   * stays. A read refusal or a store fault propagates as raised: an outage is
+   * neither an answer nor a refusal, and the by-id write door answers a caller
+   * the read door refuses with that refusal.
+   */
+  private async organizationTargets(opCtx: any): Promise<Array<{ next: any | null; prev: any | null }>> {
+    if (opCtx.operation === 'insert') return rowsOf(opCtx).map((r) => ({ next: r, prev: null }));
+    const id = extractSingleId(opCtx);
+    const ql = this.deps.ql;
+    const prev = id != null && ql?.findOne
+      ? await ql.findOne(opCtx.object, { where: { id }, context: opCtx.context })
+      : null;
+    return [{ next: null, prev: prev && typeof prev === 'object' ? prev : null }];
   }
 
   /**

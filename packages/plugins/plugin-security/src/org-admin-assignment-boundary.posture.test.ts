@@ -15,6 +15,12 @@
  * `status` and `code` through `resolveThrownHttpError`, the resolver both HTTP
  * doors answer with — and an out-of-boundary refusal also names its set and
  * the failed condition. Every admission reads the stored row back.
+ *
+ * At the foot: under the walled postures, an organization administrator's
+ * update and delete of a row it cannot read answer exactly what an id naming
+ * no row answers (ruling of record 5985885287) — the whole refusal, sentence
+ * and details included; a row it reads keeps the boundary guidance, and a
+ * tenant-level administrator is answered by the engine as before.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -275,4 +281,112 @@ describe('[ADR-0090 D12, amended 2026-10-17] the organization administrator assi
       });
     });
   }
+});
+
+/** An id that names no row in either table. */
+const NOWHERE = 'zz_nowhere_0001';
+
+/** Everything a refusal carries: the envelope both doors resolve, its sentence and its details. */
+async function answerOf(run: () => Promise<unknown>): Promise<Record<string, unknown>> {
+  try {
+    await run();
+    return { status: 200 };
+  } catch (e) {
+    const r = resolveThrownHttpError(e);
+    return { status: r.status, code: r.code, message: (e as Error).message, details: (e as any).details };
+  }
+}
+
+/** An in-boundary row of `organizationId`, written by the system. */
+async function seedIn(h: Harness, table: Table, id: string, organizationId: string, userId: string) {
+  await h.engine.insert(table, { id, user_id: userId, ...TABLES[table].in, organization_id: organizationId },
+    { context: { isSystem: true, tenantId: organizationId } } as any);
+}
+
+const ORG_ADMINS = ['orgAdmin', 'orgAdminNoBypass'] as const;
+
+/** `caller`'s own by-id read of `id`: the read door's answer to it. */
+function readAs(h: Harness, table: Table, id: string, caller: Caller) {
+  const { positions, permissions, accessible_org_ids, ...rest } = CALLERS[caller];
+  const context = { ...rest, positions: [...positions], permissions: [...permissions], accessible_org_ids: [...accessible_org_ids] };
+  return h.engine.findOne(table, { where: { id }, context });
+}
+
+const write =(h: Harness, table: Table, op: 'update' | 'delete', id: string, context: object) =>
+  answerOf(() => op === 'update'
+    ? h.engine.update(table, { reason: 'edited' }, { where: { id }, context } as any)
+    : h.engine.delete(table, { where: { id }, context } as any));
+
+describe("[ADR-0090 D12; ruling of record 5985885287] an organization administrator's refused assignment write answers the same for a row it cannot read as for a missing one", () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    describe(`posture '${posture}'`, () => {
+      it('update and delete of a row the caller cannot read answer exactly what an id naming no row answers, and leave the row', async () => {
+        const h = await boot(posture);
+        for (const table of Object.keys(TABLES) as Table[]) {
+          const id = `unreadable_${table}`;
+          await seedIn(h, table, id, ORG_B, 'u_other_org');
+          const before = await stored(h, table, { id });
+          expect(before, `${table}: the row exists`).toHaveLength(1);
+          for (const caller of ORG_ADMINS) {
+            const context = CALLERS[caller];
+            // The precondition, read off the read door: this caller reads no such row.
+            expect(await readAs(h, table, id, caller), `${caller} reads ${table} ${id}`).toBeFalsy();
+            for (const op of ['update', 'delete'] as const) {
+              const row = await write(h, table, op, id, context);
+              const none = await write(h, table, op, NOWHERE, context);
+              expect([none.status, none.code], `${caller} ${op} ${table}, no row: ${none.message}`).toEqual([403, 'PERMISSION_DENIED']);
+              expect(row, `${caller} ${op} ${table}: the unreadable row answers as no row`).toEqual(none);
+            }
+          }
+          expect(await stored(h, table, { id }), `${table}: refused means untouched`).toEqual(before);
+        }
+      });
+
+      it('control: a row of its own organization, which it reads, keeps the boundary guidance; the platform administrator is answered as before', async () => {
+        const h = await boot(posture);
+        for (const table of Object.keys(TABLES) as Table[]) {
+          await seed(h, table, 'own_out', 'out');
+          for (const caller of ORG_ADMINS) {
+            const context = CALLERS[caller];
+            expect(await readAs(h, table, 'own_out', caller), `${caller} reads ${table}`).toBeTruthy();
+            const own = await write(h, table, 'delete', 'own_out', context);
+            expect([own.status, own.code], `${caller} ${table}: ${own.message}`).toEqual([403, 'PERMISSION_DENIED']);
+            expect(own.message).toMatch(/'admin_full_access'.*by name/);
+            expect(own, `${caller} ${table}: a row it reads is not answered as no row`).not.toEqual(await write(h, table, 'delete', NOWHERE, context));
+          }
+          expect(await stored(h, table, { id: 'own_out' }), `${table}: refused means untouched`).toHaveLength(1);
+
+          // A tenant-level administrator passes the gate: the engine answers
+          // its by-id writes, and the row it addresses outside its active
+          // organization answers that engine's not-found, as no row does.
+          const id = `platform_${table}`;
+          await seedIn(h, table, id, ORG_B, 'u_other_org');
+          for (const op of ['update', 'delete'] as const) {
+            const row = await write(h, table, op, id, CALLERS.platform);
+            const none = await write(h, table, op, NOWHERE, CALLERS.platform);
+            expect([none.status, none.code], `platform ${op} ${table}: ${none.message}`).toEqual([404, 'RECORD_NOT_FOUND']);
+            expect({ ...row, message: String(row.message).split(id).join('ID') }, `platform ${op} ${table}`)
+              .toEqual({ ...none, message: String(none.message).split(NOWHERE).join('ID') });
+          }
+          expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
+        }
+      });
+    });
+  }
+
+  it("control, 'single': a row of another organization that the caller reads keeps the guidance that names its organization", async () => {
+    const h = await boot('single');
+    for (const table of Object.keys(TABLES) as Table[]) {
+      const id = `readable_${table}`;
+      await seedIn(h, table, id, ORG_B, 'u_other_org');
+      for (const caller of ORG_ADMINS) {
+        const context = CALLERS[caller];
+        expect(await readAs(h, table, id, caller), `${caller} reads ${table}`).toBeTruthy();
+        const row = await write(h, table, 'delete', id, context);
+        expect([row.status, row.code], `${caller} ${table}: ${row.message}`).toEqual([403, 'PERMISSION_DENIED']);
+        expect(row.message).toMatch(/belongs to organization 'org_b'/);
+      }
+      expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
+    }
+  });
 });
