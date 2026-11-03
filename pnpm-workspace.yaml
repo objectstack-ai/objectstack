@@ -361,7 +361,7 @@ overrides:
   # brace-expansion GHSA-mh99-v99m-4gvg (via minimatch@10.x), then GHSA-rgw5-rvv9-x895
   # (7.5 high) which affects 5.0.8 itself — the version the first pin landed on — so the
   # target moves to ^5.0.9 — the selector keeps its <6.0.0 major boundary (#6095), which is
-  # what makes this a target-only lift. Still transitive-only through minimatch (ts-morph, eslint,
+  # what makes this a target-only lift. Still transitive-only through minimatch (eslint,
   # @typescript-eslint, glob, archiver — @vscode/vsce left with #5825's retirement,
   # the rest still pull it, so this pin stays live); sharp GHSA-f88m-g3jw-g9cj
   # (next optionalDep ^0.34.5 excludes the fix); react-router GHSA-qwww-vcr4-c8h2 has no
