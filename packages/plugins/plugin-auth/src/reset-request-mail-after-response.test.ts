@@ -19,6 +19,14 @@
  *    answer is the one a succeeding send gets;
  *  - the server-side reset call (no `Request` — the identity import's) still
  *    awaits its send, because it reads the delivery receipt the send settles;
+ *  - the phone-number reset request (`plugins.phoneNumber` with an SMS
+ *    service) answers without waiting for the SMS send, as the emailed reset
+ *    does: a number with an account and a number without one get the same
+ *    answer while the reset text's send is still open, and the text still
+ *    goes out after the response; a text whose send fails is logged on the
+ *    server at error, without its code, and the answer is the one a sent text
+ *    gets; the server-side phone reset call (no `Request`) still awaits its
+ *    send;
  *  - `runAfterResponse` hands a task's synchronous throw to `onFailure` and
  *    survives an `onFailure` that throws.
  */
@@ -174,6 +182,118 @@ describe('a reset request answers without waiting on the reset mail', () => {
 
     expect(d.sends.map((m) => m.template)).toEqual(['auth.password_reset']);
     expect(settled).toBe(true);
+  }, 60_000);
+});
+
+describe('the phone-number reset request answers without waiting on the reset text', () => {
+  const PHONE = '+15550161';
+  const NO_ACCOUNT_PHONE = '+15550162';
+  const SYS = { context: { isSystem: true } } as never;
+
+  type Text = { to: string; templateParams?: { code?: string } };
+
+  /** A promise the case settles by hand. */
+  function deferred(): { promise: Promise<void>; resolve: () => void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  /**
+   * A deployment with phone-number sign-in and one account holding `PHONE`,
+   * whose SMS service hands each send to `answer`, and records every text it
+   * was handed (`texts`) and the number of every send that has settled
+   * (`settled`).
+   */
+  async function phoneDeployment(answer: () => Promise<unknown>) {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const engine = await engines.take();
+    const logged: string[] = [];
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: BASE,
+      dataEngine: engine as never,
+      plugins: { phoneNumber: true },
+      logger: { warn: () => {}, error: (message: string) => logged.push(message) },
+    } as never);
+    manager.setEmailService({ sendTemplate: async () => ({ status: 'sent' }) } as never);
+    const texts: Text[] = [];
+    const settled: string[] = [];
+    manager.setSmsService({
+      async send(input: Text) {
+        texts.push(input);
+        try {
+          return await answer();
+        } finally {
+          settled.push(input.to);
+        }
+      },
+      isConfigured: () => true,
+    } as never);
+    const signedUp = await post(manager, '/sign-up/email', { email: EMAIL, password: PASSWORD, name: 'Reset' });
+    expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+    const [user] = (await engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    await engine.update('sys_user', { id: user.id, phone_number: PHONE, phone_number_verified: true }, SYS);
+    return { manager, texts, settled, logged };
+  }
+
+  async function requestPhoneReset(manager: AuthManager, phoneNumber: string): Promise<{ status: number; body: string }> {
+    const res = await post(manager, '/phone-number/request-password-reset', { phoneNumber });
+    return { status: res.status, body: await res.text() };
+  }
+
+  it('answers a number with an account and a number without one alike, while the reset text is still being sent', async () => {
+    const send = deferred();
+    const d = await phoneDeployment(async () => {
+      await send.promise;
+      return { id: 'sms1', status: 'sent' };
+    });
+
+    const forAccount = await requestPhoneReset(d.manager, PHONE);
+    const forNobody = await requestPhoneReset(d.manager, NO_ACCOUNT_PHONE);
+
+    expect(forAccount.status).toBe(200);
+    expect(forAccount).toEqual(forNobody);
+    // Both answers arrived while the text's send was still open.
+    expect(d.settled).toEqual([]);
+
+    // The control: the text still goes to the number, after the response.
+    send.resolve();
+    await vi.waitFor(() => expect(d.settled).toEqual([PHONE]));
+    expect(d.texts.map((t) => t.to)).toEqual([PHONE]);
+    expect(d.logged).toEqual([]);
+  }, 60_000);
+
+  it('logs a reset text whose send fails on the server, without its code, and answers as for a text that is sent', async () => {
+    const failing = await phoneDeployment(async () => ({ status: 'failed', error: 'carrier unavailable' }));
+    const sending = await phoneDeployment(async () => ({ id: 'sms1', status: 'sent' }));
+
+    const throughFailing = await requestPhoneReset(failing.manager, PHONE);
+    const throughSending = await requestPhoneReset(sending.manager, PHONE);
+
+    expect(throughFailing).toEqual(throughSending);
+    await vi.waitFor(() => expect(failing.logged).toHaveLength(1));
+    expect(failing.logged[0]).toContain('phone password-reset text was not delivered');
+    expect(failing.logged[0]).toContain('carrier unavailable');
+    const code = String(failing.texts[0]?.templateParams?.code ?? '');
+    expect(code, 'the text carries its code').not.toBe('');
+    expect(failing.logged[0]).not.toContain(code);
+  }, 60_000);
+
+  it('the server-side phone reset call (no Request) still awaits its send', async () => {
+    const d = await phoneDeployment(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      return { id: 'sms1', status: 'sent' };
+    });
+    const api = (await d.manager.getApi()) as unknown as {
+      requestPasswordResetPhoneNumber(input: { body: { phoneNumber: string } }): Promise<unknown>;
+    };
+
+    await api.requestPasswordResetPhoneNumber({ body: { phoneNumber: PHONE } });
+
+    expect(d.settled).toEqual([PHONE]);
   }, 60_000);
 });
 
