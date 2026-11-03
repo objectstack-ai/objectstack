@@ -8,6 +8,7 @@ import type {
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
+import { assertQueryReadRows, planQueryReadWindow, resolveQueryReadLimits } from '@objectstack/types';
 import { type TenancyPosture } from '@objectstack/spec/security';
 // [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
 // `DiscoverySchema` "System Identity" field — never a literal again.
@@ -1269,6 +1270,10 @@ export class ObjectStackProtocolImplementation implements
         this.getServicesRegistry = getServicesRegistry;
         this.environmentId = environmentId;
         this.authoringChannel = authoringChannel;
+        // Fail at construction on a misconfigured read limit (`OS_DATA_*`), so a
+        // typo is a boot fault naming the variable rather than a 500 on every
+        // list read. `findData` reads the limits again per call.
+        resolveQueryReadLimits();
     }
 
     // [#25467 E1] The one place that can read this class's private members builds
@@ -6248,7 +6253,23 @@ export class ObjectStackProtocolImplementation implements
         // honor groupBy/aggregations in find().
         const hasGroupBy = Array.isArray(options.groupBy) && options.groupBy.length > 0;
         const hasAggregations = Array.isArray(options.aggregations) && options.aggregations.length > 0;
+        // The deployment's read limits (`OS_DATA_DEFAULT_PAGE_SIZE`,
+        // `OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`; the rule is
+        // `@objectstack/types`' `query-read-limits.ts`). Planned here, after
+        // every shape gate and before the engine, so a refusal leaves the
+        // driver unasked. All three unset returns the caller's own `limit`.
+        const readLimits = resolveQueryReadLimits();
         if (hasGroupBy || hasAggregations) {
+            // The grouped branch slices in memory and never reads `offset`, so
+            // the window it is judged on is the groups it returns.
+            const groupRead = {
+                surface: 'list' as const,
+                object: request.object,
+                limit: typeof options.limit === 'number' ? options.limit : undefined,
+                limitParam: slotParam('limit'),
+            };
+            const groupPlan = planQueryReadWindow(groupRead, readLimits, console);
+            if (!groupPlan.probe) options.limit = groupPlan.limit;
             const aggregateQuery: EngineAggregateOptions = {
                 where: options.where,
                 groupBy: options.groupBy,
@@ -6270,6 +6291,7 @@ export class ObjectStackProtocolImplementation implements
                 context: options.context,
             };
             const records = await this.engine.aggregate(request.object, aggregateQuery);
+            assertQueryReadRows(groupRead, groupPlan, records.length, console);
             // Apply limit client-side (EngineAggregateOptions doesn't carry limit).
             // `records` is the full grouped set, so its length IS the real total
             // and `hasMore` follows from whether the slice dropped any groups.
@@ -6338,6 +6360,21 @@ export class ObjectStackProtocolImplementation implements
         // projection named only the body, and taken back off before serving.
         const bodyProjection = storedMetadataBodyProjection(request.object, options.fields);
         if (bodyProjection.addedType) options.fields = bodyProjection.fields;
+        // A list read with no `limit` takes the default page size, and its
+        // answer says whether more rows exist (`hasMore` / `total` below). A
+        // PROBE limit (a row budget with no page size) is the server's, not the
+        // caller's: the answer is refused when it overruns, and otherwise it is
+        // the whole set, so the probe is taken back off before the page
+        // metadata below reads `limit`.
+        const listRead = {
+            surface: 'list' as const,
+            object: request.object,
+            limit: typeof options.limit === 'number' ? options.limit : undefined,
+            offset: typeof options.offset === 'number' ? options.offset : undefined,
+            limitParam: slotParam('limit'),
+        };
+        const listPlan = planQueryReadWindow(listRead, readLimits, console);
+        if (listPlan.limit !== undefined) options.limit = listPlan.limit;
         // [#29764] The bag `engine.find` receives is typed as the engine declares
         // it. `options` is the caller's normalized request bag, and by this line
         // every key the normalizer does not hand on has been folded, deleted or
@@ -6361,11 +6398,16 @@ export class ObjectStackProtocolImplementation implements
         // is served in keyed form — never the stored value, which beside the
         // projected body confirms a guess at the withheld material offline —
         // under the provider's key, or the process-scoped ephemeral one.
+        const found = await this.engine.find(request.object, findQuery);
+        if (listPlan.probe) {
+            assertQueryReadRows(listRead, listPlan, found.length, console);
+            delete options.limit;
+        }
         const records = await serveStoredMetadataHashColumnRows(
             request.object,
             redactStoredMetadataRows(
                 request.object,
-                await this.engine.find(request.object, findQuery),
+                found,
                 { dropType: bodyProjection.addedType },
             ),
             this.storedHashDigest(),
