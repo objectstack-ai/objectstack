@@ -297,7 +297,7 @@ const isEpicLane = (lane) => lane.startsWith(`${SEAT_EPIC_KIND}:`);
  * (#27113) — not imported, so the relay never loads the patrol; the self-test holds the two patterns byte-equal.
  */
 const SIGNATURE_LINE = new RegExp(
-  '^((?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator))#([1-9][0-9]*) · ([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}) · (session_[A-Za-z0-9]{6,})$',
+  '^((?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security))#([1-9][0-9]*) · ([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}) · (session_[A-Za-z0-9]{6,})$',
   'u',
 );
 
@@ -826,7 +826,7 @@ async function selfTest() {
     t('the comment read starts STALE_HOURS before now, and the footer names it', [activitySince(NOW), readsFor([R]).some((q) => q.startsWith(`GET /repos/${R}/issues/comments?since=`))], ['2026-11-01T22:00:00Z', true]);
     const { SEAT_SIGNATURE_LINE, readSignatureLine } = await import('./check-half-states.mjs');
     t('the signature pattern is check-half-states\' SEAT_SIGNATURE_LINE, byte for byte — mirrored, not imported', [SIGNATURE_LINE.source === SEAT_SIGNATURE_LINE.source, SIGNATURE_LINE.flags === SEAT_SIGNATURE_LINE.flags], [true, true]);
-    const corpus = ['', sig('domain:server#2'), `\n\n  ${sig('domain:engine-core#3')}\r\nbody`, `body\n${sig('triage#1')}`, 'epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U', 'domain:server#0 · os-pm · session_01SharedSeatSess', 'domain:server#2 · os-pm · cse_01SharedSeatSess'];
+    const corpus = ['', sig('domain:server#2'), `\n\n  ${sig('domain:engine-core#3')}\r\nbody`, `body\n${sig('triage#1')}`, sig('security#1'), 'epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U', 'domain:server#0 · os-pm · session_01SharedSeatSess', 'domain:server#2 · os-pm · cse_01SharedSeatSess'];
     t('signedSeatOf reads every body as readSignatureLine does', corpus.map(signedSeatOf), corpus.map((b) => { const r = readSignatureLine(b); return r ? `${r.lane}#${r.seat}` : null; }));
   }
 
