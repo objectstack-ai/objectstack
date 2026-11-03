@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 250,
-    "droppedRefinementSites": 1012,
+    "droppedRefinementSites": 1018,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -129,6 +129,7 @@
         "manifest.reports.element.runtimeFilter.lazy",
         "manifest.sharingRules.element.sharedWith",
         "manifest.skills.element.triggerConditions.element",
+        "manifest.translations.element",
         "manifest.translations.element.valueType.flows.valueType.errorMessage",
         "manifest.translations.element.valueType.flows.valueType.notices.valueType.message",
         "manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
@@ -280,6 +281,7 @@
         "data.options[1].manifest.reports.element.runtimeFilter.lazy",
         "data.options[1].manifest.sharingRules.element.sharedWith",
         "data.options[1].manifest.skills.element.triggerConditions.element",
+        "data.options[1].manifest.translations.element",
         "data.options[1].manifest.translations.element.valueType.flows.valueType.errorMessage",
         "data.options[1].manifest.translations.element.valueType.flows.valueType.successMessage",
         "data.options[1].manifest.views.element.form",
@@ -422,6 +424,7 @@
         "options[1].manifest.reports.element.runtimeFilter.lazy",
         "options[1].manifest.sharingRules.element.sharedWith",
         "options[1].manifest.skills.element.triggerConditions.element",
+        "options[1].manifest.translations.element",
         "options[1].manifest.translations.element.valueType.flows.valueType.errorMessage",
         "options[1].manifest.translations.element.valueType.flows.valueType.notices.valueType.message",
         "options[1].manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
@@ -504,6 +507,7 @@
         "data.packages.element.options[1].manifest.reports.element.runtimeFilter.lazy",
         "data.packages.element.options[1].manifest.sharingRules.element.sharedWith",
         "data.packages.element.options[1].manifest.skills.element.triggerConditions.element",
+        "data.packages.element.options[1].manifest.translations.element",
         "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.errorMessage",
         "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.successMessage",
         "data.packages.element.options[1].manifest.views.element.form",
@@ -1463,12 +1467,13 @@
     },
     "system/PlatformTranslationBundle": {
       "sites": [
+        "",
         "valueType.flows.valueType.errorMessage",
+        "valueType.flows.valueType.notices.valueType.message",
         "valueType.flows.valueType.refusals.valueType.message",
         "valueType.flows.valueType.screens.valueType.description",
         "valueType.flows.valueType.screens.valueType.title",
-        "valueType.flows.valueType.successMessage",
-        "valueType.flows.valueType.notices.valueType.message"
+        "valueType.flows.valueType.successMessage"
       ]
     },
     "system/PlatformTranslationData": {
@@ -1533,12 +1538,13 @@
     },
     "system/TranslationBundle": {
       "sites": [
+        "",
         "valueType.flows.valueType.errorMessage",
+        "valueType.flows.valueType.notices.valueType.message",
         "valueType.flows.valueType.refusals.valueType.message",
         "valueType.flows.valueType.screens.valueType.description",
         "valueType.flows.valueType.screens.valueType.title",
-        "valueType.flows.valueType.successMessage",
-        "valueType.flows.valueType.notices.valueType.message"
+        "valueType.flows.valueType.successMessage"
       ]
     },
     "system/TranslationData": {
