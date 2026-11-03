@@ -71,6 +71,7 @@
  * bundle and the packaged base.
  */
 
+import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
 import {
     BUILTIN_SYSTEM_FIELD_LABEL_LOCALES,
@@ -96,6 +97,26 @@ export interface RestoredTranslatedSlot {
     from: string;
     /** The source text stored instead (`undefined` when the source has no such slot). */
     to: string | undefined;
+}
+
+/**
+ * One `info` advisory per author slot a save put back to its source text, for
+ * the save answer's `advisories` — beside the credential carry-forward's
+ * `withheld-key-dropped` notices on the same door. The `path` is the object
+ * write's name-keyed one (`objects.NAME.fields.F.label`). The platform's
+ * injected columns are not reported: the stored document never carries them.
+ */
+export function translatedEchoNotices(name: string, restored: readonly RestoredTranslatedSlot[]): RuntimeAuthoringIssue[] {
+    return restored.map((slot) => ({
+        rule: TRANSLATED_ECHO_NOTICE_ID,
+        severity: 'info' as const,
+        where: `object "${name}"`,
+        path: `objects.${name}.${slot.path}`,
+        message: slot.to === undefined
+            ? `this save left '${slot.path}' unset rather than storing '${slot.from}': that is what a /meta read serves for it in another language, translated from the source, which sets no text there.`
+            : `this save stored '${slot.to}' at '${slot.path}', not '${slot.from}': '${slot.from}' is what a /meta read serves for '${slot.to}' in another language, so it is the read's translation, not the document.`,
+        hint: 'Readers in that language are served the translation from the catalog. To change the text itself, edit it in the source language, or change the catalog entry.',
+    }));
 }
 
 /** The field slots the object translator writes. */

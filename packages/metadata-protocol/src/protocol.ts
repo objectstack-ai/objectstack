@@ -143,7 +143,12 @@ import { type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '
 import { type FormFieldInput } from '@objectstack/spec/ui';
 export type { FormFieldInput };
 import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage, type TranslationBundle } from '@objectstack/spec/system';
-import { restoreTranslatedEchoes, TRANSLATED_ECHO_NOTICE_ID } from './protocol-translated-echo.js';
+import {
+    restoreTranslatedEchoes,
+    translatedEchoNotices,
+    TRANSLATED_ECHO_NOTICE_ID,
+    type RestoredTranslatedSlot,
+} from './protocol-translated-echo.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
     resolveLockState,
@@ -3800,33 +3805,55 @@ export class ObjectStackProtocolImplementation implements
      *
      * The source is the row this save overwrites, read as the credential
      * carry-forward reads it ({@link storedBodyForCarryForward}: the row at the
-     * save's own state, the active row a first draft overlays, else the code
-     * layer), plus the platform's definition of each injected column. The
-     * locales are the bundle's and the built-in system-field table's — every
-     * locale a read could have answered in.
+     * save's own state, else the active row a first draft overlays), and with
+     * no stored row the packaged base (`getPackagedObjectBase`) in place of
+     * the carry-forward's code-layer read. Every read of the source is
+     * translated against that packaged base, as the REST read's is, so a slot
+     * the read serves untranslated is no translation's source. The locales are
+     * the bundle's and the built-in system-field table's — every locale a read
+     * could have answered in. Each restored slot is answered on the save's
+     * `advisories` ({@link translatedEchoNotices}).
      *
      * Every save is asked, the stored-row migration included
      * (`source: 'migrate-stored'`): it re-saves a row through this door, which
      * is how a row a zh-CN session already stored is repaired. Any other
      * type's body is returned as it came. No `try`/`catch`: a failed stored-row
-     * read fails the save rather than storing a body this door could not judge.
+     * read fails the save rather than storing a body this door could not judge;
+     * the packaged base is a registry lookup, so a degraded MetadataService
+     * fails nothing here.
      */
     private async restoreTranslatedObjectEchoes(
         request: SaveMetaItemRequest,
         repo: SysMetadataRepository,
         ref: Parameters<SysMetadataRepository['get']>[0],
         mode: 'draft' | 'publish',
-    ): Promise<SaveMetaItemRequest['item']> {
-        if (canonicalMetaType(request.type) !== 'object') return request.item;
-        if (!request.item || typeof request.item !== 'object' || Array.isArray(request.item)) return request.item;
-        const source = await this.storedBodyForCarryForward({
-            type: 'object',
-            repo,
-            ref,
-            state: mode === 'draft' ? 'draft' : 'active',
-            packageId: request.packageId ?? null,
+    ): Promise<{ item: SaveMetaItemRequest['item']; restored: RestoredTranslatedSlot[] }> {
+        if (canonicalMetaType(request.type) !== 'object') return { item: request.item, restored: [] };
+        if (!request.item || typeof request.item !== 'object' || Array.isArray(request.item)) {
+            return { item: request.item, restored: [] };
+        }
+        // The packaged base the read translates against (`getPackagedObjectBase`,
+        // what the REST read hands `translateObject` as `packagedBase`), and,
+        // with no stored row, the source itself: the body a read of an object
+        // with no overlay served. A registry lookup, never a MetadataService
+        // read — so a degraded service fails no save here (a brand-new object
+        // has no source beyond the platform columns the pure half handled).
+        const packagedBase = this.getPackagedObjectBase(request.name);
+        const source = await storedBodyForCarryForward.call(
+            { readCodeLayerForCarryForward: async () => packagedBase },
+            {
+                type: 'object',
+                repo,
+                ref,
+                state: mode === 'draft' ? 'draft' : 'active',
+                packageId: request.packageId ?? null,
+            },
+        );
+        return restoreTranslatedEchoes(request.item, {
+            source,
+            bundle: this.registeredTranslationBundle(),
+            packagedBase: packagedBase ?? undefined,
         });
-        return restoreTranslatedEchoes(request.item, { source, bundle: this.registeredTranslationBundle() }).item;
     }
 
     /**
@@ -3997,18 +4024,10 @@ export class ObjectStackProtocolImplementation implements
         const pkg = packageId ?? undefined;
         const fromService = await this.readItemFromMetadataService(type, name, pkg);
         if (fromService.data !== undefined && fromService.data !== null) return fromService.data;
-        // [#29673] A registry with no `getItem` has no code layer to read — the
-        // guard `lookupArtifactItem` and the authoring gate already apply.
-        // Every save of an object now reads its source here (the translated-
-        // echo restoration), not only one carrying a credential.
-        const registry = this.engine.registry;
-        const getItem = typeof registry?.getItem === 'function'
-            ? (t: string) => registry.getItem(t, name, pkg)
-            : () => undefined;
-        let item: unknown = this.lookupArtifactItem(type, name, pkg) ?? getItem(type);
+        let item: unknown = this.lookupArtifactItem(type, name, pkg) ?? this.engine.registry.getItem(type, name, pkg);
         if (item === undefined) {
             const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-            if (alt) item = getItem(alt);
+            if (alt) item = this.engine.registry.getItem(alt, name, pkg);
         }
         if (item !== undefined && item !== null) return item;
         if (fromService.degraded) this.throwMetadataServiceUnavailable(fromService.errors);
@@ -13784,6 +13803,9 @@ export class ObjectStackProtocolImplementation implements
         // answered `200` for a draft no publish can serve. An ambiguous
         // address is left to the repository's `409`, as before. The address
         // is the one read above, before the named-base rule's inherited arm.
+        // [#29673] The object layer the D9.9 block below classified, for the
+        // registry's refusal asked after the spec gate.
+        let objectRegistrationLayer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']> | undefined;
         if (singularType === 'object') {
             const writtenPackage = draftAddress && draftAddress.kind !== 'ambiguous'
                 ? draftAddress.into
@@ -13808,17 +13830,9 @@ export class ObjectStackProtocolImplementation implements
                     { mode, storedPackages, namedNoPackage, strandedDrafts },
                 );
             }
-            // [#29673] …and the registry's own refusal of the BODY, at the
-            // producer for the same reason: a body `registerObject` refuses
-            // was stored, answered `200`, and logged a `console.warn` at the
-            // write-through — and a draft of it published as "published" and
-            // never reached the data plane. Asked in both modes, as the D9.9
-            // refusal above is (#23712: a draft no publish can serve is a
-            // refusal now, not later). The body is the one this save stores:
-            // the read's translation and injected columns already came off it
-            // above. See {@link objectRegistrationRefusal}.
-            const registration = this.objectRegistrationRefusal(request.item, layer);
-            if (registration) throw registration;
+            // [#29673] …and the layer the registry's own refusal of the BODY
+            // is asked under, after the spec gate below.
+            objectRegistrationLayer = layer;
         }
 
         // [#24547 · ADR-0129 D2] THE NAMESPACE-PREFIX RULE, on the door that
@@ -14364,6 +14378,21 @@ export class ObjectStackProtocolImplementation implements
                     (err as any).issues = issues;
                     throw err;
                 }
+                // [#29673] The registry's own refusal of the BODY, at the
+                // producer for the D9.9 refusal's reason: a body
+                // `registerObject` refuses was stored, answered `200`, and
+                // logged a `console.warn` at the write-through — and a draft of
+                // it published as "published" and never reached the data plane.
+                // Asked in both modes (#23712: a draft no publish can serve is a
+                // refusal now, not later), and AFTER the spec gate, so a body
+                // both refuse keeps the gate's structured `issues[]` (#5364).
+                // The body is the one this save stores: the read's injected
+                // columns already came off it above. See
+                // {@link objectRegistrationRefusal}.
+                if (objectRegistrationLayer) {
+                    const registration = this.objectRegistrationRefusal(request.item, objectRegistrationLayer);
+                    if (registration) throw registration;
+                }
                 if (singularType === 'view') {
                     // [#20051] A saved view is the parsed body: the parsed
                     // value of every key the request carried, undeclared keys
@@ -14897,7 +14926,8 @@ export class ObjectStackProtocolImplementation implements
         // stored row's source text. After every refusal, so a refused save
         // costs no read; before the carry-forward and the put, so what is
         // stored is the source. See {@link restoreTranslatedObjectEchoes}.
-        request.item = await this.restoreTranslatedObjectEchoes(request, repo, ref, mode);
+        const echoes = await this.restoreTranslatedObjectEchoes(request, repo, ref, mode);
+        request.item = echoes.item;
         const carried = await this.carryForwardRedactedCredentials({
             type: singularTypeForRepo,
             repo,
@@ -14911,6 +14941,8 @@ export class ObjectStackProtocolImplementation implements
         const saveNotices = [
             ...runtimeAdvisories,
             ...droppedWithheldKeyNotices({ type: singularTypeForRepo, name: request.name, dropped: carried.dropped }),
+            // [#29673] Each author slot this save put back to its source text.
+            ...translatedEchoNotices(request.name, echoes.restored),
         ];
         // [#20790] …and then OUT of the body: a type with a write-only
         // credential channel (`flow`, registered by the automation plugin)
