@@ -1,7 +1,7 @@
 {
   "number": 20966,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 2 — 🟢 os-warren · 由 os-warren 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:12:24Z",
-  "updated_at": "2026-11-03T00:13:53Z",
+  "updated_at": "2026-11-03T14:15:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 85,
+  "comments": 86,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20966",
-  "body": "domain:server#2 · os-warren · session_01JQwxbXKRzgnVvjzxaYxLUf\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed 2026-11-03T00:12Z at seating.</sub>\n\n## Current PM — 🟢 os-warren\n\n- **Holder:** `os-warren` · `session_01JQwxbXKRzgnVvjzxaYxLUf` (project thread \"Take server lane seat 2\", the os-warren account's project) · opening mark 6591834600.\n- **Previous holder:** `os-steve` · `session_01ADHkmQxwoGb5fSnrFkpxmt`, sign-off brief 6591667069, stay-behind none. Its body is the previous revision of this post.\n- **Mailbox:** PR #29657 (`Mailbox-of: domain:server#2 · os-warren`), subscribed by the seated session.\n- **Patrol:** trig_01K9qs5jUhRGcDM44Pt1Y211 · 11 * * * * (hourly, bound to the seated session).\n- **Concurrency:** at most 5 card threads in hand.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **Carried from the previous revision:** #29610 → draft PR #29637 (contract review PASS 6591028293; owed: check-run re-read, ACCEPT, landing; release 6591594770). Decision box #29594 (`needs-user-decision`, analysis 6588653995): this seat executes the ruling. Queue notes from the previous holder: #29435 waits on #29390; #29557 and #29558 follow #29233; #29544 (lint).\n\n## Hot-file serial queue\n\n- None held by this seat. `protocol.ts` (`packages/metadata-protocol/src/protocol.ts`, spec `api/protocol.zod.ts`, spec `identity/protocol.ts`) is frozen until 2026-11-03 06:00Z at the latest; this seat dispatches nothing touching it before then.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Seats 4 and 5 are 🟢 `os-warren` sibling threads of the same project; seat 1 is `os-steve`. Lane cards are taken by the full order; collisions are settled by the claim timestamp.\n- Session effort: project default, not verified `high`.\n"
+  "body": "domain:server#2 · os-warren · session_01JQwxbXKRzgnVvjzxaYxLUf\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed 2026-11-03T14:13Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-warren` · `session_01JQwxbXKRzgnVvjzxaYxLUf`, seated 2026-11-03T00:12Z (opening mark 6591834600), signed off 2026-11-03T14:13Z. Sign-off brief 6606081838. Stay-behind: none. In flight: none. `check-handover.mjs` exit 0.\n- **Mailbox:** none. PR #29657 is closed; the next holder opens its own at seating.\n- **Patrol:** none. trig_01K9qs5jUhRGcDM44Pt1Y211 is deleted.\n- **Successor:** run `/pm-dispatch 接手`, then read this post first.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **Queue snapshot at sign-off:** 22 cards in `pm:queue` + `domain:server`, listed in brief 6606081838. Decision box: #29594 #29580 #29484 #29425 #29029.\n- **Paused by the maintainer's stand-down (2026-11-03 09:10Z), not started:** #29479. Its serial predecessor #29397 has landed (PR #29874).\n\n## Hot-file serial queue\n\n- None held by this seat. No `protocol.ts` freeze is active.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Cross-lane: #29871 and #29882 sit with `domain:server#6` (os-support-ai, mailbox #29907) by maintainer hand-off.\n"
 }

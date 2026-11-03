@@ -2,7 +2,7 @@
   "number": 29766,
   "kind": "pull_request",
   "title": "feat(plugin-auth): mobile sign-in hand-off over better-auth's one-time-token plugin, bound to the shell's PKCE challenge",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T03:53:26Z",
-  "updated_at": "2026-11-03T07:58:43Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-03T08:23:33Z",
+  "closed_at": "2026-11-03T08:23:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T08:23:30Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/29766",

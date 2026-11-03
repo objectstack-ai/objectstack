@@ -1,7 +1,7 @@
 {
   "number": 25966,
   "kind": "issue",
-  "title": "[PM seat] domain:ui — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
+  "title": "[PM seat] domain:ui — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责 · p1 only",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T06:24:48Z",
-  "updated_at": "2026-11-01T13:06:31Z",
+  "updated_at": "2026-11-03T10:33:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 13,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
-  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 **`zhuangjianguo`** · session `session_01QsR2jUJ19MstFvFhjgiYTu` · seated 2026-11-01T13:03Z · 由 zhuangjianguo 账户的项目负责 (Claude Code project \"objectstack docs ui\", seat thread \"Run second ui lane seat\"). Posture, ledger and round reports live in the project; this body keeps only what other accounts need.\n\n## Handover ledger\n\n- **Inherited:** none in flight. The previous holder (`os-tesla`, `session_01L9qibw2uhdSeHYfnZdAf4V`) signed off clean (brief 6554648505, `check-handover` exit 0, stay-behind none).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. Each claim names its file surface.\n- **Split with seat 4 (#26620, same account, separate session):** seat 4 keeps #28470 #28568 #28573 #28567 #28562 and #28572 through landing. This seat takes every other unclaimed `domain:ui` `pm:queue` card, starting with #28645, then #28569 #28570 #28578 once #28562 lands. Cards sharing `StudioDesignSurface.tsx` or the studio en/zh packs with seat 4's in-flight PRs serialize behind them (the later PR merges main).\n- **Excluded:** the `pm:epic` subtrees. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card; no card thread or reviewer runs on the contract-review tier — a `CONTRACT_REVIEW_TIER` review waits for the director seat; cloud-touching cards go whole to the `repo:cloud` lane.\n- **Mailbox:** opened at seating; its number is in the seat-taken comment below.\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#1 · os-support-ai · session_01WGufzjDyeFwq6AuFu3vwTd\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 **`os-support-ai`** (`GET /user`) · `session_01WGufzjDyeFwq6AuFu3vwTd` (project thread \"Run PM dispatch ui seat 1\" in the os-support-ai account's project \"objectstack spec skills\") · seated 2026-11-03T10:30Z · 由 os-support-ai 账户的项目负责. Summons: the maintainer (Yibo Wang, `os-support-ai`), verbatim 「开一个 ui seat 1 ，只派 p1 任务」 (2026-11-03T10:25Z, in this account's project).\n\n- **Scope:** `priority:p1` cards only (and any `priority:p0`, which the skill puts ahead of everything). p2/p3 cards are left to the other ui seats.\n- **Patrol:** `trig_01RcwDf9WzTeVsgNSdczDUXG` · `29 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** PR objectstack-ai/objectstack#29905 (`Mailbox-of: domain:ui#1 · os-support-ai`), subscribed.\n- **Concurrency:** `batch` 3 (the skill default; no number was given).\n- **Contract reviews:** run in-seat at `CONTRACT_REVIEW_TIER` as an isolated reviewer.\n- Posture, ledger and round reports live in the project (pointer only). Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n\n## Handover ledger\n\n- **Predecessor:** `zhuangjianguo`, `session_01QsR2jUJ19MstFvFhjgiYTu`, clocked out with brief 6600964901 (`check-handover` exit 0); the previous body revision keeps its ledger. #29793 stays released (`pm:blocked`, `Blocked-by: #29814`).\n- **Inherited in flight:** none.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat and each open PR's file list before every dispatch.\n- **Seat 3 (`zhuangjianguo`) holds:** #29878 (p1), #29884 (p1), #29885 (p2). ⛔ Not touched by this seat.\n\n## Notes\n\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Split with seat 3:** first claim wins; this seat re-reads the other seats' live `Claim:` comments before claiming and ⛔ never takes a card another seat holds.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
 }

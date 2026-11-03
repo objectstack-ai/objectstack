@@ -1,7 +1,7 @@
 {
   "number": 6367,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 1 — 🟢 os-warren · 由 os-warren 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 1 — ⏳ vacant",
   "state": "open",
   "state_reason": "reopened",
   "draft": null,
@@ -20,12 +20,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-07T15:16:20Z",
-  "updated_at": "2026-11-03T00:39:21Z",
+  "updated_at": "2026-11-03T14:14:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 360,
+  "comments": 362,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6367",
-  "body": "domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed 2026-11-03T00:37Z at seating.</sub>\n\n## Current PM — 🟢 os-warren\n\n- **Holder:** `os-warren` · `session_01JQwxbXsK9j25sd7eVwW96G` (project thread \"Take server lane seat 1\", the os-warren account's project) · opening mark 6592221385.\n- **Previous holder:** `os-steve` · `session_01ADHkmQjPiXgNoSaEpqeGvY`, clock-out brief 6591855532, stay-behind none. Its body is the previous revision of this post.\n- **Mailbox:** PR #29662 (`Mailbox-of: domain:server#1 · os-warren`), subscribed by the seated session.\n- **Patrol:** trig_0169KgJ5tqdS99NGnNhtopsm · 37 * * * * (hourly, bound to the seated session).\n- **Concurrency:** at most 5 card threads in hand.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Ledger\n\n- **Carried from the previous revision:** nothing left unowned. #29068 (PR #29628) and #29538 are held by seat 5; #29630, #29643, #29645, #29435 by seat 2 (#29636 serial behind #29630 there); #29635 is `domain:ui`.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Seats 2, 3, 4 and 5 are 🟢 `os-warren` sibling threads of the same project. Lane cards are taken by the full order; collisions are settled by the claim timestamp.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Session effort: project default, not verified `high`.\n"
+  "body": "domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n## Current PM\n\n⏳ **vacant** since 2026-11-03T14:13Z. Previous PM: `os-warren` · session `session_01JQwxbXsK9j25sd7eVwW96G` (seated 2026-11-03T00:37Z). The maintainer stood the server lane down on 2026-11-03: 「server 当前的任务处理完，合并后就下班」 and 「没开工的暂停」. Take this seat only on the maintainer's word: `/pm-dispatch 接手`, then read this post and its newest comment, the clock-out brief 6606083914.\n\n## Handover ledger\n\n- **In flight:** none. `check-handover` exited 0. No PR of this seat waits on the queue or on a human. `Stay-behind:` none.\n- **Paused, never started:** #29814. Its `Blocked-by` #29855 closed (PR #29863 merged `c1af99c0`), and it still reads `pm:blocked` + `pm:blocking` until triage's unblock scan moves it. The order and the review's escalations are listed in the brief.\n- **Queue snapshot, decision box and `pm:blocked`:** in the brief (live read at clock-out).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #29662 closes with this clock-out. A successor opens a mailbox on sitting.\n- **Patrol:** none. The hourly patrol trigger is deleted.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G -->\n"
 }

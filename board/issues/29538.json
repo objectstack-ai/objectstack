@@ -2,8 +2,8 @@
   "number": 29538,
   "kind": "issue",
   "title": "objectql write path: an insert or update response leaves a declared column the driver did not echo as an absent key on mongo/memory, while the next read answers it null (#29408)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:13:30Z",
-  "updated_at": "2026-11-03T08:09:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T09:10:02Z",
+  "closed_at": "2026-11-03T09:07:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29538",
   "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ① 产品缺陷 — 具名落点 + 复现. This follow-up is owed by work under review: open_question 2 of the #29408 dev report (issuecomment-6584231973), answered **B** by contract review issuecomment-6584622486 on PR #29528 and ruled B by this seat.\nreach: 公开入口实测 on PR #29528's base `aca58cdb6`, through the engine. The #29408 card thread measured that SQLite answers an unwritten declared column as `null` in both the read and the write response. Memory and mongo return no key in either. PR #29528 fixes the **read** half only: `find` and `findOne` now answer every stored declared column the read selected as `null`. The insert and update answers on mongo and memory stay sparse.\n业务理由: a client that creates or edits a record and renders the response shows a different record body than the very next `GET` of the same row. Once #29528 lands, the write response is the only record body left that differs by driver. The house rule is that the write response is the record as read (read-your-write; #5504 holds it for materialized formulas). A UI form that diffs the write answer against its own state sees fields appear on the next read that the save never mentioned.\n动手的读者: `domain:server` (objectql). The write-answer seam in `packages/objectql/src/engine.ts` (the insert, update and upsert answer paths), beside `selectedStoredColumns` and `withDeclaredColumnsOnly` in `packages/objectql/src/declared-read-columns.ts` as #29528 adds them. Triage grades and routes it.\n查重 (includes closed issues): `insert response unwritten column null` → 3, `write echo sparse mongo null` → 4, `read-your-write response null column` → 6. The only one on this face is #29408, the read half. None covers the write answer.\n\n## What happens\n\n- **SQLite:** the insert or update answer carries every declared column, unwritten ones as `null`.\n- **Memory and mongo:** the answer carries only the keys the driver echoed, so an unwritten declared column is an absent key.\n- **After #29528:** `find` and `findOne` on the same row answer that column `null` on every driver.\n\n## Wanted\n\n- The write answer applies the same fill as the read: every stored declared column the answer carries is `null` when the driver did not return it. Unprovisioned, formula, undeclared and federated-unprovisioned columns, and FLS-refused fields, stay absent exactly as #29528 rules them on the read side.\n- Pin it per driver (SQLite, memory, mongo) on insert, update and upsert, with a control showing the read and write bodies are identical.\n- **Level:** a response body gains `null` keys and no accept set moves, so expect `Clause-②: no` and a patch, the same reading #29528 has.\n\n**Order:** build after PR #29528 merges; it reuses that PR's helper and exclusions."

@@ -13,18 +13,18 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:29:05Z",
-  "updated_at": "2026-11-03T04:30:57Z",
+  "updated_at": "2026-11-03T12:35:47Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29418",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the `Skills-docs:` line of PR #29404 (card #29050, handled under ruling C). `skills/**` is Tier H, so the edit is its own card. State the rule only, in the same words the changeset uses. No examples of refused values and no \"before\" behaviour.\n\n**The rule (from the changeset).** A flow's record nodes (`get_record`, `update_record`, `delete_record`) treat an evaluated value in a filter's operand position as a value, never as a query operator. A value is a string, number, boolean or date. At the comparand of `$in`, `$nin` or `$between` it may be a list of them. Anything else fails the node as a guard before the query runs. The filter the author wrote and every literal operand are unchanged.\n\n**Files.**\n- `skills/objectstack-automation/SKILL.md`: where record-node filters are described, add the rule and the author's fix: make the expression evaluate to the compared value (for a record, its `id`), and write conditions in the filter itself.\n- `content/docs/automation/flows.mdx`: the same sentence in the record-node section.\n\nLands after #29404 merges. Text only."

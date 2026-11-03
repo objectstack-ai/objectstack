@@ -1,7 +1,7 @@
 {
   "number": 26761,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 3 — 🟢 os-warren · 由 os-warren 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 3 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-11-03T00:39:47Z",
+  "updated_at": "2026-11-03T14:16:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 13,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
-  "body": "domain:server#3 · os-warren · session_01JQwxbYyp6wSRcywGFK2L4A\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-03T00:38Z at seating.</sub>\n\n## Current PM — 🟢 os-warren\n\n- **Holder:** `os-warren` · `session_01JQwxbYyp6wSRcywGFK2L4A` (project thread \"Take server lane seat 3\", the os-warren account's project) · opening mark 6592227865.\n- **Previous holder:** `os-steve` · `session_01ADHkmQJdgarUjPLNgFBY67`, sign-off brief 6591780325, stay-behind none. Its body is the previous revision of this post.\n- **Mailbox:** PR #29661 (`Mailbox-of: domain:server#3 · os-warren`), subscribed by the seated session.\n- **Patrol:** trig_01MSYiRzszcZ1pEk7CbdMJWi · 37 * * * * (hourly, bound to the seated session).\n- **Concurrency:** at most 5 card threads in hand.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n\n## Ledger\n\n- **Carried from the previous revision:** nothing in flight. #29630 is held by seat 2, #29342 by seat 5. #29604 needs its ADR-0142 amendment (governed) before code.\n\n## Hot-file serial queue\n\n- None held by this seat. `packages/metadata-protocol/src/protocol.ts` chain #29414 → #29397 → #29479 (#29414 held by seat 5). The freeze (6583458590) was lifted at 6588593530.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Seats 2, 4 and 5 are 🟢 `os-warren` (this account's project, other threads). Lane cards are taken by the full order; collisions are settled by the claim timestamp. Claims name `Seat: domain:server#3` explicitly.\n- **Declarations:** a new provider-owned `providerConfig` key is `Metadata-protocol: added` and takes `minor`, even with no spec hunk (precedent #27387).\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- Session effort: project default, not verified `high`.\n"
+  "body": "domain:server#3 · os-warren · session_01JQwxbYyp6wSRcywGFK2L4A\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-03T14:12Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Holder:** none. Take the seat with `/pm-dispatch 接手` and read this body first.\n- **Previous holder:** `os-warren` · `session_01JQwxbYyp6wSRcywGFK2L4A` (the os-warren account's project) · seated 2026-11-03T00:37Z (opening mark 6592227865) · signed off on the maintainer's order 「server 当前的任务处理完，合并后就下班」. The sign-off brief is the comment that follows this revision.\n- **Mailbox:** PR #29661 closed at sign-off. The next holder opens a new one (`mailbox-open.mjs`).\n- **Patrol:** `trig_01MSYiRzszcZ1pEk7CbdMJWi` deleted at sign-off.\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none. `check-handover` exit 0 (clear). No open PR or assigned card is left by this seat.\n- **Stay-behind:** none.\n- **Never started (unclaimed, in `pm:queue`):**\n  - #29818, serial after PR #29794.\n  - #29848, serial after PR #29797.\n- **Owed elsewhere:**\n  - #29727 leg 2 (Console `PermissionSetCloned` type) is `domain:ui`, back in `pm:queue`.\n  - #29653 is scoped by note 6598764965 to exclude `readonly: true` columns.\n- **Queue snapshot at sign-off** (`pm:queue` + `domain:server`): #29926 #29919 #29918 #29900 #29898 #29896 #29895 #29894 #29891 #29881 #29880 #29879 #29873 #29872 #29860 #29859 #29848 #29818 #29653 #29604 #29479 #25467.\n- **Paused by the maintainer's 09:10Z stand-down:** #25467 s3b, #29479, #29818, #29848.\n- **Decisions:** none open from this seat.\n\n## Hot-file serial queue\n\n- None held by this seat. `packages/metadata-protocol/src/protocol.ts`: no freeze is active (seat 4's 09:07Z freeze on #27737 was lifted at 09:12Z).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Lesson this term (#29343):** before passing a storage-form change, census the consumers that read `[]` and NULL differently.\n  - The first PASS missed `sys_activity.changed_fields` (readonly, NULL = unstamped). CI exposed it, and the PASS was superseded by FAIL 6597870397. Round-2 ruling A (6598733139) fixed it.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

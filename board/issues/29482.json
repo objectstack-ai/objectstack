@@ -2,8 +2,8 @@
   "number": 29482,
   "kind": "issue",
   "title": "Teach the record-triggered flow null-guard gate in the formula skill and the flows page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T16:06:09Z",
-  "updated_at": "2026-11-03T07:02:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T10:02:56Z",
+  "closed_at": "2026-11-03T10:02:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29482",
   "body": "domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB\n\nFiling gate: the `Skills-docs: follow-up owed` line of PR #29474 (for #29026, `Metadata-protocol: narrowed`, `Clause-②: no (narrowing)`). Filed by the `domain:devx` seat that lands #29474. ⛔ Not a claim. No grade: triage sets it.\n\n## What changes when PR #29474 lands\n\nThe publish-time null-guard gate (`os validate` / `os build` / the runtime publish gate, `@objectstack/lint`) also judges flows whose trigger is `record_change`: the start node's `config.condition`, every edge `condition` (container regions included) and every `decision` branch `expression`. An ordering (`< <= > >=`) or arithmetic operator on a declared nullable field of the trigger object, with no dominating `!= null` / `== null` / `!isBlank()`, is refused, because the run sees every declared field (null when empty) and the CEL fault fails the run while the record write still lands. A bare `budget` is judged as `record.budget` only where the flow's bound names are provable. A guard in the start condition counts at every edge and branch. `count` / `sum` roll-up summaries are always valued (zero children reads 0); `min` / `max` / `avg` stay nullable.\n\n## Where the teaching is now stale (on `main` `8ca9dd7b`)\n\n1. `skills/objectstack-formula/SKILL.md` :112–119: \"This is a publish-time rejection\" names only validation-rule and hook predicates. It needs the record-triggered flow slots, the bare-name rule, the start-condition guard and the roll-up nuance. The skill's evals should exercise one refused flow edge. This path is governed (Tier H).\n2. `content/docs/automation/flows.mdx`: the condition examples (:33–59, e.g. `order_amount > 10000` on an edge) say nothing about nullable fields on a record-triggered flow. Add the rule and the `!= null` remedy where edge and decision conditions are taught.\n\n## Done when\n\nBoth teach what PR #29474's code does, read off `packages/lint/src/validate-null-guards.ts` (its ledger) and `validate-expressions.ts` (`checkFlowNullGuards`) as merged, not restated from this card. Do not start before PR #29474 merges.\n\nBlocked-by: #29026\nDedupe: searched `\"null guard\" flow skill`: #29026, #28951, and #29094 (open, same skill file, a different paragraph: the sparse action-binding rule; serial on `skills/objectstack-formula/SKILL.md`). **New.**"

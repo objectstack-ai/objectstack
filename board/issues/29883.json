@@ -1,0 +1,35 @@
+{
+  "number": 29883,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a route whose object read the server answered shows the server reason, not \"check your connection\"",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T09:31:33Z",
+  "updated_at": "2026-11-03T10:13:33Z",
+  "closed_at": "2026-11-03T10:13:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T10:13:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29883",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb1XxsxCUUTENZK7nrfYe3Zo)_\n\nFixes #29728\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：应用路由读取对象定义失败时，如果服务器其实已经回答了（5xx，或带有本版本不认识的错误码的 404），页面现在显示服务器给出的原因和错误码，而不再让人「检查网络连接」。\n- **为什么改**：服务器明明说了原因，界面却让用户去排查网络，误导用户也误导排障；列表页、记录页、应用页早已按同一规则显示服务器原因，路由级这一处是最后一个。\n- **风险与回滚**：风险低。适配器只是在抛出的包装错误上多带一个 `details.originalError`，类、code、statusCode、message 都不变；网络中断和 403 仍显示原来的文案，重试行为不变。回滚即还原本 PR。\n- **先看**：`ui/packages/data-objectstack/src/index.ts`（getObjectSchema 的非 404 分支）、`ui/packages/app-shell/src/providers/MetadataProvider.tsx`（失败读取保存服务器回答）、`ui/packages/app-shell/src/console/AppContent.tsx`（RouteObjectReadFailed）。\n- **两分钟验证**：在 `ui/` 下运行 `pnpm exec vitest run packages/app-shell/src/console/__tests__/AppContent.disabledPackageDeepLink-13052.test.tsx`，预期 18 个用例全部通过，其中 503 用例显示 SERVICE_UNAVAILABLE 和服务器原文。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\nOn main, an app route whose by-name object read failed drew \"Check your connection and try again\" whatever happened: an answered 503, an answered 500, a 404 with a code this build does not know, a network drop and a 403 all drew the same sentence. Measured on `99c06965` through the real `ObjectStackAdapter` under the real `MetadataProvider` and `AppContent`.\n\nThe provider never saw the server's answer. `requestObjectSchema` throws `Error{status, code, message}` with the server's own code and sentence, but `getObjectSchema`'s non-404 catch rewrapped it with `createErrorFromResponse` and kept no reference to it. A 503 became `ConnectionError` `CONNECTION_ERROR` \"Connection error: ...\", a 500 became `UNKNOWN_ERROR`, and a network drop got an invented status 500.\n\n- **`@object-ui/data-objectstack`**: `getObjectSchema`'s non-404 rewrap now carries the transport error as `details.originalError`, as its 404 arm (`MetadataNotFoundError`) and three other wrap sites in the package already do. The wrapper's class, `code`, `statusCode` and `message` are unchanged, and `createErrorFromResponse` keeps its signature.\n- **`MetadataProvider`**: `readObjectThroughAdapter` unwraps `details.originalError` for any `ObjectStackError` (before, only `MetadataNotFoundError`). A failed by-name read stores `answeredLoadFailure(err)` beside the failed name, in a new `answers` record on the scope entry. Nothing is stored for a refused read (`forbidden` / `unauthorized`), which keeps its state as `PageView` does. The record is dropped when the name is answered or invalidated, and returned beside `failed` / `refused`.\n- **`appObjectScope`**: `failedAnswer` is the answer of the first failed name that has one. It is carried on the object, page and dashboard route paths.\n- **`AppContent`**: `RouteObjectReadFailed` draws `answer.message` in place of the network sentence, plus a code chip (`route-object-read-failed-code`) in `PageView`'s shape. No i18n rows were added, and Retry is unchanged.\n\n## Tests\n\n- `AppContent.disabledPackageDeepLink-13052.test.tsx`: a new top-level describe over the REAL adapter driven by a fake `fetch`. It pins:\n  - an answered 503 (wrapped envelope), a 500 (flat envelope) and an unknown-code 404 each show the server code and sentence, and not the network sentence;\n  - a page route that binds the object shows the 503 answer too;\n  - CONTROLs: a network drop keeps the network sentence with no chip; a 403 keeps today's state; `RESOURCE_NOT_FOUND` and `OBJECT_PACKAGE_DISABLED` keep theirs;\n  - Retry still asks once more and clears the answer, and a retry that gets no answer draws the network sentence again.\n- `getObjectSchema.test.ts`: a new describe pins the wrapper's class, code, statusCode and message, plus `details.originalError`, for a 503, a 500 and a network drop, and a 404 CONTROL.\n\n<details><summary>Ablations (committed head, ablation-replace.mjs, restored blob == HEAD)</summary>\n\n- Drop the provider unwrap (back to `MetadataNotFoundError` only): 5 of 9 new route pins went red (503, 500, page 503, network CONTROL, retry-to-network). The unknown-404 pin stayed green, because a 404 is still unwrapped.\n- Drop the `answers` record (`if (answer && false)`): 6 of 9 went red (503, 500, unknown-404, page 503, both Retry pins).\n\n</details>\n\n<details><summary>Verification</summary>\n\n- Related sweep: 301 app-shell test files naming `appObjectScope` / `AppContent` / `MetadataProvider` / `route-object-read-failed` (6 batches, all green), plus the whole data-objectstack suite (114 files, green).\n- `turbo run type-check --filter=@object-ui/app-shell --filter=@object-ui/data-objectstack`: 66/66 tasks.\n- eslint on the six touched files: 0 errors.\n- Derived gates (`dispatch-gates --commands`): 36 derived, 36 run, all exit 0, reconciled with `--ran` (0 NOT-MEASURED), at `ff352f41`. The head `effe42c8` adds only a merge of one unrelated main commit (cloud-connection).\n- Sweep, type-check and ablations ran at `2a886b17` / `ff352f41`; the touched files are unchanged since.\n\n</details>\n\n## Acceptance notes\n\n- **Verdict edge:** with the unwrap, a non-404 status that carries `RESOURCE_NOT_FOUND` or `OBJECT_PACKAGE_DISABLED` is now read by its code: an absence or a refusal, not a failure. No server path is known to answer that way.\n- **Finding, filed by the seat:** `createErrorFromResponse` stamps `500` on any error with no status. As a result, every `getObjectSchema` caller that reads the wrapper takes a network drop for an answered 500 (43 source files, 58 call sites under `ui/`). This PR reads the cause instead and leaves the wrapper as it is.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTGjiGTnPZnatdavVb)_\n"
+}

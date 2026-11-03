@@ -1,0 +1,31 @@
+{
+  "number": 29894,
+  "kind": "issue",
+  "title": "data batch: POST /api/v1/data/:object/batch reports an undeclared hook refusal as row code VALIDATION_ERROR, while /data, /createMany and /batch answer the same refusal HOOK_ABORTED",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T10:04:23Z",
+  "updated_at": "2026-11-03T11:06:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29894",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbZtZMhQkARKJtViA9U\n\nFiling gate: ① a product defect, observed beside the clauses (api-backend.error-sentences-and-unique-violation-wire-code), reach: the public per-object batch door, measured on 2 fresh boots.\nBusiness reason: #27597 gave an undeclared hook `onError` abort one ledgered wire code, `HOOK_ABORTED`, so a client can tell \"a business rule refused this row\" from \"the input is malformed\" and show the hook's sentence instead of a field-validation hint. Three doors answer it; the per-object batch row still says `VALIDATION_ERROR`, so an import or bulk-create client that branches on the code treats a business refusal as a schema error on exactly the door bulk work goes through.\nReader who acts: the triage seat, then a `domain:server` implementer in `packages/metadata-protocol/src/protocol-client-failures.ts`. QA suggestion only: p2.\nDuplicate search (incl. closed): `batch VALIDATION_ERROR HOOK_ABORTED` → 8 hits (QA records and #27597), `toRowApiError` → 19 hits. Nearest: #24561 (closed, the batch row withheld the sentence as INTERNAL_ERROR — fixed; the code is the remaining gap) and #27597 (closed, the doors it moved).\n\n## Reproduction (subject `589049b0`, scratch showcase copy)\n1. An object (e.g. `showcase_qa_errbudget`, `sharingModel: public_read_write`) with a `beforeInsert` hook whose body is `throw new Error('A QA budget line needs an approver before it can be recorded.')` and declares no code.\n2. As admin:\n   - `POST /api/v1/data/showcase_qa_errbudget` `{\"name\":\"x\"}` → 400 `{error: <sentence>, code: \"HOOK_ABORTED\"}`;\n   - `POST /api/v1/data/showcase_qa_errbudget/createMany` `[{\"name\":\"x\"}]` → 400 `HOOK_ABORTED`;\n   - `POST /api/v1/batch` `{\"operations\":[{\"action\":\"create\",\"object\":\"showcase_qa_errbudget\",\"data\":{\"name\":\"x\"}}]}` → 400 `HOOK_ABORTED`;\n   - `POST /api/v1/data/showcase_qa_errbudget/batch` `{\"operation\":\"create\",\"records\":[{\"name\":\"x\"}]}` (also with `options.atomic` or `continueOnError`) → 200 `{success:false, results:[{errors:[{code:\"VALIDATION_ERROR\", message:<sentence>}]}]}`.\n\nExpected: the row's code is `HOOK_ABORTED`, like its sibling doors for the same refusal. Actual: `VALIDATION_ERROR`. 2 of 2 fresh boots.\n\n## Mechanism\n`toRowApiError` (`packages/metadata-protocol/src/protocol-client-failures.ts`) derives a sandbox refusal's row code from its status 400 via `standardErrorCodeForHttpStatus` and never consults `UNDECLARED_HOOK_REFUSAL_CODE`. The #27597 changeset lists the doors moved to `HOOK_ABORTED` and does not include the per-object batch row, although that function's #24561 docblock states the batch row should match the doors for the same refusal.\n\nQA-source: #29890 · api-backend.error-sentences-and-unique-violation-wire-code · observed beside the clauses"
+}

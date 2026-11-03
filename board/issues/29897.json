@@ -1,0 +1,31 @@
+{
+  "number": 29897,
+  "kind": "issue",
+  "title": "Studio All-metadata item page: on a locked item the Properties panel shown with nothing selected disables every control with no reason on hover, keyboard focus or screen reader",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T10:06:06Z",
+  "updated_at": "2026-11-03T11:06:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29897",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbZtZMhQkARKJtViA9U\n\nFiling gate: ① a user-visible experience defect, a QA run clause fail (ux-conventions.disabled-control-reason acceptance[0], [1], [2]), reach: the Studio All-metadata item page, measured on 3 and 2 fresh loads.\nBusiness reason: the convention is that a disabled control says why, on hover, on keyboard focus and to a screen reader, so an admin knows whether to switch package, customize, or stop. #29081, #29206 and #29203 brought the field, flow-node and flow-edge inspectors into line, and the node inspector on this same page now explains itself; but the default Properties panel (nothing selected) on a locked item still greys every control silently, and Tab never reaches them. A keyboard or screen-reader user gets no reason at all; the only sentence is a page banner not associated with the controls.\nReader who acts: the triage seat, then a `domain:ui` implementer in `ui/packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx`. QA suggestion only: `area:studio`.\nDuplicate search (incl. closed): `ResourceEditPage disabled reason` → 22 hits, `inspectorReadOnlyReason` → 3, `locked item disabled controls no reason Studio` → 55. Nearest: #29079 (closed by #29203, the scoped node inspector on this page), #28985 / #29077 (closed, flow node and edge inspectors), #28986 (closed, field inspector display-patch). #29203 says it deliberately left the unselected default inspector unchanged; none covers it.\n\n## Reproduction (subject `589049b0`, stock showcase boot)\n1. Form sign-in as admin.\n2. Open `/_console/studio/~all/metadata/object/showcase_task`, or `/_console/apps/setup/metadata/flow/showcase_task_completed` (redirects to `/_console/studio/~all/metadata/flow/showcase_task_completed`). The page banner reads \"This item is locked and cannot be edited or deleted.\"\n3. With nothing selected on the canvas, the Properties panel's controls are disabled: object page Name, Label, Plural label, Icon, Description, Exposure posture, the Required capabilities toggles; flow page Type* (`button#mdf-type`).\n4. Hover each for 1 s; Tab through the panel; read the accessible description.\n\nExpected: a tooltip with the lock reason on hover, and a focusable wrapper Tab reaches whose `aria-describedby` carries the reason (as the node inspector on the same page does since #29203). Actual: no tooltip, Tab never reaches the controls or a wrapper, no `aria-describedby`, no `title`, no described focusable ancestor. Reproduced 3 of 3 fresh loads (flow) and 2 of 2 (object); control: a writable-package item renders the panel enabled.\n\n## Mechanism\n`ResourceEditPage.tsx` passes `DefaultInspectorComponent` only `readOnly={formReadOnly}` (~L3566–3580), and `SchemaForm` likewise (~L3594, ~L3622); `inspectorReadOnlyReason` (~L2625) reaches only the scoped inspector (~L3561).\n\nQA-source: #29890 · ux-conventions.disabled-control-reason · acceptance[0]"
+}

@@ -2,8 +2,8 @@
   "number": 29783,
   "kind": "issue",
   "title": "data API: a host-configurable default and maximum page size for list, report and analytics reads, and a per-query scanned-row budget, refused with a structured code and logged (framework seam for cloud)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T04:29:06Z",
-  "updated_at": "2026-11-03T07:06:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T09:13:20Z",
+  "closed_at": "2026-11-03T09:13:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29783",
   "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate: executing the maintainer's instruction of 2026-11-03 04:26Z (decision thread on cloud plans), verbatim: 「同意：在代码里补两个保护再谈放宽：查询扫描行预算和强制分页；每周看板加「每个 Team 组织的数据库大小与行读量」。第 3 个月闸门前有这两组数，再决定存储包价格和数据边界的数字。」 Also 04:25Z: 「暂时不考虑存储包，等有了实际用户再说」. Evaluation: https://claude.ai/artifact/Vq1N6ZfXMmfy8sXcupU26t, the 数据量增长 section.\n\n## Why this is a framework card\n\nDedupe on objectstack `main`: no general page-size cap exists in the data API or in the SQL / libSQL driver. `driver-odata` has `pageSize` only for its own upstream, and MCP has `maxQueryLimit` only for its own tool. The hosted data plane runs the framework's data API, so the gate belongs here. Cloud only sets the numbers.\n\n## Ask\n\n- **Forced pagination:** list, report and analytics (问数) reads get a default page size and a maximum page size. A request over the maximum is clamped or refused, as one documented rule.\n- **Scanned-row budget:** a per-query limit on rows the driver may scan or return. Over the budget, the query is refused with a structured code (for example `QUERY_ROW_BUDGET_EXCEEDED`), the limit is named, and a log or metric line is written with object and count, never row content.\n- **Host configuration:** both numbers come from host configuration with safe defaults, so cloud can set them per deployment. One value for every plan is enough for now.\n- **Tests:** the clamp, the refusal shape, and that defaults leave today's self-hosted behaviour working.\n\n## Reader\n\nobjectstack triage (data API / driver lane). Cloud picks this up in its own card once a pin carries it."

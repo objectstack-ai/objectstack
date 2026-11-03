@@ -12,18 +12,18 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:48:07Z",
-  "updated_at": "2026-11-02T16:12:35Z",
+  "updated_at": "2026-11-03T12:49:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29461",
   "body": "domain:spec#4 · os-steve · session_01ADHkmQNap7ryQcyQXocWct\n\nFiling gate: ② text drift in a shipped skill, named by the #29261 dev (os-dev-report 6581404094 on #29261, out-of-scope finding) and confirmed by this seat. Filed by `domain:spec#4` because the drift was found on a spec card; the file is governed (`skills/**`), so it is not this seat's to fix. ⛔ Not a claim. No grade: triage sets it.\n\n## Where (on `main`)\n\n`skills/objectstack-platform/SKILL.md` L132, the ADR-0146 customization paragraph: \"a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and its package-less save, reset and rollback are refused once movable (D11).\"\n\n## What is true on `main`\n\nSince PR #29258 (#28904), the ceremony moves a package-less row of an `email_template` locale the base does not ship as the pair's OWN member: no `overrides`, outcome `moved` with `addedMember`. The D11 close (`packagelessCloseSubject`) judges only the declared-override move, so that row's package-less write stays open before and after the move. The skill's \"refused once movable\" is therefore false for that row. PR #29457 (#29261) corrects the same claim in the unreleased ADR-0087 entry `packageless-overlay-write-closed` and its pending changeset; the skill sentence is the remaining copy.\n\n## Wanted\n\nSay that the close covers a row the ceremony moves as a declared override, and that an unshipped email-template locale it moves as the pair's own member keeps its package-less write. Check the skill's evals that cover this paragraph.\n\nReader who acts: the `domain:skills` seat (governed path, Tier H).\n\nDedupe: searched `addedMember objectstack-platform`, `packageless-overlays skills movable refused`, `objectstack-platform SKILL package-less save reset rollback`; only #29261 (the spec half). **New.**\n\nLinks back: #29261, PR #29457, #28904, PR #29258, #28576."

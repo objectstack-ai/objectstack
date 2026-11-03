@@ -1,0 +1,34 @@
+{
+  "number": 29917,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a tracked record's field-change history shows again on a record page with no declared page",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T11:51:12Z",
+  "updated_at": "2026-11-03T12:28:11Z",
+  "closed_at": "2026-11-03T12:28:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T12:28:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29917",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbLBjKdYAu7h1PVXA59GcZk1)_\nFixes #29878\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：打包应用（以及控制台里新建的应用）中，没有声明记录页的记录页面会重新显示声明了 `trackHistory` 的对象的字段变更历史。记录路由按名读取 `sys_audit_log`，并在首屏渲染前等它返回。\n- **为什么改**：#29846 / #29697 让记录路由只读应用范围内的对象，不再读整份对象注册表，而这个范围里没有 `sys_audit_log`。于是记录页的「变更」筛选只剩活动摘要，用户会以为没人改过记录；同一条记录在抽屉里仍能看到变更。这是 18.3.0 的回归。\n- **风险与回滚**：只改 app-shell 一个函数。对象没有 `trackHistory` 时请求不变；有的话多一次小的按名元数据读取，首屏要等它。读取被拒、不存在或失败时历史保持关闭，页面照常渲染，不会退回读整份注册表。回滚就是 revert 本 PR。\n- **先看**：`ui/packages/app-shell/src/console/appObjectScope.ts` 的 `readObjectRouteNames` 末尾（新增的 `streamRead` 等待）和 `recordStreamObjectNames`；再看 `AppContent.packagelessRecordRelated-29552.test.tsx` 末尾新增的 describe。\n- **两分钟验证**：`cd ui && pnpm exec vitest run packages/app-shell/src/console/__tests__/AppContent.packagelessRecordRelated-29552.test.tsx`，预期 23 个用例全绿；新增的 6 个用例在 main 上有 4 个是红的。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n| File | Change |\n|---|---|\n| `ui/packages/app-shell/src/console/appObjectScope.ts` | The record arm with no declared record page passes `synthesizedRecordPage`. In `readObjectRouteNames`, once the route object's definition is in hand and it declares `enable.trackHistory === true`, `sys_audit_log` is asked by name (`views: false`) through the same scope as the lookup targets, and the route's `ready` waits on it (`routeReadDone`). The route's `failedNames` and `routeObjectRefusal` still read the route's own object only. |\n| `.../__tests__/AppContent.packagelessRecordRelated-29552.test.tsx` | New top-level describe (the #29552 harness: real `MetadataProvider` under the real `AppContent`). The harness gains a `refuse` map for by-name reads and records the objects each record-view render is handed. |\n| `.../views/RecordDetailView.timelineCount-28737.test.tsx` | Surface addition approved by the seat: the page payload's `timeline` asks `fieldChanges: true` for a tracked object when `sys_audit_log` is in the objects, with a CONTROL that asks `false` without it. `boot()` takes the objects. |\n| `.changeset/29878-record-route-field-history.md` | `@object-ui/app-shell` patch. |\n\nOnly `sys_audit_log` was missing. The step-1 census of every record-page reader that looks an object up by name in the scoped list found no other: `resolveFeedWriteGates` gives the same verdict for `sys_comment` and `sys_comment_reaction` whether the schema is present or absent (both are `managedBy: 'platform'`, the absent default). The reaction store's presence uses its own by-name read. Lookup targets, inbound objects and cascade labels are already in the scope.\n\nA declared record page never held `sys_audit_log`, and that is not a gap: an assigned page has no history consumer. `pageColumnsEligible = !assignedPage` gates the `timeline` ask, and the audit read needs `!assignedPage`.\n\n## Tests\n\n- Harness describe `a tracked object's record route asks sys_audit_log by name (objectstack#29878)`:\n  - packaged and package-less: the record view's FIRST render holds `sys_audit_log`, the object calls are exactly the package list (packaged) plus `object/sys_user` and `object/sys_audit_log`, there is no `object` (registry) call, and the related lists keep the registry's set and order.\n  - CONTROL: an object without `trackHistory` asks nothing more.\n  - A refused read (403 `PERMISSION_DENIED`) and an absent object (404) keep it out of the objects and still draw the page, with no registry read.\n  - CONTROL: the drawer still reads the registry.\n- Red at main: the final test files run against main's `appObjectScope.ts` (`00f72f94`): 4 failed / 25 passed (29), across both files.\n- Ablation 1, the stream name dropped (`recordStreamObjectNames` returns `[]`): 4 failed / 19 passed. Restored blob `7f44431a`, `git diff HEAD` empty.\n- Ablation 2, the wait dropped (`ready` without `routeReadDone(streamRead)`): both first-render cases red (2 failed / 21 passed). This proves the pin holds the wait, not only the ask.\n\nPer-PR pin, not the live spec: `ui/e2e/live/record-history-display.spec.ts` stays on `test:e2e:live:nightly`. Moving it to `:ci` would add a live backend to every PR for a contract the unit pin above holds in Test UI (gates are added only when named by a maintainer).\n\n## Acceptance notes\n\n- Route reads, measured in the harness, in order, before and after:\n  - Before, packaged: `page`, `app`, `object?package=app.crm`, `object/sys_user`. First render: the route object plus the related objects; `sys_user` (a lookup target) lands later.\n  - After, packaged: the same, plus `object/sys_audit_log`, sent in the same render as the `sys_user` lookup ask, after the package list and the route object answer. First render waits on the package list, the route and related names, and the `sys_audit_log` answer. That is one extra by-name round trip, in parallel with the lookup target, and only for a tracked object.\n  - Package-less: the same, minus the package list.\n- Live showcase not re-run here. QA's reproduction at `589049b0` names the route, and the harness reproduces it.\n\n## Verification\n\nLocal gate union at `f8dab480` (see the report comment on #29878).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUeSi3TcT4sErYm6GQ)_\n"
+}

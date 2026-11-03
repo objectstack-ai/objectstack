@@ -1,0 +1,36 @@
+{
+  "number": 29885,
+  "kind": "issue",
+  "title": "data-objectstack: createErrorFromResponse stamps status 500 on an error that got no answer, so a dropped connection reads as an answered server error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T09:34:31Z",
+  "updated_at": "2026-11-03T12:18:40Z",
+  "closed_at": "2026-11-03T12:17:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29885",
+  "body": "domain:ui#2 · zhuangjianguo · session_01QsR2jRFuJz9QBZqPVHYVhJ\n\nFiling gate: ② out-of-scope finding, class a (read and measured), from #29728 (PR #29883). Filed by `domain:ui#2`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** When a request gets no answer at all (the connection dropped, the host is unreachable), any caller that reads the adapter's error believes the server answered with a 500. A screen that follows #29704's rule then shows the browser's \"Failed to fetch\" as if it were the server's own sentence, when it should say \"check your connection\".\n\n## What happens (measured on `main` `99c06965`, real `ObjectStackAdapter` + fake fetch)\n\n- `ui/packages/data-objectstack/src/errors.ts` `createErrorFromResponse`: `const status = response?.status || response?.statusCode || 500`. A `TypeError` from `fetch` has no status, so it becomes an `ObjectStackError` with code `UNKNOWN_ERROR` and `statusCode` 500.\n- The function also replaces the server's ADR-0112 code with the adapter's own taxonomy (a 503 becomes `ConnectionError` / `CONNECTION_ERROR`, a 500 becomes `UNKNOWN_ERROR`).\n- In-tree there is one caller, `ObjectStackAdapter.getObjectSchema`'s non-404 catch. It is read at 58 call sites in 43 files under `ui/`. The function is also exported from `@object-ui/data-objectstack`.\n- #29728 (PR #29883) works around this for the by-name route read only: the wrapper now keeps the transport error as `details.originalError`, and `MetadataProvider` reads that cause. Every other `getObjectSchema` caller that classifies the wrapper still reads a network drop as an answered 500.\n\n## Wanted\n\nA status-less error is not answered as 500. One way is to keep `statusCode` undefined, or to give the error a no-answer class such as `ConnectionError` with no status. `classifyLoadError` / `answeredLoadFailure` would then read it as `network` everywhere. Decide whether the wrapper should also carry the server's own `code` beside its taxonomy code. The function is exported, so a change to what it returns may be a Clause-② question for the claim.\n\n## Tests\n\n- A `getObjectSchema` call whose fetch rejects with a `TypeError` produces an error that `answeredLoadFailure` returns `null` for, and `classifyLoadError` reads as `network`.\n- CONTROL: an answered 503 / 500 keeps its status.\n- Ablation: put the `|| 500` back, and the first test goes red.\n\nLanding site: `ui/packages/data-objectstack/src/errors.ts` and its tests. Callers only if a test shows one depends on the 500.\n\nDedupe: `is:issue createErrorFromResponse`, `is:issue \"Failed to fetch\" 500 network` (none open).\n\nLinks back: #29728, #29704."
+}

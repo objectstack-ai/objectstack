@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T04:15:32Z",
-  "updated_at": "2026-11-03T07:33:19Z",
+  "updated_at": "2026-11-03T08:30:04Z",
   "closed_at": "2026-11-03T07:33:18Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -30,7 +29,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29777",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured red on a generated PR the `domain:devx` lane owns (the weekly refresh, #22949 ruling E). Found while answering triage's stale-PR sweep on PR #28978.\nReader: `domain:devx` (`scripts/partition-test-shards.mjs`, its `slice spread` check in the self-test).\nDedupe (open AND closed): `slice spread`, `partition-test-shards cli whole slice`, `shard-timings`. #25870 (open) is about the two slowest shards' wall clock, not this refusal. #25936 is about the refresh PR's token. No card for this refusal.\nreach: every weekly refresh until the partitioner or the dataset changes. The next scheduled run is Monday 05:30Z (`shard-timings-refresh.yml`, `cron: '30 5 * * 1'`).\ntype: Bug\n\n## What happens\nThe 2026-11-02 refresh (run 41394864471) opened PR #28978 (head `b5b4b790`, one file, +261/−405). On that head, `Lint · CI, release & engine gates` is red on one gate, `Shard partitioner self-test` (`node scripts/partition-test-shards.mjs --self-test`):\n\n```\nError: slice spread: the committed dataset, split as CI splits it, carries no slice -- @objectstack/cli: whole (whole 1432s against 736s, 1.3x the heaviest other serial task, but sliced the densest shard would carry 1552.63s, past the 1455.81s densit…\n    at partition-test-shards.mjs:2125\n```\n\nThe refreshed timings put `@objectstack/cli` at 1432 s. The check wants the dataset to carry at least one slice. Slicing `cli` would push the densest shard past the density bound, and keeping it whole leaves no slice, so the check refuses either way. `Lint & Repo Gates` is red only because it aggregates that lane.\n\n## Wanted\n- Decide which side is wrong. Either the check's \"carries a slice\" expectation no longer fits the measured workload, or the density bound or shard count needs to move for a 1432 s serial task. Measure it on the refreshed dataset rather than the committed one.\n- ⛔ Do not delete or weaken the check to make the refresh land. Do not hand-edit the generated timings.\n- When this lands, re-run the refresh or let Monday's run regenerate it. PR #28978 is parked on this card."

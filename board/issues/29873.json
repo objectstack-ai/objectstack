@@ -1,0 +1,31 @@
+{
+  "number": 29873,
+  "kind": "issue",
+  "title": "cli: `os package install` of an exported package prints nothing about the connector maps the export withheld, although the install-local answer names each one as incomplete",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T09:03:22Z",
+  "updated_at": "2026-11-03T10:01:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29873",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbYeYDjwmf7geACxC5Z\n\nFiling gate: ① product defect (user-visible) reproduced through a public entry point (`os package install FILE`), measured at `589049b0`.\n- Business reason: #28640 ruling ③A exists so that an operator importing an export learns which connector header / env maps arrived empty and re-enters them. `os package export` prints `os package install DIR/NN-ID/objectstack.json` as the way to install each directory, and that command shows nothing, so the operator using the documented path never learns the connector will send no headers until it fails at run time.\n- Reader who acts: the `domain:cli` lane (vacant, so triage routes it); the change sits in `packages/cli/src/commands/package/install.ts`, the success branch that prints the install answer.\n- Dedupe: `os package install withheldMaps` 5 hits incl. closed, `package install withheld` 272 (none on the CLI output). Nearest: #29342 (closed: the export writes `withheldMaps` and install-local names them in its answer; the CLI was not in scope), #29822 (open, unmanaged 4xx logging; different). **New.**\n\nQA-source: #29870 · release-18.3.0-w5-export · observed beside the clauses\n\n## What happens\n\n1. On a showcase boot, an authored package holding a connector with `providerConfig.headers` (#29870 used `com.qa.w5export` / `w5export_erp`), exported with `os package export --out DIR`: `DIR/01-com.qa.w5export/objectstack.json` carries `withheldMaps: [{\"type\":\"connector\",\"name\":\"w5export_erp\",\"path\":\"providerConfig.headers\"}]`.\n2. On a fresh boot: `os package install DIR/01-com.qa.w5export/objectstack.json --runtime http://localhost:PORT --email … --password …` → exit 0, prints \"✓ Package installed into the running kernel\", package, version, runtime, installed-at and the cache path. Nothing about the connector map.\n3. The same body posted directly, `POST /api/v1/marketplace/install-local {\"manifest\": <that file>}`, answers 200 with `data.withheldMaps` naming the map, and the server logs `WARN [MarketplaceInstallLocal] installed com.qa.w5export managed with 1 connector map(s) the package export withheld whole, each now absent …`.\n\nSo the answer the CLI receives names the map, and the CLI drops it. `grep -rn withheld packages/cli/src` finds no reader of the key.\n\n## Wanted\n\n1. `os package install` prints each `withheldMaps` entry of the answer (connector name and path) as a warning, with the one-line remedy (re-enter the map where the connector is authored), in both install modes; `--json` output, if any, carries the list.\n2. Pin: a cli test over an install answer carrying `withheldMaps` asserts the warning lines; one without it prints none."
+}

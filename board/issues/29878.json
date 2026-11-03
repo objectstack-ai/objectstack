@@ -1,0 +1,36 @@
+{
+  "number": 29878,
+  "kind": "issue",
+  "title": "Console: a packaged app's record page no longer shows a record's field-change history (Changes chip), since the record route reads only its package scope (#29846)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T09:24:35Z",
+  "updated_at": "2026-11-03T12:29:45Z",
+  "closed_at": "2026-11-03T12:28:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29878",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbWT669ynWFKZjqFyNF\n\n立卡门: ① 产品缺陷，具名落点 + 复现（reach: 公开入口 界面 `/_console/apps/com.example.showcase/showcase_account/record/ID?related=timeline` 实测两次错误结果，独立复核一致）；回归，P0 清单项 `records-forms.crud-roundtrip` acceptance[4] 由 PASS 转 FAIL\n业务理由: 打开记录页想知道「谁改了什么」的用户（审计、客服、销售主管）在任何打包应用的记录页上都看不到字段变更历史了，只剩活动摘要；`sys_audit_log` 里数据完好，抽屉里也还能看到，所以用户会以为没人改过。这是 18.3.0 将要发布的行为；不修，记录页的变更历史在发版后对所有声明 `trackHistory` 的对象静默消失。\n动手的读者: domain:ui 席（`ui/packages/app-shell`），`ui/packages/app-shell/src/console/appObjectScope.ts` 记录路由 `!page` 分支（#29846 引入）与 `ui/packages/app-shell/src/views/RecordDetailView.tsx` 的 `historyEnabled`；附一枚进 CI 的 pin（现有 `ui/e2e/live/record-history-display.spec.ts` 只在 nightly 跑）。\n查重: `repo is:issue fieldChanges` 3 命中（#28737 已关，及两张 qa-run 记录）、`record page audit history Changes chip` 50、`sys_audit_log record page` 118、`appObjectScope` 19（均含已关）；最近邻 #29681（本回归所修的性能卡，已关）、#29416 / #29551 / #29552（同族范围读，已关）、#28737、#27492 都不是本现象。\n\nQA-source: #29877 · records-forms.crud-roundtrip · acceptance[4]\n\n## What happens\nOn a packaged app's record page, the record's field-change history no longer appears. The record page's timeline stream (the Activity tab, or `?related=timeline`) with the Changes chip pressed shows only the `sys_activity` summary lines (\"Updated Account …: Annual Revenue · Dev Admin\", \"Created Account …\"), never the audit lines with display values (\"Annual Revenue — → $4,321,000.00 · Dev Admin\", \"Owner — → Dev Admin; Account Name — → …\").\n- The page request `POST /api/v1/ui/…/showcase_account/ID/page` carries `\"timeline\":{\"discussion\":true,\"activity\":true,\"fieldChanges\":false}`, and the page never issues `GET /api/v1/data/sys_audit_log`.\n- The rows exist: `GET /api/v1/data/sys_audit_log?filter=[[\"record_id\",\"=\",\"ID\"]]` answers total 2 (create + update).\n- Control: the record drawer of the same record (`/_console/apps/com.example.showcase/showcase_account?recordId=ID`, same session) sends `fieldChanges:true`, reads `sys_audit_log`, and draws both audit lines.\n- The pin the checklist cites for this contract, `ui/e2e/live/record-history-display.spec.ts`, fails the same way at this subject (run against a live backend and the console dev server from source): `expect(text).toContain(other.name)` at line 116 receives only `sys_activity` summaries.\n\nMeasured at framework `589049b0` (main, 2026-11-03, the 18.3.0 pre-cut re-check subject), stock showcase, built console (served entry byte-identical to `packages/console/dist`) and the source console through vite. Wave 4 (#28927, at `7fa9873f`, 2026-11-02) measured this clause PASS.\n\n## Reproduction\n1. Boot the stock showcase; sign in as admin through the form.\n2. Accounts › New: Account Name `os-qa-x`, Industry Retail, Lifecycle Active › Create (`POST /api/v1/data/showcase_account` 201).\n3. Record page › Edit › Annual Revenue 4321000 › Update (`PATCH` 200).\n4. Fresh load `/_console/apps/com.example.showcase/showcase_account/record/ID?related=timeline` at 1440×900; press the Changes chip.\n5. **Expected:** the audit field-change lines with display values (option labels, resolved owner), as the drawer shows.\n6. **Actual:** only the two `sys_activity` lines; the page request says `fieldChanges:false`; no `sys_audit_log` read.\n\n## Mechanism (read at 589049b0)\n- `historyEnabled` in `ui/packages/app-shell/src/views/RecordDetailView.tsx` (~L2375) is `objectDef.enable.trackHistory === true && objects.some(o => o.name === 'sys_audit_log')`; it feeds both `timeline.fieldChanges` (~L2437) and the audit read (~L2742).\n- On a packaged app's record route with no declared record page, `objects` comes from `readAppObjectScope` (`ui/packages/app-shell/src/console/appObjectScope.ts`). Before a9322700 (#29846, \"a packaged app's record route reads the objects pointing at the record through its package scope, not the registry\", fixing #29681) that branch returned `scope: null`, i.e. the whole registry, which contains `sys_audit_log`. Now it reads only the package list, the route object, `requiresObject` names, the objects pointing at the record and its lookup targets. `sys_audit_log` (package `com.objectstack.audit`) points at nothing by lookup, so it is never in that list and `historyEnabled` reads false.\n- The drawer still works because `AppContent` joins the whole registry when `?recordId=` is present (#27626).\n- Likely the same for console-created apps' record routes after be6b15c7 (#29697), from the code only, not driven.\n- Why CI did not catch it: `record-history-display.spec.ts` runs in `test:e2e:live:nightly`, not `test:e2e:live:ci`; #29846's tests pin the related-list set, not `historyEnabled`.\n\nA fix direction (the PM's call): the record-route scope also asks for `sys_audit_log` by name when the route object declares `enable.trackHistory`, or the history gate stops depending on the scoped list. Either way, a pin in the per-PR suite."
+}

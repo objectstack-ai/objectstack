@@ -1,0 +1,31 @@
+{
+  "number": 29896,
+  "kind": "issue",
+  "title": "field.sortable: false has no effect — the sortability projection still reports the field sortable, the data door sorts by it, and the list header and Sort picker offer it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T10:05:37Z",
+  "updated_at": "2026-11-03T11:06:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29896",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbZtZMhQkARKJtViA9U\n\nFiling gate: ① a product defect, a QA run clause fail (studio-authoring.no-entry-property-matrix acceptance[1], acceptance[2], negative[0] — the field.sortable row: a key stored, served and inert), reach: the public data door and the list grid, measured on 4 fresh loads.\nBusiness reason: an author marks a field `sortable: false` because sorting it is meaningless or expensive (a long text, an unindexed column on a large table). The spec describes the key as \"the column cannot be sorted in list views\" and the liveness ledger grades it live for the grid, so Studio offers it as a working switch — but nothing honours it, so users still sort by it and the author gets no signal. Wave 4 recorded this row as passing; at `589049b0` it is inert.\nReader who acts: the triage seat, then a `domain:server` implementer in `packages/spec/src/api/sortability.zod.ts` (the projection), with a `domain:ui` follow-up in `ui/packages/plugin-grid/src/objectGridGenerateColumns.tsx` if the explicit-column path keeps reading `col.sortable` alone. QA suggestion only: p2.\nDuplicate search (incl. closed): `field sortable false sort` → 31 hits, `resolveObjectSortability` → 1 (#22250, closed, a different leak), `sortable: false list header` → 28. Nearest: #10235 (closed, formula columns the platform cannot sort — the virtual-type half, which works). None covers an authored `sortable: false`.\n\n## Reproduction (subject `589049b0`)\n1. Writable package (e.g. `app.qar8`), object `qar8_fz` with a field `nosort: {type: 'text', sortable: false}` (plus a normal `name`), published; a few rows.\n2. `GET /api/v1/meta/object/qar8_fz` → `fields.nosort.sortable: false`; the served sortability projection → `sortability.fields.nosort = {sortable: true}`.\n3. `GET /api/v1/data/qar8_fz?sort=nosort` → 200, sorted.\n4. Console list (default tab, and a view with explicit columns): clicking the \"No Sort\" header sends `sort=nosort`; the Sort picker offers \"No Sort\".\n\nExpected: the projection reports `sortable: false`, the grid header and the Sort picker do not offer the column (and, per the projection's contract, the data door refuses or ignores the sort). Actual: sortable everywhere. Reproduced 4 of 4 fresh loads (2 per route); control: the same selector on the Name header sends `sort=name`; proof is the network request.\n\n## Mechanism (suspected)\n- `resolveObjectSortability` (`packages/spec/src/api/sortability.zod.ts` ~L226) never reads `field.sortable`; only virtual types come out unsortable. ListView's Sort picker reads that projection.\n- `objectGridGenerateColumns.tsx` ~L555 takes the explicit-column path's `sortable` from `col.sortable`, not the field definition (~L698 and ~L962 do read the field).\n- Spec text: `field.zod.ts` ~L2469; liveness grade: `liveness/field.json`.\n\nQA-source: #29890 · studio-authoring.no-entry-property-matrix · acceptance[1]"
+}

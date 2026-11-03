@@ -2,8 +2,8 @@
   "number": 29762,
   "kind": "issue",
   "title": "Plugin-driver row cap is fixed at 1000 with no paging: a gantt over a virtual object (the #27130 recipe) fails with 422 once its tree passes 1000 rows",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "baozhoutao",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T03:46:41Z",
-  "updated_at": "2026-11-03T06:29:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T11:15:40Z",
+  "closed_at": "2026-11-03T11:14:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29762",
   "body": "**Edition:** ObjectOS Enterprise (licensed, self-managed)\n**Version:** 18.2.0 in production. The virtual-object route is evaluated against 18.3.0 (`origin/main` `0b2b309c`).\n\n## Background\n\n#27130 (closed) was answered with the virtual-object recipe: a plugin driver behind an external object, with the gantt bound to that object (`content/docs/data-modeling/virtual-objects.mdx`). Our production-scheduling gantt is a four-level tree: project → product → plan → work order. The project and product rows are synthetic group rows that the driver computes.\n\n**We expect the tree to reach about 5,000 rows**, counting plans and their work orders as they accumulate. We have not measured this yet. A gantt shows the whole tree at once, so one list read has to return all of those rows.\n\n## What happens\n\nRead on `origin/main` `0b2b309c`, `packages/objectql/src/external-driver-floor.ts`:\n\n- The floor sends the driver `limit: EXTERNAL_ROW_CAP + 1` (`:199`). It never sends `offset`, so the driver cannot page.\n- More than `EXTERNAL_ROW_CAP` (1000, `external-driver-errors.ts:37`) rows back throws `EXTERNAL_ROW_CAP_EXCEEDED` (422, `:214`). The guide confirms this: \"the cap is fixed and not configurable\", and \"when more than 1000 rows match, every page of that read is refused\".\n- So once the tree passes 1000 matching rows, **the whole gantt fails with a 422**. It is not truncated. It works in testing and breaks in production as data grows.\n\nThe guide's remedies do not fit this case:\n\n- **Narrow the filter.** This helps only as long as the narrowed set stays under 1000. A planner who widens the date range or clears a quick filter gets the 422 again.\n- **Mirror the data into a real object.** This brings back the snapshot table we removed. A stored copy is stale until the next sync, and the next sync overwrites a planner's edits. The guide itself says to make the object virtual when \"a stored copy is yesterday's answer\".\n\n## Request\n\nOne of the following:\n\n- **(a) A per-datasource cap.** For example `external.rowCap` on the datasource, bounded by a platform maximum, so an operator who knows the source can raise it.\n- **(b) Bring forward the trusted-driver tier from #27261.** A driver that passes the plugin-driver conformance kit would be trusted with `offset`, `limit` and pagination, and the cap would then apply per page, not per match set.\n- **(c) At minimum, document it.** Add a section to the guide on views that read the whole set at once (gantt, tree, calendar, map), and what to do when that set exceeds 1000.\n\n## Related\n\n- #27130 (the original report), #27261 (epic; the trusted tier is its later phase), #27277 (the floor and the cap)"

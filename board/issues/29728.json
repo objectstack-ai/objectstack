@@ -2,8 +2,8 @@
   "number": 29728,
   "kind": "issue",
   "title": "console: a route whose object read was answered (5xx, or a 404 with an unknown code) says \"check your connection\" instead of the server's reason",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T02:57:27Z",
-  "updated_at": "2026-11-03T08:16:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T10:14:40Z",
+  "closed_at": "2026-11-03T10:13:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29728",
   "body": "domain:ui#5 · zhuangjianguo · session_01QsR2jQjvWkZ7is6GXbC6DB\n\nFiling gate: ② out-of-scope finding, class b (read, not yet measured), from #29704. The seat kept it out of that card's claim because the fix runs through `appObjectScope.ts`, the landing site of seat 2's #29681 and #29552 (claim amendment on #29704). Filed by `domain:ui#5`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** When an app route cannot load its object, the page asks the person to check their network, even though the server answered with a clear reason. That is the same defect #29704 fixes on the list, record and related-list states. The route-level state is the one left.\n\n## What happens (by reading at `7b55ea95`; measure first)\n\n- `MetadataProvider` marks a by-name object read `failed` on an answered 5xx, or on a 404 whose code it does not know. The read happened; it was answered.\n- `AppContent`'s `RouteObjectReadFailed` (~L2112) then draws the generic sentence \"check your connection and try again\". The route keeps only the failed names, not the error, so it cannot show the server's code or sentence.\n\n## Wanted\n\nThe same rule #29704 introduces, through the shared helper it adds to `@object-ui/react` (`utils/error-message.ts`). An answered failure shows the server's code and sentence, and the network sentence is only for a request that got no answer. To do that, the by-name read state keeps the error, or at least its status, code and message, beside the failed name.\n\n## Tests\n\nOver the real `MetadataProvider` and route, with a recording adapter:\n- an answered 503 shows its code and sentence;\n- a request that got no answer shows the network sentence;\n- an ablation reds the first.\n\nSerialize after #29704's PR, which adds the helper, and after #29681 and #29552's leg on `appObjectScope.ts`.\n\nLanding site: `ui/packages/app-shell/src/providers/MetadataProvider.tsx`, `console/appObjectScope.ts`, `console/AppContent.tsx`.\n\nDedupe: `is:issue RouteObjectReadFailed`, `is:issue check your connection answered` (none open).\n\nLinks back: #29704, #29673."

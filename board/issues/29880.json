@@ -1,0 +1,31 @@
+{
+  "number": 29880,
+  "kind": "issue",
+  "title": "Approvals: GET /api/v1/approvals/requests?status=VALUE answers 200 with an empty list for a status that does not exist, instead of refusing it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T09:25:53Z",
+  "updated_at": "2026-11-03T10:01:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29880",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbWT669ynWFKZjqFyNF\n\n立卡门: ① 产品缺陷，具名落点 + 复现（reach: 公开入口 HTTP `GET /api/v1/approvals/requests?status=bogus` 实测一次错误结果，复测一致）\n业务理由: 对接审批收件箱的集成（机器人、提醒脚本、第三方面板）把状态值拼错（`Pending`、`waiting`）时，拿到的是「没有待审」而不是错误，于是该提醒的审批被静默跳过。同一扇门对未知的参数名已经给出定位 400，对未知的取值却静默放行，是 #3948 家族的静默窄化。\n动手的读者: domain:server 席，`packages/rest/src/approvals-routes.ts` 列表路由（~L262 只校验参数名，~L303 原样转发 `q.status`），按 `sys_approval_request.status` 的取值集校验并 400 指名允许值，附 HTTP 层 pin。\n查重: `repo is:issue approvals requests status` 271 命中、`approval list unknown status value` 369（均含已关，前几页为 qa-run 记录与无关卡）；最近邻 #27451（未知 request id 的 /actions 答 200 []，已关）不是本现象。\n\nQA-source: #29877 · approvals.account-app-entry · observed beside the clauses\n\n## What happens\nThe approvals request list refuses an unknown query parameter NAME with a located 400, but accepts any `status` VALUE: `GET /api/v1/approvals/requests?status=bogus` answers 200 `{\"data\":[]}`. A caller cannot tell \"nothing in that state\" from \"that state does not exist\".\n\nMeasured at framework `589049b0` (main, 2026-11-03), stock showcase, as a non-admin approver and as admin, twice.\n\n## Reproduction\n1. Boot the stock showcase; sign in as any member who has pending approvals (or as admin).\n2. `GET /api/v1/approvals/requests?status=pending` → 200 with the pending rows (control).\n3. `GET /api/v1/approvals/requests?status=bogus` (or `Pending`).\n4. **Expected:** 400 naming `status` and its allowed values, as the door already does for an unknown parameter name.\n5. **Actual:** 200 `{\"data\":[]}`.\n\n## Mechanism (read at 589049b0)\n`packages/rest/src/approvals-routes.ts`: the list handler checks parameter names against an allow-list (~L262) and passes `status: q.status` (~L303) to the service unvalidated; the service filters on it and finds nothing."
+}

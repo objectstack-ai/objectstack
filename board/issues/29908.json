@@ -1,0 +1,31 @@
+{
+  "number": 29908,
+  "kind": "issue",
+  "title": "[PM seat] domain:server · seat 6 — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责 · p1 only",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T10:35:44Z",
+  "updated_at": "2026-11-03T10:42:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29908",
+  "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 6**, added by `seat-post-protocol.md` 〈新增座位贴〉 (highest existing seat number in the lane, 5, plus one). Seats 1–5 (#6367, #20966, #26761, #27737, #28677) are held by another account's project; ⛔ this post is none of them.\n\n## Current PM\n\n🟢 **`os-support-ai`** (`GET /user`) · `session_01WGufzibcN9oHa8kDbTTnL5` (project thread \"Run PM dispatch server seat 1\" in the os-support-ai account's project \"objectstack spec skills\"), seated 2026-11-03. Summons: the maintainer (Yibo Wang, `os-support-ai`), verbatim 「开一个 server seat 1 只处理 p1 卡」 (2026-11-03T10:31Z) and 「后续所有车道只处理 p1 卡」 (10:31Z), in this account's project.\n\n- **Why seat 6, not seat 1:** seat 1 (#6367) and seats 2–5 are 🟢 under another account with opening marks today; this seat is added beside them rather than taking any over.\n- **Scope:** `priority:p1` `domain:server` cards ONLY. ⛔ No p2/p3 claims.\n- **Patrol:** `trig_01HgAqSgMRXPSeBpYkv5PWnc` · `33 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** PR objectstack-ai/objectstack#29907 (`Mailbox-of: domain:server#6 · os-support-ai`), subscribed.\n- **Concurrency:** `batch` default 3 active dev cards (the maintainer named no cap).\n- **Contract reviews:** run in-seat at `CONTRACT_REVIEW_TIER` as an isolated reviewer.\n- Posture, ledger and round reports live in the project (pointer only). Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#6` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch; read seats 1–5 too.\n\n- #29871 (`assemblePackageManifest` per-package layer; serial with #29760 and #29872 per triage 6600504116).\n- #29882 (`packages/runtime` `organizationOwnershipRefusalMessage`, `packages/cli` `os start`).\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Release freeze context (2026-11-03):** the maintainer is preparing a release; this seat is their explicit p1-only exception.\n- **Harness:** `check-harness-current.mjs` read STALE at seating (shared checkout behind `origin/main` `e9ae8ef4` on `project-forms.md`, `seat-lifecycle.md`, `lanes/triage.md`); the three files were re-read from `origin/main` before this post.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes."
+}

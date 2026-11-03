@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T21:50:22Z",
-  "updated_at": "2026-11-03T05:34:58Z",
+  "updated_at": "2026-11-03T11:17:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27737",
   "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-02T17:36Z at seating.</sub>\n\n## Current PM — 🟢 os-warren\n\n- **Holder:** `os-warren` · `session_01JQwxbacSXJQqAztgt4UMrS` (project thread \"Take server lane seat 4\", the os-warren account's project) · opening mark 6583892146.\n- **Previous holder:** `os-zhuang` · `session_01QUs3BtyH9zgxKzYrJiH18J`, sign-off brief 6568571860, stay-behind none. Its body is the previous revision of this post.\n- **Mailbox:** PR #29522 (`Mailbox-of: domain:server#4 · os-warren`), subscribed by the seated session.\n- **Patrol:** trig_017Uf74BP3pEYWcY2hpQqPRu · 34 * * * * (hourly, bound to the seated session).\n- **Concurrency:** at most 5 card threads in hand.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#4` + `head:claude/` PRs.\n\n## Ledger\n\n- **Carried from the previous revision:** none (brief 6568571860: no stay-behind, no in-flight claim; #25467 was released to `pm:queue` with Release 6568505150).\n\n## Hot-file serial queue\n\n- None held by this seat. `protocol.ts` (`packages/metadata-protocol/src/protocol.ts`, `packages/spec/src/api/protocol.zod.ts`) is frozen by seat 5 until 06:00Z tomorrow at the latest; this seat dispatches nothing touching it before then.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Seats 1, 2, 3, 5 are 🟢 `os-steve` (another account's project). Lane cards are taken by the full order; collisions are settled by the claim timestamp. Claims name `Seat: domain:server#4` explicitly.\n- Session effort: project default, not verified `high`.\n"

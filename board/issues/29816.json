@@ -2,8 +2,8 @@
   "number": 29816,
   "kind": "issue",
   "title": "spec: push relay transport — `transport: relay | direct` on PushServiceConfigSchema, and the server→relay wire shape (ruling cloud#3519)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -13,10 +13,7 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "needs:contract-review",
     "pm:blocking",
-    "pm:dispatched",
-    "pm:queue",
     "priority:p1",
     "protocol:system"
   ],
@@ -26,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T06:06:31Z",
-  "updated_at": "2026-11-03T06:57:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T10:34:05Z",
+  "closed_at": "2026-11-03T10:32:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29816",
   "body": "Blocked-by: objectstack-ai/cloud#3519\n\n## Context\n\nobjectstack-ai/cloud#3519 was ruled **1C 2A 3A 4B 5A 6B 7B** on 2026-11-03. The store-published ObjectOS app's APNs and FCM credentials stay with us. Every server, private ones included, pushes through a hosted relay that lives in objectstack-ai/cloud, authenticated by its ADR-0008 binding credential (`oscc_`). The relay only ever sees an opaque payload.\n\nToday `packages/spec/src/system/push-config.zod.ts` knows only direct mode:\n- `PushServiceConfigSchema = { apns?, fcm? }`, each with a `credentialRef`, all marked `[PLANNED — not yet read]`;\n- its docblock calls a hosted surface out of scope.\n\n## Ask\n\n1. **`transport` discriminated union** on `PushServiceConfigSchema`, built with `strictObject`:\n   - `{ transport: 'relay', endpoint?: URL }`. This is the default. `endpoint` defaults to the production relay and exists only for staging. The block carries no credential, because the binding is the credential.\n   - `{ transport: 'direct', apns?, fcm? }`. This is the current shape, kept for white-label builds.\n   - Mixed shapes are refused when authored: credentials inside a relay block, or direct without any `credentialRef`.\n   - Keep `[PLANNED — not yet read]` until #29041's reader lands (ADR-0049, second state).\n   - Rewrite the docblock: the hosted relay is the default, and direct is for white-label apps.\n2. **New `packages/spec/src/api/push-relay.zod.ts`.** One Zod schema that the sender (#29041) and the receiver (the cloud relay) both pin.\n   - Request: `{ deliveries: [{ token, vendor, payload, priority }] }`. `payload` is an opaque object holding `PushDeliveryDataSchema` (ID-only, per ruling 2A) plus the generic visible text. There are no title or body fields.\n   - Response: one result per token, `ok | invalid | retry`.\n   - Error envelope: 401 (bad or revoked binding) and 429 (quota or rate limit, with reason and next step).\n3. **Unchanged this phase.**\n   - `PushVendorSchema` stays `apns | fcm`; it widens in the same PR as the China transports.\n   - `RegisterDeviceRequestSchema` gets no `pushKey`; that waits for the E2EE phase.\n4. **Declarations.** Changeset level `minor`, `Clause-②: yes (widening)`, `Metadata-protocol: added`. Regenerate the generated artifacts, as #29218 did.\n\n## Acceptance\n\n- Tests pin the default transport, the mixed-shape refusals, and the request/response shapes including each per-token result.\n- The precedent for size and shape is #29218 (+1388/−24)."

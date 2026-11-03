@@ -1,0 +1,36 @@
+{
+  "number": 29871,
+  "kind": "issue",
+  "title": "runtime: a disabled package exports as an empty shell (GET /packages/:id/export and the whole-deployment bundle drop its items), so a re-install loses them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T09:02:02Z",
+  "updated_at": "2026-11-03T12:30:05Z",
+  "closed_at": "2026-11-03T12:28:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29871",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbYeYDjwmf7geACxC5Z\n\nFiling gate: ① product defect with a reproduction through a public door (`GET /api/v1/packages/:id/export`, `GET /api/v1/packages/export`), measured on a live showcase boot at `589049b0`.\n- Business reason: the whole-deployment export is a tenant's exit right (#28914). A tenant who switched a package off and exports the deployment gets that package back as an empty package on the copy, and its objects are gone with no error. Not fixing it means \"export everything, install elsewhere\" silently loses whatever was disabled at export time.\n- Reader who acts: a `domain:server` seat dispatching from `pm:queue`; the change sits in `packages/runtime/src/domains/packages.ts` (`assemblePackageManifest`) and possibly the per-package read it calls.\n- Dedupe: `export disabled package` 514 hits incl. closed (none on this), `\"disabled package\" export in:title` 0, `disabled package export empty` 476. Nearest: #29760 (open, a THROWING per-type read is skipped; here nothing throws), #28117 / #25296 (disabled-package serving, closed). **New.**\n\nQA-source: #29870 · release-18.3.0-w5-export · E5\n\n## What happens\n\n1. `POST /api/v1/packages {\"manifest\":{\"id\":\"com.qa.w5off\",\"name\":\"W5 disabled\",\"version\":\"0.1.0\",\"type\":\"app\",\"namespace\":\"w5off\"}}` → 201.\n2. `PUT /api/v1/meta/object/w5off_note?mode=draft&package=com.qa.w5off {\"name\":\"w5off_note\",\"label\":\"W5 Note\",\"sharingModel\":\"private\",\"fields\":{\"body\":{\"type\":\"text\",\"label\":\"Body\"}}}` → 200, then `POST /api/v1/packages/com.qa.w5off/publish-drafts {}` → 200 (`published` 1).\n3. Control: `GET /api/v1/packages/com.qa.w5off/export` → 200 with `objects: [w5off_note]`.\n4. `PATCH /api/v1/packages/com.qa.w5off/disable` → 200, `enabled: false`.\n5. `GET /api/v1/packages/com.qa.w5off/export` → 200 `{\"id\":\"com.qa.w5off\",\"name\":\"W5 disabled\",\"version\":\"0.1.0\",\"namespace\":\"w5off\"}`: no `objects`. The bundle `GET /api/v1/packages/export` lists the package with the same empty entry.\n\nThe `sys_metadata` row `object / w5off_note / com.qa.w5off` stays `state: active` throughout. Re-enabling brings the content back; disabling again empties it (three times on one boot). Installing that entry on a fresh boot (`os package install`) answers 200 and the object is absent there (`GET /meta/object/w5off_note` 404).\n\n## Governing text\n\n`PackageExportBundleSchema` docblock (`packages/spec/src/api/package-lifecycle.zod.ts`): \"Enabled or not, every such package is exported, and the bundle carries no enabled state … an install of the bundle installs every entry enabled. A package the tenant switched off comes back on, and the consumer disables it again if it wants it off.\" The entry is listed, but its content is not, so the consumer gets the package back on and empty.\n\n## Mechanism (source reading, not ablated)\n\n`assemblePackageManifest` reads each type through `protocol.getMetaItemsPerPackage`. The list read hides items of a disabled package (`isItemOfDisabledPackage`, `packages/metadata-protocol/src/protocol-meta-list-reads.ts` near line 750: \"Hide metadata owned by a disabled package\"), which is right for serving and wrong for the export. The bundle pin `packages/runtime/src/domains/packages-export-bundle.test.ts` (\"a disabled one included\") runs over a stub protocol and asserts only that the id is listed.\n\n## Wanted\n\n1. The per-package export (and so the bundle, one producer) carries a disabled package's own items, read without the disabled-package serving filter; served reads keep hiding them.\n2. Pin on a real boot: disable a published package, its export still carries its object; a fresh install of the bundle serves it."
+}

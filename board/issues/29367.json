@@ -2,8 +2,8 @@
   "number": 29367,
   "kind": "issue",
   "title": "[governed] AGENTS.md and .claude/agents/os-dev.md disagree on who sets a PR assignee at pr_create",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T13:04:57Z",
-  "updated_at": "2026-11-03T06:48:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T12:35:45Z",
+  "closed_at": "2026-11-03T12:35:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

@@ -2,8 +2,8 @@
   "number": 29400,
   "kind": "issue",
   "title": "skills(objectstack-data): a `user` field's declared `deleteBehavior` now takes effect when the user is deleted (#29253) — the field-type and relationship rules should say so",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:06:21Z",
-  "updated_at": "2026-11-03T07:58:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T09:54:30Z",
+  "closed_at": "2026-11-03T09:54:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

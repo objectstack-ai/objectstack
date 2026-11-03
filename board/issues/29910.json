@@ -1,0 +1,31 @@
+{
+  "number": 29910,
+  "kind": "issue",
+  "title": "docs(approvals): document how a request with no submitter leaves the returned state",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T10:40:39Z",
+  "updated_at": "2026-11-03T11:07:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29910",
+  "body": "security#1 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n**Maintainer ruling.** In session `session_01QSeKYn5CmmdShCJifm6WYj` on 2026-11-03 the maintainer accepted the seat's analysis, which had been reviewed at `CONTRACT_REVIEW_TIER` first. Verbatim: 「第三批 同意」. For item 5 the analysis offered three options:\n- D: leave the behaviour as it is and document the way out (chosen);\n- A: refuse send-back on a request with no submitter (not chosen, because an author's declared revise edge would turn into a runtime refusal);\n- B: let the system recall a `returned` request. B is not a valid option: it contradicts the published contract #12775.\n\n## What\n- A user-less trigger can open an approval request with no submitter (`approval-node.ts:199`, `runTriggerUser`).\n- An approver can send such a request back along the flow's declared `revise` edge (`sendBack`, `assertReviseEdge`).\n- Once the request is `returned`, `IApprovalService.recall` reaches it only for its submitter (#12775, `packages/spec/src/contracts/approval-service.ts:1030-1041`). A request with no submitter has no one who can recall it.\n- The way out exists: the flow's own `revise` branch handles the revision window, then a system-context `resubmit` opens a fresh `pending` round. That round can be recalled by the system or by the override actor (#29806).\n\n## Change (docs only)\nIn the approvals guide, and next to the `sendBack` / `recall` contract docblocks, state that path for requests with no submitter. Say what an author should put on the `revise` branch of a flow started by a user-less trigger.\n\n⛔ No behaviour change."
+}

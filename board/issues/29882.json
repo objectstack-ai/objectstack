@@ -1,0 +1,36 @@
+{
+  "number": 29882,
+  "kind": "issue",
+  "title": "cli: the v17 refusal `os start` prints sends the operator to an ownership ceremony that blocks (security plugin not composed), because it does not say to export the auth secret `os start` keeps in its home",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T09:27:15Z",
+  "updated_at": "2026-11-03T11:51:07Z",
+  "closed_at": "2026-11-03T11:49:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29882",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbWT669ynWFKZjqFyNF\n\n立卡门: ① 产品缺陷，具名落点 + 复现（reach: 公开入口 CLI `os start` 对 v17 库的拒绝文案，照文执行后 `os migrate organization-ownership --apply` 实测一次错误结果）；已关卡 #23871 的未覆盖分支\n业务理由: 用 `os start`（生产快速启动）跑着 17.x 的运维升级到 18 时，启动拒绝给出的两条命令照抄执行，计划能出、apply 却停在 `authored-conversion` 半途（安全插件未组合），提示也不说要导出 `os start` 存在其 home 里的 auth-secret。能续跑、不丢数据，但升级卡住，运维得自己去翻 `os start` 把密钥放在哪。不修，18.3.0 上每个从 `os start` 部署升级的人都会撞上。\n动手的读者: domain:cli 席，`packages/runtime/src/organization-ownership-boot-guard.ts` 的 `organizationOwnershipRefusalMessage`（#23871 已让 `--dev` 一支自带组合，`os start` 一支未覆盖）与 `packages/cli/src/commands/start.ts`（其 home 下的 `auth-secret`）：拒绝文案对 `os start` 给出能跑通的命令（带 `OS_AUTH_SECRET=$(cat HOME/auth-secret)` 或等价旗），附 CLI e2e pin。\n查重: `repo is:issue os start organization-ownership auth-secret` 43 命中、`ceremony authored-conversion OS_AUTH_SECRET` 7、`migrate organization-ownership os start` 127（均含已关）；最近邻 #23871（`os dev`/`os serve` 拒绝文案缺组合，已关）与 #23359（apply 阻断未点名原因，已关）是同族已修分支，#24566、#26615 不是本现象。\n\nQA-source: #29877 · cli.organization-ownership-ceremony · observed beside the clauses\n\n## What happens\nOn a v17-shaped database `os start` refuses to boot and prints the two ceremony commands without `--dev` and without naming any auth secret. Run exactly as printed (same app directory, `OS_AUTH_SECRET` unset, as an `os start` operator has it), the plan succeeds and the apply stops: `complete: false`, `blocking: 1`, step `authored-conversion` blocked with \"Did not compose the security plugin: `os serve` composes none here (no OS_AUTH_SECRET, and not a development boot…)\". Re-running the apply with `OS_AUTH_SECRET=$(cat HOME/auth-secret)` (the secret `os start` persisted in its home) completes.\n\nMeasured at framework `589049b0` (main, 2026-11-03), from a scratch copy of the showcase, over a copy of a v17 database built by npm `create-objectstack@17.7.0` and booted once by its own `os dev`.\n\n## Reproduction\n1. Copy a v17 database to `COPY`. From the app directory, with `OS_AUTH_SECRET` unset: `os start -p PORT -d file:COPY --home H` → exit 1; the refusal prints `os migrate organization-ownership --out PLAN`, then `os migrate organization-ownership --apply --plan-file PLAN --backup-taken`.\n2. Run both, with `OS_DATABASE_URL=file:COPY`: the plan exits 0.\n3. The apply exits 1: complete false, blocking 1, `authored-conversion` blocked (\"Did not compose the security plugin…\").\n4. **Expected:** the commands the refusal prints complete for the deployment that printed them (as the `--dev` spelling already does since #23871), or the refusal names the secret to export.\n5. **Actual:** a blocked, resumable ceremony; the operator has to find `H/auth-secret` on their own."
+}

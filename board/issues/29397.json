@@ -2,8 +2,8 @@
   "number": 29397,
   "kind": "issue",
   "title": "metadata-protocol: fold the two overlay-write close predicates (`namedBaseCloseSubject`, `packagelessCloseSubject`) into one fix-can-be-taken predicate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:studio",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:03:33Z",
-  "updated_at": "2026-11-03T07:17:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T11:33:05Z",
+  "closed_at": "2026-11-03T11:31:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29397",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the contract review of PR #29270 (#28905), record 6577747588, should-fix S6 (the dev's open question 3, answered A). #28904 has landed (#29258), which was the precondition.\n\n`namedBaseCloseSubject` (`protocol-packaged-base-refusal.ts`, #28905) and `packagelessCloseSubject` (`protocol-packageless-overlay-migration.ts`, #28576) agree step for step on whether the pair fix can be taken: the pair id derives, `customizationPairEnsureRefusal` answers none, the base records a `manifest.version`, and the D2 gate admits the declared body. They differ only where intended: the named close reads no row and accepts a named package among several shippers, while the package-less close requires exactly one shipper and classifies the stored row.\n\nAsk: one shared predicate for the common steps, with each close keeping its own intended difference. This is a refactor with no behaviour change: both closes' pins pass unchanged, and the sentence spelling (`closedOverlayWriteClauses`) is untouched. Serial with the S1 card (same module)."

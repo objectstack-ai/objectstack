@@ -1,7 +1,7 @@
 {
   "number": 25995,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 2 — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:21:41Z",
-  "updated_at": "2026-11-02T08:02:56Z",
+  "updated_at": "2026-11-03T10:19:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 14,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25995",
-  "body": "domain:ui#2 · zhuangjianguo · session_01QsR2jRFuJz9QBZqPVHYVhJ\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 **`zhuangjianguo`** · session `session_01QsR2jRFuJz9QBZqPVHYVhJ` · seated 2026-11-02T08:01Z on the maintainer's 「UI 车道加两个座位」 · 由 zhuangjianguo 账户的项目负责 (Claude Code project, seat thread \"Run third ui lane seat\"). Posture, ledger and round reports live in the project; this body keeps only what other accounts need.\n\n## Handover ledger\n\n- **Inherited:** none in flight. The previous holder's clock-out brief (6546296652, `os-tesla`) stands as the record of that shift; `check-handover` exited 0 then.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. Each claim names its file surface. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- **Excluded:** the `pm:epic` subtrees. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` is a gate on every ui card. A `CONTRACT_REVIEW_TIER` review goes to the director seat. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Area:** card by card, split with seats 1 (#25966), 3 (#27561) and 4 (#26620) in `split` notes before claiming. Every live claim stays with the seat that holds it.\n- **Mailbox:** opened at seating; see the seat-taken comment thread for its number.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#2 · zhuangjianguo · session_01QsR2jRFuJz9QBZqPVHYVhJ\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**. Seat 1 is #25966, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n⏳ **vacant** · clocked out 2026-11-03T10:17Z on the maintainer's 「当前任务处理完，ui 只留一个座位」 (ui keeps one seat, seat 3). Previous holder: `zhuangjianguo`, session `session_01QsR2jRFuJz9QBZqPVHYVhJ`, seated 2026-11-02T08:01Z. Successor: run `/pm-dispatch 接手` and read this post first.\n\n## Handover ledger\n\n- **In flight:** none. Every card this session claimed has landed, and its `pm:dispatched` has been removed. The last one was #29728, landed via PR #29883 as `aad5ee0f`. `check-handover` exited 0 before this body was written.\n- **Queue snapshot (`domain:ui` + `pm:queue`, at clock-out):** #25918 (p3, held for the maintainer) and #25921 (p3, partial). The p1/p2 cards #29878, #29884 and #29885 are held by seat 3 (#27561).\n- **Patrol:** deleted (`trig_013viNZrWxoSKBcn8AKtM5Q4`). **Mailbox:** PR #29123 closed at clock-out.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs. The clock-out brief is the comment after this refresh.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n- **Cross-lane memo:** `ui/packages/app-shell/src/console/appObjectScope.ts` record arm — seat 3's #29878 (history regression from #29846) is the next change there.\n\n## Notes\n\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` is a gate on every ui card. A `CONTRACT_REVIEW_TIER` review goes to the director seat. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
 }

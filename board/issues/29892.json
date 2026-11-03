@@ -1,0 +1,36 @@
+{
+  "number": 29892,
+  "kind": "issue",
+  "title": "checklist: re-point ai.mcp-run-action-exposure-gate acceptance[4] and step 6 — they still pin the wholesale sys_* refusal that rulings on #27681 and #27900 replaced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1",
+    "tests"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T10:03:57Z",
+  "updated_at": "2026-11-03T13:58:40Z",
+  "closed_at": "2026-11-03T13:56:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29892",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbZtZMhQkARKJtViA9U\n\nFiling gate: ① a stale clause, a QA run clause fail (ai.mcp-run-action-exposure-gate acceptance[4]) whose red line needs an owner (checklist-test §5, \"过期规格\"). It failed the same way in wave 4 (#28942) and was parked on the 18.3.0 anchor #27377, which has since closed with the re-point not made, so it is red again at wave 5.\nBusiness reason: the item is the MCP door's release evidence that an agent cannot run actions it should not reach. While acceptance[4] asserts a refusal the product no longer makes, every sweep reports this P1 item FAIL although the gate holds as ruled, and the one real defect it found (#28943) is buried under a permanent red row.\nReader who acts: the `domain:devx` lane that owns `docs/qa/platform-checklist/areas/ai.json` (one item revision, `node scripts/check-platform-checklist.mjs` green).\nDuplicate search (incl. closed): `mcp-run-action-exposure-gate re-point` → 8 hits; none is a re-point card (wave 4 parked it on #27377 instead of carding).\n\n**Disposition: stale spec.** Since maintainer ruling 6513869839 on #27681 (letter B) and the ADR-0011 addendum (ruling 6523087116 on #27900, amended by 6540309323), a `sys_*` action is listed and run over MCP when the action itself declares `ai.exposed`. Code: `systemObjectActionExposureError` (`packages/runtime/src/action-execution.ts`) and `isListableAction` (`packages/mcp/src/mcp-http-tools.ts`). Item revision 6 kept acceptance[4] as \"system objects are refused wholesale\".\n\n## Measured at `589049b0` (2 fresh stock boots, MCP Streamable HTTP on `/api/v1/mcp`)\n- `list_actions {}` with an admin osk_ key → `totalCount` 37, of which 36 are `sys_*` actions, all `aiExposed: true`, all marked `unavailable` for an osk_ caller (since #28943 / PR #29036).\n- A non-exposed system action is refused and never executes, in two spellings the clause does not quote: with objectName 'Action \"create_api_key\" on system object \"sys_api_key\" is not exposed via MCP: …ai.exposed… list_actions lists it for you'; without it \"Action 'create_api_key' is on a system object ('sys_api_key') and is not exposed via MCP — …\".\n- With the admin's session bearer, `run_action revoke_api_key` (`confirm: true`) answers `ok: true` and the key reads `revoked: true` — exposed and allowed, as ruled.\n\n## Revise (`areas/ai.json`, item `mcp-run-action-exposure-gate`)\n- acceptance[4]: a `sys_*` action with no `ai` block is refused in either current spelling with zero side effects, and an `ai.exposed` system action passes this guard (and meets the next gate);\n- step 6: name a non-exposed action (`create_api_key`), since \"any sys_* action name\" can pick an exposed one;\n- acceptance[1].verify: \"the snapshot is the one exposed action\" no longer holds (37 listed on stock, 38 with `qa_ai_gated`); entries marked `unavailable` are part of the contract.\n\nQA-source: #29890 · ai.mcp-run-action-exposure-gate · acceptance[4]"
+}

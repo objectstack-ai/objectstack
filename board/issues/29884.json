@@ -1,0 +1,36 @@
+{
+  "number": 29884,
+  "kind": "issue",
+  "title": "Studio Interfaces: a dashboard draft the server refuses to read (403) still opens an editable empty buffer under the refusal strip, and a Source edit autosaves over the draft unpinned, dropping its requiredPermissions",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T09:32:02Z",
+  "updated_at": "2026-11-03T13:19:13Z",
+  "closed_at": "2026-11-03T13:17:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29884",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbZtZMhQkARKJtViA9U\n\nFiling gate: ① a product defect, the #29015 path re-checked live after its fix (#29132, #29275, #29380), reach: the Studio autosave PUT, measured on two independent boots by two runners (10 of 11 and 7 of 9 fresh loads).\nBusiness reason: an author opening a dashboard whose draft carries an audience gate (`requiredPermissions`) they do not hold now sees #29132's refusal strip, but on most loads Studio also renders an editable form under it. An edit through the header's Source tool autosaves over the draft with no If-Match: the gate and every draft-only change are lost, and publishing then serves the dashboard to everyone. That is exactly the data loss #29015 was filed (and fixed) for, so the 18.3.0 release blocker's fix is incomplete. It is not an authorization hole: the author holds metadata write on their own package.\nReader who acts: the triage seat, then a `domain:ui` implementer in `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx` (the Interfaces leaf load) and the #29132 test. QA suggestion only: `area:studio`; it re-opens the #29015 release-blocker path, so the director seat decides whether it blocks 18.3.0.\nDuplicate search (incl. closed): `\"refuses to read\" draft Studio` → 27 hits, `StudioDesignSurface draft 403` → 29, `requiredPermissions draft 403 Studio dashboard` → 38. Nearest: #29015 (closed by #29132, the original), #29148 (closed by #29275/#29380, the four other editors and the pillar load; the list-view editor re-measured here holds). None covers the Interfaces-leaf ordering.\n\n## Reproduction (subject `589049b0`, main)\n1. Writable package PKG (`POST /api/v1/packages`), a published dashboard D with one metric widget, and an app whose navigation entry names D.\n2. As admin (no set grants `showcase.export_data`): `PUT /api/v1/meta/dashboard/D?mode=draft&package=PKG` with the published body plus `\"requiredPermissions\":[\"showcase.export_data\"]` → 200 draft.\n3. `GET /api/v1/meta/dashboard/D?state=draft&package=PKG`: admin → 403 PERMISSION_DENIED; an entitled reader (admin role + `admin_full_access` + `showcase_ops`) → 200 with `requiredPermissions`.\n4. Fresh browser, form sign-in as admin, open `/_console/studio/PKG/interfaces` (D auto-selected) or the deep link `/_console/studio/PKG/metadata/dashboard/D`.\n5. Observed: the refusal strip (\"This item has an unpublished draft you are not allowed to read…\") AND, under it, the Properties inspector (Label empty, Widgets 0) and the item tools; Source reads `{}`. 10 of 11 loads (runner 2: 7 of 9); the deep link 4 of 4. No input was sent before observing (≥6 s after the 403).\n6. Inspector Label edit → `PUT /api/v1/meta/dashboard/D?mode=draft&package=PKG&surface=studio` `{\"label\":\"…\"}`, no If-Match → 422 INVALID_METADATA (name, widgets). The draft survives only because the inspector cannot supply `name` (`metadata-admin/dashboard-schema.ts` hides it).\n7. Source tool (`[data-testid=studio-item-tool-source]`): replace `{}` with the published body (name, label, columns, widgets), close the sheet → same PUT, no If-Match → **200**. The entitled reader's draft read now has no `requiredPermissions` and its draft-only label is gone; admin's draft read flips 403 → 200. 2 of 2 per runner (Interfaces and deep link).\n\nExpected (the #29132 contract): Studio opens no buffer over a draft the server refuses to read; no autosave can be sent from that leaf. Actual: an empty editable buffer with a live, unpinned autosave on most loads.\n\n## Mechanism (read from source at the subject, consistent with both runs)\n- The designers register through a dynamic import (`ui/packages/app-shell/src/index.ts` ~L425), so `isEditable = !!Preview && !StudioCanvas` (`StudioDesignSurface.tsx` ~L5131) can be false on the first render.\n- In that state the `!current || !isEditable` arm (~L5240–5251) installs `draft = {}` with `setDraftFor(leafKey)` and no version pin.\n- When the preview registers, the effect re-runs; its refused (403) branch (~L5284–5290) only calls `setError` and returns, leaving `draftFor === leafKey`, so `useDraftAutoSave` (`useDraftAutoSave.ts` ~L167, `loadedFor === target`) reports loaded: item tools (~L6473) and inspector show and the autosave is live. The object, flow and app 403 branches clear theirs (`setObjDraftFor('')` ~L8116, `setDraftFor('')` ~L10565, `setAppDraftFor('')` ~L4983).\n- `StudioDesignSurface.draftUnreadable-29015.test.tsx` registers the dashboard preview in `beforeEach` (~L152), so it never reaches this ordering.\n\nQA-source: #29890 · studio-authoring.api-written-keys-survive-studio-save · observed beside the clauses (#29015 off-clause re-check)\n"
+}
