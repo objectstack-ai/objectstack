@@ -1,17 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-/**
- * [#29520 codemod] The top-level declarations ahead of `SqlDriver` in
- * `sql-driver.ts` that moved out whole by
- * `scripts/codemod-split-sql-driver.mjs` (lever (b) of ruling 6591753301).
- *
- * A MOVE, not a redesign: each declaration below is its `sql-driver.ts` text
- * exactly, with the comments above it, in the order it stood there. A LEAF:
- * it imports neither `sql-driver.ts` nor any `sql-driver-*` module, so it is
- * evaluated before the class and forms no cycle with it. `sql-driver.ts`
- * re-exports, by name, every declaration here it exported before, so every
- * importer of `./sql-driver.js` reads what it read.
- */
+// [#29520 codemod] The top-level declarations ahead of `SqlDriver` in
+// `sql-driver.ts` that moved out whole by
+// `scripts/codemod-split-sql-driver.mjs` (lever (b) of ruling 6591753301).
+//
+// A MOVE, not a redesign: each declaration below is its `sql-driver.ts` text
+// exactly, with the comments above it, in the order it stood there. A LEAF:
+// it imports neither `sql-driver.ts` nor any `sql-driver-*` module, so it is
+// evaluated before the class and forms no cycle with it. `sql-driver.ts`
+// re-exports, by name, every declaration here it exported before, so every
+// importer of `./sql-driver.js` reads what it read.
 
 import { AggregationFunction, NUMERIC_VALUE_TYPES, isAcceptedFilterComparand, isMultiValueField, isNowDefaultToken } from '@objectstack/spec/data';
 import type { SchemaMode, FilterVerdict as SharedFilterVerdict, ValueShapeFieldDef } from '@objectstack/spec/data';
