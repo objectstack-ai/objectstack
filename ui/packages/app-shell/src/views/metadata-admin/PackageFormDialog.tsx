@@ -56,6 +56,7 @@ import {
   Label,
 } from '@object-ui/components';
 import { useMetadataLocale, t, tFormat, tOptional } from './i18n.js';
+import { isStudioCatalogueLoaded } from '@object-ui/i18n/namespaces/studio';
 import { SchemaForm, type SchemaFormIssue } from './SchemaForm.js';
 import type { FormFieldSpec, FormViewSpec } from './form-spec.js';
 import { getPackageSchema, getPackageForm } from './package-schema.js';
@@ -378,7 +379,16 @@ export function PackageFormDialog({
 }) {
   const locale = useMetadataLocale();
   const schema = React.useMemo(() => getPackageSchema(), []);
-  const form = React.useMemo(() => getPackageForm(locale, { create: mode === 'create' }), [locale, mode]);
+  // The form's labels and help lines are read from the lazily fetched studio
+  // catalogue. Landing mounts this dialog closed before that catalogue is
+  // resident, so the form is rebuilt once it lands; keyed on the locale alone
+  // it kept the `en` answer of its first render under a translated title.
+  const catalogueResident = isStudioCatalogueLoaded(locale);
+  const form = React.useMemo(
+    () => getPackageForm(locale, { create: mode === 'create' }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the residency flag is the dependency: the form reads the catalogue through `t`
+    [locale, mode, catalogueResident],
+  );
   // objectui#11792 — the `<org>` of a derived `com.<org>.<name>` id. Null
   // outside an AuthProvider and whenever the session has no active
   // organization; `deriveCreatePackageId` then leaves the segment out.
