@@ -22,11 +22,13 @@
  *    * `beforeInsert`: the caller must be able to READ the parent record —
  *      verified with a caller-scoped `findOne`, so the parent's own
  *      OWD/sharing, RLS and object-level CRUD all apply. `author_id` is
- *      server-stamped from the session; a client-supplied value never wins.
- *      So is the display identity beside it: `author_name` and
- *      `author_avatar_url` are the session user's own name and avatar
- *      ({@link CommentAuthorIdentityResolver}), never the client's, and both
- *      are read-only on update (`objects/sys-comment.object.ts`).
+ *      server-stamped from the session; a client-supplied value never wins,
+ *      and a non-system create whose session names no user is refused. So is
+ *      the display identity beside it: `author_name` and `author_avatar_url`
+ *      are the session user's own name and avatar
+ *      ({@link CommentAuthorIdentityResolver}), never the client's. All three
+ *      are read-only on update (`objects/sys-comment.object.ts`): a row's
+ *      author is read-only after creation.
  *    * `beforeUpdate` / `beforeDelete`: the caller must be the comment's
  *      AUTHOR, or hold EDIT on the parent record (see "Parent EDIT" below) —
  *      the attachment kit's uploader-or-parent-editor rule. A multi-row write
@@ -915,10 +917,17 @@ export function installCommentAccessHooks(
       return;
     }
 
-    // Server stamps provenance: the session identity wins over whatever the
-    // client sent. Without this the author-or-parent-editor rule below is
-    // spoofable — a caller could post as anyone, then "author-delete" it.
-    if (ctx.session.userId) data.author_id = ctx.session.userId;
+    // The author is the session's user, recorded over whatever the client
+    // sent: the row's provenance names who wrote it. A session with no user
+    // has nobody to record, so the create is refused, as a reaction's is —
+    // never left to the client's value. The column is read-only on update
+    // (`objects/sys-comment.object.ts`), so this stamp is the row's author
+    // for life.
+    const authorId: unknown = ctx.session.userId;
+    if (typeof authorId !== 'string' || authorId === '') {
+      forbid('Cannot comment: there is no signed-in user to record as the author');
+    }
+    data.author_id = authorId;
 
     // [#23124] A new comment is not an edited one, whatever the client sent.
     // The engine's create-side `readonly` strip leaves `sys_` objects to their

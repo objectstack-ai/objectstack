@@ -185,6 +185,17 @@ describe('attachment access — beforeInsert (parent visibility + provenance)', 
     expect(data.uploaded_by).toBe('u1');
   });
 
+  it('refuses a create whose session names no user: the uploader is the signed-in user, never the request\'s', async () => {
+    const canEdit = vi.fn(async () => true);
+    const { beforeInsert } = install({ sharing: { canEdit } });
+    const data = { parent_object: 'att_case', parent_id: 'r1', file_id: 'f1', uploaded_by: 'someone-else' };
+    await expect(
+      beforeInsert({ ...insertCtx(data, { visible: ['att_case/r1'] }), session: { positions: ['org_member'] } }),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+    // Refused before the parent is judged: no user, no attach.
+    expect(canEdit).not.toHaveBeenCalled();
+  });
+
   it('bypasses for system context and context-less calls', async () => {
     const { beforeInsert } = install({});
     await expect(

@@ -24,7 +24,7 @@ const schema = {
   indexes: [{ fields: ['idx_a'], unique: true }, { fields: ['code'] }],
 };
 
-describe('blankAsNullColumns: the three arms of the write door\'s blank-as-null rule', () => {
+describe('blankAsNullColumns: the four arms of the write door\'s blank-as-null rule', () => {
   const cols = blankAsNullColumns(schema);
 
   it('[#20308] a typed column takes any blank, required and lifecycle included', () => {
@@ -44,7 +44,45 @@ describe('blankAsNullColumns: the three arms of the write door\'s blank-as-null 
     expect(cols.get('stage')).toBe('empty');
     expect(cols.get('ref')).toBe('empty');
     expect(cols.get('pic')).toBe('empty');
-    for (const out of ['stage_req', 'tags', 'blob', 'num', 'created_by']) expect(cols.has(out), out).toBe(false);
+    for (const out of ['stage_req', 'tags', 'blob', 'num', 'created_by']) expect(cols.get(out), out).not.toBe('empty');
+  });
+
+  it('[#29343] "emptyList" on every optional column on the multi_value row, unique or not', () => {
+    const list = blankAsNullColumns({
+      fields: {
+        tags: { type: 'select', multiple: true, options: [{ value: 'a' }] },
+        ms: { type: 'multiselect', options: [{ value: 'a' }] },
+        ms_u: { type: 'multiselect', unique: true, options: [{ value: 'a' }] },
+        cb: { type: 'checkboxes', options: [{ value: 'a' }] },
+        tg: { type: 'tags' },
+        refs: { type: 'lookup', multiple: true },
+        pics: { type: 'image', multiple: true },
+        ms_req: { type: 'multiselect', required: true, options: [{ value: 'a' }] },
+        created_by: { type: 'user', multiple: true },
+        ref: { type: 'lookup' },
+      },
+    });
+    for (const f of ['tags', 'ms', 'ms_u', 'cb', 'tg', 'refs', 'pics']) expect(list.get(f), f).toBe('emptyList');
+    expect(list.has('ms_req')).toBe(false);
+    expect(list.has('created_by')).toBe(false);
+    expect(list.get('ref')).toBe('empty');
+  });
+
+  it('[#29343] a readonly optional tags column written [] keeps [] — platform-stamped, never cleared (record 6598733139)', () => {
+    const cols = blankAsNullColumns({
+      fields: {
+        changed_fields: { type: 'tags', required: false, readonly: true },
+        tg: { type: 'tags' },
+        stage_ro: { type: 'select', readonly: true, options: [{ value: 'a' }] },
+      },
+    });
+    expect(cols.has('changed_fields')).toBe(false);
+    const stamped: string[] = [];
+    expect(blankStorageForm(stamped, cols.get('changed_fields'))).toBe(stamped);
+    // Controls: the same type without readonly still takes the arm, and the
+    // 'empty' arm is untouched by readonly.
+    expect(cols.get('tg')).toBe('emptyList');
+    expect(cols.get('stage_ro')).toBe('empty');
   });
 
   it('lifecycle names are the five engine-owned columns', () => {
@@ -64,6 +102,17 @@ describe('blankStorageForm', () => {
     expect(blankStorageForm('', 'empty')).toBeNull();
     expect(blankStorageForm('  ', 'empty')).toBe('  ');
     expect(blankStorageForm('', undefined)).toBe('');
+  });
+
+  it('"emptyList" nulls [] and exactly ""; whitespace and a non-empty list stay', () => {
+    expect(blankStorageForm([], 'emptyList')).toBeNull();
+    expect(blankStorageForm('', 'emptyList')).toBeNull();
+    const list = ['a'];
+    expect(blankStorageForm(list, 'emptyList')).toBe(list);
+    for (const v of ['  ', 'a', 0, false, null, undefined]) expect(blankStorageForm(v, 'emptyList')).toBe(v);
+    // An empty list on any other reach is not a blank of that column.
+    const empty: unknown[] = [];
+    for (const r of ['blank', 'empty', undefined] as const) expect(blankStorageForm(empty, r)).toBe(empty);
   });
 
   it('a non-blank value or a non-string comes back as it is', () => {

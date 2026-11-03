@@ -38,6 +38,7 @@
     "package-api-assembled",
     "package-lifecycle",
     "push-delivery",
+    "push-relay",
     "record-page",
     "sortability"
   ]

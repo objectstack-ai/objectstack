@@ -19493,11 +19493,12 @@ export class ObjectQL implements IObjectQLEngine {
    *   - `set_null` → clear the foreign key. On a MULTI-VALUED field
    *                  ([#18408] {@link declaredMultiValued}, ⛔ not the raw
    *                  flag) the FK is a SET, so "clear" means remove the
-   *                  deleted MEMBER and keep the rest; an emptied set is
-   *                  written as `[]`,
-   *                  never `null` — the representation `FieldSchema` pins
+   *                  deleted MEMBER and keep the rest; an emptied set on
+   *                  an optional field is stored as `null`, the same as one
+   *                  never set — the representation `FieldSchema` pins
    *                  (`packages/spec/src/data/field.zod.ts`, the `multiple`
-   *                  doc block, #9447 maintainer ruling 2026-08-18),
+   *                  doc block, ruling A on #29343, record 6591577985,
+   *                  amending #9447),
    *   - `restrict` → refuse the delete when dependents exist.
    * `master_detail` defaults to `cascade` (the parent owns the child
    * lifecycle); `lookup` and `tree` default to `set_null` — except a `set_null` default
@@ -20272,10 +20273,12 @@ export class ObjectQL implements IObjectQLEngine {
                 // The residual shape when the last member goes is not this
                 // engine's call to make: `FieldSchema` pins it —
                 // `packages/spec/src/data/field.zod.ts`, the `multiple` and
-                // `required` doc blocks (#9447, maintainer ruling 2026-08-18) —
-                // and this write consumes that contract: the emptied set is
-                // written as `[]`, which `Array.prototype.filter` already
-                // yields, never `null`.
+                // `required` doc blocks (ruling A on #29343, record
+                // 6591577985, amending #9447) — and this write consumes that
+                // contract: it hands the write door the `[]` that
+                // `Array.prototype.filter` yields, and the door stores an
+                // emptied optional set as `null` (`blankAsNullColumns`, reach
+                // `'emptyList'`), the same as one never set.
                 //
                 // [#9688] The remainder is computed by
                 // `remainderAfterMemberRemoval`, which the per-row required

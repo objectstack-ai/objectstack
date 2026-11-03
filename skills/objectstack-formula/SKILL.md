@@ -114,9 +114,12 @@ record.start_date != null && record.end_date != null && record.end_date < record
 
 **This is a publish-time rejection, not advice.** `os build` /
 `os validate` / `os lint` and the runtime publish gate reject any validation-rule
-or hook predicate that applies an ordering (`< <= > >=`) or arithmetic
+or hook predicate — and a record-triggered flow's (`triggerType: 'record-*'`)
+start `config.condition`, edge `condition` (nested regions too) or `decision`
+branch `expression` — that applies an ordering (`< <= > >=`) or arithmetic
 (`+ - * / %`) operator to a **declared nullable** field — no `required: true`,
-no `defaultValue`, no default option — unless an explicit `!= null` / `== null` /
+no `defaultValue`, no default option, not a `count` / `sum` roll-up (empty reads
+`0`; `min` / `max` / `avg` stay nullable) — unless an explicit `!= null` / `== null` /
 `!isBlank()` test dominates it in the same boolean branch. `has()` deliberately
 does not satisfy that gate. `has()` over an **undeclared** key stays legal: that
 is its use there — telling "absent from this PATCH" apart from "explicitly null".
@@ -136,12 +139,6 @@ has(record.status) && record.status != 'resolved'
 has(record.amount) && record.amount != null && record.amount > 1000
 has(record.viewer) && has(record.viewer.can_approve) && record.viewer.can_approve == true
 ```
-
-### Null + string throws
-
-CEL has no implicit `null` coercion. `null + 'foo'` throws
-`no such overload: dyn<null> + string`. Wrap every nullable string operand
-in `coalesce(..., '')`.
 
 ---
 
@@ -339,9 +336,7 @@ a typo'd key (`record.stauts`), a retired field, or a comparison CEL has no
 overload for — does **not** degrade to "the hook did not fire": it **fails the
 write**, with an error naming the hook and the key — `before*` and `after*`
 alike, with no `onError` escape (`onError` governs a handler that throws, and
-the condition is evaluated before any handler runs). A condition that does not
-even **compile** aborts the same way. So on an insert event read `previous`
-only against `null`, and put a column read off it behind `previous != null &&`.
+the condition is evaluated before any handler runs).
 
 **A transition condition needs no special handling for bulk writes.**
 Write it once, on a `before*` or an `after*` event, and it means the same thing
@@ -397,17 +392,19 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `ISCHANGED(x)` | `previous.x != record.x` |
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
 
-> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which has a value
-> only where `previous` is a **row** — see §5. On an insert event `previous` is
-> `null`, so the read does not quietly skip the hook, it **fails the write**
-> unless guarded by `previous != null &&`. On update and delete
-> events it IS bound, per matched row, in `before*` and `after*` alike, on bulk
-> and single-record writes.
+> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which is `null` on an
+> insert event and **fails the write** there unless guarded by `previous != null
+> &&`; on update and delete events it is bound per matched row — see §5.
 
-> ⚠️ **Flow conditions are the exception to row 1.** The automation engine
-> spreads the record's variables to top level, so a bare `status` resolves in a
-> flow start condition. `record.status` resolves there too and is the only
-> spelling valid on every other surface — prefer it.
+> ⚠️ **Flow conditions are the exception to row 1.** The engine spreads the
+> trigger record's fields, nulls included, to top level wherever no flow variable
+> or node id holds the name, so in a start, edge or `decision` condition a bare
+> `budget` IS `record.budget`: `os validate` judges either spelling (bare names
+> only while the flow's bound names are provable) and a guard on one guards both.
+> What the start condition proves non-null is presumed at every edge and branch;
+> spell that guard `record.budget != null` — the runtime publish gate judges the
+> written flow alone and resolves no bare name. An unguarded null fails the
+> **run** at that condition; the write that fired it still lands.
 
 ---
 
@@ -471,8 +468,7 @@ data instead, `{{ amount | currency:@currency_code }}`.
 
 ## Verify your work
 
-A malformed expression does not fail silently (ADR-0032). It used to evaluate to
-`null` / `false` — a flow "fired" and did nothing; now `os validate` and
+A malformed expression does not fail silently (ADR-0032): `os validate` and
 `os build` run the shared validator over every formula and predicate in the
 stack — CEL syntax **plus** `record.<field>` existence on the target object —
 and fail non-zero with a located, did-you-mean message, while at runtime the

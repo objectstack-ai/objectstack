@@ -9,7 +9,9 @@ import type { SemanticMigration } from '../../types.js';
 // its row as a declared override (a row it moves as the pair's own member
 // stays open), and a save, publish or rollback naming the read-only package
 // itself onto an item it ships is refused where the pair can take the
-// declared override (a delete naming the package stays open).
+// declared override (a delete naming the package stays open; a commit revert
+// or package rollback restoring a commit item into such a row is that
+// rollback, refused per item).
 // Registered because an upgrading deployment can carry the rows those writes
 // made, package-less or bound to the read-only package itself, and the
 // operator step that moves both kinds into the base's `.custom` pair ships in
@@ -28,7 +30,10 @@ export const entry: SemanticMigration = {
     + 'member, an email template locale the base does not ship, keeps the write); (2) naming the '
     + 'read-only package itself (a save in draft or publish mode or a per-item publish under '
     + '/api/v1/meta/<type>/<name>?package=<base>, POST /api/v1/packages/<base>/publish-drafts '
-    + 'holding such a draft, and a rollback of a row bound to the package), where the pair can be '
+    + 'holding such a draft, and a rollback of a row bound to the package: the per-item rollback, '
+    + 'and the restore of a commit item into that row by POST /api/v1/packages/<base>/commits/'
+    + '<commitId>/revert and POST /api/v1/packages/<base>/rollback, reported per item in their '
+    + 'failed[]), where the pair can be '
     + 'ensured, the base records a version and the override write gate admits the declared body '
     + 'into the pair (a delete naming the package keeps the write); and the sys_metadata rows '
     + 'those writes stored, package-less or bound to the read-only package itself',
@@ -80,7 +85,9 @@ export const entry: SemanticMigration = {
     + 'member, keeps its package-less write. The close reaches only what the command moves as a '
     + 'declared override (its own classification and its own move steps), so no customization is '
     + 'left without a write door. The save, publish or rollback naming the read-only package '
-    + 'itself is refused 403 NOT_OVERRIDABLE naming the pair and the `overrides` declaration '
+    + 'itself (a commit revert or package rollback restoring a commit item into the row bound to '
+    + 'it among them, which reports the item in its failed[] and reverts the rest) is refused 403 '
+    + 'NOT_OVERRIDABLE naming the pair and the `overrides` declaration '
     + 'wherever the pair can take the declared override (it can be ensured, the base records a '
     + 'version and the override write gate admits the declared body); a delete naming the package '
     + 'stays open, as the way to remove such a row, and so does every write the pair could not '

@@ -106,16 +106,18 @@ const SYSTEM_CTX = { isSystem: true } as const;
 /**
  * The columns of one object this run cleans: the write door's #29277 arm, read
  * from `blankAsNullColumns` (`@objectstack/core`, the one rule the door and
- * the seed replay read). That map holds three arms; this run takes the two
+ * the seed replay read). That map holds four arms; this run takes the two
  * `'empty'` ones minus the text-like columns of the #29176 unique arm, which
  * leaves exactly the optional single-value columns on the `$empty` table's
  * `null_only` row: options, references and file references today. The text
  * types are the spec's `STRING_VALUE_TYPES`, the set the map itself reads for
  * that arm: no type name is listed here.
  *
- * Out, by the map's own rule: `required` columns, lifecycle columns,
- * `multiple: true` columns (the `multi_value` row), typed columns (the #20308
- * `'blank'` arm, whose door already refuses to store a blank as a value).
+ * Out, by the map's own rule: `required` columns and lifecycle columns. Out
+ * because this run takes only `reach === 'empty'`: `multiple: true` columns
+ * (the `multi_value` row), which the map holds on the #29343 `'emptyList'`
+ * arm, and typed columns (the #20308 `'blank'` arm, whose door already refuses
+ * to store a blank as a value).
  */
 export function blankSingleValueColumns(schema: unknown): Array<{ name: string; type: string }> {
   const fields = (schema as { fields?: Record<string, BlankAsNullFieldDef | undefined> } | undefined)?.fields;

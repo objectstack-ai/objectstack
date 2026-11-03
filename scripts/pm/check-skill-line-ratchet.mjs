@@ -1289,7 +1289,19 @@ export const CEILINGS = new Map([
   // line naming which seat reads it on which fire. New files, landed at their
   // own counts (headroom 0, same convention as every entry above); added rows,
   // paid for by the SKILL.md decrease — the map's total goes down.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 96],
+  // 96 → 98 (#29754): an off-shift seat's items (it signed off, or two
+  // `Request: progress` knocks went unanswered) go to an online sibling seat
+  // of the same lane, which claims them with `Resume-from:` citing the brief;
+  // the exceptions (a decision-card wait, no online sibling ⇒ 「待席」 on the
+  // round record, security items stay with the security seat). The sign-off
+  // line keeps the `Release:` + `Resume-from:` transit back to `pm:queue`
+  // (`check-handover.mjs` (a) still reads it) and names the sibling as the
+  // next claimant; the two-unanswered-knocks case cites triage's round record
+  // through execution-duties.md's 接管 shape, since no brief exists. Ruling of
+  // record: amendment 6595840476 on #29754 (maintainer 「同意：下班席位的卡交给
+  // 兄弟席」), which names this file, under #29775 letter A, record 6595514258
+  // (「同意29775 A」). Measured delta +2 (96 → 98 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 98],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
@@ -1443,7 +1455,16 @@ export const CEILINGS = new Map([
   // record: the card body (「设 security#1 座位」) and amendment comment
   // 6592303181, which names this file's mailbox row. Measured delta +1
   // (55 → 56 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/project-forms.md', 56],
+  // 56 → 58 (#29754): the `Request: progress` / `Notify: progress` pair
+  // (triage → the claiming seat on an item idle 3 h; the seat back with its
+  // record) and the 不敲 line's 「催」 turned from a ban into a rate — one knock
+  // per item per 60 min, an answered ETA holds it, parked or decision-waiting
+  // items are not knocked. Ruling of record: #29775 letter A, record
+  // 6595514258 (maintainer 「同意29775 A」), with the card's amendments
+  // 6595244387 (the rate) and 6595840476. The key row and the record/rate
+  // line are the two lines the ruling orders; the 不敲 line was rewritten in
+  // place. Measured delta +2 (56 → 58 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 58],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -1589,7 +1610,18 @@ export const CEILINGS = new Map([
   // of record: the card body (「设 security#1 座位」, Change 4) and amendment
   // comment 6592303181. Measured delta +2 (15 → 17 lines); landed count,
   // headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 17],
+  // 17 → 20 (#29754): the progress round step — sweep `pm:dispatched` cards
+  // and non-mailbox open PRs reading idle off PROGRESS (head commit,
+  // non-triage comment, the seat's label change), never `updated_at`; knock
+  // the claiming seat `Request: progress` once per item per hour, read the
+  // answers next round, list the unanswered; two silent rounds ⇒ the seat
+  // reads as down and its items go to an online sibling, which triage knocks
+  // once and never releases. Ruling of record: #29775 letter A, record
+  // 6595514258 (maintainer 「同意29775 A」), amendment 6595244387 (the rate and
+  // the escalation) and amendment 6595840476 (maintainer 「同意：下班席位的卡交给
+  // 兄弟席」, the idle reading and the sibling hand-over, which names this
+  // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 20],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
