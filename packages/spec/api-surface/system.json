@@ -809,6 +809,8 @@
     "TranslationDiffStatusSchema (const)",
     "TranslationItem (type)",
     "TranslationItemSchema (const)",
+    "TrustedAppScheme (type)",
+    "TrustedAppSchemeSchema (const)",
     "UserActivityStatus (const)",
     "UserActivityStatus (type)",
     "UserDevice (type)",

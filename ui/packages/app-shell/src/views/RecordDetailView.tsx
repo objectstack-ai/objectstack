@@ -92,6 +92,7 @@ import {
   useWorkspacePreference,
 } from '../utils/workspacePreference.js';
 import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type ShortcutChord, type ShortcutLabelTranslate } from '../chrome/advertisedShortcuts.js';
+import { nativeShare } from '@object-ui/mobile';
 import { useActionModal } from '../hooks/useActionModal.js';
 import { resolveCascadeDeleteLabels } from '../hooks/useObjectActions.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
@@ -4482,6 +4483,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       order: 110,
       component: 'action:menu',
       onClick: async () => {
+        // Inside the ObjectStack mobile shell, when it announces `share`: the
+        // OS share sheet through the shell, with this record's page link and
+        // its title (objectstack-ai/mobile `docs/HYBRID-SHELL.md`, "Files").
+        // Only the record URL crosses the bridge. A shell that refuses or
+        // fails the call, an older shell and a plain browser take the path
+        // below, unchanged.
+        const shared = await nativeShare({
+          url: window.location.href,
+          ...(document.title ? { text: document.title } : {}),
+        });
+        if (shared.status === 'ok') return;
         try {
           if ((navigator as any).share) {
             await (navigator as any).share({

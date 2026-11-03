@@ -13,6 +13,7 @@ import {
   AUDIENCE_POSTURES,
   isAudiencePosture,
   audiencePermitsSelfRegistration,
+  TrustedAppSchemeSchema,
 } from './auth-config.zod';
 
 describe('AuthProviderConfigSchema', () => {
@@ -138,6 +139,35 @@ describe('AuthConfigSchema', () => {
     const config = AuthConfigSchema.parse({});
 
     expect(config.trustedOrigins).toBeUndefined();
+  });
+
+  it('accepts reverse-domain app schemes in trustedAppSchemes, and leaves the list absent by default', () => {
+    const config = AuthConfigSchema.parse({
+      trustedAppSchemes: ['com.example.app', 'io.objectstack.mobile', 'com.googleusercontent.apps.123-abc'],
+    });
+    expect(config.trustedAppSchemes).toEqual([
+      'com.example.app',
+      'io.objectstack.mobile',
+      'com.googleusercontent.apps.123-abc',
+    ]);
+    expect(AuthConfigSchema.parse({}).trustedAppSchemes).toBeUndefined();
+  });
+
+  it.each([
+    ['a web scheme', 'https'],
+    ['a script scheme', 'javascript'],
+    ['a scheme without a dot', 'myapp'],
+    ['a scheme written with its suffix', 'com.example.app://'],
+    ['a scheme written with a colon', 'com.example.app:'],
+    ['an uppercase scheme', 'Com.Example.App'],
+    ['an empty label', 'com..app'],
+    ['a trailing dot', 'com.example.'],
+    ['a leading dot', '.com.example'],
+  ])('refuses %s in trustedAppSchemes (%s), never dropping or rewriting it', (_label, scheme) => {
+    expect(TrustedAppSchemeSchema.safeParse(scheme).success).toBe(false);
+    const result = AuthConfigSchema.safeParse({ trustedAppSchemes: ['com.example.app', scheme] });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0].path).toEqual(['trustedAppSchemes', 1]);
   });
 });
 
