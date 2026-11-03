@@ -14,7 +14,7 @@ Skills-docs: updated here — `content/docs/data-modeling/object-extensions.mdx`
 
 <!-- adr-0087: registered object-extension-field-key-grammar-refused -->
 
-**BREAKING** accept-set narrowing on `ObjectExtensionSchema` (`@objectstack/spec`), at every door that parses an object extension: `defineObjectExtension`, `defineStack({ objectExtensions })`, `os validate`, the marketplace install and the `/api/v1/meta` `object_extension` save door.
+**BREAKING** accept-set narrowing on `ObjectExtensionSchema` (`@objectstack/spec`), at every door that parses an object extension: `defineObjectExtension`, `defineStack({ objectExtensions })`, `os validate` and `os build`, and the `/api/v1/meta` `object_extension` save door. The marketplace install does not parse an extension with the schema (it judges a built artifact's `__c` suffixes and patch targets), so a package built after this change carries the refusal from `os build`.
 
 - **Before.** `fields: { 'Region Code': { type: 'text', label: 'Region' } }` parsed in `defineStack`, whether or not the target was in the same stack, and `os validate` raised nothing on it. In a `.custom` package, `fields: { 'Region Code__c': … }` was saved and published by the `object_extension` doors, served on every object read, re-registered at boot, and stored values in a column of that name.
 - **Now.** One `invalid_key` issue at `fields.Region Code`, naming the grammar and an example. The key schema is the one `ObjectSchema.fields` and `fieldPatches` read, one constant, so the three cannot drift.
