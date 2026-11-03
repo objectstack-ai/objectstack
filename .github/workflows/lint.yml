@@ -1445,8 +1445,7 @@ jobs:
       # other workflow names this script, but since #21351 that gate's
       # population includes every root `package.json` alias whose expansion
       # carries `--self-test`, so deleting this step reds it with
-      # `[alias-self-test-not-run] pnpm check:pm-issue-transfer`. The
-      # stale-`finding` sweep step below is held the same way.
+      # `[alias-self-test-not-run] pnpm check:pm-issue-transfer`.
       - name: Issue-transfer door self-test
         id: issue-transfer-door-self-test
         continue-on-error: true
