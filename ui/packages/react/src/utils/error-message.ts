@@ -414,7 +414,8 @@ export interface AnsweredLoadFailure {
  *    the browser's prose, not the server's, so it answers `null` and the caller
  *    keeps its network sentence.
  *  - **Sentence** from {@link extractWriteErrorMessage} (structured body first,
- *    then the message, with machine prefixes stripped); **code** from the
+ *    then the message, with machine prefixes stripped; a wrapped `{ error: {
+ *    code, message } }` body under `details` first); **code** from the
  *    error's `code`, else the body's (`details.code`).
  *
  * It returns text, never a verdict: callers still decide by kind which
@@ -426,8 +427,14 @@ export function answeredLoadFailure(err: unknown): AnsweredLoadFailure | null {
   const numeric = [e.httpStatus, e.status, e.statusCode].some((s) => typeof s === 'number');
   const answered = numeric || /HTTP \d{3}\b/.test(String(e.message ?? ''));
   if (!answered) return null;
-  const message = extractWriteErrorMessage(err);
+  // The wrapped envelope (`{ error: { code, message } }`) when a transport
+  // parked the whole body under `details` without lifting it.
+  const envelope =
+    e.details?.error && typeof e.details.error === 'object' ? (e.details.error as Record<string, unknown>) : null;
+  const message =
+    (typeof envelope?.message === 'string' ? extractWriteErrorMessage(envelope.message) : null)
+    ?? extractWriteErrorMessage(err);
   if (!message) return null;
-  const code = firstString(e.code, e.details?.code);
+  const code = firstString(e.code, envelope?.code, e.details?.code);
   return { code: code ? code.trim() : null, message };
 }
