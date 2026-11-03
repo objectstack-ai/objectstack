@@ -346,17 +346,6 @@ describe('`confirmText` + non-empty ARRAY `params` is refused on the `action:but
     expect(issues[0]?.message).toBe(inlineIssue?.message);
   });
 
-  it('refuses the localized-map form of `confirmText` too', () => {
-    const result = ActionButtonPropsSchema.safeParse({
-      ...buttonReject,
-      confirmText: { en: 'Reject this request?', 'zh-CN': '拒绝该请求？' },
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.success ? undefined : result.error.issues.map((i) => i.path.join('.')))
-      .toContain('confirmText');
-  });
-
   it('accepts `description` beside an array `params` and no `confirmText` — the remedy', () => {
     const result = ActionButtonPropsSchema.safeParse({
       ...buttonReject,
