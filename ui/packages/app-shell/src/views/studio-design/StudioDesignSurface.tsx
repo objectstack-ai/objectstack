@@ -403,6 +403,7 @@ import {
 import { usePackageCustomizations, type PackageCustomizationsState } from './CustomizationMark.js';
 import {
   ContributedRailRow,
+  contributedElsewhereText,
   RailCustomizationFilter,
   RailCustomizationMark,
   StudioPairItemChip,
@@ -411,6 +412,7 @@ import {
   foldCustomizationPairs,
   railCustomizationsOf,
   useDeepLinkFallback,
+  useContributedElsewhere,
   useOpenContributor,
   useRailCustomizationsOnly,
   withPairItems,
@@ -421,7 +423,11 @@ import {
   contributedFieldsOf,
   placeNavContributions,
   placesAnyNav,
+  servedContributedNavOf,
+  servedEntryOf,
   withContributedFlowGroups,
+  NO_SERVED_CONTRIBUTED_NAV,
+  type ServedContributedNav,
   type ContributedOnObject,
   type NavContributionPlacement,
   type TopLevelContributedNav,
@@ -3091,6 +3097,13 @@ const InterfacesRailMarksContext = React.createContext<RailCustomizations | null
 const InterfacesNavContributionsContext = React.createContext<NavContributionPlacement>({ byGroup: new Map(), top: [] });
 
 /**
+ * objectstack#29851 — the open app's served entries its published layer does
+ * not hold, by id (`servedContributedNavOf`): what a contributed row reads
+ * its label from. Empty for a never-published app.
+ */
+const InterfacesServedContributedNavContext = React.createContext<ServedContributedNav>(NO_SERVED_CONTRIBUTED_NAV);
+
+/**
  * objectstack#29786 — contributed nav entries as rail rows: greyed, with the
  * contributing package, and opening that package's Interfaces pillar. Not
  * nav entries of this app: never in its edit buffer, never dragged, renamed
@@ -3105,6 +3118,9 @@ function ContributedNavRows({
 }): React.ReactElement | null {
   const locale = useMetadataLocale();
   const openContributor = useOpenContributor();
+  const served = React.useContext(InterfacesServedContributedNavContext);
+  // objectstack#29851 — the label-less entry inherits as the live sidebar's does.
+  const targetLabel = useNavTargetLabel();
   if (rows.length === 0) return null;
   return (
     <>
@@ -3112,6 +3128,7 @@ function ContributedNavRows({
         <ContributedRailRow
           key={`${entry.packageId}:${entry.name}`}
           item={entry}
+          label={contributedNavLabel(servedEntryOf(served, entry), locale, targetLabel)}
           indent={indent}
           icon={<Puzzle className="h-4 w-4 shrink-0" />}
           title={contributedItemTitle(entry, locale, undeclaredGroup)}
@@ -3121,6 +3138,21 @@ function ContributedNavRows({
       ))}
     </>
   );
+}
+
+/**
+ * objectstack#29851 — the text the live app shows for a contributed entry: the
+ * served entry read with the rail's own resolver, or `undefined` when no served
+ * entry is known for it (the row then keeps its id).
+ */
+function contributedNavLabel(
+  node: Record<string, unknown> | undefined,
+  locale: string,
+  targetLabel: ReturnType<typeof useNavTargetLabel>,
+): string | undefined {
+  if (!node) return undefined;
+  const text = navEntryLabelText(node as NavNode, locale, targetLabel).trim();
+  return text || undefined;
 }
 
 function NavTree({
@@ -4485,6 +4517,7 @@ export function InterfacesPillar({
   // `railAppLabel`; every editor keeps reading `navTree` / `appLabel`, the
   // authored buffer, so no input ever echoes a served text.
   const [servedNav, setServedNav] = React.useState<ServedNavText | null>(null);
+  const [servedContributed, setServedContributed] = React.useState<ServedContributedNav>(NO_SERVED_CONTRIBUTED_NAV);
   const railTree = React.useMemo(() => displayNavTree(navTree, servedNav), [navTree, servedNav]);
   const railAppLabel = displayAppLabel(appLabel, servedNav);
   // objectstack#29786 — what other packages add to this app's navigation,
@@ -4791,6 +4824,15 @@ export function InterfacesPillar({
   // objectui#11785 — a load failure as it was (`plainRefusal`), a refused leaf
   // save as an author sentence with the raw text behind Details.
   const [error, setError] = React.useState<StudioRefusal | null>(null);
+  // objectstack#29851 — on the no-app empty state only: what this package adds
+  // to other packages' apps, from the target's served owner and that owner's
+  // customization read (the declared app is an address, never shown).
+  const contributedElsewhere = useContributedElsewhere(
+    packageId,
+    appStatus === 'missing' && !error,
+    (name) => client.get<Record<string, unknown>>('app', name),
+  );
+  const openContributor = useOpenContributor();
   // Objects in THIS package (published ∪ draft) — the nav item inspector's
   // object picker, so nav can be wired to sibling objects before publishing.
   const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string }>>([]);
@@ -5000,6 +5042,9 @@ export function InterfacesPillar({
         // translated from. A never-saved app has neither, and no served text.
         const served = saved ? servedNavTextOf(eff, published[0]) : null;
         setServedNav(served);
+        // objectstack#29851 — from the same two answers: the entries the fold
+        // added, by id, for the contributed rows' labels. No request of its own.
+        setServedContributed(saved ? servedContributedNavOf(eff, published[0]) : NO_SERVED_CONTRIBUTED_NAV);
         const appDraftBody = extractDraftBody(appDraftResp);
         // A served draft is the whole document — taken as-is, never spread
         // over the published layer (objectui#10765; the rule is stated once
@@ -6601,10 +6646,32 @@ export function InterfacesPillar({
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <LayoutDashboard className="h-6 w-6 text-muted-foreground" />
             </div>
-            <div>
-              <p className="text-sm font-medium">{t('engine.studio.if.noAppTitle', locale)}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{t('engine.studio.if.noAppHint', locale)}</p>
-            </div>
+            {contributedElsewhere ? (
+              // objectstack#29851 — what the served reads show this package
+              // adding to other packages' apps, each with a way there.
+              <div data-testid="if-contributes-elsewhere">
+                <p className="text-sm font-medium">{t('engine.studio.if.noOwnAppTitle', locale)}</p>
+                {contributedElsewhere.map((found) => (
+                  <div key={found.app} className="mt-1 flex flex-col items-center gap-2">
+                    <p className="text-xs text-muted-foreground">{contributedElsewhereText(found, locale)}</p>
+                    <button
+                      type="button"
+                      data-testid="if-open-owner"
+                      data-package={found.ownerId}
+                      onClick={() => openContributor(`/studio/${encodeURIComponent(found.ownerId)}/interfaces`)}
+                      className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+                    >
+                      {tFormat('engine.studio.if.openOwner', locale, { package: found.ownerName })}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm font-medium">{t('engine.studio.if.noAppTitle', locale)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t('engine.studio.if.noAppHint', locale)}</p>
+              </div>
+            )}
             {onCreateApp && (
               <button
                 type="button"
@@ -7154,6 +7221,7 @@ export function InterfacesPillar({
         >
           <InterfacesRailMarksContext.Provider value={railMarks}>
           <InterfacesNavContributionsContext.Provider value={navPlacement}>
+          <InterfacesServedContributedNavContext.Provider value={servedContributed}>
           {editNav && (
               <div className="mt-1.5 flex items-center gap-1.5">
                 {navHasDraft && (
@@ -7170,8 +7238,19 @@ export function InterfacesPillar({
               </div>
           )}
             {listOnlyCustomized && !editNav ? null : appStatus === 'missing' && !error ? (
-              <div className="px-2 py-3">
-                <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noApp', locale)}</p>
+              <div className="px-2 py-3" data-testid="if-no-app-rail">
+                {contributedElsewhere ? (
+                  <>
+                    <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noOwnApp', locale)}</p>
+                    {contributedElsewhere.map((found) => (
+                      <p key={found.app} className="mt-1 text-[11px] text-muted-foreground">
+                        {contributedElsewhereText(found, locale)}
+                      </p>
+                    ))}
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">{t('engine.studio.if.noApp', locale)}</p>
+                )}
                 {onCreateApp && (
                   <button
                     type="button"
@@ -7222,6 +7301,7 @@ export function InterfacesPillar({
                 onlyCustomized={listOnlyCustomized}
               />
             )}
+          </InterfacesServedContributedNavContext.Provider>
           </InterfacesNavContributionsContext.Provider>
           </InterfacesRailMarksContext.Provider>
         </StudioRail>
