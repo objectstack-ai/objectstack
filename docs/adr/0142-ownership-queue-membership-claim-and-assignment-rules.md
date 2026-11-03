@@ -1,6 +1,6 @@
 # ADR-0142: An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds, claim through the ownership-transfer gate, and declarative assignment rules evaluated on insert
 
-**Status**: Proposed (2026-10-25) · **Amended** (2026-10-28, ruling [`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A) — D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`; see the note in D3. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
+**Status**: Proposed (2026-10-25) · **Amended** (2026-10-28, ruling [`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A) — D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`; see the note in D3 · **Amended** (2026-11-03, ruling record [`6594432222`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6594432222) on #29604, letter B) — D2 tells an empty expansion (a fact) from a failed member-table read (a fault): the admission consumers (D3, D4, D5) keep "nobody" on a failed read, the D6 approver slate and the D7 grant recompute refuse it; see the notes in D2, D6 and D7. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
 maintainer's merge, and ⛔ the one PR under [Execution plan](#execution-plan-after-acceptance) is cut after that merge,
 never before it. Until a published `@objectstack/*` release carries that PR, HotCRM keeps the STOPGAP module this record
 exists to retire. **This record declares; it implements nothing** — no schema, no code, no changeset.
@@ -308,6 +308,28 @@ admission (D4), the assignment pool (D5), the approver slate (D6), the sharing r
 of the queue service. The approvals engine's `queue` branch calls it rather than growing a third position expander. An
 empty expansion is a fact, not a fault: the consumers below each say what they do with it.
 
+**An empty expansion is a fact; a failed read is a fault; the one expander answers the two apart** (**Amended**
+2026-11-03, ruling record [`6594432222`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6594432222)
+on #29604, letter B). An expansion is *empty* when every member specification was read and reached nobody — an unstaffed
+position, an emptied team, a queue with no member rows, a name that resolves nowhere (D1) — and the consumers below each
+say what they do with it. A read *fails* when a member table a specification reads (`sys_queue_member`, `sys_user_position`,
+`sys_team_member`, `sys_business_unit_member`, the BU tree) cannot be read at all: the expander then knows nothing about
+who is in the queue, and "nobody" would be an invented answer. A table that does not exist in the composition is absence,
+not failure, as the sibling recipient reads already hold it. Who is owed which answer follows from what the consumer does
+with the set, and the consumer says which it is owed when it calls (how the call says so is the implementing PR's):
+
+- the **admission consumers** — the access path (D3), the claim admission (D4) and the assignment pool (D5) — keep
+  **"nobody"** for a failed read, logged at `warn`, because for them nobody *denies*: a sitting record is not reached
+  through the queue for that request, a member's insert naming the queue and a claim resting on D3's basis alone are
+  refused as a non-member's are, and a row parks in the queue (D5 says so already). Nothing is granted and nothing is
+  revoked on an answer the expander could not stand behind;
+- the **recompute consumers** — the approver slate (D6) and the sharing-recipient grant pass (D7) — **refuse** a failed
+  read: they turn the member set into routed work or materialised grants, so "nobody" there revokes every grant the queue
+  gave and routes a request past the people who could not be read — the posture every other sharing and approvals
+  recipient read gave up when the team, position and role reads were made to read to completion and refuse a failed read.
+  A refusal is a thrown failure naming the specification and the table, never `[]` or `false`; what each refusing
+  consumer does with it is written under D6 and D7.
+
 **Membership moves, and three things follow it.** A write to `sys_queue_member`, and a write to any membership table a
 queue's members read (`sys_user_position`, `sys_team_member`, `sys_business_unit_member`, the BU tree), changes who is in
 the queue. The access path needs no recompute (it is resolved per request); the sharing grants that name a queue are
@@ -517,6 +539,19 @@ remove gate; Prime Directive #10):
 5. A test drives a stored `queue` approver through the real service to a slate of the queue's members, and the
    cross-organization integration suite gains the queue case.
 
+**Amended** (2026-11-03, ruling record [`6594432222`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6594432222)
+on #29604, letter B) — item 2's "expanded to nobody" is the *empty* case of D2 as amended. A **failed** member-table read
+behind the queue **refuses** the slate instead of shrinking it, in the failure class the approvals resolver already gives a
+`team` or `position` approver whose directory read failed (#29362, #29503): the expansion throws rather than answering
+`[]`; the resolver's directory-failure catch takes the throw and warns that the read **failed**, carrying the error, never
+that the queue "expanded to nobody" (`packages/plugins/plugin-approvals/src/approval-service.ts#warnExpansionFailed` is
+that warning), so an operator is not sent to staff a queue whose members simply could not be read; and the request is not
+routed on an invented set: the slot is **held** as the `queue:<name>` literal, as a `team` whose read failed is held — a
+slot no acting path admits a caller under, decidable by the override — so the request waits rather than advances past the
+queue's people. Item 2's "never written again" is therefore the empty case: a member who joins later is not owed a request
+that expanded to nobody, while a failed read owes the request to members who exist and could not be read.
+`onEmptyApprovers` decides an empty slate as before and is not reached through a held slot.
+
 What it resolves to at runtime: the queue's members at node entry, in the request's organization. Re-admission is not an
 ADR-0087 conversion: the enum member never left, no stored shape changes, and the designer annotation is not a protocol
 surface. The generated reference page re-renders from the enum's description.
@@ -547,6 +582,21 @@ The recipient becomes authorable in the same PR when **all** of the following ho
    `SharingLevel` comment in `sharing.zod.ts` that cites the drop, `access-level.ts`'s stale sentence, the dogfood
    `sharing-rules` row's summary (its note demands the re-transcription) and the authorable-surface snapshot; the
    migration-17 entry keeps its text as the record of protocol 17's state.
+
+**Amended** (2026-11-03, ruling record [`6594432222`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6594432222)
+on #29604, letter B) — item 1's "an empty queue grants nothing and warns once" is the *empty* case of D2 as amended. A
+**failed** member-table read behind the queue **refuses** the grant pass instead of answering nobody, and every pass that
+materialises or revokes a queue recipient's grants takes the refusal in the isolation shape the other recipient kinds
+already have (#29362, #29503): the rule-wide passes (`evaluateRule`, the per-record `evaluateAllForRecord` and the
+recipient-axis `revokeRuleGrantsForRetiredRecipients` in `packages/plugins/plugin-sharing/src/sharing-rule-service.ts`) and
+the per-user recompute (`reconcileRuleForUser` in the same file, reached from
+`packages/plugins/plugin-sharing/src/recipient-membership-recompute.ts` through the queue's holder check) each stop **that
+rule's** pass — or that rule-and-user pair's — before any revoke, keep the rule's existing grants exactly as they were, log
+the failure at `warn` naming the rule and the read, and let the record's other rules reconcile. A grant the queue gave is
+never revoked because its members could not be read; it is re-evaluated on the rule's next pass (a write to the rule, the
+next membership write, a restart). The look-through that finds the rules a membership write moves (the "membership
+moves" paragraph of D2; `packages/plugins/plugin-sharing/src/ownership-queue-service.ts#queuesNaming`) revokes nothing
+and is outside this amendment.
 
 What it resolves to at runtime: grants materialised per member, rule-wide, as `team` and `position` are today — and
 re-materialised when the queue's membership moves. ⛔ The recipient does not confer queue-sitting access; that is D3's
