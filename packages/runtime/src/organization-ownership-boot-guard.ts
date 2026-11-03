@@ -342,7 +342,8 @@ export function organizationOwnershipRefusalMessage(
 
 /**
  * Why the named commands export the auth secret, on a boot that read it from
- * a file ({@link OrganizationOwnershipBootGuardOptions.authSecretFile}).
+ * a file ({@link OrganizationOwnershipBootGuardOptions.authSecretFile}). A
+ * development boot's `--dev` composes the security plugin itself.
  */
 function secretNote(opts: OrganizationOwnershipBootGuardOptions): string {
   if (opts.dev || !opts.authSecretFile) return '';
