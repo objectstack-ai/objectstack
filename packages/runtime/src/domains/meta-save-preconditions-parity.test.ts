@@ -47,6 +47,8 @@
  * the store, never the envelope's bytes.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import '../lint-root-preload.testkit.js';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';

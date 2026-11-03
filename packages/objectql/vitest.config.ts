@@ -104,22 +104,16 @@ runProjectCliOverridePreflight({
   parse: parseCLI,
 });
 
-// [#29627] The lint package root's first load is paid in this setup file,
-// before a test file is collected, never inside the case that makes the
-// file's first served view read or object publish. Named in EACH project
-// below, like the per-project settings beside it. The module's header carries
-// the measurement and the price.
-const LINT_ROOT_PRELOAD = './test/lint-root-preload.setup.ts';
-
 export default defineConfig({
   resolve: {
     alias: [
-      // [#29627] The package root the preload above imports. This package does
-      // not depend on `@objectstack/lint`; metadata-protocol does, and loads
-      // the root lazily from its `dist/`. Anchored, so lint's published
-      // subpaths are not swallowed by the file replacement, and pointed at
-      // source, so the preload and the protocol's own `import()` resolve to
-      // the same module, the lint rule in the checkout, never `dist/`.
+      // [#29627] The lint package ROOT, which `src/__fixtures__/lint-root-preload.testkit.ts`
+      // imports at module top so a test file pays its first load during
+      // collection. metadata-protocol loads the same root lazily from its
+      // `dist/` on a served view read or an object publish; through this
+      // entry both resolve to one module, the lint rule in the checkout,
+      // never `dist/`. Anchored, so lint's published subpaths are not
+      // swallowed by the file replacement.
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
     ],
   },
@@ -142,7 +136,6 @@ export default defineConfig({
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
           disableConsoleIntercept: true,
-          setupFiles: [LINT_ROOT_PRELOAD],
         },
       },
       {
@@ -158,7 +151,6 @@ export default defineConfig({
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
           disableConsoleIntercept: true,
-          setupFiles: [LINT_ROOT_PRELOAD],
         },
       },
     ],

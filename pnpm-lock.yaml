@@ -1573,6 +1573,9 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
     devDependencies:
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../lint
       tsx:
         specifier: ^4.23.15
         version: 4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6)

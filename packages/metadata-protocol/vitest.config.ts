@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// This config exists for exactly three settings; everything else stays on
+// This config exists for exactly two settings; everything else stays on
 // vitest's defaults, deliberately — a key added here re-specifies behaviour
 // for every test file in the package (packages/cli/vitest.config.ts's header
 // records the incident that taught that).
@@ -16,11 +16,6 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
-    // [#29627] The lint package root's first load is paid here, before a test
-    // file is collected, never inside the case that makes the file's first
-    // served view read or object publish. The module's header carries the
-    // measurement and the price.
-    setupFiles: ['./test/lint-root-preload.setup.ts'],
   },
   resolve: {
     alias: [
