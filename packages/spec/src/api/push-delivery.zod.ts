@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { PUSH_SERVER_ORIGIN_MESSAGE, PUSH_SERVER_ORIGIN_PATTERN } from '../system/push-server-origin';
 
 /**
  * Push delivery data — what a push carries to the shell.
@@ -46,6 +47,16 @@ import { lazySchema } from '../shared/lazy-schema';
  * had open, re-checked against the active apps, then the first active app,
  * then `setup`). It never re-implements the resolver and never opens `route`
  * verbatim.
+ *
+ * **Which server sent it — `origin`.** APNs and FCM tell the shell nothing
+ * about the sender, and every server a shell has saved registers the same
+ * vendor token, so the data names the server itself. `origin` is the origin
+ * the Console was loaded from when it registered the device
+ * (`RegisterDeviceRequestSchema.origin`), kept on the device row
+ * (`UserDeviceSchema.origin`) and copied here by the push channel. It is the
+ * address the shell saved for that server, so the shell opens the tap on the
+ * saved server whose origin it equals and resolves `route` there. The rule
+ * the three members share lives in `system/push-server-origin.ts`.
  *
  * Not to be confused with the `PushNotificationSchema` that `system/` once
  * declared and then removed (ADR-0049): that was an authoring template shape;
@@ -92,7 +103,14 @@ export const PushDeliveryDataSchema = lazySchema(() => z.object({
     'The notification actionUrl, the value the inbox serves, when it is a same-server relative path; absent otherwise. '
     + 'The shell resolves it on tap as the inbox bell and Home do, never verbatim',
   ),
+  origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
+    'The origin of the server that sent the push (for example https://crm.example.com): the push channel copies it from '
+    + 'the device row, which holds the origin the Console was loaded from when it registered the device. A mobile shell '
+    + 'with several saved servers opens the tap on the saved server with this origin, and resolves route there. Absent '
+    + 'when the device was registered without one',
+  ),
 }).describe(
-  'The data a push delivery carries to the shell: the notification id and its actionUrl as a same-server route',
+  'The data a push delivery carries to the shell: the notification id, its actionUrl as a same-server route, and the '
+  + 'origin of the server that sent it',
 ));
 export type PushDeliveryData = z.input<typeof PushDeliveryDataSchema>;

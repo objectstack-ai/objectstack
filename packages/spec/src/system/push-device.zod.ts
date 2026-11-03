@@ -5,6 +5,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { PushVendorSchema } from './push-config.zod';
 import { LocaleSchema } from './translation.zod';
 import { PUSH_DEVICE_PLATFORMS } from './push-device-platform';
+import { PUSH_SERVER_ORIGIN_MESSAGE, PUSH_SERVER_ORIGIN_PATTERN } from './push-server-origin';
 
 /**
  * Push Device Protocol — the stored device shape of the push device registry
@@ -60,6 +61,11 @@ export const UserDeviceSchema = lazySchema(() => z.object({
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
   locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
   name: z.string().optional().describe('Device friendly name, as the registration named it'),
+  origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
+    '[PLANNED — not yet stored] The origin the Console was loaded from, as the registration named it (for example '
+    + 'https://crm.example.com). The device registry keeps it on the row and the push channel copies it into every push '
+    + 'to this device, where the mobile shell picks the saved server by it. Absent on a device registered without one',
+  ),
   enabled: z.boolean().describe('False once the vendor reported the token dead; nothing is delivered to a disabled device'),
   invalidatedAt: z.string().datetime().optional().describe(
     'When the vendor reported the token dead. Present exactly while enabled is false: absent on an enabled device, '

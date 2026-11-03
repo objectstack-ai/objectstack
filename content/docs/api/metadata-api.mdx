@@ -110,9 +110,8 @@ never overridden; it is copied under a new name. What the reads then serve is in
 `POST /packages/hotcrm/ensure-customization` creates the pair when absent (Studio calls
 it on the first change), and `GET /packages/hotcrm/customizations` lists its overrides,
 extensions and switched-off items in one read, beside `contributions`: the fields (kind `field`)
-and flows (kind `flow`) other installed packages contribute to `hotcrm`'s objects, each entry
-naming its package. Its `nav` kind (a navigation item another package contributes to a
-`hotcrm` app) is declared and not yet served.
+and flows (kind `flow`) other installed packages contribute to `hotcrm`'s objects, and the
+navigation items (kind `nav`) they contribute to `hotcrm`'s apps, each entry naming its package.
 
 **Body**: `{ type: "object", name: "account", item: { ... } }`  
 **Response**: `{ success: true }`

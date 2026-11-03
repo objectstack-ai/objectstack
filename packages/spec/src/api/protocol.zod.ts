@@ -31,6 +31,7 @@ import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { ServedTranslationDataSchema, LocaleSchema } from '../system/translation.zod';
 import { PushVendorSchema } from '../system/push-config.zod';
 import { PUSH_DEVICE_PLATFORMS } from '../system/push-device-platform';
+import { PUSH_SERVER_ORIGIN_MESSAGE, PUSH_SERVER_ORIGIN_PATTERN } from '../system/push-server-origin';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -238,10 +239,45 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
  * must carry it alongside a request do so in a typed transport envelope at
  * their own layer (see `TransportScopedMetaRequest` in `@objectstack/rest`),
  * never by widening these shapes.
+ *
+ * **`names` is the batch by-names read of one type** (ruling A on #29236,
+ * record 6580261740): a caller that wants a handful of items asks the list
+ * once instead of reading the whole type, or reading each item by name. This
+ * member is the protocol's post-parse shape — a LIST of item names; the wire
+ * spelling `?names=a,b,c` (one comma-separated value, the data routes'
+ * convention for `fields` and `searchFields`, which fits the list door's arity
+ * rule that refuses a repeated key) is split by the REST door, not here. The
+ * protocol pushes it down to the store read, so it filters before decorating
+ * and masking and translation run on the named items only.
+ *
+ * The list arm refuses only the EMPTY list, as `searchFieldsArray` does
+ * (`../data/search-fields-names-a-field.ts`): absent means "every item", so an
+ * empty filter read as absent is a widening — the class the list door's `?id=`
+ * / `?object=` refusal closes (`refuseEmptyListFilter` in `@objectstack/rest`).
+ * The schema judges no member: a name that matches no item is not refused,
+ * it is simply absent from the answer, as an unknown `?id=` narrows to the
+ * empty list. A minimum, not a refinement, so the published JSON Schema
+ * states it.
+ *
+ * **Declared ahead of its producer.** No list door reads `names` yet, so its
+ * describe opens `[PLANNED — not yet served]`; the server PR on #29236 drops
+ * the marker in the change that serves the member (the pin is in
+ * `protocol.test.ts`).
  */
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  names: z.array(z.string())
+    .min(1, 'Name at least one item, or leave `names` out to list every item')
+    .optional()
+    .describe(
+      '[PLANNED — not yet served] Item names to narrow the list to: only the named items of the type '
+      + 'are answered, among those the list would answer without it. Sent over HTTP as one '
+      + 'comma-separated value (`?names=a,b,c`). A name that matches no item is simply absent from the '
+      + 'answer (no 404). An empty value is refused with 400 rather than read as every item; leave the '
+      + 'key out to list every item. No list door reads it yet: until one does, a request carrying it '
+      + 'is answered as if it were absent.',
+    ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
     + 'pending `state=\'draft\'` rows are overlaid on the active list — draft '
@@ -766,8 +802,8 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ),
   cascadeDeleteObjects: z.array(z.string()).optional().describe(
     'The objects, by name, that deleting a record of this object can also delete: every object whose '
-    + 'relation into it cascades (a `master_detail` by default, a `lookup` or `tree` that declares '
-    + '`deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
+    + 'relation into it cascades (a `master_detail` by default, a `lookup`, `tree` or `user` field that '
+    + 'declares `deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
     + 'order the delete reaches them. This object itself is named only when a cascading relation leads back '
     + 'to it. A `restrict` or `set_null` relation removes nothing and is not named. Read from the rule the '
     + 'delete runs, and object-level: it never says which records or how many. Present only on an `object` '
@@ -3549,6 +3585,13 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
   locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
+    '[PLANNED — not yet stored] The origin the Console was loaded from (window.location.origin, for example '
+    + 'https://crm.example.com): the address the mobile shell saved for this server. The Console writes it; the server '
+    + 'stores it on the device row and every push to the device carries it back, so a shell with several saved servers '
+    + 'opens the push on the one that sent it. http or https, a lowercase host and an optional port; a path, another '
+    + 'scheme or a bare host is refused',
+  ),
 }).describe('Register or refresh a push device for the signed-in user'));
 
 export const RegisterDeviceResponseSchema = lazySchema(() => z.object({

@@ -906,7 +906,7 @@
       "title": "Permission-matrix editor UX: field-filter + bulk apply to EXACTLY the visible fields, and the Bulk column never clips at narrow widths",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin"],
@@ -930,7 +930,8 @@
         "Save; GET /api/v1/meta/permission/<name> (or the package draft read) and assert the fields map (keyed `${object}.${field}`) carries overrides for ONLY the fields that were visible when each bulk fired — never a filter-hidden field",
         "B3 clip: shrink the viewport to a narrow width; confirm the object matrix's enclosing overflow-auto container SCROLLS horizontally (the table carries min-w-[1304px]; Studio's is data-testid perm-studio-matrix) and the Bulk column (Read / CRUD / All / None per row) stays reachable, not clipped off the right edge",
         "read-only gate: open a read-only package/type set; confirm Save is hidden, every checkbox is disabled, the field sub-table's bulk buttons (Read-only all / Write all / Clear) are ABSENT — FieldsSubTable renders them only while the set is writable — and the object row's Read / CRUD / All / None, which Studio shows only on the row under the pointer or with keyboard focus, are disabled when they show; the read-only badge names package-vs-type as the reason",
-        "the grant→access flip (a flipped verb actually changing a persona's API access) is access-security.permission-matrix-edit-loop — cite a pass there; this item does NOT re-prove that a saved grant changes access"
+        "the grant→access flip (a flipped verb actually changing a persona's API access) is access-security.permission-matrix-edit-loop — cite a pass there; this item does NOT re-prove that a saved grant changes access",
+        "B5 field boxes under a sideways scroll: at a pane narrower than the matrix floor (a 1000 px pane, and a narrower one), expand an object, scroll the matrix container right in steps (0, 80, 200 px and its far end); at each offset read document.elementFromPoint at the centre of every field row's Read and Edit box, and at the field name"
       ],
       "acceptance": [
         {
@@ -968,11 +969,18 @@
           "oracle": "screenshot",
           "verify": "on the read-only set Save is absent, every checkbox is disabled, the field bulk buttons (Read-only all / Write all / Clear) are absent — not merely disabled (PermissionMatrixEditor.tsx FieldsSubTable renders them only while writable; QA run #26715 read them absent in read-only Studio) — and the object row's bulk, which appears only on hover or keyboard focus (engine.studio.access.bulkHint), is disabled when it appears; an operating bulk control is the FAIL. The badge names the gate that holds; the console distinguishes FOUR (objectui PermissionMatrixEditor.tsx at the pin): the package gate (engine.studio.pkg.readonly — Studio on a read-only package), the artifact gate (perm.readOnly.artifact, 'Read-only (this set is provided by a code package)' — a set a code package ships, in the metadata admin), the wall (perm.readOnly.walled — the security catalog under isolated/group tenancy) and the type gate (perm.readOnly — a type with no runtime write channel). On a stock boot only the package and artifact gates are reachable — the wall needs a walled tenancy posture and the type gate a permission type with no write channel, which stock does not have — so score those two on the packaged showcase_contributor set (Studio Access and the metadata admin) and record the other two as not reachable on stock. A badge that blames the wrong gate is the FAIL",
           "evidence": "the read-only screenshot"
+        },
+        {
+          "clause": "an expanded object's field Read and Edit boxes stay in view and clickable at every horizontal scroll offset of the matrix and at any pane width, and each field's name stays readable beside them — the field panel holds its place at the cell's inset, no wider than the pane shows, instead of scrolling with the object columns or sitting under a pinned name cell (objectstack#29677)",
+          "oracle": "dom",
+          "verify": "at a narrow pane (scrollWidth > clientWidth on the matrix container) and at each scroll offset of step B5, elementFromPoint at the centre of every field row's Read and Edit box returns that box (or a node inside it) and the centre lies inside the container's visible box; the field name answers at its first characters. A box answering the field-name cell, or a box only reachable at scrollLeft 0, is the FAIL",
+          "evidence": "the elementFromPoint readings per offset + screenshots at scrollLeft 0 and at the far end"
         }
       ],
       "negative": [
         "a field bulk that writes grants to fields hidden by the filter is the FAIL this item exists for — a wrong bulk scope silently grants or revokes access on fields the admin never saw (assert against the SAVED fields map, not the repaint)",
-        "the Bulk column clipped off the right edge at a narrow width with no horizontal scroll is the B3 FAIL — the admin cannot reach Read / CRUD / All / None"
+        "the Bulk column clipped off the right edge at a narrow width with no horizontal scroll is the B3 FAIL — the admin cannot reach Read / CRUD / All / None",
+        "a field row's Read or Edit box covered by the field-name cell, or carried out of view, once the matrix scrolls sideways is the B5 FAIL — below the matrix floor the admin cannot grant or revoke that field at all"
       ],
       "variants": [
         "field bulk: Read-only all (readable)",
@@ -980,7 +988,7 @@
         "field bulk: Clear"
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
-      "automated": { "kind": "unit", "ref": "objectui code under ui/: ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.fieldBulk.test.tsx (+ PermissionMatrixEditor.readonly.test.tsx, PermissionMatrixEditor.artifactTier.test.tsx). fieldBulk asserts filter narrowing, the '2 / 8' counter and the bulk scope as jsdom checkbox states: component-layer evidence for acceptance[0] and [1], never the SAVED fields map that acceptance[2], [3] and negative[0] make the authority. For acceptance[5], readonly covers the package gate, the type gate and the capability gate, and artifactTier covers the artifact gate ('provided by a code package'). Every screenshot and api clause stays the run's" },
+      "automated": { "kind": "unit", "ref": "objectui code under ui/: ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.fieldBulk.test.tsx (+ PermissionMatrixEditor.readonly.test.tsx, PermissionMatrixEditor.artifactTier.test.tsx). fieldBulk asserts filter narrowing, the '2 / 8' counter and the bulk scope as jsdom checkbox states: component-layer evidence for acceptance[0] and [1], never the SAVED fields map that acceptance[2], [3] and negative[0] make the authority. For acceptance[5], readonly covers the package gate, the type gate and the capability gate, and artifactTier covers the artifact gate ('provided by a code package'). For acceptance[6], ui/e2e/permission-field-panel-scroll.spec.ts measures elementFromPoint at every field box over a sweep of scroll offsets in Chromium on both matrix renderings (a stubbed client; Build & E2E UI runs it). Every screenshot and api clause stays the run's" },
       "source": [
         "objectui: packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx (FieldsSubTable B4 — field filter + bulkSetFields over visibleNames; PermissionTable min-w-[1304px] B3 anti-clip on the Bulk column; the writable gate + celErrorCount Save gate)",
         "objectui: packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.fieldBulk.test.tsx ('the filter narrows the field set and bulk acts only on what is visible'; 'Clear drops the overrides so fields fall back to the read-only default')",
@@ -1027,6 +1035,12 @@
           "date": "2026-11-02",
           "change": "steps[0]'s second door re-pointed (#28579 slice 2, FOLLOW-UPS §13c): the Setup metadata item URL it named redirects since #28818 to Studio's All metadata item page, which mounts the same PermissionMatrixEditor, so the step names the landing URL. No clause changed. Read at base eb123b7ccc",
           "ref": "#28579"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-03",
+          "change": "new clause acceptance[6], step B5 (steps[8]) and negative[2] (objectstack#29677, from QA run #29672, whose acceptance[4] covers only the Bulk column): an expanded object's field Read and Edit boxes stay in view and clickable at every horizontal scroll offset and pane width. On main at 3482f3d8d2 the field sub-table's name column, its flexible column and about 697 px wide, was pinned left and covered both boxes from a scroll of about 80 px on, so below the 1304 px floor they could not be reached. The field panel is now pinned at the cell's inset instead (FIELD_PANEL in ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx); automated.ref names the browser geometry pin ui/e2e/permission-field-panel-scroll.spec.ts. Appended, so no existing index moves; no other clause changed",
+          "ref": "#29677"
         }
       ]
     },

@@ -55,6 +55,7 @@ export { default as CloudWhoamiCommand } from './commands/cloud/whoami.js';
 // ─── Package topic subcommands ──────────────────────────────────────
 export { default as PackagePublishCommand } from './commands/package/publish.js';
 export { default as PackageInstallCommand } from './commands/package/install.js';
+export { default as PackageExportCommand } from './commands/package/export.js';
 
 // ─── Entry-point guard (#10111) ─────────────────────────────────────
 // This file is the package `main`. It is a LIBRARY entry — a barrel of
