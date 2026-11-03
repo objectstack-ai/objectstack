@@ -168,7 +168,8 @@ const SESSION_SHAPE = /^(?:session|cse)_[A-Za-z0-9]+$/;
 // three, so a login is never read as a seat. The lists below are the ONE spelling of those lane words: the shape is
 // built from them, and so is the reserved set a `domain:` lane may not be named after (`seatKey`). The same three
 // words close the seat signature's lane alternation (`SIGNATURE_LANE_SOURCE`, check-half-states.mjs), which this
-// list does not import; a bare lane admitted there is admitted here in the same PR.
+// list cannot import (the patrol loads this file lazily, so that edge would be a cycle); fleet-roster's self-test,
+// which imports both, holds the two equal, `coordinator` (it signs and has no mailbox) aside.
 /** The lane kinds that carry a name after the colon: `domain:<x>`, `repo:<x>`. `domain` is the default kind the slug drops. */
 export const SEAT_LANE_KINDS = Object.freeze(['domain', 'repo']);
 /** The bare lanes, a closed set: `triage`, `director`, `security` (the seat that owns security findings, `lanes/security.md`). */
