@@ -31,6 +31,8 @@
 - 分诊定级轮读车道 `Suggested-grade:` 行:是输入不是定级,确认或改判,不采纳给理由。
 - 分类动作每张三选一,外加一个修复通道;裁定写方向、给六态之一。
 - 停 `pm:blocked` 同笔在卡正文写行首 `Blocked-by: #N`(issue/PR 号;full-run 卡写评论),散文不算。
+- 每轮读 H14(`check-half-states.mjs`)同笔落标签:NOT carrying ⇒ `label-write.mjs --add pm:blocking`;
+- stale 行核过跨仓依赖再 `--remove pm:blocking`;UNJUDGED 行不动;增删卡号进轮次记录。
 - 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,无可问之事;⛔ 工具/门禁修复不由此进。
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
