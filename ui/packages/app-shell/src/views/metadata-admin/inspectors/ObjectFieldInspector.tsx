@@ -112,7 +112,7 @@ import {
   type FieldsView,
   type FieldEntry,
 } from '../previews/object-fields-io.js';
-import { romanizeHan, useHanRomanizer } from '../romanizeHan.js';
+import { romanizeHan, useHanRomanizer, useWhenRomanizerLands } from '../romanizeHan.js';
 import {
   FIELD_TYPE_META,
   type FieldTypeId,
@@ -2112,23 +2112,20 @@ function OptionsEditor({
   };
   // A Chinese label typed before the pinyin dictionary landed left its row's
   // value empty; once it lands, each such row still deriving takes its value.
-  const romanizerVersion = useHanRomanizer(
-    ...rows.flatMap((r) => (r.kind === 'option' && r.derive ? [r.option.label] : [])),
+  useWhenRomanizerLands(
+    () => {
+      let changed = false;
+      const next = rows.map((r) => {
+        if (r.kind !== 'option' || !r.derive || r.option.value !== '' || !r.option.label) return r;
+        const value = deriveValue(r.option.label);
+        if (!value) return r;
+        changed = true;
+        return { ...r, option: { ...r.option, value } };
+      });
+      if (changed) commit(next);
+    },
+    ...rows.flatMap((r) => (r.kind === 'option' && r.derive ? [r.option.label ?? ''] : [])),
   );
-  const romanizerSeen = React.useRef(romanizerVersion);
-  React.useEffect(() => {
-    if (romanizerSeen.current === romanizerVersion) return;
-    romanizerSeen.current = romanizerVersion;
-    let changed = false;
-    const next = rows.map((r) => {
-      if (r.kind !== 'option' || !r.derive || r.option.value !== '' || !r.option.label) return r;
-      const value = deriveValue(r.option.label);
-      if (!value) return r;
-      changed = true;
-      return { ...r, option: { ...r.option, value } };
-    });
-    if (changed) commit(next);
-  });
   const updateValue = (i: number, value: string) => {
     const next = [...rows];
     const row = next[i];

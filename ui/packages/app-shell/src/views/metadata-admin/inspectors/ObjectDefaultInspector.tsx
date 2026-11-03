@@ -26,7 +26,7 @@ import { InspectorShell, InspectorTextField } from './_shared.js';
 import { Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import { toFieldNameLoose } from '../previews/object-fields-io.js';
 import { slugify } from '../createDerive.js';
-import { romanizeHan, useHanRomanizer } from '../romanizeHan.js';
+import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import { t } from '../i18n.js';
 import { IconPickerWidget } from '../widgets.js';
 
@@ -60,16 +60,12 @@ export function ObjectDefaultInspector({
   };
 
   // A Chinese label typed before the pinyin dictionary landed left the name
-  // empty; once it lands (`romanizerVersion` moves), an empty name that still
-  // follows the label takes the derived one. A no-op on every other render.
-  const romanizerVersion = useHanRomanizer(str('label'));
-  const labelNow = str('label');
-  const nameNow = str('name');
-  React.useEffect(() => {
-    if (!createMode || readOnly || nameNow !== '' || !labelNow) return;
-    const derived = slugify(romanizeHan(labelNow));
+  // empty; when it lands, an empty name takes the derived one.
+  useWhenRomanizerLands(() => {
+    if (!createMode || readOnly || str('name') !== '' || !str('label')) return;
+    const derived = deriveName(str('label'));
     if (derived) onPatch({ name: derived });
-  }, [createMode, readOnly, labelNow, nameNow, onPatch, romanizerVersion]);
+  }, str('label'));
   const setName = (v: string) => {
     onPatch({ name: toFieldNameLoose(v) });
   };

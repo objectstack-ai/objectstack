@@ -41,7 +41,7 @@ import {
 } from './_shared.js';
 import { AddFieldPopover, FieldListRow } from '../previews/ViewColumnPanes.js';
 import { toFieldNameLoose, toFieldNameOrEmpty } from '../previews/object-fields-io.js';
-import { romanizeHan, useHanRomanizer } from '../romanizeHan.js';
+import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
 import type { ObjectFieldInfo } from '../previews/useObjectFields.js';
@@ -366,14 +366,12 @@ export function ReportDefaultInspector({
   const nameFollowsLabel =
     createMode && (nameValue === '' || nameValue === toFieldNameOrEmpty(romanizeHan(labelValue)));
   // A Chinese Label typed before the pinyin dictionary landed left the Name
-  // empty; once it lands (`romanizerVersion` moves), an empty Name that still
-  // follows the Label takes the derived one. A no-op on every other render.
-  const romanizerVersion = useHanRomanizer(labelValue);
-  React.useEffect(() => {
+  // empty; when it lands, an empty Name takes the derived one.
+  useWhenRomanizerLands(() => {
     if (!createMode || readOnly || nameValue !== '' || !labelValue) return;
     const derived = toFieldNameOrEmpty(romanizeHan(labelValue));
     if (derived) onPatch({ name: derived });
-  }, [createMode, readOnly, nameValue, labelValue, onPatch, romanizerVersion]);
+  }, labelValue);
   const datasetName =
     typeof draft.dataset === 'string' ? (draft.dataset as string) : '';
   const values = React.useMemo(() => readNames(draft.values), [draft.values]);

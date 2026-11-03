@@ -33,7 +33,7 @@ import {
 } from './_shared.js';
 import { InspectorComboField, type InspectorComboOption } from './InspectorComboField.js';
 import { toFieldNameLoose, toFieldNameOrEmpty } from '../previews/object-fields-io.js';
-import { romanizeHan, useHanRomanizer } from '../romanizeHan.js';
+import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import { formatMeasure } from '@object-ui/core';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { type FilterCondition } from './datasetFilterCondition.js';
@@ -403,14 +403,12 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
   // of this comparison and in the Label handler below.
   const nameFollowsLabel = createMode && (nameValue === '' || nameValue === toFieldNameOrEmpty(romanizeHan(label)));
   // A Chinese Label typed before the pinyin dictionary landed left the Name
-  // empty; once it lands (`romanizerVersion` moves), an empty Name that still
-  // follows the Label takes the derived one. A no-op on every other render.
-  const romanizerVersion = useHanRomanizer(label);
-  React.useEffect(() => {
+  // empty; when it lands, an empty Name takes the derived one.
+  useWhenRomanizerLands(() => {
     if (!createMode || readOnly || nameValue !== '' || !label) return;
     const derived = toFieldNameOrEmpty(romanizeHan(label));
     if (derived) onPatch({ name: derived });
-  }, [createMode, readOnly, nameValue, label, onPatch, romanizerVersion]);
+  }, label);
 
   const { options: objectOptions, loading: objectsLoading } = useObjectOptions();
   const { relationships, fieldOptions, loading: catalogLoading } = useDatasetFieldCatalog(object, include);

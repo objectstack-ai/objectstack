@@ -175,3 +175,24 @@ export function useHanRomanizer(...texts: string[]): number {
   }, [wanted]);
   return current;
 }
+
+/**
+ * Runs `onLand` once each time the pinyin dictionary lands after this
+ * component mounted, and on no other render. A door whose identifier was left
+ * empty by a Chinese name typed before the chunk arrived fills it here; a
+ * person who later clears the identifier to type their own is not refilled,
+ * because the dictionary does not land twice.
+ */
+export function useWhenRomanizerLands(onLand: () => void, ...texts: string[]): void {
+  const version = useHanRomanizer(...texts);
+  const seen = React.useRef(version);
+  const latest = React.useRef(onLand);
+  React.useEffect(() => {
+    latest.current = onLand;
+  });
+  React.useEffect(() => {
+    if (version === seen.current) return;
+    seen.current = version;
+    latest.current();
+  }, [version]);
+}
