@@ -55,6 +55,7 @@
     "AwarenessUserState (type)",
     "AwarenessUserStateSchema (const)",
     "BUILTIN_OPERATION_MESSAGES (const)",
+    "BUILTIN_SYSTEM_FIELD_LABEL_LOCALES (const)",
     "BUILTIN_VALIDATION_MESSAGES (const)",
     "BackupConfig (type)",
     "BackupConfigParsed (type)",
