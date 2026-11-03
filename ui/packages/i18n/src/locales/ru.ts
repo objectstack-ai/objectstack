@@ -4715,6 +4715,7 @@ const ru = {
       draftedByMcp: 'Включает изменения, подготовленные MCP-клиентом',
       detailChangedKeys: 'Также изменено:',
       detailNewKeys: 'Включает:',
+      detailNewItem: 'Публикация добавит этот элемент.',
       generatedGroup: 'Создано платформой ({{n}})',
       confirmNote: 'Публикация выпускает все {{count}} ожидающих черновиков этого пакета вместе: либо публикуются все, либо ни один.',
       confirmNote_one: 'Публикация выпускает {{count}} ожидающий черновик этого пакета: он публикуется, либо ничего не меняется.',
@@ -4793,6 +4794,11 @@ const ru = {
         email_template_few: 'Шаблоны писем: {{count}}',
         email_template_many: 'Шаблоны писем: {{count}}',
         email_template_other: 'Шаблоны писем: {{count}}',
+        object_extension: 'Расширения объектов: {{count}}',
+        object_extension_one: 'Расширение объекта: {{count}}',
+        object_extension_few: 'Расширения объектов: {{count}}',
+        object_extension_many: 'Расширения объектов: {{count}}',
+        object_extension_other: 'Расширения объектов: {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

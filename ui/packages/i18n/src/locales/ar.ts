@@ -4903,6 +4903,7 @@ const ar = {
       draftedByMcp: 'يتضمن تغييرات صاغها عميل MCP',
       detailChangedKeys: 'تغييرات أخرى:',
       detailNewKeys: 'يتضمن:',
+      detailNewItem: 'يضيف النشر هذا العنصر.',
       generatedGroup: 'أنشأتها المنصة ({{n}})',
       confirmNote: 'النشر يُصدر كل المسودات المعلقة ({{count}}) لهذه الحزمة معًا: إما أن تُنشر كلها، أو لا يُنشر أي منها.',
       confirmNote_zero: 'النشر يُصدر كل المسودات المعلقة ({{count}}) لهذه الحزمة معًا: إما أن تُنشر كلها، أو لا يُنشر أي منها.',
@@ -5009,6 +5010,13 @@ const ar = {
         email_template_few: 'قوالب بريد إلكتروني {{count}}',
         email_template_many: 'قوالب بريد إلكتروني {{count}}',
         email_template_other: 'قوالب بريد إلكتروني {{count}}',
+        object_extension: 'امتدادات كائنات {{count}}',
+        object_extension_zero: 'امتدادات كائنات {{count}}',
+        object_extension_one: 'امتداد كائن {{count}}',
+        object_extension_two: 'امتدادات كائنات {{count}}',
+        object_extension_few: 'امتدادات كائنات {{count}}',
+        object_extension_many: 'امتدادات كائنات {{count}}',
+        object_extension_other: 'امتدادات كائنات {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

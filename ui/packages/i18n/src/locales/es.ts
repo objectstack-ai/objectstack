@@ -4606,6 +4606,7 @@ const es = {
       draftedByMcp: 'Incluye cambios redactados por un cliente MCP',
       detailChangedKeys: 'También cambió:',
       detailNewKeys: 'Incluye:',
+      detailNewItem: 'Al publicar se añade este elemento.',
       generatedGroup: 'Generado por la plataforma ({{n}})',
       confirmNote: 'Publicar libera juntos los {{count}} borradores pendientes de este paquete: o se publican todos, o ninguno.',
       confirmNote_one: 'Publicar libera {{count}} borrador pendiente de este paquete: se publica, o no cambia nada.',
@@ -4670,6 +4671,10 @@ const es = {
         email_template_one: '{{count}} plantilla de correo',
         email_template_many: '{{count}} de plantillas de correo',
         email_template_other: '{{count}} plantillas de correo',
+        object_extension: '{{count}} extensiones de objeto',
+        object_extension_one: '{{count}} extensión de objeto',
+        object_extension_many: '{{count}} de extensiones de objeto',
+        object_extension_other: '{{count}} extensiones de objeto',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
