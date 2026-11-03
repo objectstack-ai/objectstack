@@ -3249,6 +3249,12 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#28572 — one surface for a read-only base and its customization package.
   'engine.studio.customize.addedIn': 'In {pair}',
   'engine.studio.customize.addedInTitle': 'This item is added by {pair}, this deployment’s customization package, and is saved there.',
+  // objectstack#29786 — items another package contributes to a read-only base.
+  'engine.studio.contributed.from': 'from {package}',
+  'engine.studio.contributed.navTitle': 'Navigation item {name}, added to this app by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.fieldTitle': 'Field {name}, added to this object by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.flowTitle': 'Flow {name}, triggered on this object and shipped by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.undeclaredGroup': 'It names the group “{group}”, which this app does not declare, so it shows at the top level.',
   // objectstack#29705 — what a person can do with a type's items, in the words
   // the pillars use for an item's state: an overlay type of a read-only package
   // takes a customization; a create-only type of a writable package takes new
