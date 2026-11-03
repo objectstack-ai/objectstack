@@ -411,3 +411,67 @@ describe('`fieldPatches` keys — the field map\'s own key grammar', () => {
     }
   });
 });
+
+/** Parse an extension whose `fields` is `fields`; return the issues. */
+function extensionFieldsIssues(fields: Record<string, unknown>): Issue[] {
+  const r = ObjectExtensionSchema.safeParse({ extend: 'crm_account', fields });
+  return r.success ? [] : (r.error.issues as unknown as Issue[]);
+}
+
+describe('extension `fields` keys — the field map\'s own key grammar', () => {
+  it.each([['Region Code'], ['RegionCode'], ['region-code'], ['2nd_phone'], ['Region Code__c']])(
+    'refuses `%s`, which no field name can be: one `invalid_key` at its key, naming the grammar and an example',
+    (key) => {
+      const issues = extensionFieldsIssues({ [key]: { type: 'text', label: 'Region' } });
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('invalid_key');
+      expect(issues[0]!.path).toEqual(['fields', key]);
+      expect(issues[0]!.message.startsWith(`\`${key}\` cannot be a field name`)).toBe(true);
+      expect(issues[0]!.message).toContain('lowercase snake_case such as `region_code`');
+      expect(issues[0]!.message).not.toMatch(/#\d{3,}/);
+    },
+  );
+
+  it('control: a snake_case key parses, and so does one spelled `__c` (the suffix is judged at the doors)', () => {
+    expect(extensionFieldsIssues({ region_code: { type: 'text', label: 'Region' } })).toEqual([]);
+    expect(extensionFieldsIssues({ region_code__c: { type: 'text', label: 'Region' } })).toEqual([]);
+  });
+
+  it('control: the authored examples of the object-extension guide still parse whole', () => {
+    // `content/docs/data-modeling/object-extensions.mdx`, the declaration and the worked example.
+    const declared = ObjectExtensionSchema.parse({
+      extend: 'showcase_account',
+      fields: {
+        loyalty_tier: { type: 'select', label: 'Loyalty Tier', options: [{ label: 'Gold', value: 'gold' }] },
+        csat_score: { type: 'number', label: 'CSAT Score', min: 0, max: 100 },
+      },
+      priority: 210,
+    });
+    expect(Object.keys(declared.fields ?? {})).toEqual(['loyalty_tier', 'csat_score']);
+    const worked = ObjectExtensionSchema.parse({
+      extend: 'crm_account',
+      fields: {
+        cs_health_score: { type: 'number', label: 'Health Score', min: 0, max: 100 },
+        cs_renewal_date: { type: 'date', label: 'Renewal Date' },
+        cs_owner: { type: 'text', label: 'Success Manager' },
+      },
+      indexes: [{ name: 'idx_crm_account_cs_renewal', fields: ['cs_renewal_date'] }],
+      priority: 300,
+    });
+    expect(Object.keys(worked.fields ?? {})).toEqual(['cs_health_score', 'cs_renewal_date', 'cs_owner']);
+  });
+
+  it('the key schema IS the one `ObjectSchema.fields` reads: both admit exactly the same grammar', () => {
+    // `constructor` / `prototype` are left out: `ObjectSchema.fields` refuses them by record refines, outside the key schema.
+    const keys = ['region', 'region_code', '_internal', 'region__c', 'a1', 'Region', 'Region Code', 'region-code', '2nd_phone', 'regionCode', ''];
+    const admitted = keys.filter((key) => objectFieldsAdmit(key));
+    // Guard against a vacuous agreement: the sample holds keys on both sides of the grammar.
+    expect(admitted.length).toBeGreaterThan(0);
+    expect(admitted.length).toBeLessThan(keys.length);
+    for (const key of keys) {
+      const refusedAtKey = extensionFieldsIssues({ [key]: { type: 'text', label: 'L' } })
+        .some((i) => i.code === 'invalid_key' && i.path.join('.') === `fields.${key}`);
+      expect(refusedAtKey, key).toBe(!admitted.includes(key));
+    }
+  });
+});

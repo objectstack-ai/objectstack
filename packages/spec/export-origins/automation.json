@@ -173,6 +173,7 @@
     "FlowRegionArity": "src/automation/region-slots.ts#FlowRegionArity (type)",
     "FlowRegionParsed": "src/automation/control-flow.zod.ts#FlowRegionParsed (type)",
     "FlowRegionSchema": "src/automation/control-flow.zod.ts#FlowRegionSchema (const)",
+    "FlowRegionShapeError": "src/automation/control-flow.zod.ts#FlowRegionShapeError (class)",
     "FlowRegionSlotDecl": "src/automation/region-slots.ts#FlowRegionSlotDecl (interface)",
     "FlowRunGateSummary": "src/automation/execution.zod.ts#FlowRunGateSummary (type)",
     "FlowRunGateSummarySchema": "src/automation/execution.zod.ts#FlowRunGateSummarySchema (const)",

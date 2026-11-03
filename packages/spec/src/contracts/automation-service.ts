@@ -1193,9 +1193,10 @@ export interface ConnectorConnectionState {
      * the deployment has no base to derive it from — a connect is then refused
      * `503` — and ⛔ never guessed from the request's origin. Only an
      * `authorization_code` instance has a connection, so no other grant ever
-     * carries it. Read-only: no connection request takes it. Declared ahead of
-     * the service that answers it: until the automation service sets it, no
-     * answer carries it.
+     * carries it. Read-only: no connection request takes it. Its producer is
+     * `@objectstack/service-automation`: `AutomationServicePlugin.getConnectorConnection`
+     * (`packages/services/service-automation/src/plugin.ts`) sets it whenever
+     * the derivation has a base, and it is absent otherwise.
      */
     redirectUri?: string;
 }

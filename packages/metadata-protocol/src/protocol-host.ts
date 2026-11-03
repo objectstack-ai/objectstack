@@ -55,6 +55,8 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
  */
 export interface ProtocolHost {
     readonly artifactLockLayerAt: ObjectStackProtocolImplementation['artifactLockLayerAt'];
+    readonly assertObjectRegistered: ObjectStackProtocolImplementation['assertObjectRegistered'];
+    readonly assertVersionMatch: ObjectStackProtocolImplementation['assertVersionMatch'];
     readonly baseServesBundleMember: ObjectStackProtocolImplementation['baseServesBundleMember'];
     readonly convertStoredItem: ObjectStackProtocolImplementation['convertStoredItem'];
     readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
@@ -84,6 +86,7 @@ export interface ProtocolHost {
     readonly packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
     readonly packagelessAddress: ObjectStackProtocolImplementation['packagelessAddress'];
     readonly packagelessReadAddress: ObjectStackProtocolImplementation['packagelessReadAddress'];
+    readonly probeRecord: ObjectStackProtocolImplementation['probeRecord'];
     readonly readActiveOverlayRows: ObjectStackProtocolImplementation['readActiveOverlayRows'];
     readonly readFlattenedMetaItems: ObjectStackProtocolImplementation['readFlattenedMetaItems'];
     readonly readItemActiveRows: ObjectStackProtocolImplementation['readItemActiveRows'];

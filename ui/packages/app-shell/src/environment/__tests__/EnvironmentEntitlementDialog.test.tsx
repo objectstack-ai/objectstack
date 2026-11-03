@@ -1,6 +1,6 @@
 /**
- * EnvironmentEntitlementDialog renders the friendly upgrade/limit dialog and a
- * CTA that lands on the (control-plane-resolved) upgrade URL.
+ * EnvironmentEntitlementDialog renders the friendly limit dialog and a CTA that
+ * lands on the (control-plane-resolved) URL the server named.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -33,34 +33,32 @@ describe('EnvironmentEntitlementDialog', () => {
         state={{
           open: true,
           spec: {
-            code: 'DEV_ENV_PLAN_LOCKED',
-            title: 'Development environments are a paid feature',
-            message: 'Upgrade to add them.',
-            cta: { label: 'Upgrade plan', url: '/settings/billing' },
+            code: 'PRODUCTION_ENV_LIMIT',
+            title: 'You already have your production environment',
+            message: 'Each organization includes exactly one production environment.',
+            cta: { label: 'Contact sales', url: '/contact-sales' },
           },
         }}
       />,
     );
-    expect(await screen.findByText('Development environments are a paid feature')).toBeTruthy();
+    expect(await screen.findByText('You already have your production environment')).toBeTruthy();
     const cta = screen.getByTestId('entitlement-cta-primary');
-    expect(cta.getAttribute('href')).toBe('/settings/billing');
+    expect(cta.getAttribute('href')).toBe('/contact-sales');
     fireEvent.click(cta);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it('renders nothing when closed', () => {
     render(<EnvironmentEntitlementDialog apiBase="" onOpenChange={vi.fn()} state={{ open: false }} />);
-    expect(screen.queryByText('Development environments are a paid feature')).toBeNull();
+    expect(screen.queryByText('You already have your production environment')).toBeNull();
   });
 });
 
 // objectui#10437 — the dialog renders the spec the builder produces, so these
 // pins go through the REAL builder: a spec hand-written without a `cta` would
-// pass whether or not the builder still synthesizes a default URL. (The
-// proactive builder is gone since objectui#12190; the plan-locked toolbar draws
-// a mark, not this dialog.)
-describe('EnvironmentEntitlementDialog — no server URL, no upgrade CTA (objectui#10437)', () => {
-  const SERVER_UPGRADE_URL = 'https://cloud.example.com/_console/apps/cloud_control/page/pricing';
+// pass whether or not the builder still synthesizes a default URL.
+describe('EnvironmentEntitlementDialog — no server URL, no CTA (objectui#10437)', () => {
+  const SERVER_CONTACT_URL = 'https://cloud.example.com/contact-sales';
 
   const renderSpec = (spec: EntitlementDialogSpec | null) =>
     render(
@@ -71,18 +69,18 @@ describe('EnvironmentEntitlementDialog — no server URL, no upgrade CTA (object
       />,
     );
 
-  it('a 403 without upgrade_url opens the dialog with no upgrade anchor', async () => {
-    renderSpec(entitlementDialogFromError({ error: { code: 'DEV_ENV_PLAN_LOCKED', details: { plan: 'free' } } }));
-    expect(await screen.findByText('Development environments are a paid feature')).toBeTruthy();
+  it('a 403 without contact_url opens the dialog with no anchor', async () => {
+    renderSpec(entitlementDialogFromError({ error: { code: 'PRODUCTION_ENV_LIMIT', details: { current: 1, limit: 1 } } }));
+    expect(await screen.findByText('You already have your production environment')).toBeTruthy();
     expect(screen.queryByTestId('entitlement-cta-primary')).toBeNull();
     expect(screen.queryByRole('link')).toBeNull();
   });
 
-  it('control: a server-supplied upgrade_url renders the anchor to exactly that URL', async () => {
+  it('control: a server-supplied contact_url renders the anchor to exactly that URL', async () => {
     renderSpec(
-      entitlementDialogFromError({ error: { code: 'DEV_ENV_PLAN_LOCKED', details: { upgrade_url: SERVER_UPGRADE_URL } } }),
+      entitlementDialogFromError({ error: { code: 'PRODUCTION_ENV_LIMIT', details: { contact_url: SERVER_CONTACT_URL } } }),
     );
-    expect(await screen.findByText('Development environments are a paid feature')).toBeTruthy();
-    expect(screen.getByTestId('entitlement-cta-primary').getAttribute('href')).toBe(SERVER_UPGRADE_URL);
+    expect(await screen.findByText('You already have your production environment')).toBeTruthy();
+    expect(screen.getByTestId('entitlement-cta-primary').getAttribute('href')).toBe(SERVER_CONTACT_URL);
   });
 });

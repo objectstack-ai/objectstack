@@ -787,7 +787,7 @@ export function tOptional(
 /**
  * Format a translated string with `{token}` placeholders.
  *
- *   tFormat('engine.directory.description', 'zh-CN', { count: 28, writable: 4 })
+ *   tFormat('engine.directory.itemCountTooltip', 'zh-CN', { count: 28 })
  */
 export function tFormat(
   key: string,
