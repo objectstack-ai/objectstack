@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { TENANT_SCOPE_FIELD_DEF } from '@objectstack/metadata-core';
+import { TENANT_SCOPE_FIELD_DEF, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
@@ -170,7 +170,12 @@ async function bootWith(objects: Array<Record<string, unknown>>, opts: { posture
     objectql: {
       registerMiddleware: vi.fn(),
       getSchema: (name: string) => byName.get(name),
-      findOne: vi.fn(async () => null),
+      // The double answers no row, but refuses what the real engine refuses
+      // (`check:engine-double-contract`).
+      findOne: vi.fn(async (object: string, query: unknown) => {
+        assertEngineFindOnePredicate(object, query);
+        return null;
+      }),
       registry: { getAllObjects: () => [...byName.values()] },
     },
     metadata: { get: async (_t: string, name: string) => byName.get(name), list: async () => [PLAIN_MEMBER] },
