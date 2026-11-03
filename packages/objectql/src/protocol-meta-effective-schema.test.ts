@@ -412,7 +412,7 @@ describe('[#29673] a zh-CN read echoed back is stored as its source, and publish
             const body = { ...authored(), sharingModel: 'private', name: `crm_case_${mode}`, fields: { ...authored().fields, queue: { type: 'text', label: 'Support Queue' } } };
             const err: any = await host.protocol.saveMetaItem({ type: 'object', name: body.name, item: body, mode } as any)
                 .then(() => null, (e) => e);
-            expect(err, mode).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+            expect(err, mode).toMatchObject({ name: 'ObjectQueueColumnRefusedError', code: 'INVALID_METADATA', status: 422 });
             expect(Array.from(host.rows.values()).some((r) => r.name === body.name), mode).toBe(false);
         }
     });
@@ -423,10 +423,11 @@ describe('[#29673] a zh-CN read echoed back is stored as its source, and publish
         // left behind, here with an author's own `queue` so no restoration applies).
         await host.engine.insert('sys_metadata', {
             type: 'object', name: 'crm_case', organization_id: null, package_id: null, state: 'draft',
-            metadata: JSON.stringify({ ...authored(), name: 'crm_case', fields: { ...authored().fields, queue: { type: 'text', label: 'Support Queue' } } }),
+            metadata: JSON.stringify({ ...authored(), sharingModel: 'private', name: 'crm_case', fields: { ...authored().fields, queue: { type: 'text', label: 'Support Queue' } } }),
         });
         const err: any = await host.protocol.publishMetaItem({ type: 'object', name: 'crm_case' } as any).then(() => null, (e) => e);
-        expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        // The registry's own refusal, by name — not some other gate's 422.
+        expect(err).toMatchObject({ name: 'ObjectQueueColumnRefusedError', code: 'INVALID_METADATA', status: 422 });
         expect(Array.from(host.rows.values()).some((r) => r.name === 'crm_case' && r.state === 'active')).toBe(false);
         expect(host.registry.getObject('crm_case')).toBeUndefined();
     });
