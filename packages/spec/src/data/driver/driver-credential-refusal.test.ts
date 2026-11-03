@@ -317,6 +317,51 @@ describe.each(URL_FAMILY)('$name — URL-embedded credential refusal', (f) => {
       expect(f.schema.parse(config)).toEqual(before.data);
     }
   });
+
+  describe('a URL is judged after trimming its leading and trailing C0 control characters and spaces', () => {
+    /** The userinfo refusal at `f.key` — other refusals at the same key (a driver's own URL grammar) are not this rule's. */
+    const userinfoRefusalAt = (config: Record<string, unknown>) => {
+      const result = f.schema.safeParse(config);
+      if (result.success) return undefined;
+      return result.error.issues.find(
+        (i) => i.path.join('.') === f.key && i.message.includes('embeds a password in its userinfo'),
+      );
+    };
+    const SURROUNDINGS: Array<[label: string, lead: string, trail: string]> = [
+      ['a leading space', ' ', ''],
+      ['a leading tab', String.fromCharCode(0x09), ''],
+      ['a leading NUL', String.fromCharCode(0x00), ''],
+      ['a trailing newline', '', String.fromCharCode(0x0a)],
+      ['a leading space and a trailing carriage return', ' ', String.fromCharCode(0x0d)],
+    ];
+
+    it.each(SURROUNDINGS)('refuses `user:password@host` behind %s', (_label, lead, trail) => {
+      expect(userinfoRefusalAt(f.make(`${lead}${f.sample('svc:hunter2@')}${trail}`))).toBeDefined();
+    });
+
+    it.each(SURROUNDINGS)('CONTROL: a bare username (`user@host`) behind %s carries no password and is not refused for one', (_label, lead, trail) => {
+      expect(userinfoRefusalAt(f.make(`${lead}${f.sample('svc@')}${trail}`))).toBeUndefined();
+    });
+
+    // A URL parser also deletes every ASCII tab, LF and CR anywhere in it.
+    const INSIDE: Array<[label: string, char: string]> = [
+      ['a tab', String.fromCharCode(0x09)],
+      ['a newline', String.fromCharCode(0x0a)],
+      ['a carriage return', String.fromCharCode(0x0d)],
+    ];
+    /** `url` with `char` inserted after its scheme's first letter. */
+    const insideScheme = (url: string, char: string) => `${url.slice(0, 1)}${char}${url.slice(1)}`;
+
+    it.each(INSIDE)('refuses `user:password@host` with %s inside its scheme, and inside its password', (_label, char) => {
+      expect(userinfoRefusalAt(f.make(insideScheme(f.sample('svc:hunter2@'), char)))).toBeDefined();
+      expect(userinfoRefusalAt(f.make(f.sample(`svc:hun${char}ter2@`)))).toBeDefined();
+    });
+
+    it.each(INSIDE)('CONTROL: a bare username with %s inside the scheme, and a password of only that character, carry no password', (_label, char) => {
+      expect(userinfoRefusalAt(f.make(insideScheme(f.sample('svc@'), char)))).toBeUndefined();
+      expect(userinfoRefusalAt(f.make(f.sample(`svc:${char}@`)))).toBeUndefined();
+    });
+  });
 });
 
 /**
@@ -407,6 +452,18 @@ describe.each(QUERY_FAMILY)('$name — URL query-parameter credential refusal', 
     expect(refusalAt(f.make(f.sample(`?${f.param}=\${DB_TOKEN}`)))).toBeDefined();
   });
 
+  it('refuses the parameter whose name holds a tab, newline or carriage return — a URL parser deletes them', () => {
+    for (const code of [0x09, 0x0a, 0x0d]) {
+      const char = String.fromCharCode(code);
+      const name = `${f.param.slice(0, 2)}${char}${f.param.slice(2)}`;
+      expect(refusalAt(f.make(f.sample(`?${name}=hunter2`))), JSON.stringify(name)).toBeDefined();
+    }
+  });
+
+  it('CONTROL: a value of only tab and newline characters is empty once a URL parser deletes them', () => {
+    expect(refusalAt(f.make(f.sample(`?${f.param}=${String.fromCharCode(0x09)}${String.fromCharCode(0x0a)}`)))).toBeUndefined();
+  });
+
   it('accepts an EMPTY value — the query twin of `user:@host` carries no secret', () => {
     expect(refusalAt(f.make(f.sample(`?${f.param}=`)))).toBeUndefined();
   });
@@ -474,6 +531,17 @@ describe('urlCredentialQueryParams — the shared value-level parse', () => {
     expect(urlCredentialQueryParams('libsql://h?auth%zzoken=x', TURSO)).toEqual([]);
   });
 
+  it('a pair is read with every ASCII tab, LF and CR deleted, as a URL parser deletes them — before percent-decoding', () => {
+    const TAB = String.fromCharCode(0x09);
+    const LF = String.fromCharCode(0x0a);
+    const CR = String.fromCharCode(0x0d);
+    expect(urlCredentialQueryParams(`libsql://h?auth${TAB}Token=x`, TURSO)).toEqual(['authToken']);
+    expect(urlCredentialQueryParams(`libsql://h?tls=1&a${LF}uthToken=x`, TURSO)).toEqual(['authToken']);
+    expect(urlCredentialQueryParams(`libsql://h?auth%5${CR}4oken=x`, TURSO)).toEqual(['authToken']);
+    // CONTROL: a value of only such characters is empty once they are deleted.
+    expect(urlCredentialQueryParams(`libsql://h?authToken=${TAB}${CR}${LF}`, TURSO)).toEqual([]);
+  });
+
   it('names match case-insensitively (the at-rest rationale on CREDENTIAL_URL_QUERY_PARAMS)', () => {
     expect(urlCredentialQueryParams('libsql://h?AUTHTOKEN=x', TURSO)).toEqual(['authToken']);
     expect(urlCredentialQueryParams('libsql://h?authtoken=x', TURSO)).toEqual(['authToken']);
@@ -507,6 +575,33 @@ describe('urlUserinfoPassword — the shared value-level parse', () => {
   it('scheme-relative URLs are judged too — the authority is the authority, named scheme or not', () => {
     expect(urlUserinfoPassword('//u:p@h/db')).toBe('p');
     expect(urlUserinfoPassword('//u@h/db')).toBeUndefined();
+  });
+
+  it('a URL is judged trimmed of its leading and trailing C0 control characters and spaces, as a URL parser reads it', () => {
+    const TAB = String.fromCharCode(0x09);
+    const LF = String.fromCharCode(0x0a);
+    const NUL = String.fromCharCode(0x00);
+    expect(urlUserinfoPassword(' mysql://u:p@h:3306/db')).toBe('p');
+    expect(urlUserinfoPassword(`${TAB}postgresql://u:p@h/db`)).toBe('p');
+    expect(urlUserinfoPassword(`${NUL}mongodb://u:p@h/db${LF}`)).toBe('p');
+    expect(urlUserinfoPassword(' //u:p@h/db ')).toBe('p');
+    // CONTROL: the same strings with no password, and a bare word, carry none.
+    expect(urlUserinfoPassword(' mysql://u@h:3306/db')).toBeUndefined();
+    expect(urlUserinfoPassword(`${TAB}postgresql://h/db${LF}`)).toBeUndefined();
+    expect(urlUserinfoPassword(' a:b@c ')).toBeUndefined();
+  });
+
+  it('a URL is judged with every ASCII tab, LF and CR deleted, as a URL parser deletes them', () => {
+    const TAB = String.fromCharCode(0x09);
+    const LF = String.fromCharCode(0x0a);
+    const CR = String.fromCharCode(0x0d);
+    expect(urlUserinfoPassword(`postgre${TAB}sql://u:p@h/db`)).toBe('p');
+    expect(urlUserinfoPassword(`postgresql:/${LF}/u:p@h/db`)).toBe('p');
+    expect(urlUserinfoPassword(`postgresql://u:p${CR}w@h/db`)).toBe('pw');
+    expect(urlUserinfoUsername(`mongodb://a${TAB}pp@h/db`)).toBe('app');
+    // CONTROL: a password of only such characters is empty, and a bare username carries none.
+    expect(urlUserinfoPassword(`postgresql://u:${TAB}@h/db`)).toBeUndefined();
+    expect(urlUserinfoPassword(`postgre${TAB}sql://u@h/db`)).toBeUndefined();
   });
 
   it('userinfo ends at the LAST `@`, so a malformed literal-`@` password is caught whole', () => {
