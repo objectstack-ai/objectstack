@@ -1,6 +1,6 @@
 # ADR-0057: ERP-Grade Authorization Core — Business-Unit Partitioning, Scope-Depth Grants, and Hierarchy Rollup
 
-**Status**: Accepted in part (2026-06-21) — D1–D3/D8 implemented (scope-depth enum + evaluator, `sys_business_unit` tree, hierarchy-resolver seam, conformance rows); **D4–D7 superseded by ADR-0090 D3 / ADR-0095**: the `sys_role`/`sys_user_role`/`role_and_subordinates` vocabulary never shipped — the code realizes them as flat `sys_position`/`sys_user_position` with rollup on the BU tree. This ADR's own implementation-status table predates that supersession; read it with the rename applied. · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13): the flat `sys_position` row object named above is itself retired by #15204 stage 8 (`66949b7729`, 2026-10-13), and its `sys-position.object.ts`, which the path note below names, is deleted; a position is a metadata-registry definition, and the `sys_user_position` assignment stays.
+**Status**: Accepted in part (2026-06-21) — D1–D3/D8 implemented (scope-depth enum + evaluator, `sys_business_unit` tree, hierarchy-resolver seam, conformance rows); **D4–D7 superseded by ADR-0090 D3 / ADR-0095**: the `sys_role`/`sys_user_role`/`role_and_subordinates` vocabulary never shipped — the code realizes them as flat `sys_position`/`sys_user_position` with rollup on the BU tree. This ADR's own implementation-status table predates that supersession; read it with the rename applied. · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13): the flat `sys_position` row object named above is itself retired by #15204 stage 8 (`66949b7729`, 2026-10-13), and its `sys-position.object.ts`, which the path note below names, is deleted; a position is a metadata-registry definition, and the `sys_user_position` assignment stays. · **Amended** (2026-11-02, [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md), #29360): D3's "mirroring the `org_user_ids` cap" carries a dated note; that cap no longer exists, and D3's own bound requirement is unchanged.
 **Shares its number with**: [`0057-system-data-lifecycle-and-retention`](./0057-system-data-lifecycle-and-retention.md) (System data has a lifecycle — declarative retention, rotation, and reclamation) — an unrelated decision under the same number. Numbers are never reassigned (AGENTS.md Prime Directive 13); cite this record unambiguously as `ADR-0057-erp-authorization-core-business-units-and-scope-depth`.
 **Deciders**: ObjectStack Protocol Architects
 **Path note (2026-09), paths only — no decision changes**: this record cites the **pre-rename**
@@ -160,6 +160,14 @@ subordinate_user_ids   -> users below me on the sys_user.manager_id chain (manag
 - Sourced by `BusinessUnitGraphService` (D2) and the existing `managerOf` chain
   (`packages/plugins/plugin-sharing/src/team-graph.ts#managerOf`). Bounded (hard cap + cache, mirroring the
   `org_user_ids` cap) and **org-scoped**.
+
+  > **Amendment note (2026-11-02, [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) — #29360).**
+  > The precedent this bullet cites no longer exists as a cap. Since PR #29356 (`f72bc9e5`, #29281) `org_user_ids`
+  > holds every member of the active organization plus the caller: the first `sys_member` read is completed by keyset
+  > pages (`packages/core/src/security/resolve-authz-context.ts#readOrganizationMembersToCompletion`). What bounds it
+  > now is the backend's bind-parameter ceiling, which ADR-0147 (Proposed) proposes to retire on the SQL family with an
+  > engine-internal semi-join leaf. This D3's own requirement, that the rollup sets are bounded (hard cap + cache) and
+  > org-scoped, is unchanged by this note. It stands on its own reason, not on the precedent.
 - Rollup is **additive only** (widens, never restricts) and respects tenant isolation. It powers both
   D1's `unit*` scopes and sharing-rule recipients (D6). Because it is pure pre-resolution, the choice
   of *which* tree drives visibility is an authoring/modelling decision, not a runtime-mechanism one.
