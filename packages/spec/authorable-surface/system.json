@@ -76,6 +76,7 @@
     "system/AuthConfig:session",
     "system/AuthConfig:socialProviders",
     "system/AuthConfig:ssoOnlyMode",
+    "system/AuthConfig:trustedAppSchemes",
     "system/AuthConfig:trustedOrigins",
     "system/AuthConfig:uiBasePath",
     "system/AuthPluginConfig:admin",

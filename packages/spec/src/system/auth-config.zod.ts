@@ -670,6 +670,7 @@ export type EmailAndPasswordConfig = z.input<typeof EmailAndPasswordConfigSchema
 export type EmailAndPasswordConfigParsed = z.infer<typeof EmailAndPasswordConfigSchema>;
 export type EmailVerificationConfig = z.input<typeof EmailVerificationConfigSchema>;
 export type AdvancedAuthConfig = z.input<typeof AdvancedAuthConfigSchema>;
+export type TrustedAppScheme = z.input<typeof TrustedAppSchemeSchema>;
 export type AuthConfig = z.input<typeof AuthConfigSchema>;
 /** Post-parse shape of {@link AuthConfig} — defaults applied, transforms run (ADR-0122). */
 export type AuthConfigParsed = z.infer<typeof AuthConfigSchema>;
