@@ -15,7 +15,8 @@ import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHea
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
-import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, extractWriteErrorMessage } from '@object-ui/react';
+import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage } from '@object-ui/react';
+import type { AnsweredLoadFailure } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
@@ -1184,6 +1185,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [pageRecordStatus, setPageRecordStatus] = useState<
     'idle' | 'loading' | 'loaded' | 'missing' | 'accessEnded' | 'forbidden' | 'failed'
   >('idle');
+  // objectstack#29704 — the server's code and sentence for a `failed` read it
+  // ANSWERED (a 500 it explained), read by the list page's own rule
+  // (`answeredLoadFailure`). `null` = no answer, so the state keeps its
+  // "check your connection" sentence, which is only true of that case.
+  const [pageRecordFailure, setPageRecordFailure] = useState<AnsweredLoadFailure | null>(null);
   // The record-load effect's own `loadRecord`, for the `failed` state's Retry
   // (objectui#11902). Held so Retry re-runs THE read the page already makes —
   // same request, same cancellation guard — rather than a second read path.
@@ -1350,6 +1356,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // objectui#11902 — a rejection is never "not found": the adapter
           // answers a 404 by resolving `null` (the branch above). A refusal is
           // told apart by the shared classifier; anything else is a failed load.
+          setPageRecordFailure(answeredLoadFailure(err));
           setPageRecordStatus(classifyLoadError(err) === 'forbidden' ? 'forbidden' : 'failed');
         });
     };
@@ -4325,10 +4332,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             {t('empty.recordLoadFailed', { defaultValue: 'Couldn’t load this record' })}
           </EmptyTitle>
           <EmptyDescription>
-            {t('empty.recordLoadFailedDescription', {
+            {pageRecordFailure?.message ?? t('empty.recordLoadFailedDescription', {
               defaultValue: 'Something went wrong while loading it. Check your connection and try again.',
             })}
           </EmptyDescription>
+          {pageRecordFailure?.code ? (
+            <code
+              data-testid="record-load-failed-code"
+              className="mt-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+            >
+              {pageRecordFailure.code}
+            </code>
+          ) : null}
           <div className="mt-4">
             <Button
               variant="outline"
