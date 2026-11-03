@@ -94,12 +94,19 @@
  *
  * The OBJECT's own `searchableFields` stays existence-only OTHERWISE, and the
  * dividing line is STORAGE, not search quality: the runtime's declared branch
- * filters by existence and scannability, never by type taste, so a json or
- * lookup column declared THERE is a choice the engine executes (a `$contains`
- * over the stored JSON text / the stored foreign key) — narrow, rarely useful,
- * but a scan that CAN match, so it is neither a 400 nor a finding. Flagging
- * those would reject metadata the runtime accepts — the false finding that
- * makes authors stop trusting the linter (ADR-0072 D1). A virtual entry is the
+ * filters by existence and scannability, never by type taste, so a lookup or
+ * json column declared THERE is admitted to the resolved set: neither a 400
+ * nor a finding. What it then contributes is the `$search` expansion's call
+ * (`expandSearchToFilter`, `@objectstack/objectql`). A single-valued lookup
+ * becomes an `$icontains` over the stored foreign key (a `multiple: true` one,
+ * a `$contains` membership match) — narrow, rarely useful, but a scan that
+ * CAN match. A column whose declared type can never hold a string — the
+ * text-operator door's `door-refusal` verdict (`textOperatorDoorVerdict`,
+ * `@objectstack/spec/data`), json among them — is admitted but contributes NO
+ * clause, and a set made only of such columns answers no rows, never an
+ * error. Flagging either would reject metadata the runtime accepts — the
+ * false finding that makes authors stop trusting the linter (ADR-0072 D1).
+ * A virtual entry is the
  * opposite case: no column exists on any driver, so admitting it is the
  * fail-open #4254 closed one axis over, surviving on the known-but-virtual
  * axis.

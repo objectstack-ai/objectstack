@@ -30,12 +30,13 @@
  * (ADR-0097 §3). The `rest` provider and an `mcp` http transport both send the
  * resolved credential themselves, so a header literal moves there by shape.
  *
- * ⛔ A stdio MCP server takes NO `auth`: the provider folds a resolved
- * credential into an http transport's headers only, and a stdio server's
- * credentials ride `transport.env` (the connector guide says so). So no text
- * here may promise that `credentialRef` reaches a stdio server — an author
- * cannot follow it. The env finding names the route with its condition: an
- * http transport.
+ * A stdio MCP server takes the same `auth`, and one more key says where it
+ * goes: `providerConfig.transport.credentialEnv` names the environment
+ * variable the `mcp` provider hands the resolved credential to the child in.
+ * ⛔ Without that key a stdio transport does not apply `auth` at all, so the
+ * env finding names BOTH halves — `auth.credentialRef` and
+ * `transport.credentialEnv` — never the reference alone, and its hint spells
+ * the `auth` the way the header hint does, so the two routes read as one.
  *
  * The predicate is a heuristic (a key named `token` can hold something that is
  * not a secret), so the finding is a `warning`, always: a false positive costs
@@ -83,15 +84,15 @@ const KEPT = 'kept in metadata, not the secrets layer';
 
 /** The route, short, in the VERDICT as well as in the hint (see the flow rule's note). */
 const STEER_HEADER = "move it to the connector's `auth.credentialRef`";
-const STEER_ENV = 'a stdio server takes no `auth`; `auth.credentialRef` reaches it only over http';
+const STEER_ENV = "move it to the connector's `auth.credentialRef` with `transport.credentialEnv`";
 
 const HEADER_ROUTE =
   "Give the entry `auth: { type: 'bearer', credentialRef }` (or `{ type: 'api-key', headerName, credentialRef }`) " +
   'and drop the header: the provider sends the resolved credential itself';
 
 const ENV_ROUTE =
-  "Reach the MCP server over `transport: { kind: 'http', url }` with `auth: { type: 'bearer', credentialRef }`; " +
-  "a stdio server's credentials ride `transport.env` only";
+  "Give the entry `auth: { type: 'bearer', credentialRef }`, name the variable in `transport.credentialEnv` " +
+  'and drop the env entry: the provider passes the resolved credential to the stdio server itself';
 
 /** One judged map: where it sits under the entry, what an entry of it is called, and its route. */
 interface JudgedMap {

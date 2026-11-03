@@ -4867,10 +4867,11 @@ const CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       'literal moves by shape: an `Authorization` bearer value to `auth: { type: \'bearer\', credentialRef }`, ' +
       'a key header to `{ type: \'api-key\', headerName, credentialRef }`, a Basic pair to ' +
       '`{ type: \'basic\', username, credentialRef }`.',
-    'A stdio MCP server takes no `auth`: the provider folds a resolved credential into an http ' +
-      'transport\'s headers only, and a stdio server\'s credentials ride `transport.env`. So the env ' +
-      'finding names `auth.credentialRef` with its condition, an http transport, and promises nothing ' +
-      'for stdio. The connector guide is content/docs/automation/connectors.mdx.',
+    'A stdio MCP server takes the same `auth`, and `providerConfig.transport.credentialEnv` names the ' +
+      'environment variable the `mcp` provider hands the resolved credential to the server in, so an env ' +
+      'literal moves to `auth: { type: \'bearer\', credentialRef }` plus `credentialEnv: \'VARIABLE_NAME\'`, ' +
+      'and the env entry is dropped. Without `credentialEnv` a stdio transport does not apply `auth` at ' +
+      'all, so the env finding names both keys. The connector guide is content/docs/automation/connectors.mdx.',
     'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
       'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
       '`token` can hold something that is not a secret, and a false positive costs a line of ' +

@@ -1158,7 +1158,6 @@ const zh = {
     undo: '撤销',
     redo: '重做',
     canvasMinimap: '画布缩略图',
-    versionHistory: '版本历史',
   },
   detail: {
     back: '返回',

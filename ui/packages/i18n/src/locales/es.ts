@@ -1168,7 +1168,6 @@ const es = {
     undo: "Deshacer",
     redo: "Rehacer",
     canvasMinimap: "Minimapa del lienzo",
-    versionHistory: "Historial de versiones",
   },
   detail: {
     editInlineHint: "Haga doble clic para editar",

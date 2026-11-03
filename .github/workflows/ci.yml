@@ -3885,22 +3885,55 @@ jobs:
       # paths relative to ui/, the vitest root, passed as positionals with no
       # `--`, the only spelling ui/scripts/vitest-invocation-guard.mjs admits.
       #
-      # objectui's full-battery runs also pass its per-file timings reporter
-      # and upload the result for the weekly dataset refresh. Both belong to
-      # that refresh workflow, which is in the governance-workflow audit
-      # (sub-issue 4 of the epic); until it is ported the committed dataset
-      # is what the sequencer reads.
+      # THE PER-FILE TIMINGS (objectstack#29517). The whole suite also passes
+      # ui/scripts/test-file-timings.mjs, the per-file timings reporter, beside
+      # the two reporters it would otherwise displace. It writes this shard's
+      # report to $OBJECTUI_TEST_TIMINGS_OUT, and the step after this one
+      # uploads it on the full battery's events as `test-file-timings-N`.
+      # .github/workflows/ui-test-timings-refresh.yml merges those reports
+      # weekly into ui/scripts/test-shard-timings.json, the dataset the shard
+      # sequencer splits on. Report-only, by ruling: the reporter never throws
+      # into vitest (a failure is one stderr line and no report), and nothing
+      # here or there grades a duration. The affected speed passes no reporter:
+      # a slice of the suite is not a measurement of it.
+      # ui/scripts/__tests__/test-file-timings.test.ts holds this step, the
+      # upload and the refresh's `--shards` to the names that script spells.
+      # The reporter is spelled from the workspace root, never `./scripts/…`
+      # relative to ui/: the root's workflow readers (check-self-test-wired)
+      # key a `./scripts/` path to the ROOT `scripts/`, where it is not.
       - name: Run the ui tests (shard ${{ matrix.shard }}/16)
         env:
           MODE: ${{ steps.select.outputs.mode }}
+          OBJECTUI_TEST_TIMINGS_OUT: ${{ runner.temp }}/test-file-timings/shard-${{ matrix.shard }}.json
         run: |
           if [ "$MODE" = 'affected' ]; then
             mapfile -t filters < "$RUNNER_TEMP/affected-tests.txt"
             echo "Affected speed: ${#filters[@]} vitest filter(s), shard ${{ matrix.shard }} of 16."
             pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"
           else
-            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
+            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions --reporter="${GITHUB_WORKSPACE}/ui/scripts/test-file-timings.mjs"
           fi
+
+      # Diagnostics only, so it can never red a shard: `continue-on-error`, and
+      # a missing report is a warning, not an error (the refresh's selector
+      # then skips this run by name). Uploaded on the full battery's events
+      # only, the deny-list of THE TWO SPEEDS above `jobs:`; a pull request that
+      # failed open to the whole suite writes a report and uploads nothing.
+      # `overwrite: true` so a re-run shard replaces its report, as the
+      # shard-attestation uploads do. The refresh reads only the newest
+      # completed `push` / `schedule` runs of this workflow on `main`, as many
+      # as its selector's own cap examines, so the retention below is
+      # deliberately more than that window needs; it is not a measurement of it.
+      - name: Publish this shard's per-file test timings
+        if: ${{ always() && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-file-timings-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-file-timings/
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'schedule' && 7 || 2 }}
+          overwrite: true
 
   test-ui-gate:
     # Stable required-check name for the sharded Test UI matrix (#26460, ruling

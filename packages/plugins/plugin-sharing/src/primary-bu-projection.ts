@@ -23,6 +23,7 @@
  * membership is usable single-tenant too).
  */
 
+import { isObjectAbsentError, keysetWalk } from '@objectstack/types';
 import type { OptionalSharingLogger } from './logger-shapes.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -124,6 +125,65 @@ export function bindPrimaryBuHooks(engine: MinimalEngine, logger?: OptionalShari
 }
 
 /**
+ * [#29606] Rows per page of the backfill scan — the bound the scan always
+ * carried, so a stack with fewer primary memberships issues the one read it
+ * always did, and one with more is read in further pages rather than cut.
+ */
+const BACKFILL_PAGE_ROWS = 10000;
+
+/**
+ * [#29606] The consequence half of a scan that could not answer, shared by the
+ * failed and the incomplete scan so an operator reads one sentence family.
+ */
+const SCAN_NOT_APPLIED = 'so the boot backfill of sys_user.primary_business_unit_id wrote nothing. Users whose '
+  + 'primary membership predates the projection hooks keep a stale or absent value, and every sharing rule keyed '
+  + 'on the primary business unit evaluates against it; the projection self-heals for a user on their next '
+  + 'sys_business_unit_member write, and a full repair is another boot once the scan can be read.';
+
+/**
+ * Every `is_primary` member row, read to completion — `null` when the scan
+ * could not answer (it says why, once), `[]` when the stack has no
+ * `sys_business_unit_member` at all.
+ *
+ * [#29606] The scan read once at a 10,000-row bound, so a stack with more
+ * primary memberships than that never projected the rest, with no signal.
+ * It now pages through the platform's one keyset walk (`keysetWalk`,
+ * `@objectstack/types`), and a scan that fails or cannot vouch for completion
+ * (a row without an `id`, a page that repeated the cursor) writes nothing and
+ * says so — never a half-built projection that reads as a clean boot. Absence
+ * of the object is the one failure that IS an answer (no memberships to
+ * project), checked by `isObjectAbsentError` against the object read.
+ */
+async function readPrimaryMemberships(engine: MinimalEngine, logger?: OptionalSharingLogger): Promise<any[] | null> {
+  const rows: any[] = [];
+  const walk = keysetWalk<Record<string, unknown>>(
+    (page) => engine.find('sys_business_unit_member', {
+      ...page, fields: ['id', 'user_id', 'business_unit_id'], context: SYSTEM_CTX,
+    }),
+    { where: { is_primary: true }, pageSize: BACKFILL_PAGE_ROWS },
+  );
+  try {
+    for await (const page of walk.pages()) rows.push(...page);
+  } catch (err: any) {
+    if (isObjectAbsentError(err, 'sys_business_unit_member')) return [];
+    logger?.warn?.(
+      `[primary-bu] the backfill scan of sys_business_unit_member failed, ${SCAN_NOT_APPLIED}`,
+      { error: err?.message ?? String(err) },
+    );
+    return null;
+  }
+  if (walk.truncated) {
+    logger?.warn?.(
+      '[primary-bu] the backfill scan of sys_business_unit_member could not be read to completion (a row without '
+        + `an id, or a page that repeated the cursor), ${SCAN_NOT_APPLIED}`,
+      { scanned: walk.scanned },
+    );
+    return null;
+  }
+  return rows;
+}
+
+/**
  * One-time boot reconcile: set every user's primary_business_unit_id from their
  * `is_primary` member row, so pre-existing memberships (seeds, prior data)
  * project even though their inserts pre-dated the hooks. Idempotent.
@@ -132,18 +192,8 @@ export async function backfillPrimaryBu(
   engine: MinimalEngine,
   logger?: OptionalSharingLogger,
 ): Promise<{ updated: number; refused: number }> {
-  let rows: any[] = [];
-  try {
-    rows = await engine.find('sys_business_unit_member', {
-      where: { is_primary: true },
-      fields: ['user_id', 'business_unit_id'],
-      limit: 10000,
-      context: SYSTEM_CTX,
-    });
-  } catch (err: any) {
-    logger?.warn?.('[primary-bu] backfill scan failed', { error: err?.message });
-    return { updated: 0, refused: 0 };
-  }
+  const rows = await readPrimaryMemberships(engine, logger);
+  if (rows === null) return { updated: 0, refused: 0 };
   let updated = 0;
   // [#12981] Refused row writes are COUNTED, never swallowed. `catch { }` alone
   // made a backfill in which EVERY row was refused byte-identical to one with

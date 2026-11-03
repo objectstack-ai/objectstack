@@ -336,6 +336,7 @@ import {
 import {
     carryForwardRedactedCredentials,
     credentialChannelFor,
+    droppedWithheldKeyNotices,
     restoredCredentialPathsFor,
     storedBodyForCarryForward,
 } from './protocol-credential-carry-forward.js';
@@ -532,6 +533,7 @@ export {
 import {
     boundPackageOf,
     bundleMemberOf,
+    declinesBorrowedEnvelope,
     isShippedViewItem,
     mergeArtifactProtection,
     stateTenantAuthorship,
@@ -3789,8 +3791,10 @@ export class ObjectStackProtocolImplementation implements
         item: any;
         /** [#22877] The bundle member the save addresses (its body's). */
         member?: string;
-    }): Promise<any> {
+    }): Promise<{ item: any; dropped: string[] }> {
         // [#25467 cut 9] The body moved to `protocol-credential-carry-forward.ts` (see `CredentialCarryForwardHost`).
+        // [#28640 ②B] It answers the grafted body and the stored positions the
+        // save drops (the redactor's `notCarriedForwardKeys`), never re-grafted.
         const host: ThisParameterType<typeof carryForwardRedactedCredentials> = {
             storedBodyForCarryForward: (...a) => this.storedBodyForCarryForward(...a),
         };
@@ -10817,15 +10821,38 @@ export class ObjectStackProtocolImplementation implements
      * it registered nothing on a save then ([#23298]: a kernel that hydrates
      * its own store now registers a save as its boot does, by this rule).
      *
-     * ⛔ `view` only, judged on the canonical type. Every other type registers
-     * as before: a row bound to one package, of a name two packages ship, holds
-     * the bare entry with its own body and its own package's envelope (#4624,
-     * ADR-0048, pinned in `objectql`'s `protocol-boot-hydration-scoped.test.ts`).
+     * ⛔ This rule is `view` only, judged on the canonical type. Every other type
+     * registers as before, save the borrowed-envelope rule below: a row bound
+     * to one package, of a name two packages ship, holds the bare entry with
+     * its own body and its own package's envelope (#4624, ADR-0048, pinned in
+     * `objectql`'s `protocol-boot-hydration-scoped.test.ts`).
      * Registry readers that name no package read those entries (the declared
      * security-metadata bootstraps, the action router, the picklist read), and
      * which body they should see for such a name is not ruled here. A
      * package-less view row, and a view row of a name only its own package
      * ships or no package ships, register as before too.
+     *
+     * ## [#29600] …and a dashboard, report or email-template row never wears another package's envelope
+     *
+     * A row of these three types bound to a package that ships no artifact of
+     * its name (or bundle member), under a name another package ships, is not
+     * registered either ({@link declinesBorrowedEnvelope}). The artifact lookup
+     * falls back to the package that ships the name, so the bare entry wore
+     * THAT package's envelope (`_packageId`, `_provenance: 'package'`) and the
+     * per-package layer listed it as that package's own item: after a `.custom`
+     * pair published its declared override of a base's dashboard, the base's
+     * layer (and with it the base's export) carried two items of the name.
+     * Every protocol read of these types answers such a row from the row
+     * itself — the by-name read, the effective list, the layered read and the
+     * pair's per-package layer — so they served the same body before and
+     * after, measured for each reader. What changes is the registry-direct
+     * read of the name, which answers the shipping package's own item.
+     *
+     * ⛔ Those three types only. A row of a package that ships its own artifact
+     * of the name keeps its bare entry (#4624). `page`, `app`, `dataset`, `doc`
+     * and `book` still register: their reads serve a pair's override from the
+     * bare entry, so it can go only once they serve it from the row. `flow`
+     * registers with no artifact envelope (below).
      *
      * ## [#23233] The entry carries the row's package binding
      *
@@ -10981,6 +11008,12 @@ export class ObjectStackProtocolImplementation implements
         const artifact = this.lookupArtifactItem(
             type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data),
         );
+        // [#29600] See the header: a dashboard, report or email-template row
+        // bound to a package that ships no artifact of its name, under a name
+        // another package ships, is not registered under the bare name, where
+        // it would wear that other package's envelope. Its reads answer it from
+        // its row. ⛔ Those three types only.
+        if (declinesBorrowedEnvelope(canonicalType, options.packageId, artifact)) return true;
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
         // `sys_metadata` write and is therefore tenant-authored by definition
@@ -11818,7 +11851,9 @@ export class ObjectStackProtocolImplementation implements
      *     ships, is not re-registered here: under the bare name it would
      *     answer every package's read of the name. The walk stops there, as
      *     for any baseline found. ⛔ View only, as at the hydration: every
-     *     other type re-registers as before.
+     *     other type re-registers as before. [#29600] The hydration's
+     *     borrowed-envelope rule has no twin here: this limb registers the
+     *     baseline's own body and grafts no artifact envelope onto it.
      *  3. [#5079] When NEITHER layer has anything, the deleted row was the
      *     whole item — so the plain-key entry is retired too
      *     ({@link SchemaRegistry.removeOverlayEntry}).
@@ -14969,7 +15004,13 @@ export class ObjectStackProtocolImplementation implements
         // lands (`restoredCredentialPathsFor`, the same plan over the same
         // stored body), never what it restores — so a rule reads a withheld
         // credential as present without any gate handling it.
-        request.item = await this.carryForwardRedactedCredentials({
+        //
+        // [#28640 ②B] …except the positions the type's redactor marks withheld
+        // AND not carried forward (a connector's undeclared `auth` keys, which
+        // no door accepts and nothing reads): those are never re-grafted, so
+        // this save drops them from the row at rest, and the answer names each
+        // one on `advisories` (`droppedWithheldKeyNotices`) — loud, never silent.
+        const carried = await this.carryForwardRedactedCredentials({
             type: singularTypeForRepo,
             repo,
             ref,
@@ -14978,6 +15019,11 @@ export class ObjectStackProtocolImplementation implements
             item: request.item,
             member: itemDiscriminator(singularTypeForRepo, request.item),
         });
+        request.item = carried.item;
+        const saveNotices = [
+            ...runtimeAdvisories,
+            ...droppedWithheldKeyNotices({ type: singularTypeForRepo, name: request.name, dropped: carried.dropped }),
+        ];
         // [#20790] …and then OUT of the body: a type with a write-only
         // credential channel (`flow`, registered by the automation plugin)
         // stores every explicit credential there and persists the body without
@@ -15098,7 +15144,11 @@ export class ObjectStackProtocolImplementation implements
                 // bypass) and that door does NOT carry this field yet — its own
                 // response contract only just landed as #7294. The asymmetry is
                 // deliberate and stated in the changeset.
-                ...(runtimeAdvisories.length > 0 ? { advisories: runtimeAdvisories } : {}),
+                //
+                // [#28640 ②B] The save's own notices ride the same key: a stored
+                // position the carry-forward dropped is named here, after the
+                // gate's findings, and the key is still omitted when both are empty.
+                ...(saveNotices.length > 0 ? { advisories: saveNotices } : {}),
                 // #5745 — the literal union, not `string`. An object-literal
                 // property widens a two-literal ternary to `string`, which made
                 // this method fail to satisfy `MetadataProtocol.saveMetaItem`
@@ -19888,6 +19938,15 @@ export class ObjectStackProtocolImplementation implements
      * performs its promise exactly, and the removal is the one action that
      * reduces the residue. The measurement and the refuse-vs-decline reasoning
      * are stated at the gate itself.
+     *
+     * [#29390, ADR-0146 D1, D11] The restore limb asks the #28905 close
+     * ({@link namedBaseOverlayWriteRefusal}) on the binding it writes, as
+     * {@link rollbackMetaItem} does: an item whose restore would land in a row
+     * bound to the read-only base itself — a commit the base recorded before
+     * the write naming it closed — goes into `failed[]` (`NOT_OVERRIDABLE`, the
+     * rollback sentence naming the base's `.custom` pair) with nothing written,
+     * and {@link rollbackToPackageCommit} reports it per item and continues.
+     * The soft-remove limb stays open: removing such a row writes nothing.
      */
     async revertCommit(request: {
         commitId: string;
@@ -20241,6 +20300,20 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, member);
+                    // [#29390, ADR-0146 D1, D11] A restore writes the row this
+                    // binding names, so a restore into a row bound to the
+                    // read-only base itself (a commit recorded before #28905
+                    // closed the write naming the base) is refused exactly as
+                    // {@link rollbackMetaItem} refuses it, on the same key and
+                    // with the same sentence ({@link namedBaseOverlayWriteRefusal}),
+                    // into `failed[]` with nothing written. The commit's other
+                    // items still revert. The soft-remove limb above stays open:
+                    // removing a row bound to the base writes nothing.
+                    const namedBase = this.namedBaseOverlayWriteRefusal(
+                        { type: PLURAL_TO_SINGULAR[it.type] ?? it.type, name: it.name, packageId: restorePackageId, ...memberOption(member) },
+                        'rollback',
+                    );
+                    if (namedBase) throw namedBase;
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',

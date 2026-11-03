@@ -147,6 +147,8 @@ export const CONDITION_SCOPE_BY_METADATA_TYPE = {
   job: 'none',
   mapping: 'none',
   object: 'none',
+  /** objectstack#29569 registers `object_extension`; `ObjectExtensionSchema` declares no condition key. */
+  object_extension: 'none',
   position: 'none',
   report: 'none',
   skill: 'none',

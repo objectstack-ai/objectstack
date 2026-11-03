@@ -1414,6 +1414,38 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_personal_view: {
+    label: "Vista personal",
+    pluralLabel: "Vistas personales",
+    description: "Las vistas de lista con nombre propio de un lector (Mis vistas). Solo las ve su propietario.",
+    fields: {
+      id: {
+        label: "ID de vista personal"
+      },
+      created_at: {
+        label: "Fecha de creación"
+      },
+      updated_at: {
+        label: "Fecha de actualización"
+      },
+      user_id: {
+        label: "Propietario",
+        help: "El usuario al que pertenece esta vista. Solo este usuario puede leerla o cambiarla."
+      },
+      object_name: {
+        label: "Objeto",
+        help: "El objeto que lista esta vista (su nombre técnico)."
+      },
+      label: {
+        label: "Nombre",
+        help: "El nombre que el propietario dio a esta vista."
+      },
+      config: {
+        label: "Configuración de la vista",
+        help: "La configuración de la lista, en la forma ListView de spec. Se valida en cada guardado."
+      }
+    }
+  },
   sys_oauth_application: {
     label: "Aplicación OAuth",
     pluralLabel: "Aplicaciones OAuth",

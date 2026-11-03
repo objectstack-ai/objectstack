@@ -228,9 +228,10 @@ allowlist — only the listed tools become actions) and **`toolsSnapshot`**
   HTTP. Resolved `auth` is folded into the request headers; a grant-bearing
   `auth` (`oauth2`, `app-credential`) is asked for on every request instead
   (see *Grant-bearing kinds* below).
-- `{ kind: 'stdio', command, args?, env? }` — a **local child process**,
-  policy-gated (below). Credentials for a stdio server ride `transport.env`,
-  not `auth`.
+- `{ kind: 'stdio', command, args?, env?, credentialEnv? }` — a **local child
+  process**, policy-gated (below). Resolved `auth` is handed to the server in
+  its environment, under the variable `credentialEnv` names (see
+  [*A stdio server's credential*](#a-stdio-servers-credential) below).
 
 {/* os:check */}
 ```typescript
@@ -345,6 +346,49 @@ A `toolsSnapshot` that is not a record of tool name → 64 lowercase hex
 characters fails the boot before connecting, and so does a pinned tool that
 `include` leaves out — the instance never exposes it, so its pin would never be
 checked.
+
+#### A stdio server's credential
+
+A stdio MCP server reads its credential from an environment variable, and the
+value stays out of metadata the way an http server's does: declare `auth` with
+a `credentialRef`, and name the variable in `transport.credentialEnv`. The
+platform resolves the reference like any instance's (the environment, then a
+credential set under Setup → Connector credentials, then the host's resolver)
+and the provider hands the resolved secret to the child in that variable — the
+token of a `bearer`, the key of an `api-key`, the password of a `basic` (whose
+username, not a secret, goes in `env` if the server reads it).
+
+{/* os:check */}
+```typescript
+import { defineConnector } from '@objectstack/spec/integration';
+
+export const RepoToolsConnector = defineConnector({
+  name: 'repo_tools',
+  label: 'Repository Tools (MCP, stdio)',
+  type: 'api',
+  provider: 'mcp',
+  providerConfig: {
+    transport: {
+      kind: 'stdio',
+      command: 'repo-mcp-server',
+      env: { LOG_LEVEL: 'info' },
+      credentialEnv: 'REPO_MCP_TOKEN',
+    },
+  },
+  auth: { type: 'bearer', credentialRef: 'REPO_MCP_TOKEN' },
+});
+```
+
+The value is never stored, logged, served on a metadata read (which shows
+`credentialRef` and `credentialEnv`, two names) or carried in a message; it
+exists only in the environment the server is started with. A reference that
+resolves to nothing never starts the server: the instance is degraded naming
+the reference, and a credential set later starts it. These fail the boot:
+a `credentialEnv` that is not a variable name, one on an `http` transport,
+one with no `bearer` / `api-key` / `basic` `auth` to place, and one naming a
+variable `env` also sets. A stdio transport that names no `credentialEnv`
+does not apply `auth`. A literal credential typed into `env` instead is
+reported by the `connector-credential-literal` advisory, which points here.
 
 <Callout type="warn">
 **Declarative stdio transports are denied by default.** Materializing one
@@ -581,8 +625,9 @@ platform's to fill, so it is left out of the action's input schema, as
 `Authorization` is.
 
 An **`mcp`** instance carries a grant-bearing credential only over an `http`
-transport (a stdio server takes its credentials in `transport.env`; a handle
-on a stdio transport, or beside a static credential, fails the boot). Every
+transport (a stdio server is handed a static credential once, at spawn, in
+`transport.credentialEnv`; a handle on a stdio transport, or beside a static
+credential, fails the boot). Every
 HTTP request of its MCP session asks the handle. Each organization a dispatch
 runs for opens its own session with its own token, so organizations never
 share one. The tools are listed at materialization, outside any run, so the

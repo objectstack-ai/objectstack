@@ -389,6 +389,48 @@ describe('ADR-0130 D4 — the manifest service registers the residual\'s flows',
 });
 
 /**
+ * [ADR-0130 D4] A residual DATASET (the ADR-0021 analytics kind, `datasets:`)
+ * reaches the registry under the stack's manifest id and version, as a body's
+ * does under its package's. Before, the residual rule did not walk `datasets`
+ * at all, so a top-level dataset no body declared was neither registered nor
+ * refused: the boot booted, `listItems('dataset')` answered the bodies' own,
+ * and a dashboard or report naming it failed at run time, far from the cause.
+ */
+describe('ADR-0130 D4 — the manifest service registers the residual\'s datasets', () => {
+  const dataset = (name = 'acme_case_metrics') => ({
+    name,
+    label: 'Case metrics',
+    object: 'acme_case',
+    dimensions: [{ name: 'subject', field: 'subject', type: 'string' }],
+    measures: [{ name: 'case_count', aggregate: 'count' }],
+  });
+  const datasetOwners = (ql: ObjectQL) =>
+    (ql.registry.listItems('dataset') as Array<{ name?: string; _packageId?: string; _packageVersion?: string }>)
+      .map((d) => [d.name, d._packageId, d._packageVersion])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+  it('registers a residual dataset under the stack\'s manifest id and version, beside a body\'s own', async () => {
+    const residualEntry = dataset();
+    const { kernel } = await boot(registering('app', [
+      residualStack(noteObj(), { datasets: [residualEntry] }, { datasets: [dataset('acme_case_body')] }),
+    ]));
+    expect(datasetOwners(engineOf(kernel))).toEqual([
+      ['acme_case_body', SERVICE_ID, '2.4.0'],
+      ['acme_case_metrics', RELEASE_ID, '1.0.0'],
+    ]);
+    // The artifact's own entry is left as it arrived.
+    expect((residualEntry as { _packageId?: string })._packageId).toBeUndefined();
+  });
+
+  it('CONTROL: a top-level dataset a body repeats is the body\'s, registered once', async () => {
+    const { kernel } = await boot(registering('app', [
+      residualStack(noteObj(), { datasets: [dataset()] }, { datasets: [dataset()] }),
+    ]));
+    expect(datasetOwners(engineOf(kernel))).toEqual([['acme_case_metrics', SERVICE_ID, '2.4.0']]);
+  });
+});
+
+/**
  * [ADR-0130 D4] EVERY other residual type a package body's collections take
  * into the registry reaches it too, under the stack's manifest id and version:
  * the engine registered a residual's objects, connectors and flows only, so a

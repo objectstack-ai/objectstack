@@ -316,6 +316,13 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'unit',
+          // Console writes go straight to the process, never over the worker
+          // RPC a late write can be pending on at teardown (EnvironmentTeardownError,
+          // "Closing rpc while onUserConsoleLog was pending"). Set per project: a
+          // root-level setting is inert for project runs. The mechanism is in the
+          // docblock of examples/app-showcase/vitest.config.ts at the repo root;
+          // enforced by scripts/check-console-intercept-disarm.mjs there.
+          disableConsoleIntercept: true,
           environment: 'node',
           // Share a module graph per worker instead of re-executing it per
           // file. Measured 3.2x faster (38s -> 12s for the project) with zero
@@ -408,6 +415,8 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'dom',
+          // Per project, as in `unit` above.
+          disableConsoleIntercept: true,
           environment: 'happy-dom',
           setupFiles: [path.resolve(__dirname, 'vitest.setup.dom-light.tsx')],
           include: [
@@ -424,6 +433,8 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'dom-heavy',
+          // Per project, as in `unit` above.
+          disableConsoleIntercept: true,
           environment: 'happy-dom',
           setupFiles: [path.resolve(__dirname, 'vitest.setup.dom.tsx')],
           include: [...heavyDomTests],
@@ -453,6 +464,8 @@ export default defineConfig({
               extends: true as const,
               test: {
                 name: 'dist',
+                // Per project, as in `unit` above.
+                disableConsoleIntercept: true,
                 environment: 'happy-dom',
                 setupFiles: [path.resolve(__dirname, 'vitest.setup.dom-light.tsx')],
                 include: [DIST_PIN_GLOB],

@@ -696,7 +696,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 90 today, an ADDITION of ONE: #28255 offered the field form's
     // `percentDisplay` row once the console's percent face reads it, gated on
     // `data.type == 'percent'`. It reaches the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(90);
+    // It is 91 today, an ADDITION of ONE: #29462 offered the field form's
+    // `referenceNameVisible` row, gated on `data.type in ['lookup','user']`. It
+    // is an in-list, so it does not reach the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(91);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
