@@ -15,6 +15,7 @@ import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDis
 // `resolveFieldScale` is the same kind of ask: the width an ABSENT `scale`
 // means is the protocol's answer, not this package's (objectui#9843).
 import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
+import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, formatDisplayNumber } from '@object-ui/i18n';
 import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
@@ -3240,23 +3241,17 @@ function RestrictedLookupReference({ label }: { label: string }): React.ReactEle
 }
 
 /**
- * The value a `lookup` / `user` field declaring `referenceNameVisible: true`
- * is served on `$expand` when the reader may read the record carrying it but
- * is refused the record it points at (director ruling 6574398310, letter B):
- * the id the row holds, the target's display name, and the refusal said in
- * the value. The server's own type is `ReferenceNameOnlyValue` in
- * `@objectstack/objectql` (`engine-reference-name-visible.ts`); it is served
- * once per element on a `multiple: true` field. `name` is the target's
- * ADR-0079 display name, or the floor `Record #<id>` when a field-level rule
- * on the name column holds it back, and is drawn exactly as served.
- */
-interface ReferenceNameOnlyValue {
-  id: string;
-  name: string;
-  readRefused: true;
-}
-
-/**
+ * `ReferenceNameOnlyValue` (imported from `@objectstack/spec/data`, where
+ * `ReferenceNameOnlyValueSchema` owns the shape and the engine imports the same
+ * type) is the value a `lookup` / `user` field declaring
+ * `referenceNameVisible: true` is served on `$expand` when the reader may read
+ * the record carrying it but is refused the record it points at (director
+ * ruling 6574398310, letter B): the id the row holds, the target's display
+ * name, and the refusal said in the value, once per element on a
+ * `multiple: true` field. `name` is the target's ADR-0079 display name, or the
+ * floor `Record #<id>` when a field-level rule on the name column holds it
+ * back, and is drawn exactly as served.
+ *
  * Is this one reference value the served name-only form? Judged on the
  * in-band `readRefused: true` the server writes, never on the shape of the
  * rest: an expanded record the reader may read can also carry just an id and
