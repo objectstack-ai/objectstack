@@ -47,6 +47,7 @@
 import { actionErrorDetail } from '@object-ui/core';
 import { apiBase } from '../../utils/apiBase.js';
 import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
+import { t, tFormat } from './i18n.js';
 
 /** What a clone that the server accepted reports back. */
 export interface PermissionSetCloned {
@@ -61,6 +62,40 @@ export interface PermissionSetCloned {
   package?: string | null;
   /** The server's sentence on what was not copied; empty when it sent none. */
   notice: string;
+  /**
+   * objectstack#29727 — the code the server names {@link notice}'s sentence
+   * by (`data.noticeCode`, one per landing), as sent; absent when it sent
+   * none. {@link permissionSetCloneNoticeText} reads it.
+   */
+  noticeCode?: string;
+}
+
+/**
+ * objectstack#29727 — the clone notice in the console's language. The door
+ * names its sentence by a code, one per landing (the server's
+ * `PERMISSION_SET_CLONE_NOTICE_CODES`), and the package that sentence names is
+ * the answer's `package`. A known code reads the console's own sentence; a
+ * code this console does not know, an answer with none, or a package-landing
+ * code whose answer names no package shows the server's `notice` as sent —
+ * the wire text stays the one source for a sentence this console has no copy
+ * of. Same pattern as `CloudConnectionPanel`'s `translateFailureCode`: the
+ * keys are string literals so `check:i18n-keys` resolves them.
+ */
+export function permissionSetCloneNoticeText(
+  cloned: Pick<PermissionSetCloned, 'notice' | 'noticeCode' | 'package'>,
+  locale?: string,
+): string {
+  const pkg = typeof cloned.package === 'string' && cloned.package !== '' ? cloned.package : null;
+  switch (cloned.noticeCode) {
+    case 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE':
+      return t('perm.clone.notice.environmentWide', locale);
+    case 'PERMISSION_SET_CLONE_IN_PACKAGE':
+      return pkg === null ? cloned.notice : tFormat('perm.clone.notice.inPackage', locale, { package: pkg });
+    case 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE':
+      return pkg === null ? cloned.notice : tFormat('perm.clone.notice.inCreatedPackage', locale, { package: pkg });
+    default:
+      return cloned.notice;
+  }
 }
 
 /**
@@ -91,5 +126,6 @@ export async function clonePermissionSet(
     name: typeof created === 'string' ? created : '',
     package: typeof landed === 'string' && landed !== '' ? landed : landed === null ? null : undefined,
     notice: typeof data.notice === 'string' ? data.notice : '',
+    ...(typeof data.noticeCode === 'string' && data.noticeCode !== '' ? { noticeCode: data.noticeCode } : {}),
   };
 }

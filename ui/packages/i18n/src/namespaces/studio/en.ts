@@ -281,6 +281,15 @@ const STUDIO_EN: Record<string, string> = {
     'The clone was created, but the server\'s answer did not name it. Open it from the permission-set list.',
   // Embedded hosts have no route to navigate to, so the clone is announced.
   'perm.clone.done': 'Cloned as {name}. Open it from the permission-set list to edit.',
+  // objectstack#29727 — the clone door's notice, by the code it names it with
+  // (`noticeCode`, one per landing); `{package}` is the answer's `package`. A
+  // code this console does not know shows the door's `notice` as sent.
+  'perm.clone.notice.environmentWide':
+    'The copy was saved environment-wide, in no package, as the set it was copied from is. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  'perm.clone.notice.inPackage':
+    'The copy was saved in package \'{package}\', beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  'perm.clone.notice.inCreatedPackage':
+    'The copy was saved in package \'{package}\', created for it to hold your changes to the package the set came from, beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
   // A save that still reached the server and was refused as a packaged set:
   // the same guidance as the lock, keyed on the refusal's code (never its
   // prose), instead of the transport's generic message.
@@ -2484,6 +2493,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.newSimilar.submit': 'Create copy',
   'engine.studio.auto.newSimilar.failedHttp': 'Could not create the copy (HTTP {status}).',
   'engine.studio.auto.newSimilar.failed': 'Could not create the copy.',
+  // objectstack#29727 — the clone door's notice for the code
+  // `FLOW_CLONE_DISABLED_COPY`; any other code shows the door's `notice` as sent.
+  'engine.studio.auto.newSimilar.notice':
+    'The copy is switched off and does not run until you switch it on, and it still uses the same subflows, actions and objects as the original.',
   'engine.studio.auto.newSimilar.done': 'Saved the copy {name} in package {package}.',
   'engine.studio.auto.newSimilar.noPackage':
     'The server saved the copy {name}, but its answer does not name the package it landed in, so nothing was opened.',
