@@ -2101,8 +2101,8 @@ function OptionsEditor({
   };
   // Only a row this editor added derives its value from its label: renaming an
   // authored option must never change the value its records store. A Chinese
-  // label derives through its pinyin (`romanizeHan`: `高优先级` →
-  // `gao_youxianji`), the same rule as every Studio create door; without it the
+  // label derives through its pinyin (`romanizeHan`: `已完成` → `yi_wancheng`),
+  // the same rule as every Studio create door; without it the
   // value stayed '' and the row was silently never saved.
   const deriveValue = (label: string) => toFieldNameOrEmpty(romanizeHan(label));
   const updateLabel = (i: number, label: string) => {
