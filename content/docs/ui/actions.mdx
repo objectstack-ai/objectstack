@@ -574,7 +574,11 @@ it. Rename the underlying function freely; as long as the declaration's
 A body `recordId` names one record by its id, a string or a number. Any other
 value is refused `400 VALIDATION_FAILED` naming `recordId`, before the declared
 param contract, the record load and dispatch, for every action type. An absent,
-`null` or empty `recordId` is the record-less call.
+`null` or empty `recordId` is the record-less call — except on an action declared
+`execution: 'perRecord'`, which runs on one record: an `api` or `flow` action
+declared so is refused `400 VALIDATION_ERROR` naming `recordId` before anything
+is forwarded or started, and one whose record does not resolve for you answers
+`404 RECORD_NOT_FOUND`.
 
 Failures speak HTTP — the status code is the signal (#3962):
 
