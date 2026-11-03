@@ -1121,6 +1121,10 @@ const ja = {
       pin: "固定：このビューを既定で開く",
       unpin: "固定を解除：リストは既定のビューを再び開きます",
       inMenu: "すでにメニューにあります",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "マイビュー",
+      saveAsMyView: "マイビューとして保存",
+      myViewName: "ビュー名",
     },
     dragToReorder: "ドラッグして並べ替え",
     defaultView: "デフォルトビュー",

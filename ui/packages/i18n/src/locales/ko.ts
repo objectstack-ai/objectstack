@@ -1121,6 +1121,10 @@ const ko = {
       pin: "고정: 이 보기를 기본으로 열기",
       unpin: "고정 해제: 목록이 기본 보기를 다시 엽니다",
       inMenu: "이미 메뉴에 있음",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "내 뷰",
+      saveAsMyView: "내 뷰로 저장",
+      myViewName: "뷰 이름",
     },
     dragToReorder: "드래그하여 순서 변경",
     defaultView: "기본 보기",

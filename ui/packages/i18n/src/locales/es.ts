@@ -1154,6 +1154,10 @@ const es = {
       pin: "Fijar: abrir esta vista de forma predeterminada",
       unpin: "Desfijar: la lista vuelve a abrir su vista predeterminada",
       inMenu: "Ya está en el menú",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Mis vistas",
+      saveAsMyView: "Guardar como mi vista",
+      myViewName: "Nombre de la vista",
     },
     dragToReorder: "Arrastrar para reordenar",
     defaultView: "Vista predeterminada",
