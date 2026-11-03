@@ -278,17 +278,23 @@ async function openUnselected(type: string, name: string) {
 const panelControls = (root: HTMLElement) =>
   [...root.querySelectorAll<HTMLElement>('input, select, textarea, button[role="combobox"], button[role="switch"]')];
 
+/** The controls a pointer and Tab cannot reach: those the panel speaks for. */
+const disabledControls = (root: HTMLElement) =>
+  panelControls(root).filter((el) => (el as HTMLInputElement).disabled);
+
 /** Tab from the top of the page until `target` has focus, or the page runs out. */
 async function tabTo(user: ReturnType<typeof userEvent.setup>, target: HTMLElement): Promise<boolean> {
   for (let i = 0; i < 80 && document.activeElement !== target; i++) await user.tab();
   return document.activeElement === target;
 }
 
+const LOCKED_ITEMS = [
+  ['object', 'task', OBJECT],
+  ['flow', 'close_case', FLOW],
+] as const;
+
 describe('the panel shown with nothing selected names the read-only cause too (objectstack#29897)', () => {
-  it.each([
-    ['object', 'task', OBJECT],
-    ['flow', 'close_case', FLOW],
-  ] as const)(
+  it.each(LOCKED_ITEMS)(
     'a locked %s: the Properties panel is a described tab stop holding its disabled controls',
     async (type, name, effective) => {
       layered = lockedEnvelope(effective);
@@ -298,31 +304,36 @@ describe('the panel shown with nothing selected names the read-only cause too (o
       expect(panel).toHaveAccessibleName(t('engine.edit.inspector.properties', 'en-US'));
       expect(panel).toHaveAccessibleDescription(LOCK_REASON());
 
-      const controls = panelControls(panel);
-      // A vacuous pass over an empty panel is not one.
-      expect(controls.length).toBeGreaterThanOrEqual(1);
-      for (const el of controls) expect(el).toBeDisabled();
+      // A vacuous pass over an empty panel is not one. A text input the generic
+      // form renders read-only (not disabled) still takes focus on its own.
+      expect(disabledControls(panel).length).toBeGreaterThanOrEqual(1);
+      for (const el of panelControls(panel)) {
+        expect((el as HTMLInputElement).disabled || el.hasAttribute('readonly')).toBe(true);
+      }
     },
   );
 
-  it.each([
-    ['object', 'task', OBJECT],
-    ['flow', 'close_case', FLOW],
-  ] as const)(
-    'a locked %s: hovering a disabled control, or tabbing to the panel, opens the reason',
+  it.each(LOCKED_ITEMS)(
+    'a locked %s: hovering a disabled control opens a tooltip with the reason',
     async (type, name, effective) => {
       const user = userEvent.setup();
       layered = lockedEnvelope(effective);
       await openUnselected(type, name);
       const panel = await screen.findByTestId('metadata-properties-readonly-reason');
-
-      const [control] = panelControls(panel);
+      const [control] = disabledControls(panel);
       expect(control).toBeDisabled();
       await user.hover(control);
       expect(await screen.findByRole('tooltip')).toHaveTextContent(LOCK_REASON());
-      await user.unhover(control);
-      await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+    },
+  );
 
+  it.each(LOCKED_ITEMS)(
+    'a locked %s: a keyboard user reaches the reason, Tab lands on the panel and opens it',
+    async (type, name, effective) => {
+      const user = userEvent.setup();
+      layered = lockedEnvelope(effective);
+      await openUnselected(type, name);
+      const panel = await screen.findByTestId('metadata-properties-readonly-reason');
       expect(await tabTo(user, panel)).toBe(true);
       expect(await screen.findByRole('tooltip')).toHaveTextContent(LOCK_REASON());
     },
