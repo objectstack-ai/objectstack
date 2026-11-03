@@ -2082,10 +2082,14 @@ export class SecurityPlugin implements Plugin {
     // [ADR-0090 D12] Delegated-admin gate shares the SAME permission-set
     // resolution as the CRUD middleware, so a delegate's authority and their
     // ordinary grants can never drift. (`ql` is guaranteed non-null here —
-    // start() bailed out above without a middleware-capable engine.)
+    // start() bailed out above without a middleware-capable engine.) Its
+    // caller-context read of an addressed row is THIS operation's pre-image
+    // read ({@link getCallerPreImage}), so the gate and the write gates after
+    // it read the row once between them.
     this.delegatedAdminGate = new DelegatedAdminGate({
       ql,
       resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
+      readAsCaller: (opCtx: any, id: string | number) => this.getCallerPreImage(opCtx, id),
       logger: ctx.logger,
     });
 
