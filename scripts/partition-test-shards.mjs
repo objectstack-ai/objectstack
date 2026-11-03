@@ -3878,8 +3878,12 @@ function selfTest() {
     `partition-test-shards: self-test OK (${datasetPackages.length} measured packages ` +
       `-> ${datasetItems.length} shard items, ${SHARD_COUNT} shards, ` +
       `max/mean ${balance.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
-      `bins ${balance.totals.map((t) => t.toFixed(2)).join('/')}s within the ${datasetCap.toFixed(2)}s density cap, ` +
-      `whole legs ${wholeLeg.sums.map((t) => t.toFixed(0)).join('/')}s within ${WHOLE_LEG_CAP_SECONDS}s, ` +
+      `bins ${balance.totals.map((t) => t.toFixed(2)).join('/')}s within the ${datasetCap.toFixed(2)}s density cap` +
+      // Named only when the bare cap did not decide, so the line never claims a cap the bins exceed.
+      (balance.max > datasetCap
+        ? ` plus its ${closureAllowance(datasetItems, SHARD_COUNT).toFixed(2)}s declaration-closure allowance`
+        : '') +
+      `, whole legs ${wholeLeg.sums.map((t) => t.toFixed(0)).join('/')}s within ${WHOLE_LEG_CAP_SECONDS}s, ` +
       `file-level slices: ` +
       `${datasetPlan.decisions.filter((d) => d.count > 1).map((d) => `${d.name} x${d.count}`).join(', ') || 'none'})`
   );
