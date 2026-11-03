@@ -3988,6 +3988,15 @@ jobs:
         continue-on-error: true
         run: pnpm check:workspace-manifest-cycles
 
+      # Rationale: `scripts/check-package-naming.mjs` header (#29710). Every
+      # packages/services/ package is `@objectstack/service-NAME` after its
+      # directory, and the `@objectstack/plugin-*` set is frozen at ten. Reads
+      # manifests only; the `check:` key runs `--self-test` first.
+      - name: package names follow their kind and the plugin prefix is frozen
+        id: package-names-follow-their-kind
+        continue-on-error: true
+        run: pnpm check:package-naming
+
       # Merged-result budget probe, wired by the card that wired the citation
       # gate below (#18224). `node scripts/check-merged-result.mjs --self-test`
       # IS the whole gate and is exactly what the root manifest registers as
