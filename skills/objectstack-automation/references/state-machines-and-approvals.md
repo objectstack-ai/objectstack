@@ -219,7 +219,7 @@ reject) — enforced before any write, with no elevation bypass, so the run
 cannot resume past the node with the key a later `expression` approver reads
 still missing.
 
-`type` and `multiple` are enforced there too, on approve and reject alike,
+`type` and `multiple` are enforced at the decision too, on approve and reject alike,
 before any write — they are not widget hints. A picker kind must resolve
 through the `expression` approver's resolvers in the request's organization:
 `user`, `department` and `team` by record id, `position` by a held position's
