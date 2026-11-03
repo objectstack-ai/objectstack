@@ -1,5 +1,586 @@
 # @objectstack/client
 
+## 18.3.0
+
+### Minor Changes
+
+- f9f27a0: feat(client): `data.fieldAccess(object, id)` reads the field projection of one record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `client.data.fieldAccess(object, id)` calls `GET /data/:object/:id/field-access` and resolves to `GetRecordFieldAccessResponse`: the fields the caller may read, and the fields the write gate admits on an update of that stored row. A field permission whose `when` names only some rows is unlocked on the rows it does not name. A row that is absent or unreadable rejects with the record read's 404.
+- 8441a01: feat(rest): `GET /api/v1/meta/app/{appId}/bundle` answers an app's metadata in one request, per caller, with an ETag (#27627)
+  
+  Clause-②: yes (widening: a new route and its response shape; no existing route, key or answer changes)
+  Metadata-protocol: added
+  
+  A console working inside one app used to read the app, then one `GET /meta/object/{name}` per object it opened, then the views, pages and dashboards those draw, each as its own request. The new route answers them together (`AppMetadataBundleResponseSchema`, `@objectstack/spec/api`):
+  
+  - **What is in it**: the app with its navigation; every object its navigation reaches (top-level, area and nested entries) and every object with a lookup or master-detail field referencing one of those; the views the navigation names or that bind to a bundled object; the pages the navigation names or that bind to a bundled object; the dashboards the navigation names.
+  - **Every member is the item read it replaces, as the same caller**: the app is `GET /meta/app/{appId}`, and each entry is `GET /meta/{type}/{name}`, envelope included. Audience gates, list-view and dashboard permissions, the field-visibility mask, the translation to the request locale and `sortability` apply exactly as they apply to those reads. An item the caller may not read is absent from the bundle. An app the caller may not read refuses the whole request with the app read's own answer.
+  - **Cached per caller**: a weak `ETag` over the body served to this caller (the `/meta` reads' shared rule), `Cache-Control: private, no-cache`, `Vary: Accept-Language`, and `If-None-Match` answered `304`. Two callers share a validator only when they are served the same body. A member whose field visibility could not be determined serves the bundle `private, no-store` with no `ETag`.
+  - **Server-Timing**: the bundle's metadata reads are timed as a `meta` span beside `db` and `total`, under the existing gate (`OS_SERVER_TIMING=true`, or `X-OS-Debug-Timing: 1` from an admin).
+  - The query-parameter set is closed and empty.
+  - `@objectstack/client` gains `meta.getAppBundle(appId, { ifNoneMatch })`, conditional in `meta.getCached`'s spelling: it answers `{ notModified: false, data, etag }` on a `200` and `{ notModified: true, etag }` on a `304`, and a `304` is not thrown as a failed request.
+  - `meta.getCached` now answers a matching `If-None-Match` / `If-Modified-Since` with `{ notModified: true }` through the same opt-in. Before, the transport threw on the `304` before the method's own `304` branch could run.
+- 0027c4a: feat(rest): `POST /api/v1/data/{object}/{id}/page` answers everything a record page asks when it opens, in one request (#27627)
+  
+  Clause-②: yes (widening: a new route and its request and response shapes; no existing route, key or answer changes)
+  Metadata-protocol: added
+  
+  A record page used to open in two or three stages of requests: the record, the approval list, the access verdicts and each related list's definition first, then the approval lock and one count probe per related list. The new route answers all of it from one request:
+  
+  - **The request names the parts** (`RecordPageRequestSchema`, `@objectstack/spec/api`): `expand` (the record's lookups to resolve), `related` (each related list the page draws: the child object, its relationship field to this record, an optional declared `filter`, `top` first rows, an optional `sort`), `explain` (`update` / `delete` / `transfer`), `fieldAccess` and `approvals`. The body is strict and the query-parameter set is closed and empty.
+  - **Every part is the read it replaces, as the same caller** (`RecordPageResponseSchema`): the record is `GET /data/{object}/{id}`; a related list is `GET /data/{child}` with the parent condition AND the declared filter, and `$count`; `fieldAccess` is `GET /data/{object}/{id}/field-access`; a verdict is `POST /security/explain` with the record id; `approvals` is `GET /approvals/requests` for the record (the pending row enriched as `GET /approvals/requests/{id}`) and the record lock. Object permissions, row-level security, sharing and field-level security therefore apply exactly as they apply to those reads.
+  - **A refusal stays where it belongs.** A record the caller cannot read refuses the whole request with the record read's own answer. A part whose read refuses carries that refusal (`{ code, status, message }`) in place of its answer, and the other parts are answered; a related list the caller may not read carries neither a count nor rows.
+  - **A related entry must be a relationship to this record**: a lookup or master-detail field of the child that references the page's object, or the request is a located `400` before anything is read.
+  - **Server-Timing**: the route's metadata reads are timed as a `meta` span beside `db` and `total`, under the existing gate (`OS_SERVER_TIMING=true`, or `X-OS-Debug-Timing: 1` from an admin).
+  - `@objectstack/client` gains `data.recordPage(object, id, request)`.
+- 7811c3f: feat(spec): a comment's author is told which @mentioned users will not be notified, and a mention added by editing is notified
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  The `@mention` recipient gate withholds a notification from a mentioned user who cannot read the comment or its record. Until now it only logged that, so the author believed the person had been told. The comment still saves with every mention; now the requester's own answer says who will not be notified.
+  
+  - **Spec.** `CreateDataResponseSchema` and `UpdateDataResponseSchema` declare an optional, response-only `withheldMentions`: the ids of the users this write @mentioned whose notification the mention gate withheld. Ids only, never the reason. Only a `sys_comment` write fills it, only on the requester's own answer to that request, and the key is omitted when nobody was withheld. It is not a field of `sys_comment` and is never stored, since a stored member would tell every reader who cannot read the thread. `WriteObservabilityOptions` declares the in-process listener that carries it, `onMentionsWithheld(userIds)`, beside `onFieldsDropped` and `onValidationAdvisory`. Like them it never crosses the wire.
+  - **plugin-audit.** The mention writer reports the gate's own verdict to that listener, which it reads off its hook's `ctx.input.options` (the write's own options bag). Readability is not derived a second time, and who the gate admits is unchanged. The writer now also runs on `sys_comment` `afterUpdate`, so a mention added by editing a comment is judged and notified like one written with it. An edit judges only the mentions it added; a mention the comment already carried is not judged or notified again. The editor, who may be a parent-record editor rather than the author, is the actor of an edit's notifications: they are named in the title and never notified themselves. `MentionGateInput` takes an optional `onWithheld(userId)` callback.
+  - **metadata-protocol.** `createData` and `updateData` pass the listener and answer the ids as `withheldMentions`. A nested write that a hook or a flow makes inside this one carries its own options, so its verdicts never reach this answer.
+  - **client.** `CreateDataResult` and `UpdateDataResult` declare `withheldMentions?: string[]`, mirroring the two schemas.
+  - **objectql.** `engine.update` accepts the `onMentionsWithheld` option. The engine never calls it; it carries it to the `after*` hooks with the rest of the caller's bag.
+  
+  Nothing to do for existing clients: a client that does not read `withheldMentions` sees the same answer as before.
+- e26cf9a: feat(spec): a hook can tell the person who saved a record what the save set in motion
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A `beforeInsert` / `beforeUpdate` / `afterInsert` / `afterUpdate` hook had no way to tell the person saving what the save started, such as sending a deal for approval. The single-record write answer carried `warnings` (advisory validation-rule hits) and nothing else a save could say. Now a hook can attach one message to the save's answer.
+  
+  - **Spec.** `CreateDataResponseSchema` and `UpdateDataResponseSchema` declare an optional, response-only `notice`: one author-written message, info severity, separate from `warnings`. When more than one call sets it, the last one wins. The key is omitted when no hook set one, and it is never stored on the record. `WriteObservabilityOptions` declares the in-process listener a hook calls to set it, `onNotice(message)`, beside `onFieldsDropped`, `onValidationAdvisory` and `onMentionsWithheld`. Like them it never crosses the wire.
+  - **metadata-protocol.** `createData` and `updateData` pass the listener and answer the last non-empty message as `notice`. A nested write that a hook or a flow makes inside this one carries its own options, so its notice never reaches this answer.
+  - **client.** `CreateDataResult` and `UpdateDataResult` declare `notice?: string`, mirroring the two schemas.
+  - **objectql.** `engine.update` accepts the `onNotice` option. The engine never calls it; it carries it to the hooks with the rest of the caller's bag.
+  
+  How a hook sets it: read the write's own options bag off `ctx.input.options` and call the listener when it is there.
+  
+  ```ts
+  const opts = ctx.input.options as WriteObservabilityOptions | undefined;
+  opts?.onNotice?.('Sent to your manager for approval');
+  ```
+  
+  A hook whose handler runs as code in the server process (registered with `registerHook`, or a declarative `handler` bound as a function) can call it today. A hook that runs in the sandbox (a `body`, including a `handler` the build lowers into one) cannot yet, and neither can a record-triggered flow: both are follow-up work.
+  
+  Nothing to do for existing clients: a client that does not read `notice` sees the same answer as before.
+- 519089e: feat(runtime): `GET /packages/:id/customizations` answers what this deployment changed on an installed base, in one read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  ADR-0146 D8 item 4. For an installed base package (HotCRM), one read answers "what did we change on it": the items its paired `<base>.custom` package overrides, the fields, validation rules and indexes that package adds to the base's objects, and the base's items switched off in this deployment, with each list's length. Upgrade reviews, the Studio landing's "n customized, m switched off" line and Studio's "only customizations" filter read it from the server instead of piecing it together in the browser.
+  
+  - **`@objectstack/spec`**: `GetPackageCustomizationsRequestSchema` and `GetPackageCustomizationsResponseSchema` (with their types) in `@objectstack/spec/api`. The response is strict at every level; its counts are non-negative integers derived from the lists in the same answer.
+  - **`@objectstack/runtime`**: the route. Overrides are the pair's active rows that the served-override predicate admits (the one the effective read serves by), so a declaration from any other package and an undeclared pair item are not listed. Extensions are the pair's `extend` contributions to objects the base owns, as declared. Switched-off items are the base's `active: false` activation-ledger rows. The read gate and the 404 wording are `GET /packages/:id`'s; the query set is closed; a `.custom` id is refused `400 VALIDATION_ERROR` naming its base; a base with no pair answers empty lists, and the read never creates the pair. No diff against the base and no `basedOn` verdict: `basedOn` is reported as recorded.
+  - **`@objectstack/client`**: `client.packages.customizations(id)`.
+  - **`@objectstack/metadata-protocol`**: `listServedOverrides({ packageId })` on the protocol implementation, and the `ServedOverrideEntry` type.
+  - **`@objectstack/core`**: `listPackageMetadataActivations(engine, packageId)` reads one package's activation-ledger rows across types through the same read and row parse the per-type store uses; `ObjectStoreMetadataActivationStore.list()` now calls that shared read and answers exactly as before.
+
+### Patch Changes
+
+- 7bb8084: fix(client): `data.find` refuses a `select` that names no field before the request, with the list door's own answer, instead of sending `?select=`
+  
+  Clause-②: no — the calls refused are exactly the ones the list door already refuses (`400 VALIDATION_ERROR`); the caller gets the same `code`, `httpStatus` and message, only without the round trip. Nothing is widened and no call that was served is refused.
+  Metadata-protocol: none
+  
+  An empty array is truthy, so `client.data.find(object, { select: [] })` (or `{ fields: [] }`) put `?select=` on the wire and came back as a `400 VALIDATION_ERROR` from a door the caller cannot see. Both `ObjectStackClient.data.find` and `environment(id).data.find` now refuse that call, and a `select` whose every member is blank, before any request:
+  
+  - The error carries `code: 'VALIDATION_ERROR'`, `httpStatus: 400` and the door's sentence (`Query parameter 'select' names no field; …`), so an existing `err.code` branch fires the same way.
+  - The parameter is never dropped: an absent projection reads every column, which is the widening the door refuses.
+  - A `select` naming at least one field is sent exactly as before, blank members included (the door keeps the named ones).
+- efdf11a: feat(security): a dismissed or revoked suggested audience binding can be re-opened, back to pending
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Once an admin dismissed a pending audience-binding suggestion, or revoked an accepted one, the row stayed `dismissed` and nothing in the product could take that "no" back: `confirm` accepts only pending rows, and the reconciliation never moves a dismissed row. A new door re-opens it:
+  
+  - **`POST /api/v1/security/suggested-bindings/:id/reopen`** moves a `dismissed` row back to `pending`, exactly as if it had never been answered (`deployment_decision` false, `resolved_by` / `resolved_at` cleared). It is served by both mounts of the family: the REST route and the dispatcher's `/security` domain.
+  - **Re-opening grants nothing.** A pending row is not an acceptance, so a revoked set stays out of the `everyone` anchor's definition until `POST …/:id/confirm` accepts it again, and that accept runs the ADR-0090 D7 high-risk gate like any other.
+  - **Refusals.** The same authority as the other doors (`manage_metadata`; under a walled posture, the platform operator; `403` otherwise), the same walled-host refusal naming `acceptedDefaultPermissionSets` (`409`), `404` for an unknown id, and `409 SUGGESTION_STATE` for a row that is not `dismissed` (the message names its status) or whose set its package no longer suggests. The last keeps the decision on record: a re-opened row with no declaration would be pruned by the next reconciliation.
+  - **Contract.** `ISecurityService` gains the OPTIONAL member `reopenAudienceBindingSuggestion(callerContext, id)`. A security service without it still satisfies the contract; both routes answer `501 NOT_IMPLEMENTED` naming the door, and every dismissal stands. plugin-security serves it and exports `reopenAudienceBindingSuggestion`.
+  - **SDK.** `client.security.suggestedBindings.reopen(id)`.
+- b6db369: fix(deps): `@hono/node-server` goes to `^2.1.3`, the first release with the GHSA-rmxm-3fg6-px4f fix (#27921)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/plugin-hono-server` declares `@hono/node-server` as a runtime dependency, so a downstream install now resolves the patched line instead of an affected `2.1.1`. `@objectstack/client` declares the same range as a devDependency and moves in lockstep. No API, behaviour or export changes.
+- f23e051: feat(runtime)!: the flow clone door is "new similar" — the copy lands switched off in a writable package, by default the source's paired `<base>.custom`, never package-less (#28149)
+  
+  Clause-②: yes (narrowing) — `POST /api/v1/automation/:name/clone` accepts a new optional `package` member and answers a new `packageId` member (the copy's package, beside `flow` and `notice`), and a request it accepted before is now refused: a clone of a flow no read-only package ships, sent with no `package`, is refused `400` where it was written package-less.
+  Metadata-protocol: added — `CloneFlowRequestSchema` and `CloneFlowResponseSchema` are new authorable API schemas in `@objectstack/spec/api` (the `authorable-surface/api.json` shard gains them), and the request's `package` member is a new key a caller can write. No existing key is removed, refused or changed in meaning.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any existing schema is removed, renamed or re-shaped and no stored metadata changes: the door's request body gains one optional member and its answer one, and a copy written before this change stays where it is. The remedy for the newly refused request is the request's own (name the writable package with `package`), so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** request narrowing at the flow clone door (`@objectstack/runtime`'s `/automation` domain), per ADR-0146 D3/D4.
+  
+  - **Before.** The clone door wrote the copy as a package-less environment row with `status: 'draft'`, which the engine arms like `active`, so a copy of a record-triggered flow ran beside its source as soon as it was saved.
+  - **Now.** The copy lands in a writable package and is written switched off (`status: 'obsolete'`, the value Studio's Enabled switch writes for Off). With no `package`, the target is the source package's paired customization package `<base>.custom`, ensured through the protocol's ensure door (the one creation path of the pair). With `package`, the target must be installed and writable (`422 WRITABLE_PACKAGE_REQUIRED` otherwise) and depend on the source's package (`409 RESOURCE_CONFLICT` otherwise). Every refusal is answered before anything is written. The save is a first write, so a name the target package already holds is refused `409 RESOURCE_CONFLICT` instead of overwriting it. The answer is `{ flow, packageId, notice }`, and the notice says the copy is switched off.
+  - **Unchanged.** The whole-definition copy, the mandatory new name and label, the credential refusal, the walled-environment refusal and the absence of clone lineage.
+  - **New surface.** `CloneFlowRequestSchema` and `CloneFlowResponseSchema` (`@objectstack/spec/api`), the SDK's `client.automation.clone(name, { name, label, package? })`, and the route ledger row now `sdk` with both schemas named. Setup's "Open the clone in Studio" link opens the copy in the package the answer names.
+  - **Who sees it.** A client that clones a flow authored in the deployment (or in a writable package) without naming a package; and anything that read the copy's `status` as `draft`.
+  
+  **The remedy.** Name the writable package the copy lands in with `package`. To have the copy run, switch it on (`POST /api/v1/automation/:name/toggle`, body `{enabled: true}`).
+- 01178c0: fix(client): `storage.upload` sends `application/octet-stream` for a file of unknown type instead of an empty `mimeType` the presigned door refuses
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A browser `File` whose type the browser does not know carries `type === ''`. `storage.upload(file)` sent that empty string as the presigned request's `mimeType`, and `POST /storage/upload/presigned` refuses an empty `mimeType` with `400 INVALID_REQUEST`, so such a file could not be attached at all. The helper now sends `application/octet-stream` when the file has no type; a typed file keeps its own type. The door is unchanged.
+- a8d2fd7: feat(runtime,metadata-protocol,client,console): Studio's publish takes a change note, every history row it writes carries it, and the item history names the person who changed it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **The note reaches each item's history.** `POST /packages/:id/publish-drafts` now forwards a string `message` from its body. `publishPackageDrafts` already wrote that note into the package commit; it now also passes it to each item's promote, so every `sys_metadata_history` row the publish writes stores it as `change_note` (the history read returns it as each event's `message`). A publish with no note, or an empty one, keeps the sentence the rows carried before, `publish app package 'PACKAGE_ID'`. The SDK's `packages.publishDrafts(id, opts)` accepts `opts.message`, and the console's `MetadataClient.publishPackageDrafts` sends it only when given, so a caller that names no note sends the same `{}` body as before.
+  
+  **Who published is the signed-in caller.** The door used to record `body.actor` as the publisher, so a caller holding `manage_metadata` could put any name on every history row and on the commit. It now records the user id of the request's authorized execution context, the rule the single-item `/meta` publish door follows, and ignores a body `actor`. A caller with no user id (a system context) records no actor (`NULL`), never the body's. The SDK keeps `opts.actor` in its type, marked deprecated, so existing callers still compile; the door ignores it. The other package write doors (discard, revert, rollback and the rest) are unchanged here.
+  
+  **In Studio.** The publish review (the pending-changes sheet's footer) offers an optional **Change note** where it publishes one package as a batch; the note is sent trimmed, and an empty one sends nothing. The item history panel shows each event's actor by the user's name, read from `sys_user` once per set of ids. An id with no user row behind it (a deleted user), or a directory the viewer cannot read, is shown as the id marked "unresolved user". A write no person made shows no actor. Each event's change note is shown under its row. English and Chinese strings are added to the console i18n bundles (the publish-review strings in all ten locale packs, as the key-parity suite requires).
+- 0ecc2c4: feat(metadata-protocol): an ensure door for a base's paired customization package (ADR-0146 D3)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: added
+  
+  The new route `POST /api/v1/packages/:id/ensure-customization`, with its request and response schemas (`EnsureCustomizationPackageRequestSchema`, `EnsureCustomizationPackageResponseSchema`), widens the surface, and `POST /api/v1/packages` and the duplicate door's target narrow theirs: a package id shaped like a pair (`<base>.custom`) is refused unless its manifest carries what the ensure door writes.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/metadata-protocol/src/protocol.ts#ObjectStackProtocolImplementation) The narrowing is a refusal added to the install primitive and the duplicate verb of this runtime class, and to the HTTP install door that fronts them: an install whose id is a paired customization package id must declare the explicit pair namespace and a dependency on the base. No Zod schema, spec contract or stored metadata shape changes, and no stored row is reread differently: a pair already in `sys_packages` replays at boot as stored. So `objectstack migrate meta` has nothing to rewrite. -->
+  
+  **What it does.** The paired customization package of a read-only base holds the changes a customer makes to that base. `POST /api/v1/packages/:id/ensure-customization` answers that pair, `<base>.custom`, and creates it when it is absent. It is created through the same install primitive `POST /api/v1/packages` uses, with an explicit namespace (the base's namespace followed by `_custom`, so `crm` gives `crm_custom`), a dependency on the base at the major of the base's version (`^3` for `3.4.1`), version `0.1.0` and type `module`. The answer names the base, the pair, its namespace, its dependency range, whether this call created it (`201` when created, `200` when it was already there) and whether it is writable. Asking again changes nothing. Two calls at once leave one pair, and a call that arrives while another is creating the pair waits for it and answers from what it left.
+  
+  **What it refuses, leaving nothing behind.** A base that is not installed (`404`). A base that is writable, because it is customized directly, a base that declares no namespace, a base whose namespace is too long to take the `_custom` suffix (nothing is truncated or hashed), and a base whose version is not SemVer (`409`). A base that is itself a pair (`400`). A pair namespace another package already owns (`422 NAMESPACE_CONFLICT`, the code the registry stamps for the same condition). An installed `<base>.custom` that lacks the namespace or the dependency (`409`): it is never adopted or rewritten. The caller is judged as at the install door: `manage_metadata` under `single`, and under `isolated` or `group` only the platform operator, so a tenant administrator gets `403`.
+  
+  **The narrowing.** `POST /api/v1/packages`, the install primitive and the duplicate door now refuse, with `400`, a package whose id is a pair id but whose manifest lacks the explicit pair namespace or a dependency on the base. The refusal names the ensure door. An exported pair that declares both still installs, and the dependency check then judges its range against the base installed there.
+  
+  **SDK.** `client.packages.ensureCustomization(baseId)` returns `EnsureCustomizationPackageResponse`.
+  
+  What to do: nothing for an existing stack. A pair is created through the ensure door, or installed from an export that declares both its namespace and its dependency on the base.
+- 58cb05d: fix(runtime): the package doors record the signed-in caller in metadata history, never a name the request body supplies
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Metadata history and package commits are what an administrator reads to decide what to roll back and whom to ask. Five package doors — `POST /packages/:id/discard-drafts`, `POST /packages/:id/commits/:commitId/revert`, `POST /packages/:id/rollback`, `POST /packages/:id/adopt-orphans` and `POST /packages/:id/duplicate` — and the app re-save that `POST /packages/:id/publish-drafts` performs to unhide a package's apps used to record whatever `actor` the request body named, so any caller allowed to manage metadata could make a change look as if someone else made it.
+  
+  They now record the request's authenticated user, the same identity the single-item metadata doors record. A body `actor` is ignored, not refused: a client that still sends one keeps working and is recorded as itself. A system call with no user keeps recording no actor (`null`), as before.
+  
+  In `@objectstack/client`, the `actor` option of `packages.discardDrafts`, `packages.revertCommit`, `packages.rollback`, `packages.adoptOrphans` and `packages.duplicate` is marked deprecated: the server ignores it. Drop it from your calls; nothing else changes.
+- 8afaf12: feat(client): `client.auth.mePermissions()` reads the caller's effective permissions, typed `MePermissionsResponse`
+  
+  Clause-②: yes (widening) — one new SDK method over an existing route; no wire change and no new route.
+  
+  Metadata-protocol: none
+  
+  - **Before.** `GET /auth/me/permissions` had a strict response contract in `@objectstack/spec/api` (`MePermissionsResponseSchema`) but no client method, so a consumer fetched the route by hand and typed the body itself.
+  - **Now.** `client.auth.mePermissions()` GETs `/api/v1/auth/me/permissions` and resolves `MePermissionsResponse`. Discriminate on `authenticated`: a signed-out caller resolves `{ authenticated: false }` instead of throwing, unlike `client.auth.me()`.
+- b3d1415: feat(runtime,client,cli): export a deployment's whole ontology as installable packages in one read (`GET /packages/export`, `os package export`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A tenant could take its ontology out of a deployment only one package at a time (`GET /packages/:id/export`). The whole-deployment export declared in `@objectstack/spec` (`PackageExportBundleSchema`) is now served.
+  
+  - **`@objectstack/runtime`**: `GET /api/v1/packages/export` answers `{ packages }`: every installed package whose registry row's `source` is not `code` (the marketplace and authored packages, each base's `.custom` pair among them), disabled ones included, each exactly as `GET /packages/:id/export` answers it, dependencies first, so a pair follows its base. It reads with the per-package export's gate (`studio.access` or `setup.access`), refuses any query parameter `400 VALIDATION_ERROR` naming it, and is whole or absent: a package whose export cannot be assembled fails the read, naming that package. No credential value is carried: credential positions are withheld as on every served metadata read, and a connector's `credentialRef` stays a reference.
+  - **`@objectstack/client`**: `client.packages.exportAll()` calls it.
+  - **`@objectstack/cli`**: `os package export [--out DIR]` writes one directory per package, numbered in install order (`DIR/01-ID/objectstack.json`), each installable with `os package install`. A refusal is printed with its status and code and nothing is written; an `--out` directory that already holds files is refused.
+  - **`@objectstack/spec`**: the `[PLANNED — not yet served]` marker comes off `PackageExportBundleSchema`'s description, which now names the route and the command.
+- 078e581: fix(rest): every 2xx write answer whose body reports `droppedFields` also sends the `X-ObjectStack-Dropped-Fields` header
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Single `POST /data/:object` and `PATCH /data/:object/:id` advertise a legal write strip (a static `readonly` or a true `readonlyWhen` field) in the body and in the `X-ObjectStack-Dropped-Fields` header. The other write doors reported the same strip in the body only, so a caller that reads the header was told nothing. They now send the header too, through the same `applyDroppedFieldsHeader` seam and in the same `field;reason=REASON` format:
+  
+  - **Clone** (`POST /data/:object/:id/clone`): the clone's own strips.
+  - **createMany** (`POST /data/:object/createMany`): the body's `droppedFields` is already the union of the rows' strips (its answer has no per-row slot), and the header names that union.
+  - **Per-row bulk doors**: the per-object `POST /data/:object/batch`, `POST /data/:object/updateMany` and an import commit (`POST /data/:object/import`) report each row's strips in `results[i].droppedFields`. The header names their union.
+  - **Cross-object `POST /batch`**: its body reports one event per op, with the op's `index`. The header names their union.
+  
+  The header has one token per field and reason, so it cannot say which row, op or object dropped a field. On a bulk door it names the union, each token once, and the body keeps the per-row report. A field one row strips and another does not is still named once. The stale roll-up answer (`201` over a write that landed) of clone and createMany carries the header as their success answers do. Each door sends no header when nothing was stripped, and an import dry run sends none: it writes nothing, though its rows preview the strip in the body. Response bodies and statuses are unchanged.
+  
+  The spec's `.describe()` text on the clone, createMany and batch-row `droppedFields`, and the client's `CloneDataResult` docblock, stop saying that these answers carry no header.
+- 7b55ea9: feat(notifications): the push device registry is served: `sys_user_device`, `POST /api/v1/notifications/devices` and `DELETE /api/v1/notifications/devices/:deviceId`, and the client's `notifications.registerDevice` / `unregisterDevice` (ADR-0012 §6)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Nothing a client or an operator sends today is refused, and no metadata an author writes changes: the routes and the client methods are new, and the spec change is two catalog rows and description text.
+  
+  - **`@objectstack/service-messaging`** registers `sys_user_device` (one row per user and app install: `device_id`, `user_id`, `vendor`, `token`, `platform`, `app_id`, `locale`, `name`, `enabled`, `invalidated_at`, `last_seen_at`) and implements `INotificationService`'s four device members on `MessagingService`. The table is system-owned: the generic data API neither reads nor writes it (`apiEnabled: false`), and it has no organization column, because a device belongs to its user. `registerDevice` refreshes a device id the user already holds, mints one when the request carries none, and moves a token another device holds to the registering device (the previous holder's row is removed, so a push meant for a phone's previous user never reaches its new one). A token has one holder: a unique index on `token` refuses a second one, and a registration that loses a race re-reads and moves the token. `invalidateDeviceToken` keeps the row with `enabled: false` and `invalidated_at`, and the device's next registration re-enables it. A `web` registration without `vendor` is refused `400 VALIDATION_FAILED`.
+  - **`@objectstack/runtime`** serves `POST /api/v1/notifications/devices` (body: `RegisterDeviceRequestSchema`; answers `{ deviceId, success }`) and `DELETE /api/v1/notifications/devices/:deviceId` (the caller's own device; another user's or an unknown id answers `404 NOT_FOUND` and nothing is removed), behind the domain's anonymous floor (`401 UNAUTHENTICATED`). A notification service without the device members answers `501`. The standalone server mounts both, with the other verbs on the two paths mounted refusal-only like the inbox faces.
+  - **`@objectstack/client`**: `client.notifications.registerDevice(request)` and `client.notifications.unregisterDevice(deviceId)`, removed earlier because no server served them, are back.
+  - **`@objectstack/spec`**: `DEFAULT_NOTIFICATION_ROUTES` lists the two device routes again, and the `[PLANNED — not yet served]` markers come off the four device registration schemas and `UserDeviceSchema`.
+- 5d759b1: fix(rest)!: the REST email send door requires a send capability and bounds the sender, the custom headers, the organization and identity mail
+  
+  Clause-②: yes (narrowing) — the REST send door refuses callers and bodies it admitted (the breaking half), and the published `IEmailService` contract gains an optional `getDefaultFrom()` (a widening, the same move as `isConfigured()` on the same interface). No spec key, export or config field is removed or renamed.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches `POST /api/v1/email/send`, `client.email.send` or `IEmailService` (a `git grep` of `skills/` for each names nothing), so no skill line changes. The runtime-services page, `content/docs/kernel/runtime-services/email-service.mdx` ("Over HTTP"), states the four bounds in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authorization narrowing at one REST door, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped: SendEmailInput keeps every member, and a caller the bounds admit receives the same answer as before. There is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which HTTP callers and bodies the door serves. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id covers this door and this diff adds none (not registered or already-registered); and IEmailService, the one published interface that moves, gains an optional member and is referenced in code across the workspace (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing of `POST /api/v1/email/send`), shipped as `patch` because no metadata protocol moves.
+  
+  `POST /api/v1/email/send` (and its environment-scoped twin) now applies four bounds after the authentication floor and before anything is sent. Each refusal is `403 PERMISSION_DENIED` in the nested `{ error: { code, message } }` envelope, and the mail service is not called:
+  
+  - **Capability.** The caller must hold `manage_platform_settings`, the capability that already governs the mail settings namespace, the `sys_identity_email` log and the two body columns of `sys_email`. An authenticated caller without it is refused. The check runs before the provider lookup, so a refused caller gets `403` whether or not mail is wired.
+  - **Attribution.** `sentBy` is always the authenticated caller. A body that names another user is refused. A body that names the caller, or names no one, is stamped with the caller.
+  - **Sender.** The envelope sender is the deployment's configured sender (the Mail settings' From address, or `defaultFrom`). A `from` naming any other address is refused. A `from` naming the configured address is accepted, and the configured value is sent in its place. `headers` is accepted only as the contract's `Record<string, string>`: a plain object whose every key is a header field name and whose every value is a single-line string. Any other shape is refused, and so are custom `From`, `Sender` and `Return-Path` headers.
+  - **Organization.** The message is recorded under the caller's active organization: the door sets `organizationId` from the caller's execution context, and the service stamps it onto `sys_email.organization_id`. A body naming another organization is refused, and so is a body naming one when the caller has no active organization. `identityMail` is refused (any value but `false`): identity mail is sent by the server itself. `replyTo` is unchanged; it is the caller's Reply-To address and makes no claim about the sender.
+  
+  Server-internal sends (flows, notifications, auth mail) call `IEmailService.send` directly and are unchanged.
+  
+  `IEmailService` gains an optional `getDefaultFrom()` that returns the configured sender, and plugin-email's `EmailService` implements it. A service that does not implement it still sends through the door, but a caller `from` is refused because the sender cannot be checked.
+  
+  plugin-email's SMTP transport now hands nodemailer custom headers as an explicit list of name/value entries, one per key of the headers map, so every key is read as exactly one header name. A well-formed headers map puts the same headers on the wire as before.
+  
+  What changes for you: an integration that sends through the REST door needs a credential holding `manage_platform_settings`, and should leave `from`, `sentBy`, `organizationId` and `identityMail` out of the body, since the door supplies each of them. Custom headers are sent as a plain object of string values.
+- Updated dependencies [ea025d3]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [0c64014]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [8ce974c]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [76bf6c5]
+- Updated dependencies [1a95c74]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [bc02a77]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [c594e1c]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [7b293c4]
+- Updated dependencies [3fb74b6]
+- Updated dependencies [b399cb8]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [8d208a4]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c708de6]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [92b7bbd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [bf03ebb]
+- Updated dependencies [2c3574c]
+- Updated dependencies [1335c6b]
+- Updated dependencies [bdb19ca]
+- Updated dependencies [d8c611d]
+- Updated dependencies [ec0316e]
+- Updated dependencies [8bb2417]
+- Updated dependencies [2ac698b]
+- Updated dependencies [d0df873]
+- Updated dependencies [462b4f9]
+- Updated dependencies [9a0c622]
+- Updated dependencies [138dacf]
+- Updated dependencies [7f4258f]
+- Updated dependencies [1ac1c24]
+- Updated dependencies [97ca257]
+- Updated dependencies [104cd1a]
+- Updated dependencies [f1d795b]
+- Updated dependencies [b3d1415]
+- Updated dependencies [078e581]
+- Updated dependencies [18e4ac1]
+- Updated dependencies [51058ef]
+- Updated dependencies [4df6292]
+- Updated dependencies [f125ce4]
+- Updated dependencies [b16ee8b]
+- Updated dependencies [86d0a8c]
+- Updated dependencies [d089dac]
+- Updated dependencies [3557366]
+- Updated dependencies [29c70ca]
+- Updated dependencies [b5e7ba5]
+- Updated dependencies [38a278b]
+- Updated dependencies [bb82da1]
+- Updated dependencies [85ea12f]
+- Updated dependencies [85f7a0d]
+- Updated dependencies [e9fb529]
+- Updated dependencies [7b55ea9]
+- Updated dependencies [4138ce8]
+- Updated dependencies [53dda03]
+- Updated dependencies [ba1f164]
+- Updated dependencies [20f052d]
+- Updated dependencies [9467a1b]
+- Updated dependencies [8b65633]
+- Updated dependencies [c268b72]
+- Updated dependencies [d68d129]
+- Updated dependencies [bd68248]
+- Updated dependencies [f72bc9e]
+- Updated dependencies [a20dcae]
+- Updated dependencies [5d46f43]
+- Updated dependencies [c9aaee9]
+- Updated dependencies [3d6f230]
+- Updated dependencies [7eb0b19]
+- Updated dependencies [8e6ab05]
+- Updated dependencies [e756782]
+- Updated dependencies [8209a2f]
+- Updated dependencies [aee9c47]
+- Updated dependencies [0e75081]
+- Updated dependencies [45b4922]
+- Updated dependencies [31204d1]
+- Updated dependencies [2c881fb]
+- Updated dependencies [1bdf674]
+- Updated dependencies [4b8cbe2]
+- Updated dependencies [5f99582]
+- Updated dependencies [63f962f]
+- Updated dependencies [df8d020]
+- Updated dependencies [6f09464]
+- Updated dependencies [772b356]
+- Updated dependencies [4008e62]
+- Updated dependencies [b64bb72]
+- Updated dependencies [b861525]
+- Updated dependencies [6903c93]
+- Updated dependencies [4b06a54]
+- Updated dependencies [ebbb5b8]
+- Updated dependencies [a81b7cb]
+- Updated dependencies [eeb3117]
+- Updated dependencies [a5fcd06]
+- Updated dependencies [56076fd]
+- Updated dependencies [fdb9a07]
+- Updated dependencies [57958aa]
+- Updated dependencies [59775a0]
+- Updated dependencies [744211f]
+- Updated dependencies [87956dc]
+- Updated dependencies [3482f3d]
+- Updated dependencies [a6a369e]
+- Updated dependencies [601832b]
+- Updated dependencies [5c4e752]
+- Updated dependencies [4ab2e7e]
+- Updated dependencies [589049b]
+- Updated dependencies [d0f308c]
+- Updated dependencies [4dc41e6]
+- Updated dependencies [eb05ea2]
+- Updated dependencies [55a4898]
+- Updated dependencies [f87239a]
+- Updated dependencies [2ae8c89]
+- Updated dependencies [a4daa85]
+- Updated dependencies [b64980a]
+- Updated dependencies [bbb98c4]
+- Updated dependencies [1bb9536]
+- Updated dependencies [2bf71ce]
+- Updated dependencies [c1af99c]
+- Updated dependencies [99a6a78]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [3ac22c9]
+- Updated dependencies [ceef714]
+- Updated dependencies [b388cfe]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [cfd237f]
+  - @objectstack/spec@18.3.0
+  - @objectstack/core@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

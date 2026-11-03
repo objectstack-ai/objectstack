@@ -269,6 +269,12 @@ import {
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
 import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
+  externalOrganizationScopeIsUndeclared,
+  refuseUndeclaredExternalObjectScope,
+  registeredObjectsOf,
+  undeclaredExternalScopeDenialWarning,
+} from './external-organization-scope.js';
+import {
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
 import {
@@ -474,6 +480,17 @@ interface ObjectSecurityMeta {
    * real remote `organization_id` — both keep the tenant wall exactly as it is.
    */
   tenantAnchorIsPhantom: boolean;
+  /**
+   * [ADR-0015 §10] The object is FEDERATED and states no organization scope the
+   * wall can enforce: neither its own `organization_id`, nor
+   * `tenancy.enabled: false`, nor `systemFields.tenant: false` — or it names a
+   * `tenancy.tenantField` other than `organization_id`. Under a walled posture
+   * Layer 0 DENIES such an object (`external-organization-scope.ts`); the boot
+   * refuses one registered before `kernel:ready` by name, so this is reached by
+   * an object registered after the boot. `false` on every local object and on
+   * a federated object that declared its scope.
+   */
+  externalOrganizationScopeUndeclared: boolean;
   /**
    * [#8023] The object DECLARES `sharingModel: 'public_read_write'` — the one
    * OWD that states row-level writes are open org-wide. Read from the author's
@@ -1997,6 +2014,17 @@ export class SecurityPlugin implements Plugin {
     // wall; declared under `single` they are refused here, the first moment the
     // posture is known, rather than left looking enforced.
     refuseAcceptedDefaultsWithoutWall(this.tenancyPosture, this.acceptedDefaultPermissionSets);
+    // [ADR-0015 §10] Under a walled posture every external object states its
+    // organization scope; one stating none is refused BY NAME when the boot
+    // completes. Judged at `kernel:ready` — every plugin has registered its
+    // objects by then, while here the registry is still filling (the moment the
+    // identity objects are judged above, for the same reason) — and the
+    // refusal fails `bootstrap()` on both kernels. A context without hooks
+    // judges now, over what is registered. The `single` posture reads nothing.
+    const refuseUndeclaredExternalObjects = () =>
+      refuseUndeclaredExternalObjectScope(this.tenancyPosture, registeredObjectsOf(this.ql));
+    if (typeof (ctx as any).hook === 'function') (ctx as any).hook('kernel:ready', refuseUndeclaredExternalObjects);
+    else refuseUndeclaredExternalObjects();
     // [ADR-0105 D11] Optional app/plugin membership resolver for the §7.3.1
     // `IN (current_user.<key>)` sets. Absent is the norm — probe once.
     try {
@@ -4466,9 +4494,10 @@ export class SecurityPlugin implements Plugin {
     // [#25223 cut 5] The body moved to `security-plugin-write-tenant-wall.ts` (see `WriteTenantWallHost`).
     const readOrgScopingEnabled = () => this.orgScopingEnabled;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'> = {
+    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'getObjectSecurityMeta' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'> = {
       computeWriteTenantCheckFilter: (...a) => this.computeWriteTenantCheckFilter(...a),
       computeWriteTenantWall: (...a) => this.computeWriteTenantWall(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get orgScopingEnabled() { return readOrgScopingEnabled(); },
       organizationWallRefusal: (...a) => this.organizationWallRefusal(...a),
       get tenancyPosture() { return readTenancyPosture(); },
@@ -5488,6 +5517,9 @@ export class SecurityPlugin implements Plugin {
       // [#7835] Federated object carrying the registry's INJECTED
       // `organization_id` — a column the platform provisions no storage for.
       tenantAnchorIsPhantom: hasPhantomTenantAnchor(obj),
+      // [ADR-0015 §10] …and such an object stated nothing about its organization
+      // scope unless it opted out of tenancy: under a wall Layer 0 DENIES it.
+      externalOrganizationScopeUndeclared: externalOrganizationScopeIsUndeclared(obj),
       // [#8023] The author's DECLARED OWD, not the effective sharing bucket.
       owdOpensRowWrites: owdDeclaresOpenRowWrites(obj),
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
@@ -5498,6 +5530,14 @@ export class SecurityPlugin implements Plugin {
       // refusing. All causes deny identically — see the field's TSDoc.
       ...(obj ? {} : { unresolvedCause: await this.resolveUnresolvedCause(object) }),
     };
+    // [ADR-0015 §10] An external object registered after the boot that states
+    // no organization scope is denied under a wall, and said so ONCE — here,
+    // where its posture is computed once and cached — naming the rule, the
+    // verdict and the three ways out. "Absence must be loud": a deny that only
+    // ever reads as zero rows is the shape nobody diagnoses.
+    if (obj && meta.externalOrganizationScopeUndeclared && postureEnforcesWall(this.tenancyPosture)) {
+      this.logger?.warn?.(undeclaredExternalScopeDenialWarning(object, this.tenancyPosture, obj), { object });
+    }
     if (obj) this.objectSecurityMetaCache.set(object, meta);
     return meta;
   }

@@ -1,5 +1,590 @@
 # @objectstack/plugin-mcp-server
 
+## 18.3.0
+
+### Patch Changes
+
+- 9bf6598: feat(mcp): the HTTP MCP runtime bridges a host-injected authoring `ToolRegistry` behind a new `metadata:write` OAuth scope, with door provenance on every call
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A developer driving an MCP client (Claude Code, Claude Desktop, …) against a hosted environment could read and run it over `/api/v1/mcp` but never build in it: `handleHttpRequest` served the data and action tools only, and no OAuth scope existed under which a token could even ask for authoring. This change adds the scope and its first reader.
+  
+  - **`@objectstack/spec` — `MCP_OAUTH_SCOPE_METADATA_WRITE` (`metadata:write`)** joins `data:read`, `data:write` and `actions:execute` in `MCP_OAUTH_SCOPES`, so the authorization server advertises it and the runtime's up-front scope check admits it. It is a tool-surface grant, not a data grant: `scopesToAgentPermissionSets` maps it alone to the no-object-access floor, and beside a data scope it changes nothing about the data ceiling. **`MCP_OAUTH_SCOPE_CONSENT_COPY`** declares the one-sentence consent copy for every scope (the three existing sentences the Console already renders, plus the new one), keyed by `McpOauthScope` so a scope cannot be added without its sentence.
+  - **`@objectstack/mcp` — `handleHttpRequest(request, { authoring })`** accepts an optional `McpAuthoringInjection`: a host's `McpAuthoringToolRegistry` plus the token principal and the environment. Its tools appear in `tools/list` only when the request's `grantedScopes` names `metadata:write`; without the scope they are not registered, so `tools/call` on one is answered exactly as `create_record` is without `data:write` (the SDK's unknown-tool error, one mechanism). The undefined grant of an API key or a session is served no authoring tool: authoring follows the token's consent. Every call into the registry receives a fresh `McpAuthoringToolContext` — `door: 'mcp'` (`MCP_TOOL_DOOR`), `actor.id`, `principal`, `environmentId` — built from the host's inputs alone, so no request header can claim another door, user or environment; the principal (and its `scopes`) is a frozen per-call copy, so a tool that writes into its context taints neither the next call nor the host's object. Tool names are the host's to keep unique: the SDK throws on a duplicate registration (a native name or a repeat within the registry) and the request fails with it. The runtime stays door-agnostic: which tools the host injects is the host's business.
+  - **`renderSkillMarkdown({ grantedScopes, authoringTools })`** renders a Build section naming the injected tools, with the build loop (create → verify → draft, a person publishes in the UI) and the switched frontmatter description `OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING`, only under the same grant; it teaches `describe_object` before a change only when the grant also carries `data:read`, the scope that registers it; every other render is byte-identical to before.
+  - **Unchanged.** The stdio transport's `bridgeTools` still calls its registry with one argument; the data and action tools register, refuse and answer as before. New exports: `MCP_TOOL_DOOR`, `grantsAuthoringTools`, and the types `McpToolDoor`, `McpTokenPrincipal`, `McpAuthoringToolContext`, `McpAuthoringToolRegistry`, `McpAuthoringInjection`.
+  
+  What to do: nothing for an existing host. A host that wants the build door passes `authoring` to `handleHttpRequest` and `grantedScopes` / `authoringTools` to `renderSkill`.
+- e5c5035: fix(mcp): `validate_expression` refuses a blank or whitespace-only expression with the save gate's verdict
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `validate_expression` MCP tool used to answer `ok: true` for an empty or whitespace-only expression, while saving that same expression is refused with `422 INVALID_METADATA` ("An expression in an evaluated slot needs a non-blank `source` …"). An agent that validated first and then saved was told the expression was fine.
+  
+  The tool now parses the expression with the same spec input schema the save/build gate uses for the slot (`EvaluatedExpressionInputSchema` for the `formula`, `validation` and `flow_condition` sites, `TemplateExpressionInputSchema` for the `template` site) before it runs the formula checks. When that schema refuses, the tool answers `ok: false` with that schema's own issue: the `code` is the schema's issue code and the `message` is the published sentence (`EVALUATED_EXPRESSION_SOURCE_REQUIRED`, or `TYPED_EXPRESSION_SOURCE_REQUIRED.template` for a template). The fields and functions in scope still come back. A non-blank expression gets the same answer as before.
+- bc496bf: fix(mcp): an action on a `sys_*` object whose author exposed it to AI is listed and run over MCP, behind every gate the action already has
+  
+  Clause-②: yes (widening: MCP `list_actions` / `run_action` / `resume_run` now admit a `sys_*` action that declares `ai.exposed: true`; `McpActionSummary` gains the optional `aiExposed`)
+  Metadata-protocol: none
+  Ruling-ref: #27681 ruling `6513869839` letter B
+  
+  MCP refused every action on a `sys_*` object by its object name, ahead of the action's own AI opt-in, so no declaration could open one, while `POST /api/v1/actions/:object/:action` served the same action to the same caller. Now the name refusal yields to the action's own `ai: { exposed: true, description }` (ADR-0011), and to nothing else:
+  
+  - **Where.** `run_action`, `list_actions` and `resume_run`, in the runtime bridge and in the `@objectstack/mcp` tool layer. An agent that lists sees exactly the system-object actions it may run.
+  - **What still runs behind the flag, unchanged.** The ADR-0066 D4 capability gate, the ADR-0126 §8 activation switch, the declared param contract, the `ai.requiresConfirmation` confirmation (428 `ACTION_CONFIRMATION_REQUIRED` without `confirm: true`), the subject load under the caller's row-level security, and for a `type: 'api'` action the target endpoint's own authorization.
+  - **No deployment switch.** `allowSystemObjects` keeps its meaning (the tool layer's filter) and opens nothing in the runtime: a `sys_*` action without the declaration stays refused there.
+  - **Nothing changes on day one.** No platform `sys_*` action declares an `ai` block, so every one of them stays hidden and refused until its declaration lands.
+  - **`McpActionSummary.aiExposed`** (optional) is how a bridge attests the author's opt-in to the tool layer, which never sees the declaration. A bridge that does not set it keeps every `sys_*` action hidden and refused, as before. The runtime bridge sets it on every action it lists.
+- d3b0a40: feat(datasource): import objects from an OData datasource's `$metadata` — EDM types map to field types, the key to the id, and navigations to lookups; Studio's datasource page imports several entity sets at once, and MCP gains `list_remote_tables` / `import_object`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Type matrix (`@objectstack/spec/data`).** `SqlDialect` gains `'odata'`, whose aliases map the EDM primitives (`Edm.String`, `Edm.Int16/32/64`, `Edm.Decimal`, `Edm.Double`, `Edm.Boolean`, `Edm.Date`, `Edm.DateTimeOffset`, `Edm.TimeOfDay`, `Edm.Guid`, `Edm.Binary`, `Edm.Stream`, `Collection(…)`) onto the matrix's canonical types. `Edm.Duration`, the geography / geometry families and a service's own enum or complex types stay unknown, so a draft flags them for review. `Edm.Int64` and `Edm.Decimal` take the same verdict as SQL `bigint` / `numeric` (exact for `number`).
+  - **Gate 2 gets looser, for SQL federation too.** `lookup` and `master_detail` are now exact under the `text`, `integer` and `bigint` rows, as they already were under `uuid`: a reference stores the target's id, which on a federated object is the remote key a foreign-key column carries. Before, `isCompatible` refused a lookup over `CustomerID int` or `varchar` as a `type_mismatch` error, so the boot validation (`onMismatch: 'fail'`) refused any federated object that declared one. Nothing that passed before fails now.
+  - **Draft (`@objectstack/service-datasource`).** For an OData datasource (the driver reports dialect `odata-4.0`, read as the `odata` vocabulary) `generateObjectDraft` / `importObject` / `refreshCatalog` and the validation map EDM types through that arm. A column whose name is not a snake_case field name drafts as its snake_case spelling with `external.columnMap` carrying the remote name (`CategoryID` → `category_id`); `rename` overrides now land in `columnMap` too, so a renamed field stays bound to its column. A remote table name drafts the same way (`Products` → `products`; a leading capital used to give `_products`). A single-valued navigation becomes a `lookup` on the column its `ReferentialConstraint` names when the constraint references the target's single key and the target is imported on the same datasource (or is the object itself); every other navigation is left out of the draft and named in `review` with its reason — import the target first.
+  - **Driver (`@objectstack/driver-odata`).** `introspectSchema()` lists each navigation's `referentialConstraints`.
+  - **Studio.** The datasource page's tables tab selects several entity sets and imports them in one go, saving lookup targets before the tables that reference them; the write opt-in is offered only on a datasource that allows writes, and an imported object stays read-only otherwise (single-table dialog included).
+  - **MCP.** `list_remote_tables` and `import_object` reach the same `IExternalDatasourceService` calls, registered only for a token whose scopes name `metadata:write`, and refused by the runtime bridge without the capability the REST twins require (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`, now exported from `@objectstack/rest`).
+- 776c1d8: fix(runtime): an agent connected over OAuth is refused by name before an api action's forward, and `list_actions` marks such an action instead of the target answering it as anonymous
+  
+  Clause-②: yes (widening: a listed action gains the optional `unavailable: { code, reason }` member, `McpActionSummary.unavailable`, with the new `McpActionUnavailable` type export; every existing member keeps its value)
+  Metadata-protocol: none
+  Ruling-ref: #28178 ruling `6540286612`, option B
+  
+  A same-origin `type: 'api'` action is forwarded by the action doors (MCP `run_action` and `POST /actions/:object/:action`) with the caller's own credentials. An agent connected to MCP over OAuth holds an access token that the platform honours on the MCP endpoint only, so the forward reached every other target as nobody, and the agent got the target's anonymous `401` ("Authentication is required…", "Sign in first") although it had authenticated.
+  
+  - **Now.** One table of credential kind × target door decides what the forward can carry: an identity route (`/api/v1/auth/…`) accepts a signed-in session only, the MCP endpoint a session, an API key or an OAuth token, every other target a session or an API key. A caller whose credential the target cannot read is refused before the forward with `401` and the standard `UNAUTHENTICATED` code, and a sentence naming the action, its target and what would let it run. Nothing is run.
+  - **`list_actions`.** Such an action is still listed, with `unavailable: { code, reason }`: the code and the sentence `run_action` would answer, so an agent can tell its user why it cannot run it.
+  - **Same table, earlier lane.** The API-key refusal on an identity route (#28217) is now one cell of that table; its sentence is unchanged, and `list_actions` marks it for an API-key caller too.
+  - **Unchanged.** Where an OAuth access token is accepted (the MCP endpoint only), which credentials any target accepts, and every forward the table allows. A server-built forward credential that would let an OAuth agent run these actions is a separate decision (#28367).
+- 20dcc07: fix(mcp)!: an `aggregate_records` aggregation entry carries its `filter` to the engine and refuses an undeclared key by name (#28550)
+  
+  Clause-②: yes (narrowing) — the aggregation entry now accepts `filter` (a widening of the tool's input), and refuses any other undeclared entry key, which it stripped and ignored before (a narrowing).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key of the metadata protocol is added, removed or re-shaped, and no export or type changes: the MCP tool's input closes an entry it already documented, and the key it now accepts is the engine's own `AggregationNodeSchema.filter`. An undeclared key used to be dropped without effect, so there is nothing for a migration to rewrite; the refusal names the key and, for `where` / `filters` / `conditions` / `as`, the spelling to send. -->
+  
+  **BREAKING** accept-set narrowing at the MCP `aggregate_records` tool (`@objectstack/mcp`), on both the HTTP and the stdio transport.
+  
+  - **Before.** Each aggregation entry was a non-strict `{ function, field, alias }`. A per-aggregation `filter` was stripped before the engine was asked, so `{"function":"count","alias":"n","filter":{"status":"active"}}` beside an unfiltered count answered the total twice, while the REST query door answered the filtered count for the same body. Any other unknown entry key was dropped the same way, with no error.
+  - **Now.** The entry is built from the engine's `AggregationNodeSchema` members (`function`, `field`, `alias`, `filter`) and is closed. The `filter` is forwarded unchanged to `engine.aggregate`, the path REST uses, so both doors give one answer, including the security middleware's 403 `PERMISSION_DENIED` for a filter on a field the caller cannot read. An undeclared entry key (the retired `distinct` included) is refused by name before anything runs, as an undeclared top-level key already was.
+  - **Unchanged.** Entries without a filter answer as before; the REST query door is untouched.
+  - **Who sees it.** An MCP client that sent an extra key inside an aggregation entry: the call was answered with that key ignored, and it is now refused naming the key.
+  
+  **The remedy.** Drop the key, or for a per-aggregation condition send it as the entry's `filter`.
+- 36fa4ff: fix(spec)!: an aggregation entry refuses an undeclared key by name on every door, and MCP's `aggregate_records` reads the same refusal (#28609)
+  
+  Clause-②: no (narrowing) — `AggregationNodeSchema` refuses an entry key it does not declare, which the REST query door stripped and ignored before; no key, value or export is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A query's aggregation entry is a request surface, the client SDK builder's output and the `POST /data/:object/query` body, never stored in stack metadata, so there is no source for a conversion to rewrite (the disposition the spec already records for the retired `distinct` on this same node). No declared key is added, removed or renamed and no export or type changes: an undeclared key used to be dropped without effect and is now refused by name, with `where` / `filters` / `conditions` hinted to `filter` and `as` to `alias`. -->
+  
+  **BREAKING** accept-set narrowing of a query's aggregation entry (`AggregationNodeSchema`, `@objectstack/spec`), at every door that takes one.
+  
+  - **Before.** The entry was a plain object, so zod deleted a key it does not declare and the call answered: `POST /api/v1/data/:object/query` with `{"function":"sum","field":"amount","alias":"s","bogusKey":true}` returned 200 and the sum, and an entry `where` meant as the entry's own `filter` computed over every row of the group. The runtime dispatcher's `/data/:object/query` did the same. The MCP tool `aggregate_records` alone refused the key, from its own closed copy of the entry (#28550), so one entry shape got two verdicts depending on the door.
+  - **Now.** The node is a `strictObject`. Every door that parses it (REST and the runtime dispatcher through `FindDataRequestSchema`, `EngineAggregateOptionsSchema.aggregations`, and `aggregate_records`, which now takes the node whole instead of its own copy) answers one refusal, word for word: `Unrecognized key(s) on this aggregation entry: KEY.` plus the near-miss hint, at `400 VALIDATION_FAILED` with `fields[]` on REST and as the tool's input error on MCP. Nothing reaches the engine. The retired `distinct` keeps its tombstone sentence on both doors (MCP used to answer it with the generic unknown-key refusal), and `tools/list` now lists `distinct` as a schema no value satisfies (`not: {}`) with its removal text.
+  - **Unchanged.** Entries that carry only `function`, `field`, `alias` and `filter` answer as before on every door. This supersedes the #28550 entry's "the REST query door is untouched": it is closed here.
+  - **Who sees it.** A REST, dispatcher or in-process caller that sent an extra key inside an aggregation entry: the query was answered with that key ignored, and it is now refused naming the key.
+  
+  **The remedy.** Drop the key; for a per-aggregation condition send it as the entry's `filter`, and for the result column name use `alias`.
+- fc28644: fix(mcp): `validate_expression` refuses the `label()` call the object save door refuses
+  
+  The object save door refuses a formula whose `label(record.FIELD)` names a field that declares no options (422 `expression-invalid`, code `label-field-no-options`). The MCP `validate_expression` tool judges with the same validator, but the object schema it read carried field names and types only, so it answered `ok: true` for that formula and the agent learned of the refusal at save.
+  
+  Clause-②: yes (widening) — the published `McpDataBridge` interface gains one optional member, `optionFieldsOf(name)`. A bridge that omits it behaves exactly as before. No tool's input or output shape changes: `describe_object` serves the same projection, and `validate_expression`'s new verdict is an `errors[]` entry with an existing code.
+  
+  Metadata-protocol: none (nothing a metadata author can write is added, refused or changed in meaning; the door already refused this formula)
+  
+  - **Now.** On the `formula` site, `validate_expression` hands the validator the object's option-bearing fields (`ExprSchemaHint.optionFields`), so `label(record.first)` on a text field answers `ok: false` with one `label-field-no-options` error naming `first`, in the sentence the door carries.
+  - **Unchanged.** `label()` on a field with inline `options`, or bound to a shared `picklist`, reads ok. An unknown field keeps its `unknown-field` refusal and gets no second one. The `validation`, `flow_condition` and `template` sites answer as before: the door judges `label()` targets on a formula field's `expression` only.
+  - **How.** Both bridges (the stdio bridge and the runtime's HTTP bridge) answer `optionFieldsOf` from the object `describeObject` reads, the protocol's served object, through `@objectstack/formula`'s `declaresOptions`: on the served object a picklist-bound field already carries its list's resolved `options`.
+- b95a856: fix(metadata-protocol,rest,runtime,mcp): the remaining write doors answer a write that landed under a failing roll-up with their own success (#28782)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches what a write door answers when a parent roll-up cannot be recomputed after the write.
+  
+  When a child write is stored but a parent's roll-up summary cannot be recomputed after it (`ERR_SUMMARY_RECOMPUTE`, "the triggering records WERE written"), #28781 made the REST and dispatcher single-record doors answer the write's own success. The other write doors now do the same, each with the success answer it already publishes — no new code, member, status or header:
+  
+  - **Public form submit** (`POST /forms/:slug/submit`): `201 { id, fields? }` instead of `500`.
+  - **`createMany`** and **clone**: `201` with their usual body instead of `500`. `createManyData` and `cloneData` attach the answer to the refusal the way `createData` does, so a caller that does not read it still gets the refusal.
+  - **Per-object `batch`, `updateMany`, `deleteMany`** (non-atomic): a stored row is a `success` row built from the refusal's `written`, and the loop goes on to the next row. Before, the row came back `success: false` with the refusal and every later row was not attempted, so a client retrying the failed rows duplicated the stored one. An **atomic** batch is unchanged: the refusal is raised inside its transaction, the batch rolls back, and nothing landed.
+  - **`callData`'s ObjectQL fallback** (a host with no `protocol` service): its create, update and delete arms attach their answer to the refusal, so the dispatcher's `/data` door answers it.
+  - **MCP `create_record`**: answers the create on both bridges. The runtime bridge relays the protocol's attached answer, and the stdio bridge builds its own.
+  
+  The stale summary column is logged at `error` once per field per process, with the fix, as on the single-record doors. A refusal before the write (validation, permission, constraint) answers exactly as before. The import runner and seed loader are untouched.
+- 3b920f6: fix(mcp): `update_record` and `delete_record` answer a write that landed under a failing roll-up with their own success (#28844)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches what an MCP write tool answers when a parent roll-up cannot be recomputed after the write.
+  
+  When a child update or delete is applied but a parent's roll-up summary cannot be recomputed after it (`ERR_SUMMARY_RECOMPUTE`, "the triggering records WERE written"), the MCP `update_record` and `delete_record` tools now answer the success result they already publish, the way #28782 made `create_record` answer: `{ object, id, record }` for an update and `{ object, id, success: true }` for a delete, instead of an `isError` result that told an agent its write failed and invited it to apply it again. No new code, member or shape.
+  
+  - **Runtime bridge**: the tools relay the answer the protocol's `updateData` / `deleteData` already attach to the refusal (#28781).
+  - **stdio bridge**: `update` and `remove` attach their own answer to the refusal, as its `create` does.
+  
+  The stale summary column is logged at `error` once per field per process, with the fix. A refusal before the write (validation, permission, not found, exposure) answers exactly as before. `run_action` is unchanged.
+- 0b99747: fix(runtime,mcp): a declarative update action whose write landed under a failing roll-up answers its own success at both action doors (#28856)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches what an action door answers when a parent roll-up cannot be recomputed after the action's write.
+  
+  When a declarative update action (`operation: 'update'`) writes its record but a parent's roll-up summary cannot be recomputed after it (`ERR_SUMMARY_RECOMPUTE`, "the triggering records WERE written"), the action now answers the result it answers when the recompute succeeds, instead of an error that invited the caller to run the action again. No new code, member, status or shape:
+  
+  - **REST** `POST /actions/:object/:action/:id`: `200` with the declarative result (`{ operation, object, id, record, undo? }`).
+  - **MCP `run_action`**: the usual `{ ok, action, objectName, recordId, result }`.
+  - The action's invocation audit row records `succeeded`, the outcome the door answers.
+  
+  The runtime composes the action's result once and attaches it to the refusal through the existing carrier; each door relays it. The stale summary column is logged at `error` once per field per process. A refusal before the write answers exactly as before. Other action kinds: an `api` action's forward already lands on a data door that answers success, and a `flow` action's record nodes and a script or body action's own writes answer a landed write's success since #28861.
+- 31670f5: Clause-②: no
+  Metadata-protocol: none
+  
+  The stdio MCP server lists `agent_prompt` only on a boot that registers at least one agent. A boot with no agent, which is every open-framework boot, used to list it anyway. Its `agentName` argument suggested `"ask"` and `"build"`, and every `prompts/get` came back as a successful prompt whose one message read `Error: Agent "ask" not found`, which an MCP client passes to its model as instructions. On such a boot the prompt is now left out of `prompts/list`, a get on it is the protocol's own unknown-prompt error, and the boot log says once why. On a boot with agents nothing changes for a client: the prompt is listed, its argument suggests names the boot actually holds, and a miss still answers `Error: Agent "X" not found`. If the agent metadata cannot be fully read at boot, the prompt stays listed, because an outage is not proof that no agent exists. Its argument then suggests no names.
+- 1b22286: fix(mcp): a request with malformed params answers JSON-RPC -32602 Invalid params naming the param, not -32603 Internal error with a raw Zod issue list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An MCP request whose `params` fail the method's request schema (`prompts/get` with no `name`, `tools/call` with `{}`, `prompts/get` with `"name": 42`) used to answer `-32603 Internal error` whose message was the serialised Zod issue array: the client was told the server failed, and an agent that retries on Internal error kept retrying a request that could never succeed. It now answers `-32602 Invalid params` with one sentence per problem, such as `params.name is required` or `params.name must be a string`. The same requests stay refused; only the error class and the message change. Both transports (Streamable HTTP and stdio) build their server through one seam, so the answer is the same on either and for every method, including the ones the SDK installs itself (`initialize`). A tool's own argument check (for example `validate_expression` with an unknown `site`) keeps its answer, and an error raised inside a handler keeps its own code.
+- b388cfe: fix(objectql)!: the engine refuses filtering, sorting, grouping and aggregating on an `internal: true` field for every caller but a system context
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing an author writes is refused: the `internal: true` flag is read as before. The narrowing is a runtime one, on reads made as a user: a query that evaluates a flagged field answers 400 INVALID_FIELD from the engine itself, with the data door's sentence. The published type change adds a member to the `objectql` slot contract and is satisfied by the one implementer, ObjectQL. There is nothing for `objectstack migrate meta` to rewrite and no tombstone; the remedy is the refusal's own sentence (use another field), or running the server's own read as a system context. -->
+  Skills-docs: updated here — `content/docs/permissions/system-context.mdx` (row 18e: the engine's read path) and `content/docs/api/error-catalog.mdx` (`INVALID_FIELD`) state who is refused and who is served; no file under `skills/**` teaches filtering on an `internal: true` field, so no skill line changes.
+  
+  **BREAKING** for one shape only: server code that reads the engine as a user (not as a system context) and filters, sorts, groups or aggregates on a field declared `internal: true`.
+  
+  - FROM: the engine ran such a read.
+  - TO: the engine refuses it with the data door's `400 INVALID_FIELD`, naming the object, the field and the position, before anything is read. A read made as a system context (`isSystem: true`) is served as before, and the flagged column is still never returned on a row.
+  
+  What to do: run a server-side lookup that matches on a flagged field as a system context, or match on another field.
+  
+  - **`@objectstack/objectql`**: the `internal: true` evaluate refusal is defined once, in the engine. `find`, `findOne`, `count` and `aggregate` apply it to every caller but a system context, in every position the data door judges: a filter (including a relation hop and a `$field` comparand), a sort, a group key, an aggregation operand and an aggregation's own filter, and the same positions inside `expand`. `ObjectQL#assertNoInternalFieldEvaluated` answers the same question for any caller, for a door that judges before it reads.
+  - **`@objectstack/spec`**: new types on the `objectql` slot contract: `QueryEvaluationGate`, `InternalFieldEvaluationQuery` and `InternalFieldEvaluationOptions`. `IObjectQLEngine` extends `QueryEvaluationGate`.
+  - **`@objectstack/metadata-protocol`**: the data door asks the engine's refusal instead of keeping its own copy. Its answers are unchanged.
+  - **`@objectstack/runtime`**: the HTTP MCP data bridge asks the engine's refusal directly. Its answers are the data door's.
+  - **`@objectstack/mcp`**: the stdio data bridge's own copy of the refusal is retired in favour of the engine's. Its answers are the data door's.
+  
+  The level is patch rather than the minor a new spec type would take: the changeset gate refuses `minor` beside `Metadata-protocol: none`, and nothing an author writes is refused.
+- 64646ae: fix(rest,runtime)!: seeing a datasource's remote structure needs the read capability on every route, writes included
+  
+  Clause-②: yes (narrowing) — `POST /api/v1/datasources/:name/external/refresh-catalog` and `POST /api/v1/datasources/:name/external/tables/:remote/import`, and the MCP `import_object` tool, now require `manage_platform_settings` as well as `manage_metadata`; `@objectstack/rest` adds two exports, `federationCapabilityRefusal` and the type `FederationCallKind`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, no stored row or authorable spelling moves, and no export is removed or narrowed: two exports are added, and the federation family's two write doors and the MCP import tool ask one more platform capability of the caller. The remedy is a grant on the caller's permission set, never a rewrite of a package source or a stored row, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on two published HTTP doors and one MCP tool. Maintainer ruling, 2026-11-03 (verbatim: 「两个写接口同时要求读权限 (Recommended)」).
+  
+  - **The rule.** Seeing a datasource's remote structure needs the read capability, `manage_platform_settings`, on every route of the federation family, writes included. The two writes answer with that structure (the refresh with the catalog snapshot, the import with the definition it generated), so each requires the read capability AND the write capability, `manage_metadata`. The three read routes are unchanged.
+  - **Before.** The refresh and the import required `manage_metadata` only.
+  - **Now.** They require `manage_metadata` and `manage_platform_settings`. A caller holding `manage_metadata` without `manage_platform_settings` is refused with the read routes' own answer: `403 PERMISSION_DENIED`, the message naming `manage_platform_settings`. A caller holding neither is told both capabilities in one answer. The refusal comes before the service is looked up, so a refused import saves nothing.
+  - **MCP.** `import_object` asks the same rule, through the same function. A connection whose user holds `manage_metadata` without `manage_platform_settings` can pass neither federation call now, so `tools/list` omits `list_remote_tables` and `import_object` for it, as it already did for a connection holding neither capability.
+  - **One rule, one place.** `federationCapabilityRefusal(kind, held)` (`@objectstack/rest`) is the family's capability decision: the REST routes and the MCP bridge both call it, so no door admits a caller another refuses.
+  - **Who sees it.** A credential (session, `sys_api_key`, or an MCP connection) whose permission sets grant `manage_metadata` without `manage_platform_settings` and that calls `datasources.external.refreshCatalog`, `datasources.external.importObject` or the MCP `import_object` tool. The shipped `admin_full_access` set grants both, so a stock administrator is unaffected; a purpose-built set is the case to check. Studio's datasource page already required `manage_platform_settings` to list and draft remote tables, so its import flow is unchanged.
+  
+  **The remedy.** Grant `manage_platform_settings` to the calling credential's permission set, beside `manage_metadata`.
+- 04b1402: harden(data): changing an API key through the data door requires a signed-in session
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` names `sys_api_key` or teaches managing a key with an API key, and the docs teach key revocation and rotation from the API Keys list (`content/docs/ai/connect-mcp.mdx`, `content/docs/api/error-catalog.mdx`), a signed-in surface; every taught use stays true.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door: the data doors stop taking writes to `sys_api_key` from a caller an API key authenticated, and the remedy is to make the same change from a signed-in session, never a rewrite of anyone's code or metadata. No exported declaration is removed or narrowed; four names are added to `@objectstack/core`'s entry (the widening this changeset's `yes` declares); all four packages publish; no ADR-0087 id is named or touched. -->
+  
+  **BREAKING** (an accept-set narrowing).
+  
+  Managing API keys is a signed-in-session act on every data door, as minting one through `POST /api/v1/keys` is. An API key keeps acting as its owner for data, automation and MCP.
+  
+  **FROM.** The data doors judged a write to `sys_api_key` by the row and column rules alone, whichever credential authenticated the caller.
+  
+  **TO.** A write to `sys_api_key` from a caller an API key authenticated is refused `403 PERMISSION_DENIED`, and nothing is written, on the REST data routes (`/api/v1/data/sys_api_key`, the bulk routes and the cross-object `POST /api/v1/batch`), on the runtime dispatcher's data faces (`/data`, the `/mcp` HTTP tools, the action doors) and on the stdio MCP transport's `create_record`, `update_record` and `delete_record` tools, whose principal is always the configured `OS_MCP_STDIO_API_KEY`. The message tells the caller to sign in and manage the key from the API Keys page.
+  
+  - **Who is affected.** Only a script, integration or agent that changed `sys_api_key` rows through one of those doors while authenticated with an API key. **Fix:** make the change signed in, from the API Keys list (Account → Developer), or with a session cookie or session bearer token.
+  - **What does not change.** A signed-in session manages its own keys from the list as before, and the existing rule on who restores a key a forced password reset revoked is unchanged. Reading `sys_api_key` is unchanged on every door. System-context writes (the mint, the last-used stamp, the forced reset) are untouched. An operation the object does not expose keeps its `405 OBJECT_API_METHOD_NOT_ALLOWED`.
+  - **Where it is decided.** One rule, `apiKeyManagementCredentialRefusal`, added to `@objectstack/core`'s entry with `API_KEY_MANAGEMENT_READ_OPERATIONS`, `API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE` and the type `ApiKeyManagementCredentialInput`, asked beside each door's exposure gate. The REST and dispatcher doors read which credential authenticated the request from the shared request resolver (`onAdmission`); the stdio transport's credential is its API key by construction. The `ExecutionContext` shape is unchanged.
+  - **Embedders calling `HttpDispatcher` data handlers directly.** The rule is positive on the credential: a context with no `admission` keeps today's answer.
+- b48eeb1: fix(mcp,runtime)!: the MCP data tools refuse to filter, sort, group or aggregate on a field declared `internal: true`, with the data door's own 400 INVALID_FIELD, on the stdio transport and on the HTTP bridge's aggregate_records
+  
+  Clause-②: no (narrowing) — the MCP stdio transport's `query_records` and `aggregate_records`, and the HTTP MCP bridge's `aggregate_records`, refuse a query that evaluates a field declared `internal: true`, which they served before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no metadata an author writes changes meaning: a query position the REST data door already refuses is now refused by the MCP data tools too, with the door's own refusal. The fix for a caller is to query another field, which the refusal says; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the MCP data tools (`@objectstack/mcp`, `@objectstack/runtime`), on the gate the data door already applies (`@objectstack/metadata-protocol`).
+  
+  - **Before.** A field declared `internal: true` was omitted from every row on every door, and the REST data door (and the HTTP bridge's `query_records`, which reaches it) refused to evaluate one: `400 INVALID_FIELD`. Three MCP mouths hand a caller's query to the engine without reaching that door, and evaluated it: the stdio transport's `query_records` answered a `where` on such a field (`$eq`, `$startsWith`, any operator) and an `orderBy` by it; the stdio transport's `aggregate_records` and the HTTP bridge's `aggregate_records` answered a `where` or an aggregation's own `filter` on it. A group key or an aggregation operand on it was refused by the engine there, in the engine's words.
+  - **Now.** Each of the three asks the data door's gate (`assertNoInternalFieldEvaluated`, now public on the protocol service) before the engine, for every principal, administrators included, and answers what the door answers for the same query: `400 INVALID_FIELD`, naming the object, the field and the position, in the door's sentence. On MCP the tool result carries that `code`, `status` and message. No row is read.
+  - **Unchanged.** A query over ordinary fields is served as before; the flagged field is still omitted from every row; a field the caller may not read is still the security middleware's `403 PERMISSION_DENIED`. The engine's privileged lookups that match on such a field (key, token and share-link verification) do not pass through these doors and are untouched. A host that registers no protocol service has no data door for these tools to agree with and serves them as before.
+  - **Who sees it.** An MCP client that filters, sorts, groups or aggregates on a field its object declares `internal: true`. The built-in objects that declare one are platform `sys_*` objects, which the MCP data tools refuse by default (`allowSystemObjects`); where a host serves them, the same refusal now applies.
+  
+  **The remedy.** Filter, sort, group and aggregate on another field. A field that must be queryable is not one to declare `internal: true`.
+- Updated dependencies [ea025d3]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [c946cb9]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [0c64014]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [8ce974c]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [76bf6c5]
+- Updated dependencies [1a95c74]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [bc02a77]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [c594e1c]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [7b293c4]
+- Updated dependencies [3fb74b6]
+- Updated dependencies [86fb645]
+- Updated dependencies [c16040d]
+- Updated dependencies [1617b7f]
+- Updated dependencies [b399cb8]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [8d208a4]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c708de6]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [92b7bbd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [bf03ebb]
+- Updated dependencies [2c3574c]
+- Updated dependencies [1335c6b]
+- Updated dependencies [bdb19ca]
+- Updated dependencies [d8c611d]
+- Updated dependencies [ec0316e]
+- Updated dependencies [8bb2417]
+- Updated dependencies [2ac698b]
+- Updated dependencies [d0df873]
+- Updated dependencies [462b4f9]
+- Updated dependencies [9a0c622]
+- Updated dependencies [138dacf]
+- Updated dependencies [7f4258f]
+- Updated dependencies [1ac1c24]
+- Updated dependencies [97ca257]
+- Updated dependencies [104cd1a]
+- Updated dependencies [f1d795b]
+- Updated dependencies [b3d1415]
+- Updated dependencies [078e581]
+- Updated dependencies [18e4ac1]
+- Updated dependencies [51058ef]
+- Updated dependencies [4df6292]
+- Updated dependencies [f125ce4]
+- Updated dependencies [b16ee8b]
+- Updated dependencies [86d0a8c]
+- Updated dependencies [d089dac]
+- Updated dependencies [3557366]
+- Updated dependencies [29c70ca]
+- Updated dependencies [b5e7ba5]
+- Updated dependencies [38a278b]
+- Updated dependencies [bb82da1]
+- Updated dependencies [85ea12f]
+- Updated dependencies [85f7a0d]
+- Updated dependencies [e9fb529]
+- Updated dependencies [7b55ea9]
+- Updated dependencies [4138ce8]
+- Updated dependencies [53dda03]
+- Updated dependencies [ba1f164]
+- Updated dependencies [20f052d]
+- Updated dependencies [9467a1b]
+- Updated dependencies [8b65633]
+- Updated dependencies [c268b72]
+- Updated dependencies [d68d129]
+- Updated dependencies [bd68248]
+- Updated dependencies [f72bc9e]
+- Updated dependencies [a20dcae]
+- Updated dependencies [5d46f43]
+- Updated dependencies [c9aaee9]
+- Updated dependencies [3d6f230]
+- Updated dependencies [7eb0b19]
+- Updated dependencies [8e6ab05]
+- Updated dependencies [e756782]
+- Updated dependencies [8209a2f]
+- Updated dependencies [aee9c47]
+- Updated dependencies [0e75081]
+- Updated dependencies [45b4922]
+- Updated dependencies [399df5b]
+- Updated dependencies [31204d1]
+- Updated dependencies [2c881fb]
+- Updated dependencies [1bdf674]
+- Updated dependencies [4b8cbe2]
+- Updated dependencies [5f99582]
+- Updated dependencies [63f962f]
+- Updated dependencies [df8d020]
+- Updated dependencies [6f09464]
+- Updated dependencies [772b356]
+- Updated dependencies [4008e62]
+- Updated dependencies [b64bb72]
+- Updated dependencies [b861525]
+- Updated dependencies [6903c93]
+- Updated dependencies [4b06a54]
+- Updated dependencies [ebbb5b8]
+- Updated dependencies [9bdfe37]
+- Updated dependencies [a81b7cb]
+- Updated dependencies [eeb3117]
+- Updated dependencies [a5fcd06]
+- Updated dependencies [56076fd]
+- Updated dependencies [fdb9a07]
+- Updated dependencies [57958aa]
+- Updated dependencies [59775a0]
+- Updated dependencies [744211f]
+- Updated dependencies [87956dc]
+- Updated dependencies [3482f3d]
+- Updated dependencies [a6a369e]
+- Updated dependencies [601832b]
+- Updated dependencies [5c4e752]
+- Updated dependencies [4ab2e7e]
+- Updated dependencies [589049b]
+- Updated dependencies [d0f308c]
+- Updated dependencies [4dc41e6]
+- Updated dependencies [eb05ea2]
+- Updated dependencies [55a4898]
+- Updated dependencies [f87239a]
+- Updated dependencies [2ae8c89]
+- Updated dependencies [a4daa85]
+- Updated dependencies [b64980a]
+- Updated dependencies [bbb98c4]
+- Updated dependencies [1bb9536]
+- Updated dependencies [2bf71ce]
+- Updated dependencies [c1af99c]
+- Updated dependencies [99a6a78]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [3ac22c9]
+- Updated dependencies [ceef714]
+- Updated dependencies [b388cfe]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [cfd237f]
+  - @objectstack/spec@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/formula@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

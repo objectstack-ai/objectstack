@@ -421,6 +421,6 @@ function stubHost(engine: { find: (object: string, opts: unknown) => Promise<unk
     datetimeFieldNamesCache: new Map(),
     numberComparandFieldsCache: new Map(),
     getObjectFieldNames: async () => rosterFields,
-    getObjectSecurityMeta: async () => ({ isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, tenantAnchorIsPhantom: false }),
+    getObjectSecurityMeta: async () => ({ isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, tenantAnchorIsPhantom: false, externalOrganizationScopeUndeclared: false }),
   };
 }

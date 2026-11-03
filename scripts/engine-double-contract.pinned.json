@@ -3992,6 +3992,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/external-organization-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/external-population.test.ts",
       "verb": "findOne",
       "pinned": 1
