@@ -81,7 +81,7 @@ import {
   useStudioItemDraftStatus,
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
-import { FlowItemMoreMenu, type FlowCopied } from './FlowItemMoreMenu.js';
+import { FlowItemMoreMenu, flowCloneNoticeText, type FlowCopied } from './FlowItemMoreMenu.js';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
 import { activationReading } from '../setup/packagedFlows.js';
@@ -288,7 +288,7 @@ import {
 } from './studioScope.js';
 import { STUDIO_METADATA_AREA, studioMetadataAreaPath, studioPillarItemPath } from './metadataArea.js';
 import { PermissionSetCloneDialog } from '../metadata-admin/PermissionSetCloneDialog.js';
-import type { PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
+import { permissionSetCloneNoticeText, type PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
 import { useWalledCatalogReadOnly } from '../metadata-admin/catalog-scope.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
@@ -9920,11 +9920,12 @@ const NO_OBJECT_ORDER: readonly string[] = [];
  * objectstack#28567 — what the Automations pillar's "New similar" strip says:
  * the copy the clone door saved, shown on that copy in the package the answer
  * named, or an answer that named no package (nothing opened). `notice` is the
- * door's sentence, shown as sent.
+ * door's sentence, and `noticeCode` the code it names it by (objectstack#29727):
+ * shown in the console's language for a known code, as sent otherwise.
  */
 type FlowCopiedStrip =
-  | { kind: 'landed'; name: string; packageId: string; notice: string }
-  | { kind: 'noPackage'; name: string; notice: string };
+  | { kind: 'landed'; name: string; packageId: string; notice: string; noticeCode?: string }
+  | { kind: 'noPackage'; name: string; notice: string; noticeCode?: string };
 
 /** The navigation-state key the copy's landing rides to the copy's pillar on. */
 const FLOW_COPIED_ARRIVAL_STATE = 'flowNewSimilar';
@@ -9945,7 +9946,13 @@ function readFlowCopiedArrival(state: unknown, packageId: string | null): FlowCo
     | undefined;
   if (!arrival || arrival.kind !== 'landed' || packageId === null || arrival.packageId !== packageId) return null;
   if (typeof arrival.name !== 'string' || arrival.name === '') return null;
-  return { kind: 'landed', name: arrival.name, packageId, notice: typeof arrival.notice === 'string' ? arrival.notice : '' };
+  return {
+    kind: 'landed',
+    name: arrival.name,
+    packageId,
+    notice: typeof arrival.notice === 'string' ? arrival.notice : '',
+    ...(typeof arrival.noticeCode === 'string' ? { noticeCode: arrival.noticeCode } : {}),
+  };
 }
 
 export function AutomationsPillar({
@@ -10744,10 +10751,16 @@ export function AutomationsPillar({
     (copy: FlowCopied) => {
       setError(null);
       if (copy.packageId === null) {
-        setFlowCopied({ kind: 'noPackage', name: copy.name, notice: copy.notice });
+        setFlowCopied({ kind: 'noPackage', name: copy.name, notice: copy.notice, noticeCode: copy.noticeCode });
         return;
       }
-      const landed: FlowCopiedStrip = { kind: 'landed', name: copy.name, packageId: copy.packageId, notice: copy.notice };
+      const landed: FlowCopiedStrip = {
+        kind: 'landed',
+        name: copy.name,
+        packageId: copy.packageId,
+        notice: copy.notice,
+        noticeCode: copy.noticeCode,
+      };
       onDraftSaved?.({ type: 'flow', name: copy.name });
       // objectstack#28572 — the pair's flows are this surface's too.
       if (copy.packageId === railPackageId || (railPairId !== null && copy.packageId === railPairId)) {
@@ -11409,8 +11422,11 @@ export function AutomationsPillar({
                           })
                         : tFormat('engine.studio.auto.newSimilar.noPackage', locale, { name: flowCopiedShown.name })}
                     </p>
-                    {/* The door's sentence that the copy is switched off, VERBATIM. */}
-                    {flowCopiedShown.notice && <p data-testid="auto-new-similar-notice">{flowCopiedShown.notice}</p>}
+                    {/* The door's sentence that the copy is switched off: in the console's
+                        language for its known code (objectstack#29727), else VERBATIM. */}
+                    {flowCopiedShown.notice && (
+                      <p data-testid="auto-new-similar-notice">{flowCloneNoticeText(flowCopiedShown, locale)}</p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -11760,12 +11776,14 @@ export function AutomationsPillar({
  * objectstack#28573 — what the Access pillar's "New similar" strip says: the
  * copy the clone door saved (shown on that copy, in the package the answer
  * named), or an answer the pillar could not open (no copy named, or no
- * package). `notice` is the server's sentence, shown as sent.
+ * package). `notice` is the server's sentence, and `noticeCode` the code it
+ * names it by (objectstack#29727): shown in the console's language for a known
+ * code, as sent otherwise.
  */
 type NewSimilarStrip =
-  | { kind: 'landed'; name: string; package: string; notice: string }
-  | { kind: 'noPackage'; name: string; notice: string }
-  | { kind: 'noName'; notice: string };
+  | { kind: 'landed'; name: string; package: string; notice: string; noticeCode?: string }
+  | { kind: 'noPackage'; name: string; notice: string; noticeCode?: string }
+  | { kind: 'noName'; notice: string; noticeCode?: string };
 
 /** The navigation-state key the copy's landing rides to the copy's pillar on. */
 const NEW_SIMILAR_ARRIVAL_STATE = 'accessNewSimilar';
@@ -11782,7 +11800,13 @@ function readNewSimilarArrival(state: unknown, packageId: string): NewSimilarStr
   if (!arrival || arrival.kind !== 'landed' || arrival.package !== packageId || typeof arrival.name !== 'string') {
     return null;
   }
-  return { kind: 'landed', name: arrival.name, package: packageId, notice: typeof arrival.notice === 'string' ? arrival.notice : '' };
+  return {
+    kind: 'landed',
+    name: arrival.name,
+    package: packageId,
+    notice: typeof arrival.notice === 'string' ? arrival.notice : '',
+    ...(typeof arrival.noticeCode === 'string' ? { noticeCode: arrival.noticeCode } : {}),
+  };
 }
 
 /**
@@ -12141,14 +12165,20 @@ export function AccessPillar({
     (copy: PermissionSetCloned) => {
       setNewSimilarOpen(false);
       if (!copy.name) {
-        setNewSimilarStrip({ kind: 'noName', notice: copy.notice });
+        setNewSimilarStrip({ kind: 'noName', notice: copy.notice, noticeCode: copy.noticeCode });
         return;
       }
       if (typeof copy.package !== 'string') {
-        setNewSimilarStrip({ kind: 'noPackage', name: copy.name, notice: copy.notice });
+        setNewSimilarStrip({ kind: 'noPackage', name: copy.name, notice: copy.notice, noticeCode: copy.noticeCode });
         return;
       }
-      const landed: NewSimilarStrip = { kind: 'landed', name: copy.name, package: copy.package, notice: copy.notice };
+      const landed: NewSimilarStrip = {
+        kind: 'landed',
+        name: copy.name,
+        package: copy.package,
+        notice: copy.notice,
+        noticeCode: copy.noticeCode,
+      };
       // objectstack#28572 — the pair's sets are this surface's too.
       if (copy.package === railPackageId || (railPairId !== null && copy.package === railPairId)) {
         setNewSimilarStrip(landed);
@@ -12355,7 +12385,19 @@ export function AccessPillar({
                 ? tFormat('engine.studio.access.newSimilar.noPackage', locale, { name: newSimilarStrip.name })
                 : t('perm.clone.noName', locale)}
           </p>
-          {newSimilarStrip.notice && <p>{newSimilarStrip.notice}</p>}
+          {/* objectstack#29727 — in the console's language for its known code, else as sent. */}
+          {newSimilarStrip.notice && (
+            <p>
+              {permissionSetCloneNoticeText(
+                {
+                  notice: newSimilarStrip.notice,
+                  noticeCode: newSimilarStrip.noticeCode,
+                  package: newSimilarStrip.kind === 'landed' ? newSimilarStrip.package : null,
+                },
+                locale,
+              )}
+            </p>
+          )}
         </div>
         <button
           type="button"

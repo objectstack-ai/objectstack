@@ -207,6 +207,12 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.clone.failed': '无法克隆该权限集。',
   'perm.clone.noName': '克隆已创建，但服务端的响应未给出其名称。请从权限集列表中打开它。',
   'perm.clone.done': '已克隆为 {name}。请从权限集列表中打开它进行编辑。',
+  'perm.clone.notice.environmentWide':
+    '副本已在环境级保存，不属于任何软件包，与被复制的权限集一样。副本是在本系统中新建的权限集，与被复制的权限集没有任何关联：对那个权限集的更改不会影响它。未复制：委派管理范围（`adminScope`）和全员基线建议（`isDefault`）——如副本需要，请在副本上有意授予。副本目前还没有任何持有者：请把它加入某个岗位，或分配给用户。',
+  'perm.clone.notice.inPackage':
+    '副本已保存在软件包 {package} 中，与原权限集并存而不是替换它，并随该软件包一起分发。副本是在本系统中新建的权限集，与被复制的权限集没有任何关联：对那个权限集的更改不会影响它。未复制：委派管理范围（`adminScope`）和全员基线建议（`isDefault`）——如副本需要，请在副本上有意授予。副本目前还没有任何持有者：请把它加入某个岗位，或分配给用户。',
+  'perm.clone.notice.inCreatedPackage':
+    '副本已保存在软件包 {package} 中：这个软件包是为存放你对原权限集所在软件包的修改而创建的。副本与原权限集并存而不是替换它，并随该软件包一起分发。副本是在本系统中新建的权限集，与被复制的权限集没有任何关联：对那个权限集的更改不会影响它。未复制：委派管理范围（`adminScope`）和全员基线建议（`isDefault`）——如副本需要，请在副本上有意授予。副本目前还没有任何持有者：请把它加入某个岗位，或分配给用户。',
   'perm.save.locked':
     '保存被拒绝（403 not_overridable）：该权限集由代码包提供，服务端不接受原地编辑。请改用「新建类似」—— 服务端以新名称把副本存入存放你的修改的软件包，升级会继续流向这个基线。',
   // Designer wrapper
@@ -2213,6 +2219,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.newSimilar.submit': '创建副本',
   'engine.studio.auto.newSimilar.failedHttp': '无法创建副本（HTTP {status}）。',
   'engine.studio.auto.newSimilar.failed': '无法创建副本。',
+  'engine.studio.auto.newSimilar.notice': '副本已停用，启用后才会运行；它仍使用与原流程相同的子流程、动作和对象。',
   'engine.studio.auto.newSimilar.done': '已在软件包 {package} 中保存副本 {name}。',
   'engine.studio.auto.newSimilar.noPackage': '服务器已保存副本 {name}，但回答中没有说明它所在的软件包，因此未打开任何内容。',
   'engine.studio.auto.newSimilar.dismiss': '关闭',

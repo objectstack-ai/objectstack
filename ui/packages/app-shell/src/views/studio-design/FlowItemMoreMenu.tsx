@@ -65,6 +65,21 @@ export interface FlowCopied {
   packageId: string | null;
   /** `data.notice`, verbatim (the copy is switched off); `''` when none was sent. */
   notice: string;
+  /** objectstack#29727 — `data.noticeCode` as sent, naming {@link notice}'s sentence; absent when none was sent. */
+  noticeCode?: string;
+}
+
+/**
+ * objectstack#29727 — the copy's notice in the console's language. The door
+ * names its sentence by a code (`FLOW_CLONE_DISABLED_COPY`, the server's
+ * `FLOW_CLONE_NOTICE_CODE`); a code this console does not know, or an answer
+ * with none, shows the door's `notice` as sent. Same pattern as
+ * `CloudConnectionPanel`'s `translateFailureCode`: the key is a string literal
+ * so `check:i18n-keys` resolves it.
+ */
+export function flowCloneNoticeText(copy: Pick<FlowCopied, 'notice' | 'noticeCode'>, locale?: string): string {
+  if (copy.noticeCode === 'FLOW_CLONE_DISABLED_COPY') return t('engine.studio.auto.newSimilar.notice', locale);
+  return copy.notice;
 }
 
 /** The clone door's answer: the copy, or its refusal verbatim. */
@@ -100,6 +115,7 @@ async function requestFlowNewSimilar(
         name: typeof flowName === 'string' && flowName ? flowName : body.name,
         packageId: typeof data.packageId === 'string' && data.packageId !== '' ? data.packageId : null,
         notice: typeof data.notice === 'string' ? data.notice : '',
+        ...(typeof data.noticeCode === 'string' && data.noticeCode !== '' ? { noticeCode: data.noticeCode } : {}),
       },
     };
   } catch (e) {

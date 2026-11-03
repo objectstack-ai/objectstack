@@ -129,7 +129,7 @@ import { errorCodeIs } from '@object-ui/types';
 import { formatMetadataError, type MetadataError } from '@object-ui/data-objectstack';
 import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
 import { isStudioHiddenSystemField } from '../studio-design/studioHiddenSystemField.js';
-import type { PermissionSetCloned } from './permission-set-clone.js';
+import { permissionSetCloneNoticeText, type PermissionSetCloned } from './permission-set-clone.js';
 import {
   mergePermissionSlice,
   scopePermissionSet,
@@ -1932,7 +1932,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           <Copy className="h-4 w-4 mt-0.5 shrink-0" />
           <div className="space-y-1">
             {cloned.name !== name && <p>{tFormat('perm.clone.done', locale, { name: cloned.name })}</p>}
-            {cloned.notice && <p>{cloned.notice}</p>}
+            {/* objectstack#29727 — in the console's language by the answer's code; the wire notice otherwise. */}
+            {cloned.notice && <p>{permissionSetCloneNoticeText(cloned, locale)}</p>}
           </div>
         </div>
       )}
