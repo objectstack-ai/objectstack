@@ -241,10 +241,13 @@ describe('PackageExportManifestSchema.withheldMaps names each map the export wit
     if (result.success) expect(result.data).toEqual(manifest);
   });
 
-  it('is declared ahead of its producer: the describe opens with the planned marker and names the ADR, never a tracker id', () => {
+  it('is served: the describe carries no planned marker, and names no tracker id', () => {
+    // The export writes the list and both install modes read it (runtime
+    // `assemblePackageManifest`, cloud-connection's install-local door), so the
+    // ADR-0049 declared-ahead marker is dropped in the change that serves it.
     const description = PackageExportManifestSchema.shape.withheldMaps.description ?? '';
-    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(description).toContain('ADR-0049');
+    expect(description).not.toContain('PLANNED');
+    expect(description).toMatch(/^Every map the export withheld WHOLE/);
     expect(description).not.toMatch(/#\d{3,}/);
   });
 

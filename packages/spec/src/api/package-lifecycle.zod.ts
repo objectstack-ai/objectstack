@@ -38,12 +38,11 @@
  * `RollbackToPackageCommitResponseSchema` below is the true contract,
  * authored after that retirement per the ruling's sequencing (3A).
  *
- * Two members are not transcriptions but DECLARED AHEAD OF THEIR PRODUCER
- * (ADR-0049), each describe opening `[PLANNED — not yet served]` until the
+ * One member is not a transcription but DECLARED AHEAD OF ITS PRODUCER
+ * (ADR-0049), its describe opening `[PLANNED — not yet served]` until the
  * change that serves it drops the marker: the `nav` arm of
- * `GetPackageCustomizationsResponseSchema.contributions` (#27928) and
- * `PackageExportManifestSchema.withheldMaps` (#28640 ruling ③A, served by
- * #29342). Their own docblocks say what is not served yet.
+ * `GetPackageCustomizationsResponseSchema.contributions` (#27928). Its own
+ * docblock says what is not served yet.
  */
 
 import { z } from 'zod';
@@ -198,22 +197,18 @@ export const RollbackToPackageCommitResponseSchema = lazySchema(() => z.object({
  * redactor's own `redactedKeys` spelling of those four positions, and
  * `package-lifecycle.test.ts` holds the two equal.
  *
- * DECLARED AHEAD OF ITS PRODUCER (ADR-0049): `withheldMaps` is declared
- * before any export writes it and before any install door reads it. Until the
- * server half (#29342) makes `assemblePackageManifest` write the list and both
- * install doors name each incomplete map, no export carries it; its describe
- * opens `[PLANNED — not yet served]`, and #29342 drops the marker in the change
- * that serves it (the pin is in `package-lifecycle.test.ts`). Its `door` row in
- * `UNMANAGED_INSTALL_KEY_DISPOSITIONS` is live today: it keeps the unmanaged
- * import from refusing an export that carries the key.
+ * Served (#29342): `assemblePackageManifest` writes the list, judging each
+ * exported connector's stored body with the same redactor the served read ran,
+ * and both install modes of `POST /marketplace/install-local` read it, accept
+ * the package and name each incomplete map in their answer. Its `door` row in
+ * `UNMANAGED_INSTALL_KEY_DISPOSITIONS` keeps the unmanaged import from
+ * refusing an export that carries the key.
  */
 export const PackageExportManifestSchema = lazySchema(() => z.object({
   id: z.string().describe('The exported package\'s id.'),
   name: z.string().describe('The exported package\'s machine name.'),
   version: z.string().describe('The exported package\'s version.'),
   label: z.string().optional().describe('Display label, when the package declares one.'),
-  // Declared ahead of its producer: #29342 writes and reads it, and drops the
-  // `[PLANNED — not yet served]` marker in that change.
   withheldMaps: z.array(z.object({
     type: z.literal('connector').describe('Metadata type of the item whose map was withheld.'),
     name: z.string().describe('Name of the item whose map was withheld.'),
@@ -224,11 +219,10 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
       'providerConfig.transport.env',
     ]).describe('Dot path of the withheld map inside the item.'),
   }).strict()).optional().describe(
-    '[PLANNED — not yet served] Declared ahead of its producer (ADR-0049): no export writes this list '
-    + 'yet and no install door reads it yet. Every map the export withheld WHOLE because a served read '
-    + 'never carries it: a connector\'s header and environment-variable maps. The item is written with '
-    + 'that map absent, so once served an import reads this list to tell an incomplete map from one the '
-    + 'package never had, and names each one for an operator to re-enter. Positions only: no header or '
+    'Every map the export withheld WHOLE because a served read never carries it: a connector\'s header '
+    + 'and environment-variable maps. The item is written with that map absent, so an import reads this '
+    + 'list to tell an incomplete map from one the package never had, and names each one for an operator '
+    + 'to re-enter. Positions only: no header or '
     + 'variable name is listed. Absence says nothing about what was withheld when the exporter predates '
     + 'this key; from an exporter that writes it, absence means nothing was withheld.',
   ),
