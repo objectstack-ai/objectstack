@@ -1186,7 +1186,9 @@ export function balanceOf(bins, items = null) {
 //
 // ⛔ Density is never traded for balance. planShards() takes a slicing only
 // when the sliced split keeps every shard within this cap, and the self-test
-// pins the committed dataset's full list, split as CI splits it, within it.
+// pins the committed dataset's full list, split as CI splits it, within it --
+// both judged with the declaration-closure allowance below (closureAllowance())
+// when the split carries the reader slice, and with no allowance otherwise.
 //
 // `packages` is whole-package `{name, weight}`, CI's exclusions already applied.
 export function densityCap(packages, shardCount = SHARD_COUNT) {
@@ -1269,6 +1271,36 @@ export function refineToCap(bins, items, cap) {
   return out;
 }
 
+// ── THE CAP'S DECLARATION-CLOSURE ALLOWANCE (ruling record 6596963071) ─────
+//
+// The reader slice's closure charge (DECLARATION_CLOSURE_CHARGE_SECONDS) is
+// packing weight, and LPT spends it by moving that much whole-package work off
+// the reader slice's shard onto the others. The density cap above is the densest
+// bin of a split that carries no such charge, so when that split is balanced --
+// the sliced package sits below the mean, and the cap IS the mean -- no split
+// carrying the charge can come back within it, at any slice count: the charge
+// alone lifts the other shards by about charge / (shards - 1). Measured on the
+// 2026-11-02 refresh at 8 shards (the CLI 1432.04s, the mean 1455.81s): the
+// cap read 1455.81s, and the CLI cut 2, 3 and 4 ways put its densest shard at
+// 1552.68s / 1552.77s / 1552.63s, so the full list ran the CLI whole, a 1432s
+// serial task, against ~500-570s on every other shard. On every dataset before
+// it the cap was the CLI's own whole bin, which no slicing approaches, so the
+// charge and the cap had never met.
+//
+// So a candidate split that CARRIES the reader slice is judged against the cap
+// plus that displacement: DECLARATION_CLOSURE_CHARGE_SECONDS / (shardCount - 1),
+// 111.86s at 8 shards. It is the charge's own arithmetic -- the density the
+// closure pin already chose to move -- and nothing else: a split with no reader
+// slice (the package whole, a run without it, a document that states its own
+// slicing) is judged against the bare cap, and a split denser than the cap plus
+// the charge's share is still refused, by name (renderSliceDecision()). A
+// one-shard run displaces nothing and is allowed nothing.
+export function closureAllowance(items, shardCount) {
+  return shardCount > 1 && items.some((i) => i.closure !== undefined)
+    ? DECLARATION_CLOSURE_CHARGE_SECONDS / (shardCount - 1)
+    : 0;
+}
+
 // The split a run actually runs: partition(), and -- only when the split
 // carries a slice -- refineToCap() against the density cap. A split with no
 // slice is the plain LPT split it always was, byte for byte.
@@ -1291,7 +1323,9 @@ export function placeItems(items, shardCount, cap = Infinity) {
 //   SPREADS     its slices land on distinct shards at this run's shard count,
 //               which is what makes them run in parallel at all;
 //   WITHIN CAP  the sliced split keeps every shard within the density cap
-//               (densityCap), repaired by refineToCap() where LPT overshoots.
+//               (densityCap), plus closureAllowance() when the split carries
+//               the reader slice, repaired by refineToCap() where LPT
+//               overshoots; the final placement is repaired against the same.
 //
 // All three => sliced at the configured count. Any one fails => whole, and the
 // decision says which. Packages are decided in name order, each against the
@@ -1321,8 +1355,11 @@ export function planShards(
     const needed = own > target;
     let spreads = false;
     let densest = null;
+    let allowance = 0;
     if (needed) {
-      const bins = placeItems(expandWith(pkg.name, pkg.sliceCount), shardCount, cap);
+      const candidate = expandWith(pkg.name, pkg.sliceCount);
+      allowance = closureAllowance(candidate, shardCount);
+      const bins = placeItems(candidate, shardCount, cap + allowance);
       try {
         assertSlicesSpread(bins);
         spreads = true;
@@ -1331,24 +1368,29 @@ export function planShards(
       }
       densest = Math.max(...bins.map((b) => b.total));
     }
-    const withinCap = densest !== null && densest <= cap;
+    const withinCap = densest !== null && densest <= cap + allowance;
     const count = needed && spreads && withinCap ? pkg.sliceCount : 1;
     chosen.set(pkg.name, count);
-    decisions.push({ name: pkg.name, configured: pkg.sliceCount, count, needed, spreads, withinCap, own, target, densest, cap });
+    decisions.push({ name: pkg.name, configured: pkg.sliceCount, count, needed, spreads, withinCap, own, target, densest, cap, allowance });
   }
   const items = expandSlices(weighed.map((p) => ({ ...p, sliceCount: chosen.get(p.name) })), readers);
-  return { items, bins: placeItems(items, shardCount, cap), decisions };
+  return { items, bins: placeItems(items, shardCount, cap + closureAllowance(items, shardCount)), decisions };
 }
 
-// One line per decision, for the shard log: what the run chose and why.
+// One line per decision, for the shard log: what the run chose and why. The
+// declaration-closure allowance is named whenever it was part of the verdict --
+// a refusal past it, or a slicing only it admitted -- and left out when the bare
+// cap already decided, so the line never claims a cap the split did not meet.
 export function renderSliceDecision(d) {
   const floor = `whole ${d.own.toFixed(0)}s against ${d.target.toFixed(0)}s, ${MAX_SHARD_OVER_MEAN}x the heaviest other serial task`;
   const capText = Number.isFinite(d.cap) ? `${d.cap.toFixed(2)}s density cap` : 'no density cap';
+  const allowed =
+    Number.isFinite(d.cap) && (d.allowance ?? 0) > 0 ? ` plus its ${d.allowance.toFixed(2)}s declaration-closure allowance` : '';
   let why;
   if (!d.needed) why = `not the run's floor: ${floor}`;
   else if (!d.spreads) why = `${floor}, but ${d.configured} slices cannot spread across this run's shards`;
-  else if (!d.withinCap) why = `${floor}, but sliced the densest shard would carry ${d.densest.toFixed(2)}s, past the ${capText}`;
-  else why = `${floor}; densest shard ${d.densest.toFixed(2)}s, within the ${capText}`;
+  else if (!d.withinCap) why = `${floor}, but sliced the densest shard would carry ${d.densest.toFixed(2)}s, past the ${capText}${allowed}`;
+  else why = `${floor}; densest shard ${d.densest.toFixed(2)}s, within the ${capText}${d.densest > d.cap ? allowed : ''}`;
   return `${d.name}: ${d.count > 1 ? `sliced x${d.count}` : 'whole'} (${why})`;
 }
 
@@ -1842,7 +1884,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
   'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 11,
-  'density cap and the per-run slice decision (#22075)': 14,
+  // 4 of these 18 are the declaration-closure allowance (ruling record
+  // 6596963071): 1 unit, 3 on the frozen 2026-11-02 shape.
+  'density cap and the per-run slice decision (#22075)': 18,
   'the drift step reports on every event, `schedule` included, and refuses a missing event': 8,
   // The nightly tiers state their own slicing (`sliceAcrossShards`). 6 of these
   // 17 read the live tree: 3 read test-nightly-tiers.yml back (the matrix, the
@@ -3198,14 +3242,18 @@ function selfTest() {
   // splits it, puts no shard past the cap -- and that split slices, so the cap
   // is graded on the shape it exists to bound (pin 3b proves the slice is
   // there). This is the case that fails when a slicing packs a shard denser
-  // than the split the drift step was proven green on.
+  // than the split the drift step was proven green on. Scored against the cap
+  // planShards() judged that split by: plus closureAllowance() when it carries
+  // the reader slice, which the full list does whenever it slices the CLI.
   check(() => {
-    const over = real.map((b, i) => ({ shard: i + 1, total: b.total })).filter((b) => b.total > datasetCap);
+    const allowance = closureAllowance(datasetItems, SHARD_COUNT);
+    const over = real.map((b, i) => ({ shard: i + 1, total: b.total })).filter((b) => b.total > datasetCap + allowance);
     if (over.length > 0 || !datasetItems.some((i) => i.slice)) {
       throw new Error(
         `density cap: the committed dataset's full list, split as CI splits it, puts ` +
           `${over.map((b) => `shard ${b.shard} at ${b.total.toFixed(2)}s`).join(', ') || 'no slice on any shard'} ` +
-          `against the ${datasetCap.toFixed(2)}s cap (the whole-package split's densest bin). ` +
+          `against the ${datasetCap.toFixed(2)}s cap (the whole-package split's densest bin) ` +
+          `plus a ${allowance.toFixed(2)}s declaration-closure allowance. ` +
           `Bins: ${real.map((b) => b.total.toFixed(2)).join('/')}s; ` +
           (datasetPlan.decisions.map(renderSliceDecision).join('; ') || 'no slicing decision') + '.'
       );
@@ -3231,6 +3279,107 @@ function selfTest() {
     const [d] = planShards(capFixture, 3, { cap: 180 }).decisions;
     if (d.count !== 3 || !d.withinCap) {
       throw new Error(`density cap: a slicing within the cap was refused: ${renderSliceDecision(d)}`);
+    }
+  });
+
+  // THE DECLARATION-CLOSURE ALLOWANCE (closureAllowance(), ruling record
+  // 6596963071), on the shape that needed it: the 2026-11-02 refresh's package
+  // weights, frozen here rather than read from the dataset file so the pin does
+  // not move with a refresh, the CLI cut 2 ways, at 8 shards, with the reader
+  // slice and its rider fixed. The whole split is balanced, so the bare cap is
+  // the mean (1455.81s) and the charge lifts the other shards past it; carried,
+  // the reader slice earns 783 / 7 = 111.86s and the split is judged against
+  // 1567.67s.
+  const refreshedWeights = [
+    'cli 1432.04 spec 1008.78 runtime 987.16 objectql 693.87 rest 630.61 metadata-protocol 566.5',
+    'service-automation 526.88 plugin-security 515.26 plugin-auth 450.08 driver-sql 267.52',
+    'plugin-audit 261.68 plugin-approvals 243.57 cloud-connection 233.46 lint 207.88 verify 189.81',
+    'plugin-sharing 183.78 service-storage 183.37 client 164.18 service-messaging 145.67',
+    'service-analytics 144 driver-memory 141.87 service-settings 140.81 service-datasource 136.01',
+    'driver-turso 108.76 organizations 107.27 core 106.66 plugin-email 101.12 example-showcase 90.51',
+    'connector-app-github 82.27 driver-sqlite-wasm 78.42 platform-objects 77 trigger-record-change 75.65',
+    'plugin-hono-server 72.94 mcp 70.64 connector-app-stripe 69.8 plugin-dev 60.84 plugin-webhooks 53.92',
+    'service-mailbox 53.18 connector-mcp 50.82 http-conformance 49.59 plugin-pinyin-search 49.43',
+    'driver-mongodb 49.14 example-todo 47.71 service-package 45.89 metadata 43.72 connector-openapi 43.28',
+    'formula 43.23 service-queue 40.79 driver-odata 35.98 hono 35.4 vitest-filter-preflight 31.35',
+    'service-print 29.15 example-crm 27.79 trigger-schedule 26.54 types 25.69 metadata-core 25.24',
+    'create-objectstack 23.84 service-knowledge 22.56 connector-rest 22.09 service-sms 21.48',
+    'metadata-fs 19.4 connector-slack 18.54 downstream-contract 17.77 service-job 14.35',
+    'service-cluster 13.58 example-embed-objectql 13.14 service-i18n 13.13 client-react 12.26',
+    'trigger-api 10.48 service-cluster-redis 9.22 service-realtime 8.19 eslint-plugin 6.46',
+    'sdui-parser 5.34 embedder-openai 4.47 observability 3.47 knowledge-ragflow 3.23 connector-imap 3.2',
+    'service-cache 2.77 knowledge-memory 2.69',
+  ].join(' ').split(' ');
+  // The packages that run `test` and `test:repo` as two tasks, as the workspace
+  // manifests read on that refresh; without them spec's 1008.78s would be the
+  // floor and the CLI would not be NEEDED at all.
+  const refreshedTwoTask = new Set(['core', 'objectql', 'rest', 'runtime', 'spec', 'types']);
+  const refreshedShape = (cliSlices) => {
+    const out = [];
+    for (let i = 0; i < refreshedWeights.length; i += 2) {
+      const short = refreshedWeights[i];
+      out.push({
+        name: short === 'create-objectstack' ? short : `@objectstack/${short}`,
+        weight: Number(refreshedWeights[i + 1]),
+        tasks: refreshedTwoTask.has(short) ? 2 : 1,
+        sliceCount: short === 'cli' ? cliSlices : 1,
+      });
+    }
+    return out;
+  };
+  const refreshedReaders = Object.freeze({
+    slices: Object.freeze({ '@objectstack/cli': 1 }),
+    packages: Object.freeze(['@objectstack/cli', '@objectstack/metadata']),
+  });
+  check(() => {
+    // The allowance itself: the charge's share of the other shards when a
+    // closure is carried, nothing when none is, nothing on one shard.
+    const carried = [{ name: 'a 1/2', weight: 1, slice: { index: 1, count: 2 }, closure: DECLARATION_CLOSURE_CHARGE_SECONDS }];
+    const plain = [{ name: 'a', weight: 1, slice: null }];
+    const got = [closureAllowance(carried, 8), closureAllowance(plain, 8), closureAllowance(carried, 1)];
+    if (got[0] !== DECLARATION_CLOSURE_CHARGE_SECONDS / 7 || got[1] !== 0 || got[2] !== 0) {
+      throw new Error(`closure allowance: carried at 8 / plain at 8 / carried at 1 read ${got.join(' / ')}s`);
+    }
+  });
+  check(() => {
+    // Carried: the refreshed shape slices x2, its densest shard past the bare
+    // cap and within the cap plus the allowance, and the log names the allowance.
+    const shape = refreshedShape(2);
+    const cap = densityCap(shape, 8);
+    const plan = planShards(shape, 8, { cap, readers: refreshedReaders });
+    const [d] = plan.decisions;
+    const judged = cap + d.allowance;
+    if (
+      shape.length !== 79 || cap.toFixed(2) !== '1455.81' || d.allowance.toFixed(2) !== '111.86' ||
+      judged.toFixed(2) !== '1567.67' || d.count !== 2 || !d.withinCap || !(d.densest > cap) ||
+      !(d.densest <= judged) || balanceOf(plan.bins).max > judged ||
+      !renderSliceDecision(d).includes('plus its 111.86s declaration-closure allowance')
+    ) {
+      throw new Error(
+        `closure allowance: the refreshed shape (${shape.length} packages, cap ${cap.toFixed(2)}s, allowance ` +
+          `${d.allowance.toFixed(2)}s) was judged ${renderSliceDecision(d)}`
+      );
+    }
+    assertSlicesSpread(plan.bins);
+  });
+  check(() => {
+    // Not carried, not allowed: the same shape with no reader slice in the
+    // split is judged against the bare cap.
+    const shape = refreshedShape(2);
+    const [d] = planShards(shape, 8, { cap: densityCap(shape, 8), readers: NO_DECLARATION_READERS }).decisions;
+    if (d.allowance !== 0 || renderSliceDecision(d).includes('allowance')) {
+      throw new Error(`closure allowance: a split with no reader slice was allowed ${d.allowance}s: ${renderSliceDecision(d)}`);
+    }
+  });
+  check(() => {
+    // The allowance widens the cap and does not lift it: the carried split
+    // against a cap one second short of admitting it is refused, by name.
+    const shape = refreshedShape(2);
+    const [taken] = planShards(shape, 8, { cap: densityCap(shape, 8), readers: refreshedReaders }).decisions;
+    const short = taken.densest - taken.allowance - 1;
+    const [d] = planShards(shape, 8, { cap: short, readers: refreshedReaders }).decisions;
+    if (d.count !== 1 || d.withinCap || !renderSliceDecision(d).includes('declaration-closure allowance')) {
+      throw new Error(`closure allowance: a split past the cap plus its allowance was taken: ${renderSliceDecision(d)}`);
     }
   });
 
