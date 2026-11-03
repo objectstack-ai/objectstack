@@ -138,8 +138,8 @@ let rows: Array<Record<string, unknown>> = [];
 
 function makeDataSource() {
   const ds: any = {
-    find: vi.fn(async (_object: string, params: any) => {
-      if (params?.$top !== 0) listQueries.push(params);
+    find: vi.fn(async (object: string, params: any) => {
+      if (object === OBJ && params?.$top !== 0) listQueries.push(params);
       if (failWith) throw failWith;
       return { data: rows, total: rows.length };
     }),

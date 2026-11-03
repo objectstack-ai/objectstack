@@ -1144,6 +1144,10 @@ const zh = {
       pin: '固定：默认打开此视图',
       unpin: '取消固定：列表恢复打开默认视图',
       inMenu: '已在菜单中',
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: '我的视图',
+      saveAsMyView: '另存为我的视图',
+      myViewName: '视图名称',
     },
     dragToReorder: '拖动排序',
     defaultView: '默认视图',
