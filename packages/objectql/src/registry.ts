@@ -721,6 +721,11 @@ function admittedFieldPatches(
  */
 type ServedObjectLayer = 'served' | 'code';
 
+/** [#29903] Whether `contributor` is an `extend` contribution of `packageId`. */
+function isExtensionOf(contributor: ObjectContributor, packageId: string | undefined): boolean {
+  return packageId !== undefined && contributor.ownership === 'extend' && contributor.packageId === packageId;
+}
+
 /**
  * Deep merge two ServiceObject definitions.
  *
@@ -4674,6 +4679,29 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#29903, ADR-0146 D8 item 3] An object as {@link resolveObject} resolves
+   * it, but with the `extend` contributions of `excludedPackageId` left out of
+   * the fold, as if that package had never extended it: the same base layer
+   * (`overlay ?? own`), every other extender folded in the same order, the same
+   * tail. With no such contribution it IS {@link resolveObject}'s answer (the
+   * cached body). Uncached otherwise, as {@link resolveOwnerLayer} is.
+   *
+   * The reader is the protocol's per-package layer, which serves a base's
+   * objects to the base's own export WITHOUT its `.custom` pair's extension:
+   * the base's export carries the base unchanged, and the pair's export carries
+   * the extension as its `objectExtensions` entry. Folded in, the pair's field
+   * and field patches travel twice, the second time as if the base shipped them.
+   */
+  private resolveObjectWithoutExtensionsOf(fqn: string, excludedPackageId: string | undefined): ServiceObject | undefined {
+    const contributors = excludedPackageId === undefined ? undefined : this.objectContributors.get(fqn);
+    if (!contributors || !contributors.some((c) => isExtensionOf(c, excludedPackageId))) return this.resolveObject(fqn);
+    const kept = contributors.filter((c) => !isExtensionOf(c, excludedPackageId));
+    const ownerContrib = kept.find(c => c.ownership === 'own');
+    if (!ownerContrib) return undefined;
+    return this.foldExtenders(kept, kept.find(c => c.ownership === 'overlay') ?? ownerContrib);
+  }
+
+  /**
    * Fold every `extend` contribution over a chosen base layer, in the list's
    * (priority-sorted) order. Extracted from {@link resolveObject} so the
    * code-layer resolution ({@link resolveOwnerLayer}) folds extenders exactly
@@ -5477,7 +5505,7 @@ export class SchemaRegistry {
    * matching {@link resolveObject}, so this narrows nothing the fold was doing
    * on an unfolded base.
    */
-  foldObjectExtendersOnto<T>(name: string, base: T): T {
+  foldObjectExtendersOnto<T>(name: string, base: T, options?: { withoutExtensionsOf?: string }): T {
     if (base === null || typeof base !== 'object') return base;
     const fqn = this.resolveObjectKey(name);
     // With nothing to fold, the body still gets its picklist-bound fields
@@ -5485,7 +5513,11 @@ export class SchemaRegistry {
     // registry never saw is served in the one shape every other read uses.
     // By reference when no field names a picklist.
     if (fqn === undefined) return this.finishServedObject(base);
-    const contributors = this.objectContributors.get(fqn);
+    // [#29903] `options.withoutExtensionsOf`: that package's `extend`
+    // contributions are left out, as on {@link getAllObjects}.
+    const excluded = options?.withoutExtensionsOf;
+    const registered = this.objectContributors.get(fqn);
+    const contributors = excluded === undefined ? registered : registered?.filter((c) => !isExtensionOf(c, excluded));
     if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.finishServedObject(base);
     return this.foldExtendersOntoDefinition(
       contributors,
@@ -6224,8 +6256,12 @@ export class SchemaRegistry {
    * Get all registered objects (merged).
    * 
    * @param packageId - Optional filter: only objects contributed by this package
+   * @param options.withoutExtensionsOf - [#29903] each object is resolved with
+   *   this package's `extend` contributions left out of the fold
+   *   ({@link resolveObjectWithoutExtensionsOf}). Only the protocol's
+   *   per-package layer passes it, naming the listed package's `.custom` pair.
    */
-  getAllObjects(packageId?: string): ServiceObject[] {
+  getAllObjects(packageId?: string, options?: { withoutExtensionsOf?: string }): ServiceObject[] {
     const results: ServiceObject[] = [];
 
     for (const fqn of this.objectContributors.keys()) {
@@ -6236,7 +6272,7 @@ export class SchemaRegistry {
         if (!hasContribution) continue;
       }
 
-      const merged = this.resolveObject(fqn);
+      const merged = this.resolveObjectWithoutExtensionsOf(fqn, options?.withoutExtensionsOf);
       if (merged) {
         // Tag with contributor info for UI
         (merged as any)._packageId = this.getObjectOwner(fqn)?.packageId;
@@ -7594,11 +7630,17 @@ export class SchemaRegistry {
    * items. Only the protocol's per-package layer passes it (the package
    * export, which carries a package's own items enabled or not); every
    * served read leaves it unset and hides them.
+   *
+   * [#29903] `options.withoutExtensionsOf` resolves each listed object with
+   * that package's `extend` contributions left out of the fold
+   * ({@link getAllObjects}); no other type reads it. Only the per-package
+   * layer passes it, naming the listed package's `.custom` pair, so a base's
+   * export carries the base's objects unchanged.
    */
-  listItems<T>(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean }): T[] {
+  listItems<T>(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean; withoutExtensionsOf?: string }): T[] {
     // Special handling for 'object' and 'objects' types - use objectContributors
     if (type === 'object' || type === 'objects') {
-      return this.getAllObjects(packageId) as unknown as T[];
+      return this.getAllObjects(packageId, { withoutExtensionsOf: options?.withoutExtensionsOf }) as unknown as T[];
     }
 
     const items = Array.from(this.metadata.get(type)?.values() || []) as T[];

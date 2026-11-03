@@ -46,6 +46,7 @@ export function foldObjectExtendersFromRegistry(
     type: string,
     name: unknown,
     body: unknown,
+    withoutExtensionsOf?: string,
 ): unknown {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (singular !== 'object') return body;
@@ -59,7 +60,11 @@ export function foldObjectExtendersFromRegistry(
     // cannot fold answers exactly as it did before.
     if (!registry || typeof registry.foldObjectExtendersOnto !== 'function') return body;
     try {
-        return registry.foldObjectExtendersOnto(name, body);
+        // [#29903] `withoutExtensionsOf`: that package's `extend` contributions
+        // are left out of the fold (the per-package layer names a base's pair).
+        return withoutExtensionsOf === undefined
+            ? registry.foldObjectExtendersOnto(name, body)
+            : registry.foldObjectExtendersOnto(name, body, { withoutExtensionsOf });
     } catch {
         // The fold is a read over in-memory contributors; a failure here
         // must not turn a served schema into a 5xx.
