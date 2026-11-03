@@ -96,9 +96,9 @@ is one diagram a reviewer (or AI) can read end-to-end.
       label: 'Sales Manager Review',
       config: {
         approvers: [{ type: 'position', value: 'sales_manager' }],
-        behavior: 'first_response',            // or 'unanimous' / 'quorum' / 'per_group'
-        lockRecord: true,                      // lock the record while pending
-        approvalStatusField: 'approval_status', // mirror pending|approved|rejected|recalled onto the row
+        behavior: 'first_response',
+        lockRecord: true,
+        approvalStatusField: 'approval_status',
       },
     },
     // Decision routing lives on the OUT-EDGES, not in node config: the engine
@@ -219,6 +219,17 @@ reject) — enforced before any write, with no elevation bypass, so the run
 cannot resume past the node with the key a later `expression` approver reads
 still missing.
 
+A typed entry renders the matching picker in the decision dialog, and `type`
+and `multiple` are also enforced at the decision, on approve and reject alike,
+before any write. A picker value must resolve through the `expression`
+approver's resolvers: `user` by any account's record id, `department` by record
+id in the request's organization, `team` by record id (not another
+organization's), `position` by the machine name of a position someone in that
+organization holds. `multiple: true` takes a list of distinct values (every
+kind, bare keys included); without it, one value. Any other non-blank value is
+`400 VALIDATION_FAILED` naming `outputs.KEY`. The Console sends a list for a
+`multiple: true` text output. The `lead_review` node below is the example.
+
 ### Reading the lock
 
 A page over a record under approval must not offer an edit the server then
@@ -245,7 +256,7 @@ an id that does not exist gets.
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
 | `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry, so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
 | `queue`      | Members of ownership queue `value` at node entry; an empty queue adds nobody |
-| `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. Only `current.*` / `trigger.*` / `vars.*` roots are available; the optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
+| `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. The optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
 
 ### Dynamic approvers (`type: 'expression'`)
 
@@ -307,12 +318,9 @@ export const DynamicApprovalFlow = defineFlow({
       config: { objectName: 'expense', triggerType: 'record-after-update', condition: "status == 'submitted'" },
     },
     {
-      // Node A declares what a decision may hand to the flow. The TYPED
-      // declaration renders a multi-select sys_user picker in the decision
-      // dialog; the lead approves with outputs:
+      // Node A declares what a decision may hand to the flow; the lead
+      // approves with outputs:
       //   POST …/approve { outputs: { next_reviewers: ['u2', 'u3'] } }
-      // `required: true` is enforced by the runtime on APPROVE (never on
-      // reject) — node B below has nobody to route to without it.
       id: 'lead_review', type: 'approval', label: 'Lead Review',
       config: {
         approvers: [{ type: 'org_membership_level', value: 'owner' }],
@@ -320,7 +328,6 @@ export const DynamicApprovalFlow = defineFlow({
       },
     },
     {
-      // Node B resolves them at entry from the lead's decision outputs.
       id: 'co_sign', type: 'approval', label: 'Co-sign',
       config: {
         approvers: [{ type: 'expression', value: 'vars.lead_review.next_reviewers' }],
@@ -362,7 +369,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
 | `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through), `fallback` (request opens on the sibling `fallbackApprovers` instead — same shape as `approvers`, required by this policy and refused under any other; a fallback that itself resolves to nobody degrades to `admin_rescue`). Declare it explicitly on any node with an `expression` approver (linted) |
 | `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
-| `decisionOutputs` | Decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
+| `decisionOutputs` | Decision outputs a decision may carry: bare keys (free text) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }`, enforced at the decision — see *Recording a decision* |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `timeoutHours` is **calendar (wall-clock) hours** — nights, weekends and holidays count; the platform ships no business-hours calendar. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
 | `maxRevisions` | Send-backs per run before auto-reject (ADR-0044) — see *Send-back for revision* above |
 
