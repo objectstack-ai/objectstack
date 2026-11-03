@@ -29,15 +29,17 @@ export const entry: SemanticMigration = {
     'An extension\'s `fields` are merged into the target object\'s field map, and every key of that map is '
     + 'lowercase snake_case: `ObjectSchema.fields` refuses any other key. The extension schema used to take '
     + 'any string, so such a field parsed in `defineStack` and in `defineObjectExtension`, whether or not '
-    + 'the target was in the same stack, and was merged into an object whose own declaration could never '
-    + 'have held it. The key is now judged where it is written, by the same key schema the field map uses.',
+    + 'the target was in the same stack, and `os validate` raised nothing on it. In a customization package, '
+    + 'an `object_extension` row keyed `Region Code__c` was saved and published, served on every read of '
+    + 'the target, and stored values under that name: a field the target\'s own declaration could never '
+    + 'have held. The key is now judged where it is written, by the same key schema the field map uses.',
   acceptanceCriteria:
     'Every `fields` key of every object extension in the stack is lowercase snake_case, and `os validate` '
     + 'passes. A key outside the grammar is refused at parse with one `invalid_key` issue at `fields.KEY` '
     + 'that names the grammar and an example. A stored `object_extension` row whose body still carries such '
-    + 'a key no longer parses, so the sync that registers stored extensions names the row '
-    + '(`INVALID_METADATA`) and registers none of it, its `fieldPatches` included, and its next save is '
-    + 'refused until the field is renamed. `os migrate meta --stored` lists such a row before the upgrade, '
+    + 'a key no longer parses, so the sync that registers stored extensions counts the row as an error and '
+    + 'registers none of it, its `fieldPatches` included, and its next save is refused (422 '
+    + '`INVALID_METADATA`) until the field is renamed. `os migrate meta --stored` lists such a row before the upgrade, '
     + 'one TODO for each refused key at `fields.KEY` naming the extended object, and leaves it as stored: '
     + 'rename each listed field to a snake_case name, along with every view, formula and caller that reads '
     + 'it, and save the extension.',

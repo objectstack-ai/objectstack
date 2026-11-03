@@ -676,8 +676,8 @@ const objectExtensionFieldKeyGrammar: RefusedStoredShape = {
             + '(lower-casing it, turning `-` or a space into `_`) names a different column than the one rows, '
             + 'views and formulas may already read, or lands on a field the object already declares, so the '
             + 'name is the author\'s to choose. Left as stored, the row no longer parses: the sync that registers '
-            + 'stored extensions names it (INVALID_METADATA) and registers none of it, its `fieldPatches` '
-            + 'included, and its next save is refused until the field is renamed. '
+            + 'stored extensions counts it as an error and registers none of it, its `fieldPatches` included, '
+            + 'and its next save is refused with 422 INVALID_METADATA until the field is renamed. '
             + message,
         });
       }
