@@ -172,7 +172,7 @@ async function bootWith(objects: Array<Record<string, unknown>>, opts: { posture
       getSchema: (name: string) => byName.get(name),
       // The double answers no row, but refuses what the real engine refuses
       // (`check:engine-double-contract`).
-      findOne: vi.fn(async (object: string, query: unknown) => {
+      findOne: vi.fn(async (object: string, query?: Parameters<typeof assertEngineFindOnePredicate>[1]) => {
         assertEngineFindOnePredicate(object, query);
         return null;
       }),
