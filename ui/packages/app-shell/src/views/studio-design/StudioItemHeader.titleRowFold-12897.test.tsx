@@ -34,7 +34,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { Workflow } from 'lucide-react';
 import { StudioItemHeader, useStudioItemHeaderFold, useStudioTabRowFold, type StudioFoldedTool } from './StudioItemHeader';
 import { STUDIO_FOLD_LABEL, STUDIO_KIND_CHIP } from './studio-tokens';
-import { StudioCustomizeButton } from './StudioCustomizeControls';
+import { StudioCustomizeButton, StudioOverrideChip } from './StudioCustomizeControls';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch';
 import { t } from '../metadata-admin/i18n';
 
@@ -257,8 +257,11 @@ function FoldingLeaf({
   labelled = false,
   onCustomize = () => {},
   onToggle = () => {},
+  kind = 'View',
   note,
 }: {
+  /** What the kind chip holds: its word, or (objectstack#29692) the override mark. */
+  kind?: React.ReactNode;
   onOpen?: (id: string) => void;
   foldMenu?: boolean;
   /** The labelled actions a pillar draws: the Customize button and a flow's ledger switch. */
@@ -275,7 +278,7 @@ function FoldingLeaf({
       titleProps={{ 'data-testid': 'hdr-title', title: INTERNAL_ID }}
       chips={
         <span className={STUDIO_KIND_CHIP} data-testid="hdr-kind-chip">
-          View
+          {kind}
         </span>
       }
       foldMenu={foldMenu ? { label: 'More', testId: 'hdr-more' } : undefined}
@@ -455,6 +458,98 @@ describe('the fold order: chips and tools, then labels, then the title (objectst
     expect(entry).toHaveAttribute('role', 'menuitem');
     fireEvent.click(entry);
     expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+});
+
+describe('the override mark folded into the ⋯ menu (objectstack#29692)', () => {
+  let rangeSpy: { mockRestore: () => void } | null = null;
+  beforeEach(() => {
+    rangeSpy = vi.spyOn(Range.prototype, 'getBoundingClientRect').mockImplementation(() => rect(READABLE));
+  });
+  afterEach(() => {
+    rangeSpy?.mockRestore();
+    rangeSpy = null;
+  });
+
+  function foldedMark(onRestore = vi.fn()) {
+    layout.row = 330;
+    render(<FoldingLeaf kind={<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" onRestore={onRestore} />} />);
+    const menu = openOwnMore();
+    const entry = within(menu).getByTestId('studio-item-header-folded-chips');
+    return { menu, entry, chip: within(entry).getByTestId('studio-override-chip'), onRestore };
+  }
+
+  it('a press on the mark opens its popover once, and the menu stays open under it', () => {
+    const { chip } = foldedMark();
+    fireEvent.click(chip);
+    // One press, one toggle: the entry's own select does not press the mark again.
+    expect(chip).toHaveAttribute('data-state', 'open');
+    expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    // A second press closes it, and the menu is still there.
+    fireEvent.click(chip);
+    expect(chip).toHaveAttribute('data-state', 'closed');
+    expect(screen.queryByTestId('studio-override-popover')).toBeNull();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('chosen by the keys, the folded entry presses the mark: its popover opens and the menu stays open', () => {
+    const { entry, chip } = foldedMark();
+    act(() => entry.focus());
+    fireEvent.keyDown(entry, { key: 'Enter' });
+    expect(chip).toHaveAttribute('data-state', 'open');
+    expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('Restore in the popover asks the host once and closes the popover and the menu with it', () => {
+    const { chip, onRestore } = foldedMark();
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByTestId('studio-override-restore'));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('studio-override-popover')).toBeNull();
+    // The confirmation replaces both: no menu is left open (hidden) behind it to take the next Enter.
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('a pointer moving over the open popover and pressing in it neither focuses the menu entry nor closes the popover', () => {
+    const { entry, chip, onRestore } = foldedMark();
+    fireEvent.click(chip);
+    const popover = screen.getByTestId('studio-override-popover');
+    const facts = within(popover).getByTestId('studio-override-popover-facts');
+    // Over the mark, then into the popover: the entry would take the focus from it on a pointer move.
+    fireEvent.pointerMove(chip, { pointerType: 'mouse' });
+    fireEvent.pointerMove(facts, { pointerType: 'mouse' });
+    fireEvent.pointerDown(facts, { button: 0, pointerType: 'mouse' });
+    fireEvent.pointerUp(facts, { button: 0, pointerType: 'mouse' });
+    fireEvent.click(facts);
+    fireEvent.keyDown(facts, { key: 'Enter' });
+    expect(document.activeElement).not.toBe(entry);
+    expect(chip).toHaveAttribute('data-state', 'open');
+    expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
+  it('with the note line under the title row (objectstack#29691), the folded mark opens once and Restore closes the menu', () => {
+    layout.row = 330;
+    const onRestore = vi.fn();
+    render(
+      <FoldingLeaf
+        note="Saved to HotCRM’s customizations"
+        kind={<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" onRestore={onRestore} />}
+      />,
+    );
+    expect(document.querySelector('[data-slot="item-note"]')).toHaveTextContent('Saved to HotCRM’s customizations');
+    const entry = within(openOwnMore()).getByTestId('studio-item-header-folded-chips');
+    const chip = within(entry).getByTestId('studio-override-chip');
+    fireEvent.click(chip);
+    expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('studio-override-restore'));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('studio-override-popover')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });
 

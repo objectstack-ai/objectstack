@@ -20,8 +20,8 @@
  *    reads it, ⛔ never a computation (no diff, no `.custom` spelling);
  *  - whether the ensure door refuses this caller
  *    ({@link customizeDoorWalled}), from the two facts the server publishes;
- *  - the header's Customize button, the override badge and the item menu's
- *    Restore entry with its confirmation.
+ *  - the header's Customize button, and the override mark, whose popover
+ *    offers Restore, with its confirmation (objectstack#29692).
  *
  * The pair's id for a write is the ensure door's answer
  * (`packages-io.ts#ensureCustomizationPackage`); the pillar asks it.
@@ -37,8 +37,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   cn,
 } from '@object-ui/components';
 import { useAuth } from '@object-ui/auth';
@@ -59,6 +60,7 @@ import { Layers, Pencil, RotateCcw } from 'lucide-react';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import { STUDIO_FOLD_LABEL } from './studio-tokens.js';
+import { useStudioFoldedMenuClose } from './StudioItemHeader.js';
 import { readFields, writeFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
 
 /**
@@ -267,58 +269,104 @@ export function StudioCustomizeButton({
 }
 
 /**
- * The header's badge: the item overrides the base. Drawn from a served
- * declaration ({@link useServedOverride}); `basedOn` is the version it names.
+ * The header's override mark: the item overrides the base. Drawn from a
+ * served declaration ({@link useServedOverride}); `basedOn` is the version it
+ * names.
+ *
+ * objectstack#29692 (ADR-0146 D2) — the mark is where a customization is
+ * named, so it is where it is undone: pressing it opens a small popover that
+ * says what the item overrides and the version it was taken from and, for an
+ * item the pair holds (`onRestore`), offers "Restore package original". That
+ * button only asks: the host opens its confirmation
+ * ({@link StudioRestoreOriginalDialog}), held outside any menu. Restore is
+ * never a header action of its own, so Customize keeps the primary slot.
+ *
+ * Folded into the header's ⋯ menu (objectstack#29693), the mark is a control
+ * inside a menu item: its own click does not reach the item (one press, one
+ * toggle), and the item activates it by `data-studio-chip-control` when it
+ * is chosen by the keys (`StudioItemHeaderFoldedItems`). The popover is a
+ * child of that item in React's tree, so what happens in it never reaches
+ * the item: a pointer moving over it would focus the item (and the focus
+ * leaving the popover closes it), a click or Enter would choose the item.
  */
 export function StudioOverrideChip({
   baseLabel,
   basedOn,
   locale,
+  onRestore,
+  restoreDisabled = false,
 }: {
   baseLabel: string;
   basedOn: string;
   locale: string;
+  /** Opens the host's Restore confirmation; omitted, the popover states the facts alone. */
+  onRestore?: () => void;
+  restoreDisabled?: boolean;
 }): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  // Folded into the header's ⋯ menu, Restore closes that menu too: the dialog it opens replaces both.
+  const closeMenu = useStudioFoldedMenuClose();
+  const keepInside = (event: React.SyntheticEvent) => event.stopPropagation();
   return (
-    <span
-      data-testid="studio-override-chip"
-      title={tFormat('engine.studio.customize.overridesTitle', locale, { package: baseLabel, basedOn })}
-      className="inline-flex h-[22px] shrink-0 items-center gap-1 rounded-[5px] bg-sky-500/10 px-2 text-[11px] font-medium text-sky-700 dark:text-sky-300"
-    >
-      <Layers className="h-3 w-3 shrink-0" aria-hidden="true" />
-      {tFormat('engine.studio.customize.overrides', locale, { package: baseLabel })}
-    </span>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-testid="studio-override-chip"
+          data-studio-chip-control=""
+          onClick={keepInside}
+          // Open, a pointer over the mark does not move the focus to an enclosing menu item.
+          onPointerMove={open ? keepInside : undefined}
+          className="inline-flex h-[22px] shrink-0 items-center gap-1 rounded-[5px] bg-sky-500/10 px-2 text-[11px] font-medium text-sky-700 hover:bg-sky-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-sky-500/20 dark:text-sky-300"
+        >
+          <Layers className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {tFormat('engine.studio.customize.overrides', locale, { package: baseLabel })}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-72 p-3 text-xs"
+        data-testid="studio-override-popover"
+        onClick={keepInside}
+        onPointerDown={keepInside}
+        onPointerUp={keepInside}
+        onPointerMove={keepInside}
+        onKeyDown={keepInside}
+      >
+        <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+          <Layers className="h-3.5 w-3.5 shrink-0 text-sky-700 dark:text-sky-300" aria-hidden="true" />
+          {tFormat('engine.studio.customize.overrides', locale, { package: baseLabel })}
+        </p>
+        <p className="mt-1.5 text-muted-foreground" data-testid="studio-override-popover-facts">
+          {tFormat('engine.studio.customize.overridesTitle', locale, { package: baseLabel, basedOn })}
+        </p>
+        {onRestore && (
+          <button
+            type="button"
+            data-testid="studio-override-restore"
+            disabled={restoreDisabled}
+            onClick={() => {
+              setOpen(false);
+              closeMenu?.();
+              onRestore();
+            }}
+            className={cn(
+              'mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs font-medium text-foreground hover:bg-muted',
+              'disabled:pointer-events-none disabled:opacity-50',
+            )}
+          >
+            <RotateCcw className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {t('engine.studio.customize.restore', locale)}
+          </button>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
 /**
- * "Restore package original" on the item's ⋯ menu. The confirmation is
- * {@link StudioRestoreOriginalDialog}, held by the host outside the menu: a
- * menu's content unmounts as the menu closes on select, and a dialog inside it
- * would close with it.
- */
-export function StudioRestoreOriginalItem({
-  disabled,
-  locale,
-  onSelect,
-}: {
-  disabled?: boolean;
-  locale: string;
-  onSelect: () => void;
-}): React.ReactElement {
-  return (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem data-testid="studio-restore-original" disabled={disabled} onSelect={onSelect}>
-        <RotateCcw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-        {t('engine.studio.customize.restore', locale)}
-      </DropdownMenuItem>
-    </>
-  );
-}
-
-/**
- * The confirmation of "Restore package original": it says what goes, the
+ * The confirmation of "Restore package original", opened from the override
+ * mark's popover ({@link StudioOverrideChip}): it says what goes, the
  * customization, and its unpublished draft when one is pending. `onConfirm`
  * sends both deletes; nothing is sent on Cancel. objectstack#28570 — a flow's
  * (`kind: 'flow'`) says the base's flow runs again, under the same switch.

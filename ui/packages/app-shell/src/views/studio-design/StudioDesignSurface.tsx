@@ -430,7 +430,6 @@ import {
   StudioCustomizeButton,
   StudioOverrideChip,
   StudioRestoreOriginalDialog,
-  StudioRestoreOriginalItem,
   isStudioCustomizeType,
   overrideDraftBody,
   useCustomizeDoorWalled,
@@ -6298,8 +6297,8 @@ export function InterfacesPillar({
   );
   // objectui#12725 — the item's ⋯ menu: its definition, and its document as
   // JSON. Rename and delete are not offered here: this header has neither
-  // today (a nav entry is renamed and removed in nav editing).
-  // objectstack#28562 — and, for an item customized into the pair, Restore.
+  // today (a nav entry is renamed and removed in nav editing). Restore is
+  // the override mark's (objectstack#29692), not this menu's.
   const itemMoreEl =
     current && draftLoaded ? (
       <DropdownMenu>
@@ -6325,13 +6324,6 @@ export function InterfacesPillar({
             <Copy className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
             {t('engine.studio.if.copyJson', locale)}
           </DropdownMenuItem>
-          {headerCustomize?.inPair && (
-            <StudioRestoreOriginalItem
-              disabled={restoring || headerCustomize.busy || (customizePair === null && !pairsByItemRef.current.has(headerCustomize.key))}
-              locale={locale}
-              onSelect={() => setRestoreFor(headerCustomize)}
-            />
-          )}
         </DropdownMenuContent>
       </DropdownMenu>
     ) : null;
@@ -6426,6 +6418,13 @@ export function InterfacesPillar({
                 baseLabel={customizeBaseLabel}
                 basedOn={headerCustomize.declaration.basedOn}
                 locale={locale}
+                // objectstack#29692 — Restore lives on the mark that names the customization.
+                onRestore={headerCustomize.inPair ? () => setRestoreFor(headerCustomize) : undefined}
+                restoreDisabled={
+                  restoring ||
+                  headerCustomize.busy ||
+                  (customizePair === null && !pairsByItemRef.current.has(headerCustomize.key))
+                }
               />
             )}
             {/* objectstack#28572 — an item the pair adds names the pair it lives in. */}
@@ -11482,6 +11481,9 @@ export function AutomationsPillar({
                   baseLabel={customizeBaseLabel}
                   basedOn={flowServed.declaration.basedOn}
                   locale={locale}
+                  // objectstack#29692 — Restore lives on the mark that names the customization.
+                  onRestore={flowInPair ? () => setRestoreOpen(true) : undefined}
+                  restoreDisabled={restoring || !!saving}
                 />
               ) : undefined
             }
@@ -11540,15 +11542,6 @@ export function AutomationsPillar({
                     locale={locale}
                     disabled={!!saving}
                     onDelete={readOnly ? undefined : () => void deleteOpenFlow()}
-                    // objectstack#28570 — for a flow the pair overrides, read from the served declaration.
-                    restore={
-                      flowInPair
-                        ? {
-                            disabled: restoring,
-                            onSelect: () => setRestoreOpen(true),
-                          }
-                        : undefined
-                    }
                     newSimilar={{
                       target: readOnly ? undefined : packageId,
                       blocked: canAuthorFlows ? null : t('engine.edit.capabilityReadOnly', locale),
