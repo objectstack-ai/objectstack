@@ -30,11 +30,12 @@
  * - {@link isEmptyForRequired}: everything {@link isMissing} calls missing, and
  *   — only where the DECLARED value is a set (`@objectstack/spec/data`'s
  *   `isMultiValueField`, ADR-0104 D1) — an empty list. The #9447 maintainer
- *   ruling sets that half: `required` on a multi-value field means a NON-EMPTY
- *   list, because the empty set is representable (it reads back as `[]`, never
- *   `null`), so an explicit `[]` is an empty value exactly as `null` / `''`
- *   are. A structured-JSON field's `[]` is a legitimate document, not an
- *   emptied set, and is NOT empty here.
+ *   ruling sets that half, and ruling A on #29343 (record 6591577985) keeps it:
+ *   `required` on a multi-value field means a NON-EMPTY list, so an explicit
+ *   `[]` is an empty value exactly as `null` / `''` are. (An emptied OPTIONAL
+ *   multi-value field is stored as `null` by the write door; a row stored
+ *   before that rule can still hold `[]`.) A structured-JSON field's `[]` is
+ *   a legitimate document, not an emptied set, and is NOT empty here.
  *
  * ⛔ What a door does with "missing" is the door's: the engine skips a
  * runtime-owned `autonumber`, the form door judges only the entries the visitor

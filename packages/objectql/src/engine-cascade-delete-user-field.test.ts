@@ -330,7 +330,7 @@ describe('[#29253] a user field\'s declared deleteBehavior takes effect when the
       expect(driver.rowOf('uf_clear', bystander.id)).toMatchObject({ name: 'B', person: other.id });
     });
 
-    it('multi-valued: only the deleted member is removed, and an emptied set is []', async () => {
+    it('multi-valued: only the deleted member is removed, and an emptied optional set stores null', async () => {
       const { engine, driver } = await makeEngine([
         holder('uf_clear_many', parsedUser({ deleteBehavior: 'set_null', multiple: true })),
       ]);
@@ -342,7 +342,7 @@ describe('[#29253] a user field\'s declared deleteBehavior takes effect when the
       await engine.delete('sys_user', { where: { id: u.id }, context: SYSTEM } as any);
 
       expect(driver.rowOf('uf_clear_many', both.id)).toMatchObject({ person: [other.id] });
-      expect(driver.rowOf('uf_clear_many', only.id)).toMatchObject({ person: [] });
+      expect(driver.rowOf('uf_clear_many', only.id)).toMatchObject({ person: null });
     });
 
     it('a required user field\'s set_null cannot clear it, so the user delete is refused', async () => {

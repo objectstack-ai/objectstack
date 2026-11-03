@@ -726,12 +726,14 @@ const opportunities = await engine.find('opportunity', {
 - `restrict`: Prevent deletion if references exist
 - `cascade`: Delete this record when referenced record is deleted
 
-> **Residual shape of a multi-value reference.** A `multiple: true` lookup emptied by
-> member removal is written as `[]`, **never `null`**. That is not a cascade
-> convention: the representation binds every writer — cascade repair, form clears and
-> API writes alike — so a reader of an array field never needs a null branch. The
-> guarantee is pinned by `FieldSchema`, in the `multiple` doc block of
-> `packages/spec/src/data/field.zod.ts` (rendered in the
+> **Residual shape of a multi-value reference.** An optional `multiple: true` lookup
+> emptied by member removal is stored as `null`, the same as one never set. That is
+> not a cascade convention: the representation binds every writer — cascade repair,
+> form clears and API writes alike, where `[]` and `""` written to an optional
+> multi-value field store `null`. A reader of an array field reads `null` and `[]`
+> alike as empty, as the `is_empty` filter (`$empty`) does, since a row stored before
+> this rule can still hold `[]`. The rule is pinned by `FieldSchema`, in the
+> `multiple` doc block of `packages/spec/src/data/field.zod.ts` (rendered in the
 > [Field reference](/docs/references/data/field)).
 
 > **Required foreign keys.** A `required: true` lookup cannot be nulled, so

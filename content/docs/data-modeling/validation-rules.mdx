@@ -261,13 +261,14 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 **Default constraints:** Validates that referenced record exists. Foreign key integrity enforced.
 
-**Multi-value lookups (`multiple: true`).** The empty set is representable: an emptied
-multi-value lookup is stored and read back as `[]`, never `null` — including when
-`deleteBehavior: 'set_null'` removes the last remaining member. The declared contract
-lives in the `multiple` and `required` doc blocks of
-`packages/spec/src/data/field.zod.ts` (rendered in the
-[Field reference](/docs/references/data/field)), and it makes `required` on a
-multi-value lookup mean **non-empty array**.
+**Multi-value lookups (`multiple: true`).** An emptied optional multi-value lookup is
+stored and read back as `null`, the same as one never set — `[]` and `""` written to it
+store `null`, including when `deleteBehavior: 'set_null'` removes the last remaining
+member. A row stored before that rule can still hold `[]`; the `is_empty` filter
+(`$empty`) reads `null` and `[]` alike as empty. The declared contract lives in the
+`multiple` and `required` doc blocks of `packages/spec/src/data/field.zod.ts`
+(rendered in the [Field reference](/docs/references/data/field)), and it makes
+`required` on a multi-value lookup mean **non-empty array**.
 
 <Callout type="info">
 The `required`-means-non-empty half is **enforced by the record validator** (#9476, per
