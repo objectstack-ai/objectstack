@@ -81,6 +81,7 @@ import {
     flowCloneNameTakenMessage,
     FLOW_CLONE_NAME_TAKEN_STATUS,
     FLOW_CLONE_NOTICE,
+    FLOW_CLONE_NOTICE_CODE,
 } from '../flow-clone.js';
 // [#28149, ADR-0146 D4] The clone body's declaration (its closed member set)
 // and the target rule every "new similar" door shares.
@@ -3964,9 +3965,16 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // opens the copy where it lives (Setup's "Open the clone in
                 // Studio"): the package is where the copy is, not where it
                 // came from, so it records no lineage.
+                // [#29727] `noticeCode` names the notice so a console can show
+                // it translated; `notice` stays the English fallback.
                 return {
                     handled: true,
-                    response: deps.success({ flow: servedFlowDefinition(clone), packageId: written.packageId, notice: FLOW_CLONE_NOTICE }),
+                    response: deps.success({
+                        flow: servedFlowDefinition(clone),
+                        packageId: written.packageId,
+                        notice: FLOW_CLONE_NOTICE,
+                        noticeCode: FLOW_CLONE_NOTICE_CODE,
+                    }),
                 };
             }
         }
