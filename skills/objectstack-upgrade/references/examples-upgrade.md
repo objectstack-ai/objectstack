@@ -51,7 +51,7 @@ maintainer can read in five minutes and a year from now. Write
 
 | Site | Change | Conversion |
 |:--|:--|:--|
-| `objects[crm_lead].fields.name` | `required: true` → `+ storage.notNull: true` | `field-required-notnull-explicit` |
+| `sharingRules[0].accessLevel` | `'full'` → `'edit'` | `sharing-rule-access-level-full-to-edit` |
 | … | | |
 
 _N sites, M conversions. Ported into sources from `os migrate meta --out`._
