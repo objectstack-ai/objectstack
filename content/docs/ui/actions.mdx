@@ -677,7 +677,7 @@ and [Connect an MCP Client](/docs/ai/connect-mcp).
 | Click → `Action 'x' … not found` | `target`-style script with no registered handler — add the `registerAction` call in `onEnable` (Path B above) |
 | REST → 400 naming the action's `type` | The type has no server dispatch (`url`/`modal`/`form`/`api`) — open its `target` in the client, or call that endpoint directly |
 | Appears in UI, missing from `list_actions` (MCP) | `ai.exposed` not `true`, `ai.description` under 40 characters, or the type isn't headless-callable |
-| Runs but the list looks stale | Add `refreshAfter: true` |
+| Runs but the list looks stale | Add `refreshAfter: true` (an `operation: 'update'` action re-reads its record and the object's lists on its own) |
 
 ## Related
 
