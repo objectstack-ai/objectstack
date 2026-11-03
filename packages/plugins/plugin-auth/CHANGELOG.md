@@ -1,5 +1,775 @@
 # Changelog
 
+## 18.3.0
+
+### Minor Changes
+
+- 13e85be: feat(spec,plugin-auth): a `demoStaff` entry names its line manager, and the development boot writes it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A `demoStaff` entry declares one optional key, `manager`: the `email` of another entry of the same `demoStaff` list, compared without regard to case. It is named by address because the address identifies an account everywhere the platform provisions one; a display name is a label a person can edit. Before, the entry was strict and refused the key, so a fresh demo's `manager` approval rung reached nobody until someone ran Setup → Users → Set Manager by hand.
+  
+  `defineStack` (and so `os validate`) refuses, with `STACK_CROSS_REFERENCE_INVALID` 422, a `manager` that is the address of no entry, an entry that names itself, and managers that form a loop. A manager written as a display name is refused at the entry's path, saying it takes an address. `reportsTo`, `managerEmail`, `managerId` (and so `manager_id`) and `supervisor` are pointed to `manager`.
+  
+  On an `os dev` boot, `@objectstack/plugin-auth` links each declared manager in a second pass, once every entry has its account and still before the application seed runs. Each link goes through the same checks as `POST /api/v1/auth/admin/set-user-manager`. A link is written only when the account has no manager, so a manager someone set by hand is left as it is on every later boot; a manager cleared by hand reads as no manager and is written again. A link that cannot be written (the manager's own entry was not provisioned, or the set-manager checks refuse it) is reported on the boot log under the subordinate's address. `DemoStaffOutcome` gains `managersLinked` and `managersKept`.
+- 79ed6f7: feat(formula, plugin-email, messaging, automation, ui)!: a template `currency` hole with no argument formats in the organization's default currency, and with none the render refuses it; nothing formats in US dollars by default any more (#26939)
+  
+  Clause-②: no (narrowing) — a mail send or render (`sendTemplate`, `renderTemplate`, and the messaging email and inbox channels on them), a flow text slot (notify, http, screen, end) and a templated formula evaluation refuse a `{{ amount | currency }}` hole with no argument when no default currency reaches the render, which they formatted in US dollars before. Authoring is unchanged: the hole is still accepted at save and publish. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/automation/email-templates.mdx`, `content/docs/automation/flows.mdx` and `content/docs/data-modeling/formulas.mdx` state the tenant default and the refusal; no skill under `skills/**` taught the dollar default (the formula skill names the formatter grammar only), so no skill line changes.
+  
+  <!-- adr-0087: registered template-currency-no-argument-tenant-default -->
+  
+  **BREAKING** semantic change of the `currency` formatter's no-argument form (`@objectstack/formula`), served by every template dialect: mail templates, flow text slots, and action / bulk-action confirm and success copy.
+  
+  - **Before.** `{{ amount | currency }}` formatted the amount in US dollars (`$1,234.50`) whatever currency the amount was in and whatever the organization's default currency was.
+  - **Now.** It formats in the organization's default currency, the `localization.currency` setting (Setup → Localization) that a currency field and a dashboard measure already display in: `CN¥1,234.50` for an `en-US` reader and `¥1,234.50` for a `zh-CN` reader when the default is CNY. Every server-side read goes through `resolveLocalizationContext` (`@objectstack/core`); the UI reads `useLocalization().currency`.
+  - **With no default currency.** The render refuses the hole by name and names the remedy: set the default, or write `currency:CODE` (a mail template's refusal also names `currency:@path`). A mail send or render fails with `TEMPLATE_INVALID` and nothing is sent; a messaging delivery records it as a permanent failure. A flow node with such a hole in a text slot fails with the refusal, which no fault edge routes. An action's confirm or success sentence is shown as written, the existing fallback for a sentence the template engine refuses.
+  - **How each host hands the default over.** `SendTemplateInput.currency` / `RenderTemplateInput.currency` (`@objectstack/spec/contracts`), filled by the messaging email and inbox channels from the delivery's organization, and by the auth mails (verification, password reset, invitations, magic link, notices) from the organization the mail names or, for identity mail, the deployment-wide setting (`@objectstack/plugin-auth`, once, on the email service it wires); `AutomationContext.currency`, seeded once at run setup from the run's tenant (`AutomationEngine.setTenantCurrencyResolver`, which the automation plugin wires), persisted with a suspended run and inherited by a subflow; `EvalContext.currency` in `@objectstack/formula`, a reserved channel like `locale`, never bound as a root; `ActionRunner.setTenantCurrency` in `@object-ui/core`, installed by the React action providers.
+  - **Unchanged.** `{{ amount | currency:EUR }}` formats in the code it names, with or without a default. A variable, field or root named `currency` is a value, never the default. Compile, `validateExpression` and the publish gates accept the no-argument form as before. A template with no no-argument currency hole needs no default.
+  - **Who sees it.** An organization with a default currency other than USD sees its own code where it saw dollars. An organization with no default currency that sends a mail, runs a flow or shows an action sentence with a no-argument `currency` hole now gets the refusal instead of dollars.
+  
+  **The remedy.** None where the amount is in the organization's default currency: set it in Setup → Localization. Where the amount is in one fixed currency, name it in the hole: `{{ amount | currency:USD }}`. Where a mail template shows each record's amount in that record's own currency, read the code from the send's data: `{{ amount | currency:@currency_code }}`.
+  
+  **Supersedes, in the same release.** The unreleased notes of the mail `currency:@path` and hole-grammar changes (`26660-currency-code-path-formula`, `26660-currency-code-path-plugin-email`, `26660-mail-hole-grammar-formula`, `26660-mail-hole-grammar`) describe a `currency` hole formatting in US dollars, and the first three say a hole with no argument still does. That was true when they were written; this entry moves it, and in this release a no-argument hole formats in the organization's default currency as described above.
+
+### Patch Changes
+
+- cb8988e: fix(plugin-auth): a session stores its client address in RFC 5952 text, and is born with `last_activity_at`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Setup › Sessions printed a localhost session's IP as `0000:0000:0000:0000:0000:0000:0000:0000` and left Last Activity empty until the session's first request. Both are fixed in the data a sign-in stores; the list still prints the columns as plain text.
+  
+  - **The address is the client's, in RFC 5952 text.** `sys_session.ip_address` is now the address the server established for the request (the client-address trust rule: forwarded headers only under `server.trustProxy`, the connection's peer otherwise), with IPv6 compressed — `::1`, `2001:db8::1` — and IPv4 unchanged. better-auth's own reader used to fill the column with its rate-limit bucket instead: every IPv6 address expanded to eight groups and masked to its /64 network, so `::1` read as `0000:…:0000` and `2001:db8::1` as `2001:0db8:0000:0000:0000:0000:0000:0000`. An IPv4-mapped address is stored as the IPv4 address it maps (`::ffff:203.0.113.7` → `203.0.113.7`), so an IPv4 client reads the same whether a dual-stack or an IPv4 listener accepted it; `last_login_ip` and the refused-sign-in audit rows, which carried the mapped text, now carry that one too. A session minted with no established address (a programmatic `auth.api.*` call) keeps better-auth's value, in the same text. An unparseable value is stored as it came.
+  - **One text on every row of a sign-in.** The `login_failed` / `account_locked` audit rows and `sys_user.last_login_ip` carry the same text as the session row and its `login` row. `signInClientFingerprint(ctx, establishedAddress?)` takes the established address as an optional second argument.
+  - **`last_activity_at` is written at creation**, equal to `created_at`. The activity heartbeat is unchanged; its first write now comes on the first request more than a minute after sign-in rather than on the very first request.
+  - **Unchanged:** better-auth's per-address rate limiter still keys on its own bucket, the ADR-0069 D5 allow-list still judges the trust rule's answer as it came, and existing session rows are not rewritten.
+- b29a88c: fix(plugin-auth)!: the set-user-manager depth cap counts the whole chain a link creates, including the reports already below the edited user, so a chain linked bottom-up cannot pass `MAX_MANAGER_CHAIN_DEPTH` (#26775)
+  
+  Clause-②: no (narrowing) — `POST /api/v1/auth/admin/set-user-manager`, the bulk user import's manager pass and the development boot's demo staff manager links refuse a link that would make a reporting chain longer than 20 links counted through the reports below the edited user, which they admitted before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the endpoint's documented depth cap is now enforced on the whole chain it creates. The refusal is the existing VALUE_OUT_OF_RANGE / 400 with details.reason max_depth_exceeded, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the manager-link write (`@objectstack/plugin-auth`), served by every caller of `applyUserManagerLink`.
+  
+  - **Before.** The cap counted the link being written plus the managers above the proposed manager. The reports already hanging below the edited user were not counted, so a chain built from the bottom up was admitted one link at a time past 20 links.
+  - **Now.** The cap counts the managers above the proposed manager, plus the link, plus the longest chain of existing reports below the edited user. A link that would make the total pass 20 is refused with the same `VALUE_OUT_OF_RANGE` / 400 and `details.reason: 'max_depth_exceeded'` as before; the message now says the count runs through the reports below the user.
+  - **Unchanged.** A chain built from the top down is refused at the same link as before. A chain of exactly 20 links is admitted in any building order. The other refusals and their order are untouched.
+  - **Who sees it.** An admin, an import file or a `demoStaff` declaration that would build a reporting chain deeper than 20 links. Such a chain was resolved only in part by the hierarchy scopes that walk it, so a manager silently lost sight of records owned deep in it.
+  
+  **The remedy.** Shorten the chain: attach the subtree under a manager closer to the top, or flatten the levels below the edited user.
+- da7bcc8: feat(plugin-auth): a sign-in that skips the OIDC seams can apply the IdP locale rule through `AuthManager.applyIdpLocaleClaim`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An external OIDC sign-in already sets the user's language preference (`sys_user.locale`) from the IdP's `locale` claim. A host whose own door signs a user in without passing through better-auth's OIDC seams, such as the cloud's sso-exchange hand-off, had no way to apply the same rule, because the package entry exported none of it. Now it can, through the running auth manager (`ctx.getService('auth')`):
+  
+  - **`AuthManager.applyIdpLocaleClaim(userId, claim)`** applies a claim (`{ providerId?, value }`) under the same rule and the same `idp-locale:` record as the OIDC path: the column is written only while it is unset or still holds the value an IdP sign-in last wrote, so a language the user chose in the environment is kept. The claim is closed against the i18n service's locales, and an unsupported one clears only an IdP-written value. It never throws: a failure is reported at `warn` and the user keeps the preference they had.
+  - **`IdpLocaleClaim`** is exported as a type from the package entry.
+  - **One owner for the rule.** The OIDC JIT path now settles its staged claim through the same method, so its behaviour is unchanged.
+  
+  Nothing to do for existing hosts.
+- 9cbe507: fix(core, plugin-auth): a failed organization probe says `readFailed` too, and an auth mail no longer reads a failed settings read as "no default currency" (#27733, #27710)
+  
+  Clause-②: no — `resolveLocalizationContext`'s result keeps its shape; the existing `readFailed?: true` member gains one more trigger. Nothing new is exported from a package entry.
+  Metadata-protocol: none
+  
+  - **Before.** For a caller that names no organization where no wall stands, `resolveLocalizationContext` first asks `sys_organization` which organization's rows it may read. A store fault on that probe answered the built-ins with no `readFailed`, so messaging graded a mail whose `{{ amount | currency }}` hole then had no default as permanent (`TEMPLATE_INVALID`) and dead-lettered it. And the auth mails (verification, password reset, invitations, magic link, notices) read every failed settings read as "the organization has no default currency": such a mail failed with `TEMPLATE_INVALID` and its "set localization.currency" remedy during a transient fault.
+  - **Now.** A probe that throws `AuthzStoreUnavailableError` answers `readFailed: true`, the same as a failed `sys_setting` read, so messaging retries the delivery. That answer is cached in neither memo, since no value was read: the next request asks again. A posture that cannot be read is not a store fault and still answers no `readFailed`. The auth mail's currency read rejects on `readFailed`; when the render then refuses for want of a default, the mail is rendered once more without sending with the no-currency code `XXX`: if that renders, the mail fails with an error that names the failed read and carries no `TEMPLATE_*` code, so sending it again once the read succeeds works; if it still refuses, that refusal stands.
+  - **Unchanged.** A read that succeeds and finds no default keeps today's refusal and remedy, on both paths. A template with no no-argument `currency` hole is sent during a read fault. The failure memo for a failed `sys_setting` read is unchanged.
+- f552fa8: feat(plugin-auth): an invite says whether its mail was delivered, and a pending invitation's link can be copied from Setup → Invitations
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a deployment that does not deliver mail (the stock `log` transport, or no email service at all), inviting someone used to toast "Invitation sent to …" while nothing left the server, and nothing offered the accept link, so the invitee never arrived.
+  
+  - `POST /api/v1/auth/organization/invite-member` (invite and resend) now answers a top-level `outcome` beside the invitation row: `sent` when the deployment delivers mail, `link_only` when it does not. It is decided at call time by the same rule sign-up uses, the email service's own `isConfigured()` answer, so a wired `log` transport is not delivery. The row's columns are unchanged.
+  - The four `invite_user` actions (Users, Members, Invitations, the organization page) and `resend_invitation` declare `outcomeMessages`: the `link_only` message says the invitation was created and no email went out, and points to Copy Invite Link. `successMessage` stays the fallback.
+  - New action `sys_invitation.copy_invitation_link` (Copy Invite Link, on the invitation row and record header): answers `{ acceptUrl }`, the same link the invitation mail carries, in a copyable result dialog. The link admits whoever opens it, so the server answers it only to an owner, admin or delegated admin of the invitation's organization, only for a pending invitation, and never while the environment is cloud-managed (`409 RESOURCE_CONFLICT`); it is never logged.
+  - `PUBLIC_AUTH_FEATURES` books the new action under the `organization` and `cloudManaged` gates.
+- b339465: fix(plugin-auth): Create User with no email names Email, and a wrong password on the password-change screen reads in the user's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The refusal.** Create User with neither an email nor a phone number used to answer "Either email or phoneNumber is required", naming a request key the dialog does not show. It now answers "Email is required", or "Email or phone number is required" where phone sign-in is on. The status (400) and code (`INVALID_REQUEST`) are unchanged.
+  - **The password-change screen.** A wrong current or temporary password is refused with the code `INVALID_PASSWORD` and the English message "Invalid password", but `createAuthClient`'s `changePassword` threw a bare `Error` that dropped the code, and the screen showed the message as it came. `changePassword` now keeps the code on the thrown error, and the screen shows a translated sentence for that code in every console language pack. Any other refusal still shows the server's message.
+- 5954705: fix(plugin-auth): a role change that grants an org-admin permission set says which set it granted (#27862)
+  
+  Clause-②: yes (widening: update-member-role's success answer gains outcome 'permission_set_granted' and grantedPermissionSet; the two sys_member actions gain outcomeMessages)
+  Metadata-protocol: none
+  
+  Raising a member to `admin` or `owner` grants an org-admin permission set as a side effect (`organization_admin`, or `organization_admin_no_bypass` on a wall-less posture). The role change used to answer the member row alone, so the console toasted "Member role updated" and the administrator later found a set on the user that nobody visibly assigned.
+  
+  - **Now.** When the role change left the member holding an org-admin set they did not hold before it, `POST /api/v1/auth/organization/update-member-role` answers two more members beside the member row: `outcome: 'permission_set_granted'` and `grantedPermissionSet: { name, label }`, the label read from the security catalog. The `sys_member` actions Change Role and Make Owner show it: "Member role updated. The new role also granted the permission set Organization Administrator (no record bypass)."
+  - **Unchanged.** A role change that grants nothing (admin to owner keeps the set already held, a demotion revokes it) and a refusal answer exactly as before. The member row's own columns are untouched. What is granted does not change: the grant is still written by `plugin-security`'s reconciler alone, and the new hooks only read.
+  - **Fails toward silence.** A grant read that fails leaves the answer as the route wrote it, without the line.
+- fc5d509: feat(plugin-auth): opt-in Cloudflare Turnstile on email sign-up — off unless both `OS_TURNSTILE_SITE_KEY` and `OS_TURNSTILE_SECRET_KEY` are set
+  
+  Clause-②: yes (widening: the public auth config gains `features.turnstileSiteKey`, served only while the challenge is on; `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` and `AuthFeaturesConfigSchema` gain `turnstileSiteKey`; with the challenge on, `/sign-up/email` answers better-auth's `captcha` refusals `400 MISSING_RESPONSE`, `403 VERIFICATION_FAILED` and `500 UNKNOWN_ERROR`; two new env vars; `@object-ui/auth` gains `TurnstileWidget`, `TURNSTILE_SCRIPT_URL`, `RegisterForm`'s `turnstileSiteKey` prop and `captchaFailed`/`captchaRetry` labels, `SignUpData.captchaToken` and a fifth `signUp` argument; `@object-ui/app-shell` gains `signUpCaptchaFailedMessage`)
+  Metadata-protocol: added
+  
+  A deployment can now ask for a human check before an email/password account is created. Set both variables and:
+  
+  - **The server** mounts better-auth's `captcha` plugin with the `cloudflare-turnstile` provider on `/sign-up/email` only. A sign-up without a token in the `x-captcha-response` header is refused before anything is read or written, a token is verified with Cloudflare using the secret, and a verification that cannot complete fails closed. Sign-in and password reset are not challenged (better-auth's default list would have included them; it is overridden). The per-address rate limit still runs first. Server-side registrations through `auth.api.signUpEmail` (the development admin seed, demo staff) are unaffected.
+  - **The public auth config** (`GET /api/v1/auth/config`) serves `features.turnstileSiteKey`, the public site key, and never the secret.
+  - **The Console** renders the challenge on `/register` and on the first-run `/setup` wizard, holds submit until it is solved, and sends the token. A failed, expired or refused challenge shows one retry message, never Cloudflare's code or the plugin's text. The Console document's content-security-policy admits `https://challenges.cloudflare.com` in `script-src` and `frame-src` only while both variables are set.
+  
+  With either variable unset or blank nothing changes: no plugin, no config key, no widget, the same policy. A deployment that sets only one gets one boot `warn` naming the missing variable.
+- f048e42: fix(plugin-auth): Create User with no email answers the field-level refusal, so a client can mark the Email input and word it in its own language (#28289)
+  
+  Clause-②: yes (widening: the refusal gains `error.fields`, one `{ field, code, message }` entry per input that would satisfy it, code `required`; its `error.code` moves from `INVALID_REQUEST` to `VALIDATION_FAILED`, the code the same endpoint's permission-set refusal and the data doors already answer with `fields`)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: one refusal of `POST /api/v1/auth/admin/create-user` answers an existing code from the plugin's ledger row with the existing `fields` envelope. Nothing an author writes changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** wire answer of one refusal at `POST /api/v1/auth/admin/create-user` (`@objectstack/plugin-auth`).
+  
+  - **Before.** With neither an email nor a phone number, the endpoint answered `400` `{ code: 'INVALID_REQUEST', message: 'Email is required' }` ("Email or phone number is required" where phone sign-in is on). The code is the endpoint's generic one, so a client could only show the English sentence.
+  - **Now.** The same `400` answers `{ code: 'VALIDATION_FAILED', message, fields }`. `fields` holds `{ field: 'email', code: 'required', message }`, plus `{ field: 'phoneNumber', code: 'required', message }` where phone sign-in is on. The English message is unchanged.
+  - **Unchanged.** Every other refusal of the endpoint keeps `INVALID_REQUEST` and its message: a malformed email, a phone number without phone sign-in, a malformed phone number, a `permissionSet` that is not a name, the password rules. A valid Create User still succeeds.
+  - **Supersedes** the line "The status (400) and code (`INVALID_REQUEST`) are unchanged" in this release's earlier Create User changeset: the status is still 400, and the code is now `VALIDATION_FAILED`.
+  - **Who sees it.** A client that read `INVALID_REQUEST` for this one refusal. The console shows the refusal's message as before; marking the Email input from `fields` is the console's own follow-up.
+- d3fdd46: feat(runtime, rest, plugin-auth): an AI agent connected over OAuth can run `api` actions that forward to identity routes and other same-origin routes, as the agent
+  
+  Clause-②: yes (widening, at the two named cells only)
+  Metadata-protocol: none
+  
+  An `api` action runs by forwarding a request to its `target` inside the server. Until now an agent connected over OAuth was refused by name before that forward unless the target was the MCP endpoint, because its access token is honoured there alone. So the identity actions ADR-0011 exposes to agents (update my profile, the confirmed admin actions) never ran for one.
+  
+  Now, per ADR-0090 D10 rule 5, the forward carries a credential the server mints for that one forward instead of the agent's token. It is bound to the forward's method and route and to the action run, spent by its first use, revoked when the target answers, and redeemable only inside the server's own in-process call. At the target it resolves to the same agent: its scope ceiling, the user it acts for and its client. At the identity routes, the auth library is shown the delegating user for that one request only; no session is created, and the user's own permissions there still decide. Writes the agent makes are recorded with both the agent and its user.
+  
+  What changes, at exactly two cells of the forward table:
+  
+  - an agent at an identity route: refused by name before, now forwarded as the agent;
+  - an agent at any other same-origin route: refused by name before, now forwarded as the agent when the connection holds `actions:execute` and `data:write`.
+  
+  What does not change:
+  
+  - An API key is still refused by name at an identity route.
+  - A state-changing request to the metadata endpoint is never forwarded for an agent; it is refused `403` by name.
+  - An agent without `data:write` is refused `403` by name, and `list_actions` marks those actions the same way.
+  - Nothing the target mints, such as a rotated session token or cookie, comes back to an agent.
+  - An OAuth access token presented directly to the data API or to an identity route is still refused.
+- aa46d14: fix(plugin-auth)!: Copy Invite Link is no longer offered or answered for a pending invitation whose expiry has passed
+  
+  Clause-②: no (narrowing) — the `sys_invitation.copy_invitation_link` handler refuses, `409 RESOURCE_CONFLICT`, an invitation that still reads `pending` after its `expires_at`, a call it answered before; the action's `visible` predicate hides it on such a row. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no metadata an author writes changes meaning: one platform action's handler narrows which rows it answers, and that action's own visible predicate follows it. The refusal is the handler's existing 409 RESOURCE_CONFLICT with a sentence naming expiry, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** row narrowing on `sys_invitation.copy_invitation_link` (`@objectstack/plugin-auth`, `@objectstack/platform-objects`).
+  
+  - **The rule.** An expired invitation's link is no longer offered or answered. A row can still read `pending` after its `expires_at` has passed, because nothing moves it to `expired`; the handler now refuses it with `409 RESOURCE_CONFLICT`, as it refuses a non-pending row, and the row menu and record header no longer offer the action there. A missing or unreadable `expires_at` counts as expired.
+  - **Unchanged.** The other gates and their order (cloud-managed, the record, the caller, invite reach, pending), the link a pending invitation before its expiry answers, and Resend Invitation, which stays offered on an expired row.
+  - **Who sees it.** An organization admin who opens the row menu of an invitation past its expiry.
+  
+  **The remedy.** Resend the invitation, then copy the link of the invitation Resend answers.
+- 0c03ce2: fix(plugin-auth, platform-objects): resending an expired invitation replaces it, leaving one pending invitation for the person
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/plugin-auth`**: when `POST /organization/invite-member` issues an invitation, the person's other pending invitations in that organization whose expiry has passed are now marked `expired`. A resend on an invitation that has already expired issues a new invitation, as before, and the expired one now moves to the Expired / Canceled list instead of staying in Pending beside the new one. A plain invite to an address whose earlier invitation expired does the same. A resend on an invitation that has not expired still renews that invitation (same id). A refused call changes nothing.
+  - **`@objectstack/platform-objects`**: the Resend Invitation confirmation on `sys_invitation` now reads "Resend the invitation to {{ record.email }}? The expiry date starts over, and an invitation that has already expired is replaced by a new one.", which is true for both rows the action is offered on. The zh-CN, ja-JP and es-ES translations say the same.
+- 92b7bbd: feat(plugin-auth): a platform administrator sees who holds platform-admin standing from Setup → Users (#28793)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Users list carries no column for platform-admin standing, because that standing is derived per user and is not stored on `sys_user`. The list toolbar now has one entry instead, **Platform Administrators**, which opens a list of every user who holds that standing right now.
+  
+  - **The answer.** `POST /api/v1/auth/admin/list-platform-admins` (`@objectstack/plugin-auth`) enumerates the candidates with the last-admin guard's own enumerator: the in-window `admin_full_access` grants the Default Organization owns, and the verified `sys_user` rows on the `OS_PLATFORM_OWNER_EMAIL` list. It then confirms each candidate through `hasPlatformAdminStanding`. The roster can only be narrower than that predicate, never wider. Organization owners and admins are not platform administrators and are not listed.
+  - **Who may read it.** Only a caller who holds platform-admin standing. Anonymous callers get 401, and every other caller, an organization owner or admin included, gets 403 `PERMISSION_DENIED` with no data.
+  - **Exported.** `resolveAdminUserIds(engine, { standing })` (`@objectstack/plugin-auth`): `'administrators'` (the default) is the population the break-glass guard protects, and `'platform-admins'` drops the organization half. The guard's own behaviour is unchanged.
+  - **Pinned.** `ADMIN_STANDING_PLATFORM_ENUMERATION` (`@objectstack/core`) names the enumerator and classifies every input of the administrator derivation as a candidate source or not, so a new source of platform-admin standing is red until the enumerator reads it.
+  - **Unchanged.** The Users list still reads one page per request. No `sys_user` field is added.
+- 2ac698b: feat(console): the workspace prompt also asks an administrator for a default currency that is still unset, offering the browser region's currency
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@objectstack/spec/shared` gains `REGION_CURRENCY` and `currencyForLocale`, the checked-in CLDR region → currency table and its lookup. They move there from `@objectstack/plugin-auth`, which gives a new organization its creator's currency through them and no longer keeps its own copy. The table and the mapping are unchanged. Neither name was exported from the plugin-auth package entry, so nothing an importer of that package used moves.
+  
+  The console's one-time workspace prompt (Setup → Localization's keys, asked once per administrator per workspace) now covers `localization.currency` too. While that key has no value on any rung, code-less amounts show as plain numbers; an administrator who may write the namespace is asked once, with the field pre-filled with the currency of the browser's first preferred language (`zh-CN` → CNY, shown as "人民币（CNY）" in Chinese). Confirm writes it through the Settings page's own `PUT /api/settings/localization`; "Not now" writes nothing. When the timezone is still the default as well, it is one dialog with both fields and one write. A browser language with no country region (`es-419`) offers no currency, and the prompt does not ask about it. No settings key, server-side dismissed flag or gate is added: the prompt keeps its existing per-device record, so an administrator already asked about the timezone is not asked again.
+  
+  `@object-ui/i18n` gains eight `console.workspaceTimezonePrompt.*` strings in every built-in locale.
+- 5d3f82b: fix(plugin-auth): a rate limit admits no more than its limit inside one process, and the auth counters count in a registered `cache` service
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A limit holds under concurrency inside one process.** Updates of one counter key are now serialised in the process: a fixed-window limit of `max` admits at most `max` requests per window for one key however many arrive at once, and every request is counted. This holds in the per-process store and in the kernel `cache` alike. It covers better-auth's sign-in and sign-up rate limits (`rateLimit.customStorage`), the counters of the exported `cacheSecondaryStorage()` adapter, the signed-out invitation preview, and every other caller of `incrementFixedWindow` (`@objectstack/plugin-auth/rate-limit-storage`). The per-number OTP send budget follows the same rule: one number is granted no more sends than its cooldown and hourly cap allow. Other keys keep counting concurrently.
+  - **The counters count in the registered `cache`.** When a `cache` service is registered, as a value or as a factory, the rate limits, the OTP send budget and the invitation preview count in it. They fall back to a per-process store only when none is registered, and say so once. The service is resolved through the kernel the plugin context hands out (`getKernel().getServiceAsync`), or through `getService` on a host without service factories (`LiteKernel`).
+  - **Across nodes, unchanged.** `ICacheService` has no atomic increment, so two nodes that share one cache can still over-admit slightly between them (ADR-0069 D2), as documented. That is still strictly better than counting per node.
+- a2fcede: fix(plugin-auth)!: `invite-member` refuses a blank role 400 `ROLE_NOT_FOUND`, the way it refuses an unknown one, and writes no invitation (#29158)
+  
+  Clause-②: no (narrowing) — `POST /api/v1/auth/organization/invite-member` with a blank role (`""`, whitespace only, or an empty role array) answered 200 and stored the invitation; it is now refused 400 `ROLE_NOT_FOUND`. A role list with an empty entry (`"member,"`) was already refused 400 `VALIDATION_FAILED` by the `sys_invitation.role` select validator, and now answers 400 `ROLE_NOT_FOUND`. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the spec changes: the invite door now refuses a role value that names no role, with the code it already answers for an unknown role, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the invite door (`@objectstack/plugin-auth`).
+  
+  - **Before.** better-auth's role check splits the role list and drops empty entries before it looks for unknown names, so a blank role named no unknown role and passed. A blank value (`""`, whitespace only, an empty role array) was then stored as the invitation's role (`role: ''`). A role list with an empty entry (`"member,"`) was refused 400 `VALIDATION_FAILED` (`invalid_option`) by the `sys_invitation.role` select validator, and was stored only on a composition without the ObjectQL validator. Under a walled `group` posture, accepting it wrote a membership with no organization role, whose holder read less than a member and gave the administrator no reason why. An unknown role such as `superuser` was already refused 400 `ROLE_NOT_FOUND`.
+  - **Now.** The framework's `beforeCreateInvitation` refuses a blank role first, before the invitation role cap and before any row is written: 400, `code: 'ROLE_NOT_FOUND'`, and a message that says the invitation role is empty. A blank role is refused, never defaulted to `member`.
+  - **Unchanged.** Every named role is judged as before: the vocabulary, the role cap's three refusals and the placement gate. A resend of an invitation that is already pending keeps the stored role, as before.
+  - **Who sees it.** A script or form that invites with an empty role: it now gets the refusal instead of an invitation outside the role vocabulary. Invitations already stored with a blank role are not rewritten.
+  - **Who sees it, by code.** A client branching on `error.code` sees `VALIDATION_FAILED` become `ROLE_NOT_FOUND` for a role list with a blank entry; the status (400) and the absence of a row are unchanged.
+  
+  **The remedy.** Send the organization role the invitee joins with, for example `member`.
+- 4522c3e: fix(plugin-auth): the uncoded refusals on `POST /change-email` and `POST /update-user` now carry an ADR-0112 code
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three refusals on the account self-service doors answered a 400 with a message and no `code`, while every other refusal on the same doors carried one, so a client could only tell them apart by matching English text. Each now answers the same 400 with the same message, plus a code that is already in the ledger:
+  
+  - `POST /change-email` to the caller's own address (`Email is the same`, any letter case) → `code: "VALIDATION_ERROR"`, the code this door already answers for a malformed address.
+  - `POST /change-email` on a deployment with no email transport (`Verification email isn't enabled`) → `code: "EMAIL_SERVICE_REQUIRED"`.
+  - `POST /update-user` with nothing it can update (`No fields to update`) → `code: "VALIDATION_ERROR"`.
+  
+  Which requests are refused is unchanged, and the body keeps the doors' flat `{ "message", "code" }` shape. A client that branched on the message text keeps working; it can now branch on `code` instead.
+- 4008e62: feat(platform-objects): `sys_personal_view`, a reader's own named list views (server step of the first version)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A reader can now keep named list views of their own, as user data rather than view metadata. The new platform object `sys_personal_view` holds one row per saved list:
+  
+  - its owner (`user_id`);
+  - the object it lists (`object_name`);
+  - the name the owner gave it (`label`);
+  - the list configuration, in spec's `ListView` shape (`config`).
+  
+  It is registered beside `sys_user_preference`, on the same template, and the generic data API serves it at `/api/v1/data/sys_personal_view`. Which view opens by default is not stored here: the reader's existing per-object pin holds a view id, and a personal view's id is one more value it can hold.
+  
+  - **Owner only.**
+    - The object declares the owner-only default row scope `user_id == current_user.id` for every operation. The table carries the organization column, so the organization wall bounds it too.
+    - Another member gets nothing: no read by id (`404`), nothing listed, and no update (`404 RECORD_NOT_FOUND`).
+    - A create naming another owner is refused `403 PERMISSION_DENIED`.
+    - A view's owner is fixed when it is saved: an update that changes `user_id` is refused `403 PERMISSION_DENIED` for every caller but the system, platform administrators included. A save rule holds this, because for an organization member the `member_default` update floor (`created_by == current_user.id`) applies to an update in place of the object's own row scope.
+  - **No back door for organization administrators.** `organization_admin`, and the derived `organization_admin_no_bypass`, name the object without the wildcard's super-user bits. An organization administrator reads, writes and deletes only their own views.
+  - **Platform administrators are not limited.** The bare `admin_full_access` wildcard carries `viewAllRecords` and `modifyAllRecords`, so through the generic data API a platform administrator reads, edits and deletes any member's view. This is the same as `sys_user_preference` today. Whether that should change is an open question.
+  - **The body is a `ListView` for the row's own object, judged on every save.**
+    - A create, and an update that sends `config` or `object_name`, parse the resulting body with spec's `ListViewSchema`.
+    - A body that does not parse is refused `400 VALIDATION_FAILED`, with one `fields[]` entry per issue, each path under `config`.
+    - A body whose `data.object` names a different object than `object_name` is refused the same way, on `config.data.object`.
+    - No new error code.
+  - **Field security is not re-judged on save.** A view whose filter names a field the reader cannot read is still saved. The list query that applies the filter is refused `403 PERMISSION_DENIED` by the existing predicate guard.
+  - **Not view metadata.** `/meta` never serves a personal view, the metadata write door never writes one, and a package export never carries one. Its id is the engine's record id, so it never takes the `object.key` view syntax.
+  - **The owner's delete door.** `DELETE /api/v1/personal-views/:id` removes one personal view, and only the caller's own.
+    - The row is read as the caller, so another member or an organization administrator gets the unknown-id `404 RECORD_NOT_FOUND`.
+    - A row the caller can read but does not own is refused `403 PERMISSION_DENIED`.
+    - Only then is the row removed, as the system, attributed to the caller and inside the caller's organization. Success is `200` with `{ id, deleted: true }`.
+    - The door takes no query parameter (`400 VALIDATION_ERROR`) and serves signed-in callers only (`401 UNAUTHENTICATED`).
+    - `AuthPlugin` mounts it on the kernel's HTTP server, in the shape of the comment-reaction unreact door.
+  - **Grants.**
+    - `member_default` grants read, create and edit on the object, and no delete. That set is bound to the `everyone` anchor, which carries no delete bit (ADR-0090 D5).
+    - A member's generic data `DELETE` on a personal view is still refused `403 PERMISSION_DENIED`. The door above grants nothing.
+    - External members (`external_default`) get no grant in this version. Whether they can save views is an open question for the Console half.
+  
+  `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` (`@objectstack/spec/system`) now lists `sys_personal_view`, so lint and cross-reference checks know the name is real. The CLI's organization-ownership inventory carries the new object's row.
+- 2ea6042: fix(plugin-auth)!: a user preference's owner is fixed when the preference is saved
+  
+  Clause-②: no (narrowing) — a non-system update of a `sys_user_preference` row that sends a `user_id` other than the stored one is refused `403 PERMISSION_DENIED`, which some callers' writes were admitted before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: a save rule on one platform object refuses a change of the row's owner. The refusal is a 403 a caller cannot work around by rewriting metadata, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the generic data door for `sys_user_preference` (`@objectstack/plugin-auth`).
+  
+  - **Now.** A preference belongs to the user it was saved for. An update that sends a different `user_id` is refused `403 PERMISSION_DENIED`, for every caller but the system: a member, an organization administrator and a platform administrator alike. The refusal names the row and the `user_id` column. The row is unchanged.
+  - **Unchanged.** An update that echoes the stored `user_id`, or does not send it, saves as before. The console's preference writer updates `value` only and creates rows in the caller's own name, so it is not affected. A system write (the platform's own writers) is not judged.
+  - **Shared rule.** `sys_personal_view` and `sys_user_preference` now hold this with one check, `owner-fixed-rule.ts`. The personal view's behaviour and message are unchanged.
+  - **Who sees it.** A client that changes the `user_id` of a saved preference.
+  
+  **The remedy.** Save a new preference in the other user's name, as that user, instead of moving one.
+- 601832b: refactor(core): the unreact door and the personal-view delete door are served by one own-row delete door
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A move with no change in what either door answers. `DELETE /api/v1/comments/reactions/:id` (`@objectstack/plugin-audit`) and `DELETE /api/v1/personal-views/:id` (`@objectstack/plugin-auth`) were two hand-copied spellings of one sequence: resolve the caller, refuse anonymous, a held sign-in and any query parameter, read the row as the caller (`404` when it cannot be read), check its owner column (`403` when it names someone else), then remove it as the system, attributed to the caller and inside the caller's organization. That sequence now lives once, in `@objectstack/core`:
+  
+  - `registerOwnRowDeleteRoute(http, door, deps)` mounts the door for one object; `door` (`OwnRowDeleteDoor`) names the route, the object, the owner column and the words its answers use.
+  - `removeOwnRow(engine, door, id, context)` is the read, the owner check and the attributed system removal on their own.
+  - `ownRowDeleteCallerResolver(sources)` is the door's caller resolution over `resolveRequestExecutionContext`.
+  
+  Each plugin keeps its route, its route ledger and its existing exports. Nothing to migrate.
+- 2b15e30: feat(plugin-auth): the mobile sign-in hand-off — a sign-in completed in the system browser is handed to a registered app scheme as a single-use token, over better-auth's own `one-time-token` plugin
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Some identity providers (Google among them) refuse to sign a user in inside an embedded WebView, so a mobile shell signs in in the platform's system auth session, where the session lands in the system browser rather than in the WebView the Console runs in. A deployment that lists its app's custom URL scheme in `trustedAppSchemes` now gets a way to carry that session across, once:
+  
+  - **`GET /api/v1/auth/one-time-token/handoff`** (session required). Query: `redirect_uri` (an app callback), `code_challenge` (RFC 7636 S256: `BASE64URL(SHA-256(code_verifier))`, 43 characters) and optionally `code_challenge_method=S256`; no other parameter is accepted. It answers `302` to `redirect_uri` with a `token` query parameter added, uncacheable. A `redirect_uri` whose scheme is not registered answers `400 VALIDATION_ERROR` with no redirect, so the route is never an open redirect; a missing or malformed challenge also answers `400`, and a signed-out caller `401 UNAUTHENTICATED`.
+  - **The hand-off carries only a fresh sign-in.** A session signed in more than five minutes ago answers `401 UNAUTHENTICATED` (sign in again), so an app cannot silently carry away a session the browser has held for days; and a navigation the browser reports as `Sec-Fetch-Site: cross-site` answers `400 VALIDATION_ERROR` (the header is checked only when the browser sends it).
+  - **`POST /api/v1/auth/one-time-token/verify`** (better-auth's route, no session needed). Body: `{ "token": "TOKEN.code_verifier" }`. It answers better-auth's `{ session, user }` with the session cookie, once, within one minute.
+  - **An intercepted callback cannot be redeemed.** Another app on the device can register the same scheme and receive the callback, so the token is stored under a hash of the token and the challenge, and redemption recomputes it from the verifier the shell kept. A token presented without that verifier answers better-auth's `400 Invalid token` and consumes nothing, so the shell that started the hand-off still redeems it.
+  - **`GET /api/v1/auth/one-time-token/generate`** is published by the plugin and refuses every client request (`400` with a session, `401` without); the hand-off is the only place a token is minted.
+  - **`trustedAppSchemes`** (the spec's `AuthConfig.trustedAppSchemes`) entries must be lowercase reverse-domain private-use schemes with no `:` suffix (RFC 8252 §7.1, e.g. `com.example.app`, no empty or trailing label); `http`, `https`, `javascript`, `data`, `file`, `blob`, `about`, `vbscript`, `ws` and `wss` are refused. A bad entry fails the auth manager's construction (and `applyConfigPatch`), naming the entry. With no scheme registered, the plugin is not mounted and the hand-off refuses every target.
+- 6bc7643: feat(plugin-auth): a forced password change now requires a password different from the current one
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a credential door's accept set: `/change-password` and `/reset-password` stop accepting the current password as the new one while an administrator's forced change is outstanding, and the remedy is to choose a different password, never a rewrite of anyone's code or metadata. No exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only); every bumped package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `patch`: the metadata protocol does not move, so the level is `patch` and this banner is the carrier.
+  
+  When an administrator issues a password and asks for it to be changed at next sign-in (`sys_user.must_change_password`, set by Create User, Set Password and Import Users), the change now has to move the user to a new password.
+  
+  **FROM.** With the forced-change flag set and the default `passwordHistoryCount` (0), a `/change-password` or `/reset-password` whose new password equals the current one completed and cleared the flag, so the user kept the password the administrator issued. With `passwordHistoryCount` above 0, a `/change-password` carrying a wrong current password and a recycled new one answered `400 PASSWORD_REUSE`.
+  
+  **TO.** While the forced change is outstanding, `/change-password` and `/reset-password` refuse the current password as the new one with `400 PASSWORD_REUSE` ("Choose a new password that is different from your temporary password."), whatever `passwordHistoryCount` is, and the flag stays set until a different password is chosen. On `/change-password` a reuse refusal of either kind (the forced change's and the `passwordHistoryCount` ring's) is given only after the current password is confirmed: a request whose current password is wrong answers the endpoint's own `INVALID_PASSWORD` whatever the new password is, including a recycled one at a history depth above 0, which answered `PASSWORD_REUSE` before. A confirmed request reusing the current or a recent password still answers `PASSWORD_REUSE`. `/reset-password` carries no current password; its token is the authority, and the forced refusal applies to it directly.
+  
+  **For clients.** A client that completes a forced change by sending the issued password back as the new one (an onboarding script, a test harness) must now send a different password.
+  
+  Nothing else changes: with no forced change outstanding, which passwords count as reuse is still decided by `passwordHistoryCount` exactly as before. If the flag cannot be read, the request goes on as though no forced change were outstanding and the failure is logged through the auth manager's durability-degradation channel.
+  
+  The Console's forced-change screen says the same thing in the user's language (all ten locale packs) when the new password matches the one typed as current, and sends no request.
+- 3a856f6: fix(plugin-auth)!: a completed password reset ends the account's other sessions, and a reset request answers the same way for any address without waiting on its mail
+  
+  Clause-②: no (narrowing) — the auth manager refuses an `emailAndPassword.revokeSessionsOnPasswordReset: false` it accepted before, at construction and on every configuration patch. Nothing is widened: no export, route, key or answer is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, settings key or stored shape is added, removed, renamed or re-shaped, and no exported declaration changes. `emailAndPassword.revokeSessionsOnPasswordReset` stays declared by `@objectstack/spec`; what changes is which value plugin-auth's own entry validation accepts for the deployment configuration a host hands the plugin in code, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a deployment that sets `emailAndPassword.revokeSessionsOnPasswordReset: false` only.
+  
+  - **A completed password reset ends the account's other sessions.** Every self-service reset door — the emailed link (`POST /api/v1/auth/reset-password`) and the phone OTP reset (`POST /api/v1/auth/phone-number/reset-password`) — ends every existing session of the account when it sets the new password, the same as an administrator's forced reset does. The person who reset the password signs in again with it. It is not a setting.
+  - **`revokeSessionsOnPasswordReset: false` is refused.** The auth manager refuses it at construction, which stops the boot, and on a configuration patch, where the standing configuration keeps ruling, with a message naming the key. `true` and an absent key are accepted and change nothing.
+  - **A reset request answers the same way for any address, without waiting on its mail.** `POST /api/v1/auth/request-password-reset` answers at once; the reset mail is built and sent after the response. A send that fails is logged on the server, at error, and never changes the answer.
+  - **Unchanged.** The answer's status and body; the reset mail's template, locale and recipient; the identity import, whose invitation mail is still awaited and still reported per row when it is not delivered; an administrator's forced reset and its revocation switch.
+  - **Who sees it.** A user signed in somewhere else when their password is reset is signed out there. A host whose configuration sets `revokeSessionsOnPasswordReset: false` no longer boots until the key is removed.
+  
+  **The remedy.** Delete `revokeSessionsOnPasswordReset: false` from the `emailAndPassword` block the host passes the auth plugin; nothing else is needed.
+- Updated dependencies [ce12ad2]
+- Updated dependencies [ea025d3]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [1d7816d]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [e1ab32e]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [67cf0b1]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [a8ec04d]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [eac6d96]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [a3014cb]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [86f2afe]
+- Updated dependencies [524befb]
+- Updated dependencies [81d00a4]
+- Updated dependencies [e0aed00]
+- Updated dependencies [a75ddba]
+- Updated dependencies [875d007]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [04141a6]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [a7c2595]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [9cd54fa]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [dd9921e]
+- Updated dependencies [2fc3861]
+- Updated dependencies [d5151a7]
+- Updated dependencies [01eab23]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [92493e3]
+- Updated dependencies [07585bf]
+- Updated dependencies [fdf844c]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [f5e6709]
+- Updated dependencies [2a3dec2]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [0bf7aaf]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [119931d]
+- Updated dependencies [5f6dc96]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [0c64014]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [1e01924]
+- Updated dependencies [2c0a97b]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [8ce974c]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [cd065d3]
+- Updated dependencies [d3fdd46]
+- Updated dependencies [9b4d193]
+- Updated dependencies [a727ba2]
+- Updated dependencies [aa46d14]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [eeec88d]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [93c0a63]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [76bf6c5]
+- Updated dependencies [1a95c74]
+- Updated dependencies [0c03ce2]
+- Updated dependencies [f3f7b62]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [bc02a77]
+- Updated dependencies [0aaad18]
+- Updated dependencies [67103cc]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [c594e1c]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [7b293c4]
+- Updated dependencies [3fb74b6]
+- Updated dependencies [1617b7f]
+- Updated dependencies [b399cb8]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [8d208a4]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c708de6]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [b95a856]
+- Updated dependencies [70943dd]
+- Updated dependencies [92b7bbd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [bf03ebb]
+- Updated dependencies [2c3574c]
+- Updated dependencies [1335c6b]
+- Updated dependencies [bdb19ca]
+- Updated dependencies [d8c611d]
+- Updated dependencies [ec0316e]
+- Updated dependencies [8bb2417]
+- Updated dependencies [2ac698b]
+- Updated dependencies [d0df873]
+- Updated dependencies [462b4f9]
+- Updated dependencies [9a0c622]
+- Updated dependencies [138dacf]
+- Updated dependencies [7f4258f]
+- Updated dependencies [1ac1c24]
+- Updated dependencies [97ca257]
+- Updated dependencies [104cd1a]
+- Updated dependencies [f1d795b]
+- Updated dependencies [b3d1415]
+- Updated dependencies [dedc350]
+- Updated dependencies [d659c1d]
+- Updated dependencies [078e581]
+- Updated dependencies [18e4ac1]
+- Updated dependencies [51058ef]
+- Updated dependencies [4df6292]
+- Updated dependencies [f125ce4]
+- Updated dependencies [b16ee8b]
+- Updated dependencies [86d0a8c]
+- Updated dependencies [d089dac]
+- Updated dependencies [3557366]
+- Updated dependencies [29c70ca]
+- Updated dependencies [b5e7ba5]
+- Updated dependencies [38a278b]
+- Updated dependencies [bb82da1]
+- Updated dependencies [85ea12f]
+- Updated dependencies [85f7a0d]
+- Updated dependencies [e9fb529]
+- Updated dependencies [7b55ea9]
+- Updated dependencies [4138ce8]
+- Updated dependencies [dbb7ea8]
+- Updated dependencies [53dda03]
+- Updated dependencies [ba1f164]
+- Updated dependencies [20f052d]
+- Updated dependencies [fa5e863]
+- Updated dependencies [9467a1b]
+- Updated dependencies [40eab63]
+- Updated dependencies [08610a9]
+- Updated dependencies [8b65633]
+- Updated dependencies [c268b72]
+- Updated dependencies [d68d129]
+- Updated dependencies [bd68248]
+- Updated dependencies [f72bc9e]
+- Updated dependencies [a20dcae]
+- Updated dependencies [5d46f43]
+- Updated dependencies [c9aaee9]
+- Updated dependencies [3d6f230]
+- Updated dependencies [186a83a]
+- Updated dependencies [7eb0b19]
+- Updated dependencies [8e6ab05]
+- Updated dependencies [e756782]
+- Updated dependencies [8209a2f]
+- Updated dependencies [aee9c47]
+- Updated dependencies [0e75081]
+- Updated dependencies [45b4922]
+- Updated dependencies [399df5b]
+- Updated dependencies [31204d1]
+- Updated dependencies [2c881fb]
+- Updated dependencies [1bdf674]
+- Updated dependencies [4b8cbe2]
+- Updated dependencies [5f99582]
+- Updated dependencies [63f962f]
+- Updated dependencies [df8d020]
+- Updated dependencies [6f09464]
+- Updated dependencies [772b356]
+- Updated dependencies [4008e62]
+- Updated dependencies [b64bb72]
+- Updated dependencies [b861525]
+- Updated dependencies [6903c93]
+- Updated dependencies [4b06a54]
+- Updated dependencies [ebbb5b8]
+- Updated dependencies [9bdfe37]
+- Updated dependencies [a81b7cb]
+- Updated dependencies [eeb3117]
+- Updated dependencies [a5fcd06]
+- Updated dependencies [56076fd]
+- Updated dependencies [fdb9a07]
+- Updated dependencies [57958aa]
+- Updated dependencies [59775a0]
+- Updated dependencies [744211f]
+- Updated dependencies [87956dc]
+- Updated dependencies [3482f3d]
+- Updated dependencies [a6a369e]
+- Updated dependencies [601832b]
+- Updated dependencies [5c4e752]
+- Updated dependencies [4ab2e7e]
+- Updated dependencies [589049b]
+- Updated dependencies [d0f308c]
+- Updated dependencies [4dc41e6]
+- Updated dependencies [eb05ea2]
+- Updated dependencies [55a4898]
+- Updated dependencies [f87239a]
+- Updated dependencies [2ae8c89]
+- Updated dependencies [a4daa85]
+- Updated dependencies [b64980a]
+- Updated dependencies [bbb98c4]
+- Updated dependencies [1bb9536]
+- Updated dependencies [2bf71ce]
+- Updated dependencies [c1af99c]
+- Updated dependencies [6f35b74]
+- Updated dependencies [99a6a78]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [3ac22c9]
+- Updated dependencies [ceef714]
+- Updated dependencies [b388cfe]
+- Updated dependencies [64646ae]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [cfd237f]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/rest@18.3.0
+  - @objectstack/service-messaging@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

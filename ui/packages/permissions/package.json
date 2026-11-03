@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/permissions",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "type": "module",
   "license": "MIT",
   "description": "RBAC permission system for ObjectUI with object/field/row-level access control, permission guards, and hooks.",

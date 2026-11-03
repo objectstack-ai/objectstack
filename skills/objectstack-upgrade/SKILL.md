@@ -16,7 +16,7 @@ license: Apache-2.0
 compatibility: Requires `@objectstack/spec` and `@objectstack/cli` at the TARGET major; the chain replays from the spec's `MIGRATION_SUPPORT_FLOOR`. No network access required.
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: process
   tags: upgrade, migration, protocol, major, retired-keys, tombstone, conversions, validate, report
 ---
