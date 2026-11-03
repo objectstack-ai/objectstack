@@ -75,6 +75,12 @@
  *              none of which writes, and before any write.
  *          A mode the package's `installModes` does not permit answers
  *          `422 INSTALL_MODE_NOT_PERMITTED`, before any write.
+ *          Either mode reads the body's `withheldMaps` — the connector header
+ *          and environment maps a package export withheld whole (#28640
+ *          ruling ③A) — accepts the package, and names each map in its
+ *          answer's `withheldMaps` and in one `warn` line; a list the export's
+ *          declaration refuses answers `PLUGIN_MANIFEST_INVALID` (400 inline,
+ *          502 cloud), before any write.
  *
  *          [ADR-0126 §6 wall 3] A managed RE-install over an installed package
  *          asks the security plugin's access upgrade check
@@ -187,6 +193,9 @@ import {
     unmanagedInstallValueCarries,
     type InstallMode,
 } from '@objectstack/spec/kernel';
+// [#28640 ruling ③A] The export's list of the connector maps it withheld whole,
+// read by both install modes through its one declaration.
+import { PackageExportManifestSchema, type PackageExportManifest } from '@objectstack/spec/api';
 // [#21762] ADR-0087 D1's protocol handshake, its brand predicate and the ONE
 // answer both package-install doors give its refusal. Imported from the
 // producer, never restated: `POST /api/v1/packages` answers through the same
@@ -600,6 +609,57 @@ function listedIdentity(type: string, item: Record<string, unknown>): string | u
 /** A `{ … }` object — not an array, not null. */
 function isPlainObject(value: unknown): value is Record<string, any> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** One entry of an export's `withheldMaps` ({@link PackageExportManifestSchema}). */
+type WithheldMap = NonNullable<PackageExportManifest['withheldMaps']>[number];
+
+/**
+ * [#28640 ruling ③A] The connector maps the export that produced this body
+ * withheld whole — its `withheldMaps`, parsed through the export's own
+ * declaration ({@link PackageExportManifestSchema}), by reference. Read by
+ * BOTH install modes before any write, so each answer names every map that
+ * arrives incomplete instead of letting it read as one the package never had.
+ *
+ * An absent list is `[]`: a body that is not an export, or an export that
+ * withheld nothing. A list the declaration refuses is refused here, the way
+ * an invalid `installModes` is ({@link judgeInstallMode}): it can only have
+ * been written by hand, and guessing which maps it meant is the silent answer
+ * the list exists to replace. The import never refuses a package FOR an
+ * incomplete map (the ruling: accept, and name each one).
+ */
+function judgeWithheldMaps(
+    manifest: Record<string, any>,
+    manifestId: string,
+    invalidManifestStatus: 400 | 502,
+): { ok: true; withheldMaps: WithheldMap[] } | { ok: false; status: number; error: { code: string; message: string } } {
+    const declared = PackageExportManifestSchema.shape.withheldMaps.safeParse(manifest.withheldMaps);
+    if (!declared.success) {
+        const [issue] = declared.error.issues;
+        return {
+            ok: false,
+            status: invalidManifestStatus,
+            error: {
+                code: 'PLUGIN_MANIFEST_INVALID',
+                message: `Package '${manifestId}' carries an invalid \`withheldMaps\`: ${issue?.message ?? 'refused by its declaration'}`
+                    + `${issue && issue.path.length > 0 ? ` (at \`withheldMaps.${issue.path.join('.')}\`)` : ''}. `
+                    + 'Send the list as the package export wrote it, or omit it.',
+            },
+        };
+    }
+    return { ok: true, withheldMaps: declared.data ?? [] };
+}
+
+/**
+ * [#28640 ruling ③A] The operator's line for an install that received
+ * withheld maps: each one named, once, at `warn` — the connector is installed
+ * and runs, without the headers or environment variables the export held back.
+ */
+function withheldMapsLogLine(manifestId: string, mode: InstallMode, withheldMaps: readonly WithheldMap[]): string {
+    const named = withheldMaps.map((m) => `${m.type} '${m.name}' ${m.path}`).join(', ');
+    return `[MarketplaceInstallLocal] installed ${manifestId} ${mode} with ${withheldMaps.length} connector map(s) the `
+        + `package export withheld whole, each now absent: ${named}. The connector sends none of those headers or `
+        + 'environment variables until each map is supplied again where the connector is authored.';
 }
 
 /**
@@ -1925,6 +1985,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, UNRUNNABLE_REFUSAL_STATUS);
         }
 
+        // 1d'. [#28640 ruling ③A] THE MAPS THE EXPORT WITHHELD, read for both
+        //     modes before any write: each answer names every connector map
+        //     that arrives incomplete ({@link judgeWithheldMaps}). Accepted,
+        //     never refused for, as the ruling has it; only a list the export's
+        //     declaration refuses is.
+        const withheld = judgeWithheldMaps(manifest, manifestId, inlineManifest ? 400 : 502);
+        if (!withheld.ok) return c.json({ success: false, error: withheld.error }, withheld.status as any);
+        const { withheldMaps } = withheld;
+
         // ── [ADR-0131 D6] The `unmanaged` install: a copy, not a registration.
         //    The package's metadata is copied ONCE into a new writable base in
         //    the environment ledger by the import verb, and the steps below —
@@ -1940,6 +2009,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 version,
                 versionId: resolvedVersionId,
                 userId,
+                withheldMaps,
             });
         }
 
@@ -2308,6 +2378,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // The door is named only when it can store one of them: a listing that
         // says none is writable (a walled posture) gets the other places.
         const door = described?.writable === undefined || unsetRefs.some((r) => described.writable!.has(r));
+        if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'managed', withheldMaps));
 
         return c.json({
             success: true,
@@ -2333,6 +2404,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // that declares none, so that answer's key set is unchanged.
                 ...(datasources !== undefined ? { datasources } : {}),
                 ...(unsetRefs.length > 0 ? { credentialNote: installedCredentialNote(unsetRefs, { door }) } : {}),
+                // [#28640 ruling ③A] Each connector map the package export
+                // withheld whole, so it arrived absent. Omitted when there are
+                // none, so that answer's key set is unchanged.
+                ...(withheldMaps.length > 0 ? { withheldMaps } : {}),
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 // [ADR-0146 D2, #28410] Names installed dependents already held,
                 // undeclared, that this version now ships (step 2d). Omitted when
@@ -3538,14 +3613,21 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *    either spelling, and the copy does not keep, with the package's
      *    reason — is the verb's own
      *    list, relayed as the verb states it, so the installer reads why the
-     *    vendor locked an item before editing it.
+     *    vendor locked an item before editing it;
+     *  - `withheldMaps` — every connector map the package export withheld
+     *    whole, read by {@link handleInstall} before the verb runs — is on the
+     *    answer and on a `warn` line: the copy carries each map absent.
      */
     private installUnmanaged = async (
         c: any,
         ctx: PluginContext,
-        args: { manifest: Record<string, any>; manifestId: string; version: string; versionId: string; userId: string | null },
+        args: {
+            manifest: Record<string, any>; manifestId: string; version: string; versionId: string; userId: string | null;
+            /** [#28640 ruling ③A] The connector maps the export withheld ({@link judgeWithheldMaps}). */
+            withheldMaps: readonly WithheldMap[];
+        },
     ): Promise<Response> => {
-        const { manifest, manifestId, version, versionId, userId } = args;
+        const { manifest, manifestId, version, versionId, userId, withheldMaps } = args;
         let protocol: UnmanagedImporter | undefined;
         try { protocol = ctx.getService<UnmanagedImporter>('protocol'); } catch { /* no protocol service */ }
         if (!protocol || typeof protocol.importUnmanagedPackage !== 'function') {
@@ -3598,6 +3680,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             + `${installedFrom.packageId}${installedFrom.version ? `@${installedFrom.version}` : ''}`
             + `${userId ? ` by ${userId}` : ''}. Nothing is registered under '${manifestId}'; the copy follows no upgrade.`,
         );
+        if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'unmanaged', withheldMaps));
         const declaresSeeds = unmanagedInstallValueCarries(packageBody.data);
         return c.json({
             success: true,
@@ -3613,6 +3696,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 copiedCount: result.copiedCount,
                 copied: result.copied,
                 strippedLocks: result.strippedLocks,
+                // [#28640 ruling ③A] Each connector map the package export
+                // withheld whole, so its copy carries it absent. Omitted when
+                // there are none, so that answer's key set is unchanged.
+                ...(withheldMaps.length > 0 ? { withheldMaps: [...withheldMaps] } : {}),
                 ...(declaresSeeds
                     ? {
                         seeded: {
