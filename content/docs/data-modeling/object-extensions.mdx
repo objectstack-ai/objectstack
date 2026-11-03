@@ -160,6 +160,11 @@ reason.
 
 ## Naming the fields you add
 
+Each key of an extension's `fields` is a field name of the target, so it follows the
+grammar of the target's own `fields` keys: lowercase snake_case, such as `region_code`
+(`region_code__c` in a `.custom` package). A key outside it (`Region Code`,
+`region-code`, a label) is refused when the extension parses, at `fields.<key>`.
+
 Field names in an extension are **not** namespace-prefixed by the platform. The
 namespace rule (`<namespace>_<name>`) governs the names of objects a package *defines*;
 it does not walk `objectExtensions`, and it could not — the target's name belongs to

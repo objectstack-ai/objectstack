@@ -340,13 +340,21 @@ shell; the bridge contract is owned by the mobile app (`docs/HYBRID-SHELL.md`,
   loading cover on it, so the cover hands over to that spinner instead of staying up
   through the session round-trip.
 - `nativeGetPushToken`, `nativeHaptic`, `nativeOpenExternal`, `nativeNavigate`,
-  `nativeResetServer` and `nativeShowConnectionSwitcher` check `has(capability)` and
+  `nativeResetServer`, `nativeShowConnectionSwitcher`, `nativeGetAppLock` and
+  `nativeOpenAppLockSettings` check `has(capability)` and
   that the method exists before calling. They never throw: each resolves
   `{ status: 'unavailable' }` without the capability, `{ status: 'ok', value }` on
   success, or `{ status: 'failed', code, message }` when the shell refuses the call.
 - `nativeHostCan(host, method)` is that same check, for a control that picks its
   native or web path before it renders (the header's organization button opens the
   shell's switcher this way).
+- `nativeGetAppLock()` reads the shell's app lock, `{ enabled, timeoutSeconds }`
+  (`0` locks as soon as the app leaves the foreground), and
+  `nativeOpenAppLockSettings()` opens the shell's native settings screen for it. Both
+  are read-only for the page: the lock changes only on that screen, behind
+  biometrics, and no bridge method writes it. No event announces a change, so read it
+  again whenever the page is shown (the Console's profile page re-reads on mount, on
+  `visibilitychange` back to visible and on window `focus`).
 
 ```tsx
 import { nativeHaptic } from '@object-ui/mobile';

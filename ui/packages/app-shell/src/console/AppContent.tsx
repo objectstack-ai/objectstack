@@ -20,7 +20,7 @@ import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordS
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { useBundledReads } from '../providers/bundledReads.js';
+import { BUNDLE_MISS, useBundledReads } from '../providers/bundledReads.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
@@ -520,6 +520,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         dashboard: preferLocal(metadata.dashboards as any[], dashboardName, (activeApp as any)?._packageId),
         settled: status === undefined || status === 'ready' || status === 'error',
       };
+    },
+    // objectstack#29552 — a record route with no declared record page, in an
+    // app with no package: the objects that point at the record's object,
+    // from the app bundle, when it can say.
+    (objectName) => {
+      const appName = typeof activeApp?.name === 'string' ? activeApp.name : undefined;
+      return bundledReads && appName ? bundledReads.objectsReferencing(appName, objectName) : BUNDLE_MISS;
     },
   );
   // Until the app list has loaded, a scope candidate does not know its package

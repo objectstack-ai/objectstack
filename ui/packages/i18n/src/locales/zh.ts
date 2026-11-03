@@ -3078,6 +3078,12 @@ const zh = {
       saved: '语言偏好已更新。',
       readOnly: '您账户的语言由管理员管理。',
     },
+    appLock: {
+      title: "应用锁",
+      off: "已关闭",
+      onImmediately: "已开启，离开应用后立即锁定",
+      onAfter: "已开启，离开应用{{duration}}后锁定",
+    },
     password: {
       changeTitle: '修改密码',
       setTitle: '设置本地密码',
