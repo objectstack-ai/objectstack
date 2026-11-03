@@ -26,7 +26,7 @@
 // still answer 200 and record their commits; a member without
 // `manage_metadata` is still refused 403 first.
 //
-// ## Read-only packages carry commits too, and keep their revert
+// ## Read-only packages carry commits too, and what their revert may still do
 //
 // Measured on main: an environment overlay draft on a showcase item, bound to
 // `com.example.showcase` (a booted code package, read-only) and published with
@@ -38,11 +38,19 @@
 //
 // [#28905, ADR-0146 D1] That draft naming the read-only showcase itself is
 // refused now (`403 NOT_OVERRIDABLE`, naming its `.custom` pair), so a fresh
-// boot can no longer give the showcase such a commit; one recorded before
-// keeps its revert, as the commit doors still take no read-only guard. The
-// last case pins the refusal, then the same customization written where D1
-// puts it, the showcase's pair: its commit reverts through the pair's own
-// path, and through no other.
+// boot can no longer give the showcase such a commit. The commit doors still
+// take no package-level read-only guard. The second-to-last case pins the
+// refusal, then the same customization written where D1 puts it, the
+// showcase's pair: its commit reverts through the pair's own path, and
+// through no other.
+//
+// [#29390] A commit the showcase recorded before that close keeps its revert
+// only where the revert REMOVES the row (an item the commit created). An item
+// it edited is refused per item (`failed[]`, `NOT_OVERRIDABLE`, the rollback
+// sentence naming the pair), as the per-item rollback of that row is:
+// restoring it would write the row bound to the read-only base again. The
+// last case pins both on such a commit, recorded with the close shadowed on
+// the booted instance only (what a build before the close did).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
@@ -225,5 +233,57 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
       success: true, revertedCount: 1, reverted: [{ type: 'view', name: OVERLAY, action: 'removed' }],
     });
     expect(await commitsOf(pair)).toHaveLength(before.length + 1);
+  });
+
+  it('[#29390] the showcase\'s commits recorded before the close: an edited item\'s revert is refused naming the pair, a created one\'s still removes it', async () => {
+    const protocol = (stack.kernel as any).getService('protocol');
+    const served = async () => (await call('GET', `/meta/view/${OVERLAY}`)).json?.item?.label;
+    const shipped = await served();
+    expect(typeof shipped).toBe('string');
+    const view = (label: string) => ({
+      name: OVERLAY, object: 'showcase_task', viewKind: 'list', label,
+      config: { type: 'grid', columns: [{ field: 'title' }] },
+    });
+    const publishBeforeClose = async (label: string): Promise<string> => {
+      protocol.namedBaseOverlayWriteRefusal = () => null;
+      try {
+        const saved = await call('PUT', `/meta/view/${OVERLAY}?mode=draft&package=${SHOWCASE}`, view(label));
+        expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        const published = await call('POST', `/packages/${SHOWCASE}/publish-drafts`, {});
+        expect(published.status, JSON.stringify(published.json)).toBe(200);
+        return published.json?.data?.commitId as string;
+      } finally {
+        delete protocol.namedBaseOverlayWriteRefusal;
+      }
+    };
+    const created = await publishBeforeClose('Before close 1');
+    const edited = await publishBeforeClose('Before close 2');
+    expect((await call('PUT', `/meta/view/${OVERLAY}?mode=draft&package=${SHOWCASE}`, view('After close'))).status).toBe(403);
+    expect(await served()).toBe('Before close 2');
+    const expectRefused = (error: string) => {
+      expect(error).toContain('a rollback of its row bound to the read-only base is closed');
+      expect(error).toContain(`?package=${SHOWCASE}.custom`);
+    };
+
+    const revert = await call('POST', `/packages/${SHOWCASE}/commits/${edited}/revert`, {});
+    expect(revert.status, JSON.stringify(revert.json)).toBe(200);
+    expect(revert.json?.data).toMatchObject({ success: false, revertedCount: 0, failedCount: 1 });
+    expect(revert.json?.data?.failed?.[0]).toMatchObject({ type: 'view', name: OVERLAY, code: 'NOT_OVERRIDABLE' });
+    expectRefused(revert.json.data.failed[0].error);
+    expect(await served()).toBe('Before close 2');
+
+    const rollback = await call('POST', `/packages/${SHOWCASE}/rollback`, { commitId: created });
+    expect(rollback.status, JSON.stringify(rollback.json)).toBe(200);
+    expect(rollback.json?.data).toMatchObject({ success: false, revertedCommits: [edited] });
+    expect(rollback.json?.data?.failed?.[0]?.commitId).toBe(edited);
+    expectRefused(rollback.json.data.failed[0].error);
+    expect(await served()).toBe('Before close 2');
+
+    const removal = await call('POST', `/packages/${SHOWCASE}/commits/${created}/revert`, {});
+    expect(removal.status, JSON.stringify(removal.json)).toBe(200);
+    expect(removal.json?.data).toMatchObject({
+      success: true, revertedCount: 1, reverted: [{ type: 'view', name: OVERLAY, action: 'removed' }],
+    });
+    expect(await served()).toBe(shipped);
   });
 });

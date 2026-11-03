@@ -3878,11 +3878,13 @@ describe('translateObject — catalog vs explicit override', () => {
     expect(zh({ name: 'showcase_account', label: '' }, PACKAGED).label).toBe('客户');
   });
 
-  it('leaves FIELD labels alone — the rule is scoped to the three scalars', () => {
-    // Field labels have their own per-field catalog keys and no measured
-    // divergence; widening the rule to them would be a second change riding
-    // this one.
-    const withFields = {
+  it('judges a FIELD label by the same rule, against the same field in the packaged base', () => {
+    // A field `label` is authored on top of the packaged declaration too — an
+    // extension's `fieldPatches` label, a tenant's rename — so the scalar rule
+    // reaches it, judged per field. The full truth table is the field-label
+    // block below.
+    const packaged = { ...PACKAGED, fields: { industry: { name: 'industry', type: 'select', label: 'Industry' } } };
+    const served = {
       ...PACKAGED,
       label: 'Customer',
       fields: { industry: { name: 'industry', type: 'select', label: 'Vertical' } },
@@ -3894,9 +3896,9 @@ describe('translateObject — catalog vs explicit override', () => {
         },
       } as any,
     };
-    const out = translateObject(withFields, bundle, { locale: 'zh-CN', packagedBase: PACKAGED });
+    const out = translateObject(served, bundle, { locale: 'zh-CN', packagedBase: packaged });
     expect(out.label).toBe('Customer');
-    expect((out.fields as any).industry.label).toBe('行业');
+    expect((out.fields as any).industry.label).toBe('Vertical');
   });
 
   it('does not mutate either input document', () => {
@@ -3918,6 +3920,164 @@ describe('translateObject — catalog vs explicit override', () => {
     );
     expect(out.label).toBe('Customer');
     expect(out.pluralLabel).toBe('客户');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// translateObject — a field label and its option labels yield to a diverged
+// value (ADR-0029 D9.2a, ADR-0146 D10 `fieldPatches`)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A published object extension's `fieldPatches` label (ADR-0146 D10) is folded
+ * onto every read of the base object, but the served read localized the
+ * folded body with the catalog's field `label` and option labels written
+ * unconditionally, so the bare, base-named and list reads kept the shipped
+ * text and only the untranslated `/layers` showed the patch. The two slots now
+ * follow the comparison their sibling slots (`description`, `inlineHelpText`,
+ * `inlineTitle`) and the object scalars already follow.
+ */
+describe('translateObject — a field label and its option labels yield to a diverged value', () => {
+  /** The packaged declaration: the owner's fields, as the owner contributor holds them. */
+  const PACKAGED = {
+    name: 'showcase_task',
+    label: 'Task',
+    fields: {
+      title: { name: 'title', type: 'text', label: 'Title' },
+      status: {
+        name: 'status',
+        type: 'select',
+        label: 'Status',
+        options: [
+          { value: 'todo', label: 'To Do' },
+          { value: 'done', label: 'Done' },
+        ],
+      },
+      created_at: { name: 'created_at', type: 'datetime', label: 'Created At' },
+    },
+  };
+
+  /** `en` repeats the packaged strings (what `i18n:extract` writes); `zh-CN` translates them. */
+  const BUNDLE: TranslationBundle = {
+    en: {
+      objects: {
+        showcase_task: {
+          label: 'Task',
+          fields: {
+            title: { label: 'Title' },
+            status: { label: 'Status', options: { todo: 'To Do', done: 'Done' } },
+          },
+        },
+      },
+    } as any,
+    'zh-CN': {
+      objects: {
+        showcase_task: {
+          label: '任务',
+          fields: {
+            title: { label: '标题' },
+            status: { label: '状态', options: { todo: '待办', done: '已完成' } },
+          },
+        },
+      },
+    } as any,
+  };
+
+  const clone = <T>(value: T): T => structuredClone(value);
+  const fieldsOf = (out: unknown) => (out as { fields: Record<string, any> }).fields;
+  /** The served body after an extension's `fieldPatches` relabelled `title` and the `todo` option. */
+  const patched = () => {
+    const served = clone(PACKAGED) as any;
+    served.fields.title.label = 'Headline';
+    served.fields.status.options[0].label = 'Queued';
+    return served;
+  };
+
+  it('keeps a patched field label and option label, in every locale, through the type dispatch', () => {
+    // The REST exit reaches `translateObject` through the dispatcher, so the
+    // base must arrive there for the comparison to be made at all.
+    for (const locale of ['en', 'zh-CN']) {
+      const fields = fieldsOf(
+        translateMetadataDocument('object', patched(), BUNDLE, { locale, packagedBase: PACKAGED }),
+      );
+      expect(fields.title.label).toBe('Headline');
+      expect(fields.status.options[0].label).toBe('Queued');
+    }
+  });
+
+  it('judges per field and per option: the undiverged siblings are still translated', () => {
+    const fields = fieldsOf(translateObject(patched(), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }));
+    expect(fields.status.label).toBe('状态');
+    expect(fields.status.options[1].label).toBe('已完成');
+  });
+
+  it('an untouched document still gets the catalog on both slots', () => {
+    const fields = fieldsOf(translateObject(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }));
+    expect(fields.title.label).toBe('标题');
+    expect(fields.status.options.map((o: any) => o.label)).toEqual(['待办', '已完成']);
+  });
+
+  it('with no packaged base, the catalog applies — "unknown" is not "authored"', () => {
+    for (const packagedBase of [undefined, null]) {
+      const fields = fieldsOf(translateObject(patched(), BUNDLE, { locale: 'zh-CN', packagedBase }));
+      expect(fields.title.label).toBe('标题');
+      expect(fields.status.options[0].label).toBe('待办');
+    }
+  });
+
+  it('an absent or empty served label is not an override — the catalog fills it', () => {
+    const served = clone(PACKAGED) as any;
+    delete served.fields.title.label;
+    served.fields.status.options[0].label = '';
+    const fields = fieldsOf(translateObject(served, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }));
+    expect(fields.title.label).toBe('标题');
+    expect(fields.status.options[0].label).toBe('待办');
+  });
+
+  it('a field or option the packaged base does not declare counts as diverged', () => {
+    const served = clone(PACKAGED) as any;
+    served.fields.extra = { name: 'extra', type: 'text', label: 'Extra' };
+    served.fields.status.options.push({ value: 'blocked', label: 'Blocked' });
+    const bundle = clone(BUNDLE) as any;
+    bundle['zh-CN'].objects.showcase_task.fields.extra = { label: '额外' };
+    bundle['zh-CN'].objects.showcase_task.fields.status.options.blocked = '受阻';
+    const fields = fieldsOf(translateObject(served, bundle, { locale: 'zh-CN', packagedBase: PACKAGED }));
+    expect(fields.extra.label).toBe('Extra');
+    expect(fields.status.options[2].label).toBe('Blocked');
+  });
+
+  it("a picklist-bound field's options have no field-level baseline — the list's labels still apply", () => {
+    // The served options are the LIST's, resolved onto the served field on
+    // every read; the packaged field names the list and carries none.
+    const packaged = {
+      ...PACKAGED,
+      fields: { ...PACKAGED.fields, stage: { name: 'stage', type: 'select', label: 'Stage', picklist: 'task_stage' } },
+    };
+    const served = clone(packaged) as any;
+    served.fields.stage.options = [{ value: 'new', label: 'New' }];
+    const bundle: TranslationBundle = {
+      'zh-CN': { picklists: { task_stage: { options: { new: '新建' } } } } as any,
+    };
+    const fields = fieldsOf(translateObject(served, bundle, { locale: 'zh-CN', packagedBase: packaged }));
+    expect(fields.stage.options[0].label).toBe('新建');
+  });
+
+  it('an undiverged injected system field keeps its built-in label; a diverged one keeps its text', () => {
+    const untouched = fieldsOf(translateObject(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }));
+    expect(untouched.created_at.label).toBe('创建时间');
+    const served = clone(PACKAGED) as any;
+    served.fields.created_at.label = 'Logged At';
+    const renamed = fieldsOf(translateObject(served, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }));
+    expect(renamed.created_at.label).toBe('Logged At');
+  });
+
+  it('does not mutate either input document', () => {
+    const served = patched();
+    const before = clone(served);
+    const base = clone(PACKAGED);
+    translateObject(served, BUNDLE, { locale: 'zh-CN', packagedBase: base });
+    expect(served).toEqual(before);
+    expect(base).toEqual(PACKAGED);
   });
 });
 
