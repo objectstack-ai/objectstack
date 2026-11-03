@@ -17548,9 +17548,17 @@ export class ObjectStackProtocolImplementation implements
                 // [#22877] …and the draft's own bundle member: another
                 // member's active row is not this member's pre-publish state,
                 // and the revert plan records the member it describes.
+                // [#29414] …and the publishing package's own row: every draft
+                // listed here is bound to `request.packageId` and is promoted
+                // into that package's row, so another package's active row of
+                // the same name (a row bound to the read-only base beside its
+                // `.custom` pair) is not this item's pre-publish state. Read
+                // package-agnostically, the pair's first publish was recorded
+                // as an edit of the base row's version, and its revert
+                // addressed the base row instead of removing the pair's.
                 const activeRow = (await this.findEnvironmentRow('sys_metadata', {
                     where: {
-                        type: d.type, name: d.name, state: 'active',
+                        type: d.type, name: d.name, state: 'active', package_id: request.packageId,
                         ...overlayMemberWhere(d.type, d.member),
                     },
                     context: { isSystem: true },
@@ -19947,6 +19955,14 @@ export class ObjectStackProtocolImplementation implements
      * rollback sentence naming the base's `.custom` pair) with nothing written,
      * and {@link rollbackToPackageCommit} reports it per item and continues.
      * The soft-remove limb stays open: removing such a row writes nothing.
+     *
+     * [#29414, ADR-0048] Both limbs address the committing package's own row
+     * (`package_id` = the commit's), as the plan {@link publishPackageDrafts}
+     * records describes it: a pair commit beside a row bound to its read-only
+     * base removes or restores the pair's row and leaves the base's served.
+     * A restore whose row is gone writes the package-less row, so it asks the
+     * package-less close ({@link packagelessOverlayWriteRefusal}) on that
+     * `null` binding exactly as {@link rollbackMetaItem} does.
      */
     async revertCommit(request: {
         commitId: string;
@@ -19971,6 +19987,9 @@ export class ObjectStackProtocolImplementation implements
         );
         await this.ensureOverlayIndex();
         const row = await this.readRevertableCommit(request.commitId, request.packageId);
+        // [#29414] The package whose rows this commit's plan describes: every
+        // item's rows are read, removed and restored under it below.
+        const commitPackageId: string = row.package_id;
         const items = this.parseCommitItems(row.items);
         // #4556 — threaded into repo.put/delete → `recorded_by`; NULL when the
         // revert carries no human actor.
@@ -20117,7 +20136,14 @@ export class ObjectStackProtocolImplementation implements
             // Absent (the canonical member) on every other item, as before.
             const member = it.member;
             try {
-                const current = await repo.get(ref, { state: 'active', ...memberOption(member) });
+                // [#29414] The committing package's own row, and no other
+                // package's: the plan describes the rows this package's publish
+                // promoted into, so every read, removal and restore below names
+                // `commitPackageId`. Read package-agnostically, a pair commit
+                // beside a row bound to its read-only base addressed whichever
+                // row the driver returned first — the base row, refused below
+                // or restored in the pair's name.
+                const current = await repo.get(ref, { state: 'active', packageId: commitPackageId, ...memberOption(member) });
                 if (!it.existedBefore) {
                     // Created by this commit → soft-remove (metadata only; table stays).
                     //
@@ -20160,6 +20186,7 @@ export class ObjectStackProtocolImplementation implements
                             source: 'protocol.revertCommit',
                             intent,
                             state: 'active',
+                            packageId: commitPackageId,
                             ...memberOption(member),
                         });
                     }
@@ -20299,7 +20326,26 @@ export class ObjectStackProtocolImplementation implements
                     // fallible query downstream of a write that already succeeded —
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
-                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, member);
+                    //
+                    // [#29414] The binding is the committing package's own row's
+                    // (`current`, read under `commitPackageId` above), not any
+                    // package's: `commitPackageId` when that row is stored, `null`
+                    // when it is not (deleted since the commit), which is what
+                    // `restoreVersion` then writes — the package-unbound row, as
+                    // the per-item rollback writes it.
+                    const restorePackageId: string | null = current ? commitPackageId : null;
+                    // [#29414, ADR-0146 D11] …so a restore whose row is gone
+                    // writes the package-less row, and is asked the package-less
+                    // close exactly as {@link rollbackMetaItem} asks it on the
+                    // same `null` binding ({@link packagelessOverlayWriteRefusal},
+                    // its rollback sentence): an overlay type's item the
+                    // read-only base ships is refused into `failed[]` with
+                    // nothing written. A binding naming a package leaves it open.
+                    const closed = await this.packagelessOverlayWriteRefusal(
+                        { type: PLURAL_TO_SINGULAR[it.type] ?? it.type, name: it.name, packageId: restorePackageId, state: 'active', ...memberOption(member) },
+                        'rollback',
+                    );
+                    if (closed) throw closed;
                     // [#29390, ADR-0146 D1, D11] A restore writes the row this
                     // binding names, so a restore into a row bound to the
                     // read-only base itself (a commit recorded before #28905
@@ -20317,6 +20363,8 @@ export class ObjectStackProtocolImplementation implements
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
+                        // [#29414] The row restored is the committing package's.
+                        packageId: commitPackageId,
                         message: `revert commit ${request.commitId}`,
                         intent,
                         // [#21470] The divergent `name` refusal, [ADR-0086 D3]
