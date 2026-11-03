@@ -957,7 +957,25 @@ export const CEILINGS = new Map([
   // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
   // ruling record 6513306068 on #27847.
   //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(9949 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 2488],
+  // 9926 -> 10391 (card #29255; the file had shrunk 23 bytes under the row
+  // since, headroom 6 tokens): recipe 6 teaches `clientSource: 'installer'`
+  // beside the declared client — when to use which, the administrator's
+  // `{ clientId, clientSecret }` connect body against the status read's
+  // `redirectUri`, and the connection's `client: { source, clientId,
+  // hasSecret }` read — from content/docs/automation/connectors.mdx and the
+  // merged connector-auth schema. Paid down first, two restatements each with
+  // a surviving home: the authorization_code comment's "A user grants access
+  // once" (the paragraph under the block says an administrator connects it,
+  // once per organization), and "`client_credentials` and `app-credential`
+  // dispatch once the ref is set." (the file's opening paragraph says an unset
+  // ref leaves its instance degraded until set). Arithmetic: 9926 -> 10391
+  // (+465 net: -100 cut, +565 added) -> ceil(10391 / 4) = 2598; the ceiling
+  // moves +110, pinned AT the measurement. Maintainer ruling 2026-10-27 on the
+  // seat's decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
+  // tap A verbatim and untranslated: 「A:先削重复,余额按实测提高」 — the
+  // standing path of ruling record 6513306068 on #27847.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(10391 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2598],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching
