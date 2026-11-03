@@ -67,7 +67,9 @@ import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
 // [#29898] The one walk of which picklists an object body's fields name — the
-// boot audit's and the `os validate` door's. ⛔ Never a second walk here.
+// boot audit's. (The `os validate` door reads the parsed artifact with its own
+// walk and agrees with this door by pin, not by sharing it.) ⛔ Never a second
+// walk here.
 import { collectPicklistReferences } from '@objectstack/metadata/picklist-references';
 import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 

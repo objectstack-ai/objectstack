@@ -8,6 +8,7 @@ fix(metadata-protocol)!: the metadata save and publish doors refuse a select fie
 
 Clause-②: no (narrowing) — the metadata save door (draft and live), the per-item and package publish, and the restore doors refuse an `object` or `object_extension` whose field names a picklist no loaded package declares, a body they accepted before. Nothing is widened.
 Metadata-protocol: narrowed
+Skills-docs: no move — `skills/**` teaches no picklist reference verdict and `content/docs/**` carries no severity table for it; the prescription ships in the refusal text, the FROM → TO below and the upgrade-guide entry.
 
 <!-- adr-0087: registered picklist-binding-unknown-refused -->
 

@@ -86,7 +86,7 @@
  * The runtime metadata write path (a field saved through Studio or REST
  * `/meta`) is not judged here: the metadata save and publish doors judge it
  * against the engine's registry (`unknownPicklistBindingSaveRefusal`,
- * `@objectstack/metadata-protocol`), over the same walk.
+ * `@objectstack/metadata-protocol`).
  *
  * Reads the PARSED stack — what `defineStack()` hands the boot wrap, and what
  * `os build` serializes.
