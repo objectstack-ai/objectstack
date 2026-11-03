@@ -3,7 +3,8 @@
 // [#29760] A package export is the package's whole content or no answer: when
 // the read of one metadata type the runtime serves fails, `GET
 // /packages/:id/export` refuses, naming the package and the type, instead of
-// answering 200 without that type's collection.
+// answering 200 without that type's collection, and the whole-deployment
+// bundle (`GET /packages/export`), which composes that export, refuses with it.
 //
 // ## What was measured before the fix
 //
@@ -12,58 +13,98 @@
 // storage fault does on the real protocol: the overlay rows of `dashboard`
 // cannot be read, which the protocol rethrows as its declared `503
 // SERVICE_UNAVAILABLE` (only an unprovisioned `sys_metadata` licenses it to
-// answer without them). The export then answered
-// 200 with the showcase's objects and no `dashboards` key at all, so a
-// reinstall from it would land without a dashboard and tell nobody.
+// answer without them). The showcase's export then answered 200 with its
+// objects and no `dashboards` key at all, so a reinstall from it would land
+// without a dashboard and tell nobody.
 //
-// ## What this file pins, on one showcase boot
+// ## What this file pins, on one showcase boot with one installed package
 //
-//   1. CONTROL: the showcase's export answers 200 and carries its dashboards;
-//   2. the dashboard overlay read failing: the export answers the read's own
-//      `503 SERVICE_UNAVAILABLE`, naming the package and `dashboard`, and
-//      serves no manifest;
-//   3. CONTROL: the read restored, the export answers 200 with the dashboards
-//      again (the failure was the read's, not the boot's);
+//   1. CONTROL: the showcase's export and the bundle answer 200 and carry their
+//      dashboards (the bundle holds the installed package, never the
+//      showcase's own `code` package);
+//   2. the dashboard overlay read failing: both doors answer the read's own
+//      `503 SERVICE_UNAVAILABLE`, naming the package and `dashboard`, and serve
+//      no body;
+//   3. CONTROL: the read restored, both answer 200 with the dashboards again
+//      (the failure was the read's, not the boot's);
 //   4. a type this runtime does not serve is still skipped: `rag_pipeline` is
 //      an exportable collection the showcase's live type vocabulary
-//      (`getMetaTypes`) does not list, and its read failing leaves the export
+//      (`getMetaTypes`) does not list, and its read failing leaves both doors
 //      200 with the same collections.
 //
 // The fault is injected on the protocol's own overlay read
 // (`readActiveOverlayRows`, which the moved list body reaches through the
-// host's call-time closure), never on the export door, so the whole real read
-// path runs. It boots a stack of its own, so it stays out of `SHARED_SHOWCASE`.
+// host's call-time closure), never on either door, so the whole real read path
+// runs. It boots a stack of its own (the install-local plugin mounted), so it
+// stays out of `SHARED_SHOWCASE`.
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
+import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import { bootShowcase } from './showcase-boot.js';
 
 const SHOWCASE = 'com.example.showcase';
+const INSTALLED = 'com.dogfood.exportread';
 const FAILING = 'dashboard';
 /** An exportable type the showcase's live vocabulary does not list (asserted below, not assumed). */
 const UNSERVED = 'rag_pipeline';
+const ROUTE = '/marketplace/install-local';
+
+/** The install body `os package install` sends for an inline manifest. */
+const INSTALL = {
+  manifest: {
+    id: INSTALLED,
+    namespace: 'exportread',
+    name: 'Export read failure',
+    version: '1.0.0',
+    type: 'app',
+    objects: [{ name: 'exportread_entry', label: 'Entry', fields: { title: { type: 'text', label: 'Title' } } }],
+    dashboards: [{ name: 'exportread_pulse', label: 'Pulse', columns: 12, widgets: [] }],
+  },
+};
 
 type Answer = { status: number; body: any };
+type Reading = { one: Answer; bundle: Answer };
 
-async function call(stack: VerifyStack, token: string, method: string, path: string): Promise<Answer> {
-  const res = await stack.apiAs(token, method, path);
+async function call(stack: VerifyStack, token: string, method: string, path: string, body?: unknown): Promise<Answer> {
+  const res = await stack.apiAs(token, method, path, body);
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
+const collections = (manifest: Record<string, any> | undefined): string[] =>
+  Object.keys(manifest ?? {}).filter((k) => Array.isArray(manifest?.[k])).sort();
+const dashboardNames = (manifest: Record<string, any> | undefined): string[] =>
+  (manifest?.dashboards ?? []).map((d: any) => d.name);
+const entryOf = (bundle: Answer) => (bundle.body?.data?.packages ?? []).find((p: any) => p.id === INSTALLED);
+
 describe('dogfood: a package export refuses when the read of a type the runtime serves fails', () => {
-  let before: Answer;
-  let failed: Answer;
-  let after: Answer;
-  let unserved: Answer;
+  let storageDir: string;
+  let installed: Answer;
+  let before: Reading;
+  let failed: Reading;
+  let after: Reading;
+  let unserved: Reading;
   let liveTypes: string[] = [];
   let overlayReadsRefused = 0;
   let unservedReadsRefused = 0;
 
   beforeAll(async () => {
-    const stack = await bootShowcase();
+    storageDir = mkdtempSync(join(tmpdir(), 'dogfood-export-type-read-'));
+    const stack = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir })],
+    });
     try {
       const token = await stack.signIn();
-      before = await call(stack, token, 'GET', `/packages/${SHOWCASE}/export`);
+      installed = await call(stack, token, 'POST', ROUTE, INSTALL);
+      const read = async (): Promise<Reading> => ({
+        one: await call(stack, token, 'GET', `/packages/${SHOWCASE}/export`),
+        bundle: await call(stack, token, 'GET', '/packages/export'),
+      });
+      before = await read();
 
       const protocol = stack.kernel.getService('protocol') as {
         readActiveOverlayRows(request: { type: string }): Promise<unknown>;
@@ -79,18 +120,19 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
           }
           return original.call(protocol, request);
         };
+
       protocol.readActiveOverlayRows = failing(FAILING, () => { overlayReadsRefused += 1; });
       try {
-        failed = await call(stack, token, 'GET', `/packages/${SHOWCASE}/export`);
+        failed = await read();
       } finally {
         protocol.readActiveOverlayRows = original;
       }
 
-      after = await call(stack, token, 'GET', `/packages/${SHOWCASE}/export`);
+      after = await read();
 
       protocol.readActiveOverlayRows = failing(UNSERVED, () => { unservedReadsRefused += 1; });
       try {
-        unserved = await call(stack, token, 'GET', `/packages/${SHOWCASE}/export`);
+        unserved = await read();
       } finally {
         protocol.readActiveOverlayRows = original;
       }
@@ -99,41 +141,60 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
     }
   }, 600_000);
 
-  it('CONTROL: the showcase\'s export answers 200 and carries its dashboards', () => {
-    expect(before.status, JSON.stringify(before.body)).toBe(200);
-    expect((before.body?.data?.dashboards ?? []).length).toBeGreaterThan(0);
+  afterAll(() => {
+    if (storageDir) rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it('a failed dashboard read refuses the export, naming the package and the type, and serves no manifest', () => {
+  it('CONTROL: the package installs, and both doors answer 200 carrying the dashboards', () => {
+    expect(installed.status, JSON.stringify(installed.body)).toBe(200);
+    expect(before.one.status, JSON.stringify(before.one.body)).toBe(200);
+    expect(dashboardNames(before.one.body?.data).length).toBeGreaterThan(0);
+    expect(before.bundle.status, JSON.stringify(before.bundle.body)).toBe(200);
+    expect((before.bundle.body?.data?.packages ?? []).map((p: any) => p.id)).not.toContain(SHOWCASE);
+    expect(dashboardNames(entryOf(before.bundle))).toEqual(['exportread_pulse']);
+  });
+
+  it('a failed dashboard read refuses the package export, naming the package and the type, and serves no manifest', () => {
     // The injected fault was reached: the export read the type through it.
     expect(overlayReadsRefused).toBeGreaterThan(0);
     // The read's declared refusal rides on: the protocol answers a failed
     // overlay read as a 503, and so does the export it failed.
-    expect(failed.status, JSON.stringify(failed.body)).toBe(503);
-    expect(failed.body?.success).toBe(false);
-    expect(failed.body?.data).toBeUndefined();
-    expect(failed.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
-    const message = String(failed.body?.error?.message ?? '');
+    expect(failed.one.status, JSON.stringify(failed.one.body)).toBe(503);
+    expect(failed.one.body?.success).toBe(false);
+    expect(failed.one.body?.data).toBeUndefined();
+    expect(failed.one.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+    const message = String(failed.one.body?.error?.message ?? '');
     expect(message).toContain(`'${SHOWCASE}'`);
     expect(message).toContain(`'${FAILING}'`);
   });
 
-  it('CONTROL: the read restored, the export answers 200 with the dashboards again', () => {
-    expect(after.status, JSON.stringify(after.body)).toBe(200);
-    expect((after.body?.data?.dashboards ?? []).map((d: any) => d.name))
-      .toEqual((before.body?.data?.dashboards ?? []).map((d: any) => d.name));
+  it('the same failure refuses the whole-deployment bundle, naming the package and the type, and serves no bundle', () => {
+    expect(failed.bundle.status, JSON.stringify(failed.bundle.body)).toBe(503);
+    expect(failed.bundle.body?.success).toBe(false);
+    expect(failed.bundle.body?.data).toBeUndefined();
+    expect(failed.bundle.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+    const message = String(failed.bundle.body?.error?.message ?? '');
+    expect(message).toContain(`'${INSTALLED}'`);
+    expect(message).toContain(`'${FAILING}'`);
   });
 
-  it('a type this runtime does not serve is still skipped: its failed read leaves the export 200, the same collections', () => {
+  it('CONTROL: the read restored, both doors answer 200 with the dashboards again', () => {
+    expect(after.one.status, JSON.stringify(after.one.body)).toBe(200);
+    expect(dashboardNames(after.one.body?.data)).toEqual(dashboardNames(before.one.body?.data));
+    expect(after.bundle.status, JSON.stringify(after.bundle.body)).toBe(200);
+    expect(dashboardNames(entryOf(after.bundle))).toEqual(['exportread_pulse']);
+  });
+
+  it('a type this runtime does not serve is still skipped: its failed read leaves both doors 200, the same collections', () => {
     // The precondition, measured on this boot: the type is exportable and the
     // live vocabulary does not list it. Registering it makes this case a
-    // served type, whose failed read refuses (the case above).
+    // served type, whose failed read refuses (the cases above).
     expect(liveTypes).toContain(FAILING);
     expect(liveTypes).not.toContain(UNSERVED);
     expect(unservedReadsRefused).toBeGreaterThan(0);
-    expect(unserved.status, JSON.stringify(unserved.body)).toBe(200);
-    const collections = (answer: Answer) =>
-      Object.keys(answer.body?.data ?? {}).filter((k) => Array.isArray(answer.body.data[k])).sort();
-    expect(collections(unserved)).toEqual(collections(before));
+    expect(unserved.one.status, JSON.stringify(unserved.one.body)).toBe(200);
+    expect(collections(unserved.one.body?.data)).toEqual(collections(before.one.body?.data));
+    expect(unserved.bundle.status, JSON.stringify(unserved.bundle.body)).toBe(200);
+    expect(collections(entryOf(unserved.bundle))).toEqual(collections(entryOf(before.bundle)));
   });
 });
