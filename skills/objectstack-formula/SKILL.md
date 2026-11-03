@@ -400,7 +400,7 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 > trigger record's fields, nulls included, to top level wherever no flow variable
 > or node id holds the name, so in a start, edge or `decision` condition a bare
 > `budget` IS `record.budget`: `os validate` judges either spelling (bare names
-> only while every node's bindings are declared) and a guard on one guards both.
+> only while the flow's bound names are provable) and a guard on one guards both.
 > What the start condition proves non-null is presumed at every edge and branch;
 > spell that guard `record.budget != null` — the runtime publish gate judges the
 > written flow alone and resolves no bare name. An unguarded null fails the
