@@ -1759,27 +1759,25 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   );
 }
 
-function findFirstRoute(items: any[], ctx?: NavTemplateContext): string {
+// objectui#12113 — a `component` entry lands too: its URL is the one the
+// sidebar follows, through `buildItemRoute` → `resolveHref`. Without it the
+// Studio app, whose navigation is all `component` entries, had no landing at
+// all.
+const WORKING_LANDING_TYPES: ReadonlySet<string> = new Set(['object', 'page', 'dashboard', 'report', 'component']);
+// objectstack-ai/objectstack#29678 — the last resort: a `doc` entry opens the
+// in-app docs portal (`/docs/BOOK[/DOC]` under the app, `resolveHref`).
+const DOC_LANDING_TYPES: ReadonlySet<string> = new Set(['doc']);
+
+function findFirstRoute(items: any[], ctx?: NavTemplateContext, types: ReadonlySet<string> = WORKING_LANDING_TYPES): string {
   if (!items || items.length === 0) return '';
   for (const item of items) {
-    // objectui#12113 — a `component` entry lands too: its URL is the one the
-    // sidebar follows, through `buildItemRoute` → `resolveHref`. Without it
-    // the Studio app, whose navigation is all `component` entries, had no
-    // landing at all.
-    if (
-      item.type === 'object' ||
-      item.type === 'page' ||
-      item.type === 'dashboard' ||
-      item.type === 'report' ||
-      item.type === 'component'
-    ) {
+    if (types.has(item.type)) {
       const route = buildItemRoute(item, ctx);
       if (route) return route;
       continue;
     }
-    if (item.type === 'url') continue;
     if (item.type === 'group' && item.children) {
-      const childRoute = findFirstRoute(item.children, ctx);
+      const childRoute = findFirstRoute(item.children, ctx, types);
       if (childRoute !== '') return childRoute;
     }
   }
@@ -1819,8 +1817,16 @@ function buildItemRoute(item: any, ctx?: NavTemplateContext): string {
  * shown (`navigation` arrives already gated, objectui#12426) — `findFirstRoute`
  * walks groups and lands on an `object`, `page`, `dashboard`, `report` or
  * `component` entry (objectui#12113 added `component`). It skips the item
- * types that address nothing inside the app (`url`, `separator`, `action`),
- * and a `doc` entry is never that fallback landing (objectui#11197). Which app
+ * types that address nothing inside the app (`url`, `separator`, `action`).
+ * A `doc` entry is passed over there: a working entry outranks reading
+ * material, so an app whose first entry is its manual still opens on its first
+ * working entry. Only when no entry lands does the root open the FIRST `doc`
+ * entry the member is shown, in the in-app docs portal
+ * (objectstack-ai/objectstack#29678): an app whose navigation holds only docs
+ * used to render an empty `main`. That doc is gated as a declared `doc`
+ * landing is (objectstack-ai/objectstack#28450): by the server's audience gate
+ * on the app read and on the doc read, not by the sidebar's doc-readability
+ * answer, which is a lazy list read the root would have to wait on. Which app
  * the ROOT lands on is a separate question, decided by `isDefault`.
  *
  * The retired `app.homePageId` (spec 17.0.0, objectstack#4667) is not read: it
@@ -1837,7 +1843,8 @@ function resolveLandingRoute(
   const declared = resolveDeclaredLandingRoute(app?.landing, shownTrees, evaluateVisibility, (item) =>
     buildItemRoute(item, ctx),
   );
-  return declared || findFirstRoute(shownTrees[0] ?? [], ctx);
+  const tree = shownTrees[0] ?? [];
+  return declared || findFirstRoute(tree, ctx) || findFirstRoute(tree, ctx, DOC_LANDING_TYPES);
 }
 
 /**
@@ -1967,11 +1974,12 @@ function AppRootLanding({
   if (appServesNoNavigation(shownApp)) {
     return <AppNoAccessEmptyState app={app} setupPath={setupPath} />;
   }
-  // A navigation with no landing: every entry the sidebar draws is a `url`,
-  // `action` or `doc` link, or the items live only under `areas`, which the
-  // resolver does not walk. The root renders no page of its own and the
-  // sidebar offers the entries. It used to render the Studio app's overview,
-  // `StudioHomePage`, which objectui#12113 retired.
+  // A navigation with no landing: every entry the sidebar draws is a `url` or
+  // `action` link, or the items live only under `areas`, which the resolver
+  // does not walk (a `doc` entry lands, objectstack-ai/objectstack#29678). The
+  // root renders no page of its own and the sidebar offers the entries. It used
+  // to render the Studio app's overview, `StudioHomePage`, which objectui#12113
+  // retired.
   return null;
 }
 

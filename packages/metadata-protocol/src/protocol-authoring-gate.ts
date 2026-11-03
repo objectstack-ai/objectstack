@@ -160,7 +160,11 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
         type,
         name,
         state: 'active',
-        body,
+        // [#29696] A flow version is judged in its D2-converted spelling, as
+        // both publish doors judge a stored flow draft (#29557): a history
+        // body is a row at rest. Restored as stored; the credential read below
+        // reads the stored version.
+        body: storedFlowVerdictBody(type, body),
         source,
         packageId: binding,
         ...(channel
