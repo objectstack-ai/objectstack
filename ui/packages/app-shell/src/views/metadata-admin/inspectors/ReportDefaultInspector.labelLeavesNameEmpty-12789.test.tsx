@@ -23,6 +23,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ReportDefaultInspector } from './ReportDefaultInspector';
+// The pinyin dictionary a Chinese Label derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690). The
+// Label with no machine name below is therefore a Japanese one.
+import { loadHanRomanizer } from '../romanizeHan';
+await loadHanRomanizer();
 
 afterEach(cleanup);
 
@@ -57,11 +62,11 @@ const labelBox = () => screen.getByLabelText('Label', { exact: true }) as HTMLIn
 const draftName = () => screen.getByTestId('draft-name').textContent;
 
 describe('report designer create mode — a Label with no machine name leaves the Name empty (objectui#12789)', () => {
-  it('the Label 收入 leaves the Name empty, in the box and in the draft', async () => {
+  it('the Label レベニュー leaves the Name empty, in the box and in the draft', async () => {
     const user = userEvent.setup();
     render(<CreateHost />);
-    await user.type(labelBox(), '收入');
-    expect(labelBox()).toHaveValue('收入');
+    await user.type(labelBox(), 'レベニュー');
+    expect(labelBox()).toHaveValue('レベニュー');
     expect(nameBox()).toHaveValue('');
     expect(draftName()).toBe('');
   });
@@ -79,7 +84,7 @@ describe('report designer create mode — a Label with no machine name leaves th
   it('a Name left empty by a non-Latin Label still follows a Latin Label typed later', async () => {
     const user = userEvent.setup();
     render(<CreateHost />);
-    await user.type(labelBox(), '收入');
+    await user.type(labelBox(), 'レベニュー');
     expect(nameBox()).toHaveValue('');
     await user.clear(labelBox());
     await user.type(labelBox(), 'Revenue Board');
@@ -89,7 +94,7 @@ describe('report designer create mode — a Label with no machine name leaves th
   it('a Name the author typed stays theirs while the Label yields no machine name, even when it reads field', async () => {
     const user = userEvent.setup();
     render(<CreateHost />);
-    await user.type(labelBox(), '收入');
+    await user.type(labelBox(), 'レベニュー');
     await user.clear(nameBox());
     await user.type(nameBox(), 'field');
     await user.clear(labelBox());
@@ -106,5 +111,19 @@ describe('report designer create mode — a Label with no machine name leaves th
     await user.clear(labelBox());
     await user.type(labelBox(), 'Field');
     expect(nameBox()).toHaveValue('field');
+  });
+});
+
+describe('report designer create mode — a Chinese Label derives the Name by pinyin (objectstack#29690)', () => {
+  it('the Label 收入金额 fills an editable Name, and a typed Name stops following it', async () => {
+    const user = userEvent.setup();
+    render(<CreateHost />);
+    await user.type(labelBox(), '收入金额');
+    expect(nameBox()).toHaveValue('shouru_jine');
+    expect(draftName()).toBe('shouru_jine');
+    await user.clear(nameBox());
+    await user.type(nameBox(), 'revenue_amount');
+    await user.type(labelBox(), '合计');
+    expect(nameBox()).toHaveValue('revenue_amount');
   });
 });

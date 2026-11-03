@@ -43,6 +43,7 @@ import {
   NotificationPreference,
   NotificationTemplate,
   HttpDelivery,
+  UserDevice,
 } from '../src/objects/index.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
@@ -71,6 +72,7 @@ const config: ObjectStackDefinition = defineStack({
     NotificationPreference,
     NotificationTemplate,
     HttpDelivery,
+    UserDevice,
   ] as any,
   translations: [
     { en: { objects: enObjects } },

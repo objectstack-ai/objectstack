@@ -84,7 +84,7 @@ import { readDraftChanges, type DraftChange, type MetadataClient } from '@object
 import { fetchPendingDrafts } from './usePendingDrafts.js';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
-import { MetadataProtectionFields, stripReadDecorations } from '@objectstack/spec/kernel';
+import { MetadataProtectionFields, OverrideDeclarationFields, stripReadDecorations } from '@objectstack/spec/kernel';
 // objectui#12929 — the ONE discriminator of an authored default's shape, the
 // same function the batch door's backfill judgement calls. Moves nothing onto
 // the eager graph for the reason recorded above (`vendor-objectstack`).
@@ -555,10 +555,23 @@ const DERIVED_KEY_TESTS: Readonly<Record<string, (body: Record<string, unknown>)
  */
 const PROTECTION_ENVELOPE_KEYS: readonly string[] = Object.freeze(Object.keys(MetadataProtectionFields));
 
-/** `body` without its top-level protection envelope; a copy, never a mutation. */
+/**
+ * objectstack#29704 — the ADR-0146 D2 override declaration (`overrides`), read
+ * off the spec's own declaration like the envelope above. Customizing a base
+ * package's item writes it into the `.custom` pair's copy, so on a customized
+ * item it is a change of every publish and of none of the person's edits: the
+ * sheet listed it as "+ overrides" beside what they actually changed.
+ */
+const OVERRIDE_DECLARATION_KEYS: readonly string[] = Object.freeze(Object.keys(OverrideDeclarationFields));
+
+/**
+ * `body` without its top-level protection envelope and override declaration;
+ * a copy, never a mutation.
+ */
 function withoutProtectionEnvelope(body: Record<string, unknown>): Record<string, unknown> {
   const rest = { ...body };
   for (const key of PROTECTION_ENVELOPE_KEYS) delete rest[key];
+  for (const key of OVERRIDE_DECLARATION_KEYS) delete rest[key];
   return rest;
 }
 
@@ -829,6 +842,9 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   agent: (t, count) => t('preview.changes.typeCount.agent', { count, defaultValue: '{{count}} agents' }),
   email_template: (t, count) =>
     t('preview.changes.typeCount.email_template', { count, defaultValue: '{{count}} email templates' }),
+  // objectstack#29704 — what customizing a base package's object writes (ADR-0146 D10).
+  object_extension: (t, count) =>
+    t('preview.changes.typeCount.object_extension', { count, defaultValue: '{{count}} object extensions' }),
 };
 
 function summaryTypeSegment(t: Translate, type: string, count: number): string {
@@ -911,14 +927,20 @@ function KeyRow({
   kind,
   type,
   name,
+  locale,
   children,
 }: {
   kind: keyof typeof FIELD_ROW_MARK;
   type: string;
   name: string;
+  locale: string;
   children?: ReactNode;
 }) {
-  const label = formKeyLabel(type, name);
+  // objectstack#29704 — the row reads in the console's language, as the
+  // inspector labels it; whether the key shows beside it is judged on the
+  // spec's own label, as `SchemaForm`'s machine-name chip is (objectui#8231).
+  const label = formKeyLabel(type, name, locale);
+  const sourceLabel = formKeyLabel(type, name);
   return (
     <div data-testid="draft-key-row">
       <p className={`${label === undefined ? 'font-mono ' : ''}text-xs ${FIELD_ROW_TONE[kind]}`}>
@@ -928,7 +950,7 @@ function KeyRow({
         ) : (
           <>
             {label}
-            {labelSpellsKey(label, name) ? null : (
+            {labelSpellsKey(sourceLabel ?? label, name) ? null : (
               <>
                 {' '}
                 <span className="font-mono text-[11px] text-muted-foreground">{name}</span>
@@ -946,8 +968,8 @@ function KeyRow({
  * The properties a changed field or list entry lists after its name, each by
  * its label on `type`'s form where the form has a row for it, else its key.
  */
-function propertyList(type: string, keys: readonly string[]): string {
-  return keys.map((key) => formKeyLabel(type, key) ?? key).join(', ');
+function propertyList(type: string, keys: readonly string[], locale: string): string {
+  return keys.map((key) => formKeyLabel(type, key, locale) ?? key).join(', ');
 }
 
 /**
@@ -956,9 +978,19 @@ function propertyList(type: string, keys: readonly string[]): string {
  * entry lists what differs by the labels the list's own form row declares for
  * its sub-rows (`fieldGroups` → "Label", "Collapse").
  */
-function ListEntryRows({ type, listKey, diff }: { type: string; listKey: string; diff: ListEntryDiff }) {
+function ListEntryRows({
+  type,
+  listKey,
+  diff,
+  locale,
+}: {
+  type: string;
+  listKey: string;
+  diff: ListEntryDiff;
+  locale: string;
+}) {
   const entryKeys = (keys: readonly string[]) =>
-    keys.map((key) => formKeyLabel(type, `${listKey}.${key}`) ?? key).join(', ');
+    keys.map((key) => formKeyLabel(type, `${listKey}.${key}`, locale) ?? key).join(', ');
   return (
     <div className="ml-3 flex flex-col gap-0.5">
       {diff.added.map((e) => (
@@ -1014,7 +1046,7 @@ function EntryDetail({
   onCompared?: (unchanged: boolean) => void;
   backfill?: EntryBackfillControl;
 }) {
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const [detail, setDetail] = useState<EntryChangeDetail | null>(null);
   const [agents, setAgents] = useState<DraftAgentSource[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -1114,7 +1146,12 @@ function EntryDetail({
   }
 
   const { fields, nodes, keys, entries, generated, isNew } = detail;
-  const hasKeyRows = keys.added.length > 0 || keys.changed.length > 0 || keys.removed.length > 0;
+  // objectstack#29704 — a NEW item is added whole. Its key list (every property
+  // it was created with: `isDefault`, `viewKind`, …) and the columns the
+  // platform provisions for it name nothing the person changed, so the drill-in
+  // lists neither: only the fields and nodes it brings, or one sentence.
+  const hasKeyRows = !isNew && (keys.added.length > 0 || keys.changed.length > 0 || keys.removed.length > 0);
+  const hasNewItemRows = isNew && ((fields?.added.length ?? 0) > 0 || (nodes?.added.length ?? 0) > 0);
   // objectstack#27176 — which AI tools drafted part of this item, one line each.
   const agentLines = agents.map((source) => (
     <p
@@ -1145,6 +1182,13 @@ function EntryDetail({
   return (
     <div className="flex flex-col gap-0.5 px-2 py-1" data-testid="draft-entry-detail">
       {agentLines}
+      {isNew && (
+        <p className="text-xs text-muted-foreground" data-testid={hasNewItemRows ? undefined : 'draft-entry-new'}>
+          {hasNewItemRows
+            ? t('preview.changes.detailNewKeys', { defaultValue: 'Includes:' })
+            : t('preview.changes.detailNewItem', { defaultValue: 'Publishing adds this item.' })}
+        </p>
+      )}
       {fields?.added.map((name) => {
         const candidate = backfill ? candidates.find((c) => c.field === name) : undefined;
         const choice: DraftBackfillEntry = { object: entry.name, field: name };
@@ -1182,7 +1226,9 @@ function EntryDetail({
       })}
       {fields?.changed.map((f) => (
         <FieldRow key={`~${f.name}`} kind="changed" name={f.name} label={fields.labels.get(f.name)}>
-          {f.keys.length > 0 && <span className="text-muted-foreground"> · {propertyList('field', f.keys)}</span>}
+          {f.keys.length > 0 && (
+            <span className="text-muted-foreground"> · {propertyList('field', f.keys, language)}</span>
+          )}
         </FieldRow>
       ))}
       {fields?.removed.map((name) => (
@@ -1208,23 +1254,21 @@ function EntryDetail({
       ))}
       {hasKeyRows && (
         <p className="text-xs text-muted-foreground">
-          {isNew
-            ? // objectstack#25890 — every key of a NEW item is new: what it includes, not what else changed.
-              t('preview.changes.detailNewKeys', { defaultValue: 'Includes:' })
-            : t('preview.changes.detailChangedKeys', { defaultValue: 'Also changed:' })}
+          {t('preview.changes.detailChangedKeys', { defaultValue: 'Also changed:' })}
         </p>
       )}
-      {(['added', 'changed', 'removed'] as const).flatMap((kind) =>
-        keys[kind].map((name) => {
-          const list = entries.get(name);
-          return (
-            <KeyRow key={`k${FIELD_ROW_MARK[kind]}${name}`} kind={kind} type={entry.type} name={name}>
-              {list ? <ListEntryRows type={entry.type} listKey={name} diff={list} /> : null}
-            </KeyRow>
-          );
-        }),
-      )}
-      {generated.length > 0 && <GeneratedGroup rows={generated} labels={fields?.labels} />}
+      {hasKeyRows &&
+        (['added', 'changed', 'removed'] as const).flatMap((kind) =>
+          keys[kind].map((name) => {
+            const list = entries.get(name);
+            return (
+              <KeyRow key={`k${FIELD_ROW_MARK[kind]}${name}`} kind={kind} type={entry.type} name={name} locale={language}>
+                {list ? <ListEntryRows type={entry.type} listKey={name} diff={list} locale={language} /> : null}
+              </KeyRow>
+            );
+          }),
+        )}
+      {!isNew && generated.length > 0 && <GeneratedGroup rows={generated} labels={fields?.labels} />}
     </div>
   );
 }
@@ -1328,9 +1372,29 @@ export interface DraftChangesPanelProps {
    * nothing to say.
    */
   renderEntryNote?: (entry: DraftChangeEntry) => ReactNode;
+  /**
+   * objectstack ADR-0146 D3 — the label of the read-only base whose
+   * `<base>.custom` pair these drafts are saved to. When set, the sheet says
+   * so under its title ({@link savedToCustomizationText}); the host passes it
+   * only while it reviews a pair's drafts.
+   */
+  customizationOf?: string;
 }
 
 export type DraftChangesPosture = 'review' | 'confirm';
+
+/**
+ * objectstack ADR-0146 D3 — the one sentence that names where a customization
+ * of a read-only base is saved: "Saved to BASE's customizations". The
+ * pending-changes sheet draws it, and the item header reuses it, so both say
+ * the same words.
+ */
+export function savedToCustomizationText(t: Translate, baseLabel: string): string {
+  return t('preview.changes.savedToCustomization', {
+    package: baseLabel,
+    defaultValue: 'Saved to {{package}}’s customizations',
+  });
+}
 
 export function DraftChangesPanel({
   open,
@@ -1341,6 +1405,7 @@ export function DraftChangesPanel({
   publishing = false,
   posture = 'review',
   renderEntryNote,
+  customizationOf,
 }: DraftChangesPanelProps) {
   const { t, language } = useObjectTranslation();
   const [entries, setEntries] = useState<DraftChangeEntry[] | null>(null);
@@ -1608,6 +1673,11 @@ export function DraftChangesPanel({
               defaultValue: 'What publishing will change. New items are added; updates overwrite the live version.',
             })}
           </SheetDescription>
+          {customizationOf ? (
+            <p data-testid="draft-changes-saved-to" className="text-xs font-medium text-foreground">
+              {savedToCustomizationText(t, customizationOf)}
+            </p>
+          ) : null}
         </SheetHeader>
         {posture === 'confirm' && entries && entries.length > 0 && !error ? (
           // objectui#12517 — what the publish carries, counted off the same

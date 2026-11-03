@@ -566,7 +566,7 @@ beforeAll(() => {
   // ⛔ No dependency is borrowed from this workspace. The barrel and the module
   // behind it import Node built-ins only, so what executes below executes with
   // exactly the cupboard a real consumer of the tarball has. (`./hook-body`'s
-  // pin has to symlink `ts-morph`; this surface needs nothing, and helping it
+  // pin has to symlink `typescript`; this surface needs nothing, and helping it
   // to something would be the same mistake that pin's own comment warns about.)
   const probePath = join(consumer, 'probe.mjs');
   writeFileSync(probePath, PROBE_SOURCE);

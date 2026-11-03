@@ -44,12 +44,13 @@ const DISPATCHER_GROUPS = [
 function makeDispatcher() {
     const spies = {
         markRead: vi.fn(async () => ({ success: true, readCount: 1 })),
+        registerDevice: vi.fn(async () => ({ deviceId: 'install-1', success: true })),
         listInbox: vi.fn(async () => ({ notifications: [], unreadCount: 0 })),
         query: vi.fn(async () => ({ data: [] })),
         getMeta: vi.fn(async () => ({ cubes: [] })),
     };
     const services: Record<string, unknown> = {
-        notification: { listInbox: spies.listInbox, markRead: spies.markRead },
+        notification: { listInbox: spies.listInbox, markRead: spies.markRead, registerDevice: spies.registerDevice },
         analytics: { query: spies.query, getMeta: spies.getMeta },
     };
     const resolve = (name: string) => services[name];
@@ -89,6 +90,21 @@ const CASES: GateCase[] = [
         valid: { ids: ['n1', 'n2'] },
         drive: (d, body) => d.handleNotification('/read', 'POST', body, {}, CTX),
         spy: (s) => s.markRead,
+    },
+    {
+        route: 'POST /api/v1/notifications/devices',
+        // A missing token, a platform outside the three, a non-string token,
+        // a vendor outside the pair, and a body that is not an object.
+        violating: [
+            { platform: 'ios' },
+            { token: 't', platform: 'blackberry' },
+            { token: 42, platform: 'ios' },
+            { token: 't', platform: 'web', vendor: 'huawei' },
+            'garbage',
+        ],
+        valid: { token: 't', platform: 'ios' },
+        drive: (d, body) => d.handleNotification('/devices', 'POST', body, {}, CTX),
+        spy: (s) => s.registerDevice,
     },
     {
         route: 'POST /api/v1/analytics/query',

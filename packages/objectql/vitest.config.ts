@@ -105,6 +105,18 @@ runProjectCliOverridePreflight({
 });
 
 export default defineConfig({
+  resolve: {
+    alias: [
+      // [#29627] The lint package ROOT, which `src/__fixtures__/lint-root-preload.testkit.ts`
+      // imports at module top so a test file pays its first load during
+      // collection. metadata-protocol loads the same root lazily from its
+      // `dist/` on a served view read or an object publish; through this
+      // entry both resolve to one module, the lint rule in the checkout,
+      // never `dist/`. Anchored, so lint's published subpaths are not
+      // swallowed by the file replacement.
+      { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
+    ],
+  },
   test: {
     // Each project re-declares the root block's test options: a ROOT-level
     // value is inert for a project run (measured on vitest 4.1.10, see

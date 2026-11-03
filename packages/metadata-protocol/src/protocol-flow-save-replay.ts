@@ -29,6 +29,22 @@
  * imports from it; what it imports from elsewhere, it imports from where
  * `protocol.ts` imported it. Nothing re-exports this module, so the published
  * surface does not move.
+ *
+ * ## [#29557] The flow verdict body, one seam for every door that judges a flow
+ *
+ * {@link flowVerdictBody} below is the conversion the save door's fallback
+ * verdict (#21982) applies, and {@link storedFlowVerdictBody} is that same
+ * conversion asked of a STORED flow draft: the body the per-item publish, the
+ * package publish (both through `promoteDraftForPublish`) and the draft read's
+ * publish verdict (`draftPublishVerdict`) judge. One judge, one spelling: a
+ * legacy D2 spelling the save door accepted and stored raw is accepted at
+ * publish too, and what goes live is still the stored bytes.
+ *
+ * [#29696] The two other judges of a flow at rest judge through it too: the
+ * read's `_diagnostics` schema half (`computeMetadataDiagnostics`, every read
+ * exit that decorates) and the restore doors' runtime rules
+ * (`refuseRestoredBodyTheSaveDoorRefuses`, for `rollbackMetaItem` and
+ * `revertCommit`). Each serves or restores the body as stored.
  */
 
 import { ALL_CONVERSIONS, applyConversionsToFlow, type ConversionNotice } from '@objectstack/spec';
@@ -112,4 +128,53 @@ export async function flowSaveReplaysRetired(
     if (!active) return false;
     strikeCarried(active.body);
     return uncarried.size === 0;
+}
+
+/**
+ * [#21982] The body a flow is JUDGED in when the save door's canonicalizer did
+ * not resolve or threw: the request body with the spec's ADR-0087 D2
+ * conversions applied (`applyConversionsToFlow`), the full chain minus
+ * {@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}, with the retired entries when
+ * `includeRetired` says so. For the VERDICT only: the caller stores the body
+ * it was handed, never this one. A key no conversion rewrites is judged
+ * exactly as written.
+ */
+export function flowVerdictBody(body: unknown, options: { includeRetired: boolean }): unknown {
+    return applyConversionsToFlow(body, {
+        includeRetired: options.includeRetired,
+        excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
+    });
+}
+
+/**
+ * [#29557] The body a STORED flow is judged in: for a `flow`, the
+ * {@link flowVerdictBody} of the row with the retired entries included; every
+ * other type, the row as stored. The two publish doors and the draft read's
+ * publish verdict judge a stored draft through here, [#29696] the read's
+ * `_diagnostics` schema half judges a served row and the restore doors' runtime
+ * rules a history version; each promotes, serves or restores the row as stored.
+ *
+ * A stored row is data at rest, so the chain is the one the automation engine
+ * replays when it registers the row: its stored-flow canonicalizer
+ * (`canonicalizeFlow` in `service-automation/src/flow-definitions.ts`), which
+ * every caller but the save door calls with no options, so retired entries
+ * included, and which excludes `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION`. That
+ * list and {@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED} name the same one entry,
+ * `flow-decision-mode-inclusive-explicit`, so this verdict replays exactly the
+ * engine's chain. The entry is a DEFAULT FLIP, not a rescue: it writes
+ * `mode: 'inclusive'` where a decision omits `mode`, and an omitted `mode`
+ * parses (it means exclusive), so leaving it out never turns an accepted body
+ * into a refused one; it only keeps the verdict from judging a meaning the row
+ * does not have. By maintainer ruling (letter C on #15429) it is not replayed
+ * over stored flows at all. No read path converts a flow either:
+ * `convertStoredItem` skips `flow`, and `applyConversionsToStoredItem` is not
+ * applied to it.
+ *
+ * The retired-entry predicate of the save door ({@link flowSaveReplaysRetired},
+ * #23903 ruling B') is not asked again: it judges authored input, and the
+ * row's own save asked it, in draft mode as in publish mode. `type` is the
+ * singular type name.
+ */
+export function storedFlowVerdictBody(type: string, body: unknown): unknown {
+    return type === 'flow' ? flowVerdictBody(body, { includeRetired: true }) : body;
 }

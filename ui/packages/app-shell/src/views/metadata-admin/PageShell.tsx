@@ -18,6 +18,7 @@
 import * as React from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Badge } from '@object-ui/components';
+import { isOverridableMetadataType } from '@objectstack/spec/kernel';
 import { ChevronRight } from 'lucide-react';
 import type { RichMetadataTypeEntry } from './useMetadata.js';
 import { useMetadataLocale, t, translateMetadataType, translateMetadataDomain } from './i18n.js';
@@ -64,10 +65,54 @@ export interface PageShellProps {
 }
 
 /**
- * The writability badge slot — one of four mutually exclusive states, rendered
- * identically in the compact (detail) and hero (list) headers. Extracted so the
- * host read-only gate cannot be honoured in one header and forgotten in the
- * other, which is the shape of the bug that motivated it.
+ * objectstack#29705 — what a person can do with a type's items here, in the
+ * words the Studio pillars use for an item's state, so a tile, a list header
+ * and a pillar never word one state two ways:
+ *
+ *  - `readOnly` — nothing is written here: the type opens no runtime door, or
+ *    the package is read-only and the type takes no customization;
+ *  - `customizable` — a read-only package's overlay type that the spec's
+ *    classification lets an override replace: a change is saved in the
+ *    deployment's customization package (ADR-0146 D2, D3);
+ *  - `writable` — an overlay type of a package this screen writes to;
+ *  - `addable` — a create-only type of a package this screen writes to: new
+ *    items can be added, the items a code package ships stay read-only.
+ *
+ * A read-only package's create-only type is `readOnly`: the area withholds
+ * every create door on a read-only package. The `OS_METADATA_WRITABLE` hatch
+ * opens only the items no package ships, so on a read-only package it opens
+ * nothing either.
+ */
+export type TypeStateWord = 'readOnly' | 'customizable' | 'writable' | 'addable';
+
+/** The one key each {@link TypeStateWord} is drawn with. */
+export const TYPE_STATE_WORD_KEY: Readonly<Record<TypeStateWord, string>> = Object.freeze({
+  readOnly: 'engine.studio.pkg.readonly',
+  customizable: 'engine.studio.customize.available',
+  writable: 'engine.studio.pkg.writable',
+  addable: 'engine.studio.customize.addable',
+});
+
+/** The {@link TypeStateWord} of `entry`'s items, on a package that is read-only or not. */
+export function typeStateWord(
+  entry: Pick<RichMetadataTypeEntry, 'type' | 'allowEnvironmentOverlay' | 'allowRuntimeCreate' | 'overrideSource'> | undefined,
+  packageReadOnly: boolean,
+): TypeStateWord {
+  if (packageReadOnly) {
+    return entry?.allowEnvironmentOverlay && entry.overrideSource !== 'env' && isOverridableMetadataType(entry.type)
+      ? 'customizable'
+      : 'readOnly';
+  }
+  if (entry?.allowEnvironmentOverlay) return 'writable';
+  if (entry?.allowRuntimeCreate) return 'addable';
+  return 'readOnly';
+}
+
+/**
+ * The type's state badge, drawn the same in the compact (detail) and hero
+ * (list) headers and on the All metadata tiles. `readOnly` is the host gate:
+ * the surrounding package is read-only, so no write starts from this screen
+ * and an overlay type can only be customized.
  */
 export function WritabilityBadge({
   entry,
@@ -81,57 +126,62 @@ export function WritabilityBadge({
   compact?: boolean;
 }): React.ReactElement {
   const size = compact ? 'text-[10px] h-5 px-1.5' : 'text-[10px]';
+  const word = typeStateWord(entry, readOnly);
+  const label = t(TYPE_STATE_WORD_KEY[word], locale);
 
-  // Host gate first: a read-only package overrides whatever the type registry
-  // says, because no write can be initiated from this screen regardless. The
-  // tooltip names the package as the reason, matching the wording the Studio
-  // top bar and the identity strip already use for the same gate.
-  if (readOnly) {
+  if (word === 'customizable') {
     return (
       <Badge
-        variant="outline"
-        className={`${size} text-muted-foreground`}
-        title={t('engine.studio.pkg.readonlyHint', locale)}
+        className={`${size} bg-violet-100 text-violet-800 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-300`}
+        title={t('engine.studio.customize.availableTitle', locale)}
+        data-state-word={word}
       >
-        {t('engine.badge.readOnly', locale)}
+        {label}
       </Badge>
     );
   }
 
-  if (entry?.allowEnvironmentOverlay) {
+  if (word === 'writable') {
     return (
       <Badge
         className={
           `${size} ` +
-          (entry.overrideSource === 'env'
+          (entry?.overrideSource === 'env'
             ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
             : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-100')
         }
         title={
-          entry.overrideSource === 'env'
+          entry?.overrideSource === 'env'
             ? 'Writable via the OS_METADATA_WRITABLE env var: it opens the items no package ships, never an item a package ships'
             : 'Writable per ADR-0005 overlay opt-in'
         }
+        data-state-word={word}
       >
-        {t('engine.badge.writable', locale)}
+        {label}
       </Badge>
     );
   }
 
-  if (entry?.allowRuntimeCreate) {
+  if (word === 'addable') {
     return (
       <Badge
         className={`${size} bg-sky-100 text-sky-800 hover:bg-sky-100`}
-        title="Code-shipped items are locked; new items can be created at runtime"
+        title={t('engine.studio.customize.addableTitle', locale)}
+        data-state-word={word}
       >
-        {t('engine.badge.createOnly', locale)}
+        {label}
       </Badge>
     );
   }
 
   return (
-    <Badge variant="outline" className={`${size} text-muted-foreground`}>
-      {t('engine.badge.readOnly', locale)}
+    <Badge
+      variant="outline"
+      className={`${size} text-muted-foreground`}
+      title={readOnly ? t('engine.studio.pkg.readonlyHint', locale) : undefined}
+      data-state-word={word}
+    >
+      {label}
     </Badge>
   );
 }

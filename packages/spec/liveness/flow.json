@@ -62,7 +62,43 @@
     "variables": {
       "status": "live",
       "evidence": "packages/services/service-automation/src/engine.ts",
-      "note": "{name,isInput,isOutput} wired."
+      "note": "{name,type,isInput,isOutput,defaultValue} wired; drilled per key (#29442) so `objectName` can carry its own `planned` row and author warning — the blanket row could not say that one child is not read yet.",
+      "children": {
+        "name": {
+          "status": "live",
+          "verifiedAt": "2026-11-02",
+          "evidence": "packages/services/service-automation/src/dag-traversal.ts#seedDeclaredVariables (binds each declared variable under `v.name`, from `context.params[v.name]` or its default)"
+        },
+        "type": {
+          "status": "live",
+          "verifiedAt": "2026-11-02",
+          "evidence": "ui/apps/console/src/pages/developer/FlowRunsPage.tsx#FlowTestRunner (the Flow Runs test runner picks each input's widget and coerces its value by `v.type`)",
+          "note": "An open string: no engine path coerces by it; the Console test runner is its reader."
+        },
+        "isInput": {
+          "status": "live",
+          "verifiedAt": "2026-11-02",
+          "evidence": "packages/services/service-automation/src/dag-traversal.ts#seedDeclaredVariables (only an `isInput` variable is bound from the caller's params)"
+        },
+        "isOutput": {
+          "status": "live",
+          "verifiedAt": "2026-11-02",
+          "evidence": "packages/services/service-automation/src/dag-traversal.ts#executeWithoutRetry (an `isOutput` variable's final value is copied onto the run result's output)"
+        },
+        "defaultValue": {
+          "status": "live",
+          "verifiedAt": "2026-11-02",
+          "evidence": "packages/services/service-automation/src/dag-traversal.ts#seedDeclaredVariables (bound when no param supplies the name, #4697)"
+        },
+        "objectName": {
+          "status": "planned",
+          "verifiedAt": "2026-11-02",
+          "evidence": "packages/spec/src/automation/flow.zod.ts#FlowVariableSchema (the superRefine that refuses `objectName` on a variable that is not an input — the one place the key is read today)",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: no start door loads a declared input from its object until the start doors ship that check, so an id the caller cannot read still starts a run.",
+          "note": "PLANNED RECORD (#29442, the spec half of #29425 ruling A 6580257050): an input's declaration that its value is the id of one record of the named object. Parsed, refused on a non-input (the evidence above) and linted (`flow-input-unknown-object` in packages/lint/src/validate-flow-trigger-readiness.ts). No door reads it: the start doors' third question (packages/runtime/src/flow-start-admission.ts, `flowDeclaredRecordReads` / `refuseUnreadableFlowStartRecords` in action-execution.ts) judges only inputs the definition reads in plain sight. Carrier: the #29425 server half, Blocked-by #29442 (every start door loads a declared input in the caller's scope, 404 RECORD_NOT_FOUND / 400 VALIDATION_FAILED). Flip to `live` on the commit that cites that reader, drop `authorWarn` / `authorHint` and the describe's planned sentence in that same edit."
+        }
+      }
     },
     "edges": {
       "status": "live",
