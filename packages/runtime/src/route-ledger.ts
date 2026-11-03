@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 126 rows.
+ * CENSUS (generated): this list holds 127 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -563,6 +563,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     responseSchema: 'RollbackToPackageCommitResponseSchema',
     note: 'Enveloped — the named schema is the `data`: `rollbackToPackageCommit`\'s declared return, the ADR-0067 COMMIT rollback. Fillable only after the retirement of `PackageRollbackResponseSchema` + `PackageApiContracts.rollbackPackage`, the VERSION-rollback declaration the spec had falsely bound to this exact path. Conformance: spec `api/package-lifecycle.test.ts`' },
   { route: 'POST /packages/:id/revert', domain: '/packages', disposition: 'sdk', client: 'packages.revert' },
+  // [#28914] The whole-deployment export: every installed package as installable packages, in one read.
+  { route: 'GET /packages/export', domain: '/packages', disposition: 'sdk', client: 'packages.exportAll',
+    responseSchema: 'PackageExportBundleSchema',
+    note: 'Enveloped — the named schema is the `data`: `{ packages }`, each entry exactly what `GET /packages/:id/export` answers (`assemblePackageManifest`, the one producer), for every registry row whose `source` is not `code`, disabled ones included, in ADR-0141 D5 dependency order (`orderHydrationBatch`, so a `.custom` pair follows its base). Same read gate as the per-package export; closed query set (none: a parameter is refused 400 `VALIDATION_ERROR` naming it); whole or absent (a package whose export cannot be assembled fails the read, naming it). Matched ahead of `GET /packages/:id`; `export` is never a package id. Pinned in `domains/packages-export-bundle.test.ts`, which drives THIS handler and parses the payload through the response schema; the round trip onto a fresh runtime is the dogfood `package-export-bundle-round-trip.dogfood.test.ts`' },
   { route: 'GET /packages/:id/export', domain: '/packages', disposition: 'sdk', client: 'packages.export',
     responseSchema: 'PackageExportManifestSchema',
     note: 'Enveloped — the named schema is the `data`: the ADR-0070 portable manifest. Four fixed keys (`id`, `name`, `version`, `label?`) plus an OPEN catch-all — the remaining keys are registry-derived per metadata type present, deliberately not enumerated (freezes nothing). Conformance: spec `api/package-lifecycle.test.ts`' },
