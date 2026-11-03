@@ -10,16 +10,18 @@
 // `assemblePackageManifest` caught every per-type read failure as an
 // "unknown/unsupported type" and skipped it. The read below fails the way a
 // storage fault does on the real protocol: the overlay rows of `dashboard`
-// cannot be read, which the protocol rethrows (only an unprovisioned
-// `sys_metadata` licenses it to answer without them). The export then answered
+// cannot be read, which the protocol rethrows as its declared `503
+// SERVICE_UNAVAILABLE` (only an unprovisioned `sys_metadata` licenses it to
+// answer without them). The export then answered
 // 200 with the showcase's objects and no `dashboards` key at all, so a
 // reinstall from it would land without a dashboard and tell nobody.
 //
 // ## What this file pins, on one showcase boot
 //
 //   1. CONTROL: the showcase's export answers 200 and carries its dashboards;
-//   2. the dashboard overlay read failing: the export answers 500, naming the
-//      package and `dashboard`, and serves no manifest;
+//   2. the dashboard overlay read failing: the export answers the read's own
+//      `503 SERVICE_UNAVAILABLE`, naming the package and `dashboard`, and
+//      serves no manifest;
 //   3. CONTROL: the read restored, the export answers 200 with the dashboards
 //      again (the failure was the read's, not the boot's).
 //
@@ -85,10 +87,12 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
   it('a failed dashboard read refuses the export, naming the package and the type, and serves no manifest', () => {
     // The injected fault was reached: the export read the type through it.
     expect(overlayReadsRefused).toBeGreaterThan(0);
-    expect(failed.status, JSON.stringify(failed.body)).toBe(500);
+    // The read's declared refusal rides on: the protocol answers a failed
+    // overlay read as a 503, and so does the export it failed.
+    expect(failed.status, JSON.stringify(failed.body)).toBe(503);
     expect(failed.body?.success).toBe(false);
     expect(failed.body?.data).toBeUndefined();
-    expect(failed.body?.error?.code).toBe('INTERNAL_ERROR');
+    expect(failed.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
     const message = String(failed.body?.error?.message ?? '');
     expect(message).toContain(`'${SHOWCASE}'`);
     expect(message).toContain(`'${FAILING}'`);
