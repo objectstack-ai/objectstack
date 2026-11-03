@@ -62,8 +62,10 @@
  *   review seat the review seats (`review#N`) against the same posts: `seated`
  *              (and which), `barred` (every seated one sits on this PR's own
  *              implementing or dispatching account — `lanes/review.md` 独立性;
- *              a barred seat is never named), `stood-down`, `absent`,
- *              `unknown` (roster unread).
+ *              a barred seat is never named), `unjudged` (seated ones, but the
+ *              card's comments could not be read, so the dispatching account
+ *              is unknown and none is printed as free), `stood-down`,
+ *              `absent`, `unknown` (roster unread).
  *   status     `TAKE` (owed, nobody on it, a trigger holds), `WAIT` (owed,
  *              nobody on it, no trigger yet — the lane's own, a lane's live hold
  *              included), `HELD` (a live claim on this head), `DONE` (a record on
@@ -258,8 +260,10 @@ export function reviewSeatsOf(seats, ownAccounts = new Set()) {
   const rows = seats.filter((s) => s?.lane === REVIEW_LANE);
   const name = (s) => `${REVIEW_LANE}#${Number(s.seat) > 0 ? Number(s.seat) : 1}`;
   const seatedRows = rows.filter((s) => s.status === 'seated');
+  // The card's comments could not be read: the dispatching account is unknown, so no seated seat is printed as free.
+  if (ownAccounts === null && seatedRows.length > 0) return { state: 'unjudged', seated: seatedRows.map(name).sort(), barred: [] };
   // `lanes/review.md` 独立性: a review seat never reviews a PR its own account dispatched or implemented.
-  const isBarred = (s) => typeof s.account === 'string' && ownAccounts.has(s.account.toLowerCase());
+  const isBarred = (s) => typeof s.account === 'string' && ownAccounts !== null && ownAccounts.has(s.account.toLowerCase());
   const seated = seatedRows.filter((s) => !isBarred(s)).map(name).sort();
   const barred = seatedRows.filter(isBarred).map(name).sort();
   if (seated.length > 0) return { state: 'seated', seated, barred };
@@ -271,9 +275,11 @@ export function reviewSeatsOf(seats, ownAccounts = new Set()) {
  * The accounts no review seat of which may take this PR (`lanes/review.md` 独立性): the IMPLEMENTING
  * account — the login in the body's `claude-projects-attribution` line — and the DISPATCHING account —
  * the login signing each `Claim:` comment on the delivered card. Lowercased logins; an unreadable or
- * absent line names no account. Pure.
+ * absent line names no account. `null` when the card's comments could not be read (`cardComments`
+ * null beside a delivered card): the dispatching account is then UNJUDGED, not absent. Pure.
  */
 export function ownAccountsOf(pull) {
+  if (pull?.card !== null && pull?.card !== undefined && pull?.cardComments === null) return null;
   const out = new Set();
   const m = /claude-projects-attribution:\s*(\{[^\n]*?\})/.exec(String(pull?.body ?? ''));
   if (m) {
@@ -383,6 +389,10 @@ export function takerOf(status, handoff, lane, review = { state: 'unknown', seat
     return `${named} first`;
   }
   if (review?.state === 'unknown') return laneGone ? `a review seat, or ${seat} next on duty` : `${seat} or a review seat`;
+  if (review?.state === 'unjudged') {
+    const named = `a review seat (${review.seated.join(', ')}) unless on this PR's own account (card comments unread)`;
+    return laneGone ? `${named}, or ${seat} next on duty` : `${named}, or ${seat}`;
+  }
   if (review?.state === 'barred') {
     const why = `review seat ${review.barred.join(', ')} is on this PR's own account`;
     return laneGone ? `${seat} next on duty (${why})` : `${seat} (${why})`;
@@ -573,8 +583,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the owed face: paths, the Clause-② line, the label — drafts included, nothing else owes': 9,
   'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 8,
   'the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat': 10,
-  // 10 → 14: S2 of PR #29967's contract review — a review seat on the PR's own account is barred (`lanes/review.md` 独立性).
-  'review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated': 14,
+  // 10 → 14 → 16: S2 and S4 of PR #29967's contract review — a review seat on the PR's own account is barred (`lanes/review.md` 独立性); an unread card thread leaves the bar unjudged.
+  'review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated': 16,
   'a live claim holds the head and a record settles it; a lapsed claim holds nothing': 6,
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
   'the live read: every read through one reader; a failed read is INCOMPLETE, never clean': 6,
@@ -693,6 +703,8 @@ export function selfTest() {
   t('⭐ S2: the only seated review seat sits on the IMPLEMENTING account ⇒ barred, the lane\'s own seat takes at once — no further round, no triage', (() => { const r = rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN); return r.status === 'TAKE' && r.reviewSeat === 'barred' && r.reviewSeats.length === 0 && r.reviewBarred.join() === 'review#1' && r.taker === "the domain:ui seat (review seat review#1 is on this PR's own account)" && !/triage/.test(renderRow(r)) && renderRow(r).includes('review seat barred (barred review#1)'); })());
   t('⭐ S2: a review seat on the DISPATCHING account (the card claim\'s signer) is barred too; a review seat on a third account still takes first, the barred one named', (() => { const r = rv({ card: 25922, cardComments: CLAIMED, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'OS-Zhuang' }, { lane: REVIEW_LANE, seat: 2, status: 'seated', account: 'os-other' }]); const alone = rv({ card: 25922, cardComments: CLAIMED, headCommittedAt: '2026-10-28T10:59:00Z' }, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'os-zhuang' }]); return r.reviewSeat === 'seated' && r.reviewSeats.join() === 'review#2' && r.reviewBarred.join() === 'review#1' && r.taker === 'a review seat (review#2) first' && alone.taker === "the domain:ui seat (review seat review#1 is on this PR's own account)"; })());
   t('S2: the lane seat gone and the only review seat barred ⇒ the lane\'s next seat; a review seat with no account on its post is never barred', rv({ body: ATTR, headCommittedAt: fresh }, [{ lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'os-support-ai' }]).taker === "the domain:ui seat next on duty (review seat review#1 is on this PR's own account)" && rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'seated', account: null }]).taker === 'a review seat (review#1) first');
+  t('⭐ S4: the card\'s comments unreadable ⇒ own accounts null, the bar UNJUDGED: a seated review seat is named with the caveat, never as free, and the lane seat beside it; with no seated review seat the states read as before', (() => { const unread = { card: 25922, cardComments: null, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }; const r = rv(unread, OWN); const gone = rv({ card: 25922, cardComments: null, headCommittedAt: fresh }, [{ lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'os-support-ai' }]); return ownAccountsOf({ card: 25922, cardComments: null }) === null && ownAccountsOf({ card: null, cardComments: [] }).size === 0 && r.reviewSeat === 'unjudged' && r.reviewSeats.join() === 'review#1' && r.reviewBarred.length === 0 && r.taker === "a review seat (review#1) unless on this PR's own account (card comments unread), or the domain:ui seat" && gone.taker === "a review seat (review#1) unless on this PR's own account (card comments unread), or the domain:ui seat next on duty" && rv(unread, SEATED).reviewSeat === 'absent' && rv(unread, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'paused' }]).reviewSeat === 'stood-down' && renderRow(r).includes('review seat unjudged review#1'); })());
+  t('S4: a readable but empty comment thread on the card, or no card at all, judges the bar — the attribution login alone bars', rv({ card: 25922, cardComments: [], body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN).reviewSeat === 'barred' && rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN).reviewSeat === 'barred');
   t('the printed row carries the review-seat reading and the taker', renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] })).includes(`review seat seated review#1,review#2 → (a) label · take: ${BOTH} first`) && renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, SEATED)).includes('review seat absent → (a) label · take: the domain:ui seat (no review seat seated)'));
 
   battery('a live claim holds the head and a record settles it; a lapsed claim holds nothing');
