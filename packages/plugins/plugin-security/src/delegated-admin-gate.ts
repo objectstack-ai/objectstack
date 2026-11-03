@@ -56,6 +56,7 @@
  */
 
 import { isGrantActive, securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
+import { declaredHttpStatus } from '@objectstack/types';
 import type { AdminScope, AdminScopeParsed, PermissionSet } from '@objectstack/spec/security';
 import {
   ADMIN_FULL_ACCESS,
@@ -224,6 +225,14 @@ export interface DelegatedAdminGateDeps {
   ql: any;
   /** Shared permission-set resolution (same path as the CRUD middleware). */
   resolveSets: (context: any) => Promise<PermissionSet[]>;
+  /**
+   * [ruling of record 5985885287] The caller's own by-id read of the row an
+   * update or delete addresses: the read door's answer to this caller. The
+   * security plugin passes its per-operation pre-image read, so the gate and
+   * the write gates after it read the row once between them. Absent, the gate
+   * reads through `ql` under the caller's context.
+   */
+  readAsCaller?: (opCtx: any, id: string | number) => Promise<Record<string, unknown> | null>;
   logger?: { warn?: (msg: string, meta?: any) => void };
   /** [ADR-0091 D3] Clock for delegation validity/ceiling checks (tests inject). */
   now?: () => number;
@@ -843,11 +852,26 @@ export class DelegatedAdminGate {
   private async organizationTargets(opCtx: any): Promise<Array<{ next: any | null; prev: any | null }>> {
     if (opCtx.operation === 'insert') return rowsOf(opCtx).map((r) => ({ next: r, prev: null }));
     const id = extractSingleId(opCtx);
+    return [{ next: null, prev: id != null ? await this.callerRead(opCtx, id) : null }];
+  }
+
+  /**
+   * [ruling of record 5985885287] The caller's own by-id read of row `id` of
+   * `opCtx.object`: the read door's answer to this caller, every read
+   * visibility and wall included — through
+   * {@link DelegatedAdminGateDeps.readAsCaller} when the host shares its
+   * per-operation pre-image, else through the engine under the caller's
+   * context. `null` for no row. A read refusal or a store fault propagates as
+   * raised.
+   */
+  private async callerRead(opCtx: any, id: string | number): Promise<any | null> {
     const ql = this.deps.ql;
-    const prev = id != null && ql?.findOne
-      ? await ql.findOne(opCtx.object, { where: { id }, context: opCtx.context })
-      : null;
-    return [{ next: null, prev: prev && typeof prev === 'object' ? prev : null }];
+    const row = this.deps.readAsCaller
+      ? await this.deps.readAsCaller(opCtx, id)
+      : ql?.findOne
+        ? await ql.findOne(opCtx.object, { where: { id }, context: opCtx.context })
+        : null;
+    return row && typeof row === 'object' ? row : null;
   }
 
   /**
@@ -1169,7 +1193,7 @@ export class DelegatedAdminGate {
   // ── sys_user_position: user ↔ position assignments ──────────────────
 
   private async assertAssignmentWrite(opCtx: any, held: HeldScope[]): Promise<void> {
-    const targets = await this.materializeTargets(opCtx, 'sys_user_position');
+    const targets = await this.delegatedTargets(opCtx);
     for (const t of targets) {
       const buId = t.next?.business_unit_id ?? null;
       const positionName = String(t.next?.position ?? t.prev?.position ?? '');
@@ -1213,7 +1237,7 @@ export class DelegatedAdminGate {
   // ── sys_user_permission_set: direct user ↔ set grants ───────────────
 
   private async assertDirectGrantWrite(opCtx: any, held: HeldScope[]): Promise<void> {
-    const targets = await this.materializeTargets(opCtx, 'sys_user_permission_set');
+    const targets = await this.delegatedTargets(opCtx);
     for (const t of targets) {
       const row = t.next ?? t.prev ?? {};
       const { setRow, setName, unresolved } = await this.directGrantSet(t, row);
@@ -1457,28 +1481,74 @@ export class DelegatedAdminGate {
     return allowed;
   }
 
-  /** Rows targeted by this write: `{ next, prev }` per row (prev = pre-image on update/delete). */
-  private async materializeTargets(opCtx: any, object: string): Promise<Array<{ next: any | null; prev: any | null }>> {
+  /**
+   * [ADR-0090 D12; ruling of record 5985885287] The rows a delegate's write
+   * targets: `{ next, prev }` per row — an insert's payload rows, or the one row
+   * a by-id write addresses (`authorize` refused a write naming no single row
+   * before the walk), `prev` its pre-image and an update's `next` its payload
+   * over that pre-image.
+   *
+   * Whether there is a row to judge is asked of the CALLER's own read
+   * ({@link callerRead}): a row the caller cannot read answers exactly what an
+   * id naming no row answers — one refusal, here at the gate, never a
+   * fall-through to the engine. A row the caller reads is judged on the stored
+   * row, as before, never on the caller's read of it: that read is served
+   * through the caller's field-level security, and a judgement made on what a
+   * field rule hid would be made on less than the row. So a row the caller
+   * reads keeps its verdict and its guidance.
+   *
+   * A read the read door REFUSES (a declared 4xx — the object's read grant
+   * withheld) hides no row: the stored row is judged as before, and a refusal
+   * the gate then answers for the by-id write the caller addressed is answered
+   * with that read refusal by the security middleware
+   * (`readDoorAnswerForGateRefusal`), for every id alike. A store fault, in
+   * either read, propagates as raised: an outage is neither an answer nor a
+   * refusal.
+   */
+  private async delegatedTargets(opCtx: any): Promise<Array<{ next: any | null; prev: any | null }>> {
     const op = opCtx.operation;
     const payload = rowsOf(opCtx);
     if (op === 'insert') return payload.map((r) => ({ next: r, prev: null }));
 
-    const id = extractSingleId(opCtx);
-    let prev: any = null;
-    if (id != null && this.deps.ql?.findOne) {
-      prev = await this.deps.ql
-        .findOne(object, { where: { id }, context: SYSTEM_CTX })
-        .catch(() => null);
+    const id = extractSingleId(opCtx) as string | number;
+    const prev = (await this.hiddenFromCaller(opCtx, id)) ? null : await this.storedRow(opCtx.object, id);
+    if (!prev) {
+      throw new PermissionDeniedError(
+        `[Security] Access denied: delegated '${op}' on ${opCtx.object} rejected — the assignment row it addresses could not be read.`,
+        { operation: op, object: opCtx.object },
+      );
     }
     if (op === 'update') {
       const next = payload.length > 0 ? payload[0] : null;
       // Merge unchanged pre-image values so boundary checks see the full row
       // (an update payload may carry only the changed columns).
-      const merged = next && prev ? { ...prev, ...next } : next ?? prev;
-      return [{ next: merged, prev }];
+      return [{ next: next ? { ...prev, ...next } : prev, prev }];
     }
     // delete / transfer / restore / purge — judged on the pre-image alone.
     return [{ next: null, prev }];
+  }
+
+  /**
+   * Does the caller's own read answer NO row for `id` ({@link callerRead})?
+   * A declared 4xx refusal of the read is not a hidden row (`false`); a store
+   * fault propagates.
+   */
+  private async hiddenFromCaller(opCtx: any, id: string | number): Promise<boolean> {
+    try {
+      return (await this.callerRead(opCtx, id)) === null;
+    } catch (e) {
+      const status = declaredHttpStatus(e);
+      if (status !== undefined && status < 500) return false;
+      throw e;
+    }
+  }
+
+  /** The stored row `id` of `object`, read by the system; `null` for no row. A store fault propagates. */
+  private async storedRow(object: string, id: string | number): Promise<any | null> {
+    const ql = this.deps.ql;
+    if (!ql?.findOne) return null;
+    const row = await ql.findOne(object, { where: { id }, context: SYSTEM_CTX });
+    return row && typeof row === 'object' ? row : null;
   }
 
   /**
