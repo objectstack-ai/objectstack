@@ -1976,9 +1976,10 @@ function AppRootLanding({
   }
   // A navigation with no landing: every entry the sidebar draws is a `url` or
   // `action` link, or the items live only under `areas`, which the resolver
-  // does not walk. (A `doc` entry lands, objectstack-ai/objectstack#29678.) The root renders no page of its own and the
-  // sidebar offers the entries. It used to render the Studio app's overview,
-  // `StudioHomePage`, which objectui#12113 retired.
+  // does not walk (a `doc` entry lands, objectstack-ai/objectstack#29678). The
+  // root renders no page of its own and the sidebar offers the entries. It used
+  // to render the Studio app's overview, `StudioHomePage`, which objectui#12113
+  // retired.
   return null;
 }
 
