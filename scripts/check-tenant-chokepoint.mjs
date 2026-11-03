@@ -230,10 +230,14 @@ const SCAN_FILES = [
  * of files is worse than the silence it replaces. ⛔ And not
  * `sql-driver-*.ts` either, although that is the population's own shape: the
  * same directory holds a few hundred `sql-driver-*.test.ts` files this gate
- * never reads, and a glob would name it on every one of them. So the seam
- * modules are declared one by one, and the self-test holds the list to the
- * directory's listing in both directions: a seam module added, renamed or
- * removed reds the self-test until it is declared here (#29520).
+ * never reads, and a glob would name it on every one of them. Measured through
+ * `hintCovers` itself (#29520): the extractor does accept that glob and judges
+ * it as a pattern, and it covers 31 seam modules and 234 test files, plus any
+ * `.d.ts`. A hint has no negation, and `?` and `[…]` are not admitted, so no
+ * spelling covers the modules and leaves the tests out. So the seam modules
+ * are declared one by one, and the self-test holds the list to the directory's
+ * listing in both directions. A seam module added, renamed or removed reds the
+ * self-test, and the failure names the exact string to add or remove here.
  *
  * The self-test derives the coupling from `SCAN_FILES` on both sides rather than
  * re-spelling it, so a driver added to or removed from the family cannot leave
@@ -247,6 +251,7 @@ const DECLARED_WATCH_HINTS = [
   'packages/drivers/driver-turso/src/turso-driver.ts',
   'packages/drivers/driver-sql/src/sql-driver-aggregation.ts',
   'packages/drivers/driver-sql/src/sql-driver-autonumber.ts',
+  'packages/drivers/driver-sql/src/sql-driver-balanced-group.ts',
   'packages/drivers/driver-sql/src/sql-driver-bulk-operations.ts',
   'packages/drivers/driver-sql/src/sql-driver-column-creation.ts',
   'packages/drivers/driver-sql/src/sql-driver-cross-field-comparison.ts',
@@ -1101,15 +1106,25 @@ function selfTest() {
   // ── the dispatch-gates population declaration ────────────────────────────
   battery('check-tenant-chokepoint self-test');
   const scannedPosix = SCAN_FILES.map((f) => f.split(sep).join('/'));
+  // Each failure names the exact entries and the one edit that fixes it: a new
+  // sql-driver-*.ts module lands from an unrelated PR (#29911 added
+  // sql-driver-balanced-group.ts), and its author meets this line first.
+  const undeclared = scannedPosix.filter((f) => !DECLARED_WATCH_HINTS.includes(f));
   assert(
-    scannedPosix.every((f) => DECLARED_WATCH_HINTS.includes(f)),
+    undeclared.length === 0,
     'every SCAN_FILES entry is declared for dispatch-gates — a join()-assembled path is invisible to '
-      + 'the hint extractor, which is how this gate came to declare nothing at all',
+      + 'the hint extractor, which is how this gate came to declare nothing at all. Fix: add '
+      + undeclared.map((f) => `'${f}'`).join(', ')
+      + ' to DECLARED_WATCH_HINTS in this gate (one string per module; a new sql-driver-*.ts module '
+      + 'is scanned the day it lands, so it is declared the same day)',
   );
+  const unread = DECLARED_WATCH_HINTS.filter((h) => !scannedPosix.includes(h));
   assert(
-    DECLARED_WATCH_HINTS.every((h) => scannedPosix.includes(h)),
+    unread.length === 0,
     'and nothing is declared that this gate does not read — a declaration that has drifted from the '
-      + 'scan replaces a silent gate with a lying one',
+      + 'scan replaces a silent gate with a lying one. Fix: remove '
+      + unread.map((h) => `'${h}'`).join(', ')
+      + ' from DECLARED_WATCH_HINTS in this gate (a module that was renamed or removed)',
   );
   assert(
     DECLARED_WATCH_HINTS.every((h) => !h.includes('*')),
