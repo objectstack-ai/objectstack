@@ -146,6 +146,7 @@ import { readFields } from './previews/object-fields-io.js';
 import { useRegisterAssistantEditor, type AssistantEditorContext } from '../../assistant/assistantBus.js';
 import { useRegisteredMetadataInspector } from './inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from './default-inspector-registry.js';
+import { InspectorReadOnlyReason } from './inspectors/_shared.js';
 import { useMetadataLocale, t, tFormat, translateMetadataType, translateSchemaIssue, translateValidationMessage } from './i18n.js';
 import { JsonSourceEditor } from '../item-tools/JsonSourceEditor.js';
 import { validateMetadataDraft, hasClientValidator, type DraftMode } from './clientValidation.js';
@@ -2621,7 +2622,8 @@ function MetadataResourceEditPageImpl({
   // names the cause (`MetadataInspectorProps.readOnlyReason`). View mode owes
   // no sentence: the inspector exists only beside a designer canvas, and a
   // designer type enters editing whenever it can be written (the auto-on
-  // effect above) and offers no Edit button to point at.
+  // effect above) and offers no Edit button to point at. A form without a
+  // canvas does offer one, so its view mode stays unexplained here too.
   const inspectorReadOnlyReason = ((): string | undefined => {
     if (!formReadOnly) return undefined;
     if (walledDeciding) {
@@ -2637,6 +2639,21 @@ function MetadataResourceEditPageImpl({
     if (showArtifactLockedBanner) return tFormat('engine.edit.artifactLockedBanner', locale, { type });
     return tFormat('engine.edit.readOnlyTypeBanner', locale, { flag: 'OS_METADATA_WRITABLE', type });
   })();
+
+  // objectstack#29897 — the panels the page draws itself (the default
+  // inspector shown with nothing selected, and the generic form) carry the
+  // same reason, through the wrapper the scoped inspectors use. The page wraps
+  // them, so no registered default inspector has to honour a new prop.
+  const withReadOnlyReason = (panel: React.ReactNode) => (
+    <InspectorReadOnlyReason
+      readOnly={formReadOnly}
+      reason={inspectorReadOnlyReason}
+      label={t('engine.edit.inspector.properties', locale)}
+      testId="metadata-properties-readonly-reason"
+    >
+      {panel}
+    </InspectorReadOnlyReason>
+  );
 
   // Note: URL `?tab=` deep-links were repurposed to open side-panel
   // sheets (Layers / References / Related). Anything else is ignored —
@@ -3562,43 +3579,47 @@ function MetadataResourceEditPageImpl({
                             locale={locale}
                           />
                         ) : !selection && DefaultInspectorComponent ? (
-                          // eslint-disable-next-line react-hooks/static-components -- useRegisteredMetadataDefaultInspector returns a registered component (stable), not one created during render
-                          <DefaultInspectorComponent
-                            type={type}
-                            name={name}
-                            draft={draft}
-                            onPatch={(patch) =>
-                              handleCreateAwareChange((d) => ({
-                                ...(d as Record<string, unknown>),
-                                ...patch,
-                              }))
-                            }
-                            onSelectionChange={setSelection}
-                            onBlockingIssuesChange={(count) =>
-                              setBlockingReport({ key: selectionKey, count })
-                            }
-                            readOnly={formReadOnly}
-                            locale={locale}
-                            serverSchema={entry?.schema as Record<string, unknown> | undefined}
-                          />
+                          withReadOnlyReason(
+                            // eslint-disable-next-line react-hooks/static-components -- useRegisteredMetadataDefaultInspector returns a registered component (stable), not one created during render
+                            <DefaultInspectorComponent
+                              type={type}
+                              name={name}
+                              draft={draft}
+                              onPatch={(patch) =>
+                                handleCreateAwareChange((d) => ({
+                                  ...(d as Record<string, unknown>),
+                                  ...patch,
+                                }))
+                              }
+                              onSelectionChange={setSelection}
+                              onBlockingIssuesChange={(count) =>
+                                setBlockingReport({ key: selectionKey, count })
+                              }
+                              readOnly={formReadOnly}
+                              locale={locale}
+                              serverSchema={entry?.schema as Record<string, unknown> | undefined}
+                            />
+                          )
                         ) : (
-                          <SchemaForm
-                            schema={schema}
-                            idPath={formIdPath}
-                            form={createMode && config.createSchema ? undefined : entry?.form}
-                            value={draft}
-                            onChange={handleCreateAwareChange}
-                            issues={displayIssues}
-                            hiddenFields={effectiveHiddenFields}
-                            fieldOrder={effectiveFieldOrder}
-                            readOnly={formReadOnly}
-                            createMode={createMode}
-                            widgetContext={widgetContext}
-                            revealIssues={revealIssues}
-                            onInlineIssueFieldsChange={setInlineIssueFields}
-                            onRequiredRowFieldsChange={setRequiredRowFields}
-                            fieldNotes={createFieldNotes}
-                          />
+                          withReadOnlyReason(
+                            <SchemaForm
+                              schema={schema}
+                              idPath={formIdPath}
+                              form={createMode && config.createSchema ? undefined : entry?.form}
+                              value={draft}
+                              onChange={handleCreateAwareChange}
+                              issues={displayIssues}
+                              hiddenFields={effectiveHiddenFields}
+                              fieldOrder={effectiveFieldOrder}
+                              readOnly={formReadOnly}
+                              createMode={createMode}
+                              widgetContext={widgetContext}
+                              revealIssues={revealIssues}
+                              onInlineIssueFieldsChange={setInlineIssueFields}
+                              onRequiredRowFieldsChange={setRequiredRowFields}
+                              fieldNotes={createFieldNotes}
+                            />
+                          )
                         )}
                       </div>
                     </div>
@@ -3610,23 +3631,25 @@ function MetadataResourceEditPageImpl({
                     button, so this duplicate affordance was just noise. */}
               </div>
             ) : (
-              <SchemaForm
-                schema={schema}
-                idPath={formIdPath}
-                form={createMode && config.createSchema ? undefined : entry?.form}
-                value={draft}
-                onChange={handleCreateAwareChange}
-                issues={displayIssues}
-                hiddenFields={effectiveHiddenFields}
-                fieldOrder={effectiveFieldOrder}
-                readOnly={formReadOnly}
-                createMode={createMode}
-                widgetContext={widgetContext}
-                revealIssues={revealIssues}
-                onInlineIssueFieldsChange={setInlineIssueFields}
-                onRequiredRowFieldsChange={setRequiredRowFields}
-                fieldNotes={createFieldNotes}
-              />
+              withReadOnlyReason(
+                <SchemaForm
+                  schema={schema}
+                  idPath={formIdPath}
+                  form={createMode && config.createSchema ? undefined : entry?.form}
+                  value={draft}
+                  onChange={handleCreateAwareChange}
+                  issues={displayIssues}
+                  hiddenFields={effectiveHiddenFields}
+                  fieldOrder={effectiveFieldOrder}
+                  readOnly={formReadOnly}
+                  createMode={createMode}
+                  widgetContext={widgetContext}
+                  revealIssues={revealIssues}
+                  onInlineIssueFieldsChange={setInlineIssueFields}
+                  onRequiredRowFieldsChange={setRequiredRowFields}
+                  fieldNotes={createFieldNotes}
+                />
+              )
             )}
             {/* objectui#7611 — under the designer, too: `position` renders
                 through its preview, so the section takes a bounded strip
