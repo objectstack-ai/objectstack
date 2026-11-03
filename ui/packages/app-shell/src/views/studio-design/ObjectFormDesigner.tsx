@@ -433,7 +433,6 @@ function SortableField({
   const locked = readOnly || contributed !== null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: fid(entry.name),
-    disabled: contributed !== null,
     // objectui#11872 — the role a screen reader announces for the card, in the
     // author's locale; left unset, dnd-kit writes its English `sortable`. A
     // read-only card is not draggable, so it gets none: ARIA does not expose a
@@ -458,7 +457,10 @@ function SortableField({
       style={{ transform: CSS.Transform.toString(transform), transition }}
       onClick={onSelect}
       {...attributes}
-      {...listeners}
+      // objectstack#29786 — a contributed card takes no drag listener: it is
+      // never a drag source. Not `useSortable`'s `disabled`, which would mark
+      // it `aria-disabled` while a click still selects it.
+      {...(contributed ? {} : listeners)}
       // objectui#11924 — dnd-kit points every card's `aria-describedby` at the
       // canvas's drag instructions, and `useSortable` cannot take it away
       // (`disabled` keeps it and adds `aria-disabled`, though a click still

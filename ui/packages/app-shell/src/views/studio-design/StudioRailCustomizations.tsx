@@ -285,8 +285,10 @@ export function ContributionMark({
     <span
       data-testid="contribution-mark"
       data-package={packageId}
+      title={tFormat('engine.studio.contributed.from', locale, { package: packageName })}
       className={cn(
-        'inline-flex h-[18px] max-w-[160px] shrink-0 items-center rounded-[5px] bg-muted px-1.5 text-[11px] font-medium text-muted-foreground',
+        // Gives way to the item's name first.
+        'inline-flex h-[18px] min-w-0 max-w-[55%] shrink-[4] items-center rounded-[5px] bg-muted px-1.5 text-[11px] font-medium text-muted-foreground',
         className,
       )}
     >
@@ -354,9 +356,13 @@ export function ContributedRailRow({
       onClick={onOpen}
       icon={icon}
       className="text-muted-foreground opacity-70"
-      trailing={<ContributionMark packageName={item.packageName} packageId={item.packageId} locale={locale} className="ml-1" />}
+      // Two lines, so a narrow rail keeps both the id and the package legible.
+      wrap
     >
-      {item.name}
+      <span className="flex min-w-0 flex-col items-start gap-0.5">
+        <span className="max-w-full truncate">{item.name}</span>
+        <ContributionMark packageName={item.packageName} packageId={item.packageId} locale={locale} className="max-w-full" />
+      </span>
     </StudioRailRow>
   );
 }

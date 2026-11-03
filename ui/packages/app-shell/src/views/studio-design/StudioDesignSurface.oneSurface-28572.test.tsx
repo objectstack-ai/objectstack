@@ -577,6 +577,8 @@ describe('items another package contributes are drawn greyed, with the package (
       { timeout: 8000 },
     );
     expect(card).toHaveTextContent('Acme score');
+    // Never a drag source, yet still a card a click selects: not announced as disabled.
+    expect(card).not.toHaveAttribute('aria-disabled', 'true');
     expect(within(card).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
     expect(card.getAttribute('title')).toBe(
       tFormat('engine.studio.contributed.fieldTitle', 'en', { name: 'acme_score', package: 'Acme add-on' }),
