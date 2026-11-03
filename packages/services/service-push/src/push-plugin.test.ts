@@ -54,8 +54,8 @@ describe('PushServicePlugin', () => {
         expect(services.has('push')).toBe(false);
     });
 
-    it('names the follow-up card and the direct transport in the relay refusal', () => {
-        expect(PUSH_RELAY_NOT_SERVED_MESSAGE).toContain('#29920');
+    it('names the direct transport, and the relay as not yet served, in the relay refusal', () => {
+        expect(PUSH_RELAY_NOT_SERVED_MESSAGE).toContain('is not served yet');
         expect(PUSH_RELAY_NOT_SERVED_MESSAGE).toContain("transport: 'direct'");
         expect(PUSH_RELAY_NOT_SERVED_MESSAGE).toContain('credentialRef');
     });

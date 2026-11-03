@@ -207,7 +207,6 @@ describe('push transport configuration is read', () => {
   it('marks the relay block not yet served, and says the push service refuses it', () => {
     expect(PushRelayTransportConfigSchema.description).toMatch(/^\[PLANNED — not yet served\] /);
     expect(PushRelayTransportConfigSchema.description).toMatch(/refuses it at boot/);
-    expect(PushRelayTransportConfigSchema.description).toMatch(/#29920/);
   });
 
   it.each([

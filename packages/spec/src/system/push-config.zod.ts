@@ -220,7 +220,7 @@ export const PushRelayTransportConfigSchema = lazySchema(() => strictObject(
     ),
   },
 ).describe('[PLANNED — not yet served] The hosted push relay transport (the default): authenticated by the server cloud binding credential, so it carries none. '
-  + 'The push service refuses it at boot until the relay sender ships (#29920)'));
+  + 'The push service refuses it at boot until the relay sender ships'));
 export type PushRelayTransportConfig = z.input<typeof PushRelayTransportConfigSchema>;
 /** Post-parse shape of {@link PushRelayTransportConfig} — `transport` filled in (ADR-0122). */
 export type PushRelayTransportConfigParsed = z.infer<typeof PushRelayTransportConfigSchema>;
@@ -265,7 +265,7 @@ export const PushServiceConfigSchema = lazySchema(() => z.discriminatedUnion(
   // tag falls back to trying the members in order, relay first.
   { unionFallback: true },
 ).describe('Push channel transport configuration: the hosted relay (the default) or direct delivery to apns and fcm for a white-label build. '
-  + 'The push service reads it: direct drives the vendor transports, and relay is refused at boot until the relay sender ships (#29920)'));
+  + 'The push service reads it: direct drives the vendor transports, and relay is refused at boot until the relay sender ships'));
 export type PushServiceConfig = z.input<typeof PushServiceConfigSchema>;
 /** Post-parse shape of {@link PushServiceConfig} — `transport` filled in (ADR-0122). */
 export type PushServiceConfigParsed = z.infer<typeof PushServiceConfigSchema>;
