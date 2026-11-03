@@ -282,6 +282,15 @@ async function openMenu(): Promise<void> {
   await screen.findByTestId('auto-item-new-similar');
 }
 
+/**
+ * objectstack#29692 — Restore is asked from the override mark's popover, and
+ * confirmed in the same dialog the flow's menu opened before.
+ */
+async function openRestorePopover(): Promise<HTMLElement> {
+  fireEvent.click(await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 }));
+  return screen.findByTestId('studio-override-popover');
+}
+
 /** The one switch drawn in the header is the ledger's: no definition switch beside it. */
 async function expectLedgerSwitchAlone(): Promise<void> {
   const ledger = await within(header()).findByTestId('auto-ledger-switch', undefined, { timeout: 8000 });
@@ -327,7 +336,13 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     // The badge reads the declaration the pair's draft now serves.
     const chip = await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
     expect(chip).toHaveTextContent(tFormat('engine.studio.customize.overrides', 'en', { package: 'HotCRM' }));
-    expect(chip).toHaveAttribute('title', tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }));
+    // objectstack#29692 — pressed, the mark says the version it was taken from.
+    fireEvent.click(chip);
+    expect(await screen.findByTestId('studio-override-popover-facts')).toHaveTextContent(
+      tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }),
+    );
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('studio-override-popover')).toBeNull());
     await expectLedgerSwitchAlone();
 
     // A later edit asks the door no more, and is pinned to the version it was answered.
@@ -350,10 +365,14 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await expectLedgerSwitchAlone();
 
     // The layered envelope says `deletable: false`; the declared row decides.
+    const popover = await openRestorePopover();
+    expect(within(popover).getByTestId('studio-override-restore')).toBeEnabled();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('studio-override-popover')).toBeNull());
+    // Delete flow stays a writable package's own; Restore is the mark's, not the menu's (objectstack#29692).
     await openMenu();
-    expect(screen.getByTestId('studio-restore-original')).not.toHaveAttribute('data-disabled');
-    // Delete flow stays a writable package's own.
     expect(screen.queryByTestId('auto-item-delete')).toBeNull();
+    expect(screen.queryByTestId('studio-restore-original')).toBeNull();
 
     // Its editors are open: an edit is saved into the pair, keeping the declaration.
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
@@ -371,10 +390,16 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     mount({ listedPair: PAIR });
     await openFlow(/^Notify owner and manager v2$/);
 
-    await openMenu();
-    fireEvent.click(screen.getByTestId('studio-restore-original'));
+    // objectstack#29692 — the dialog names the flow as its rail row does.
+    const railText = within(screen.getByTestId('studio-rail-automations'))
+      .getByRole('button', { name: /^Notify owner/ })
+      // The row's label, without the switch reading the row prints after it.
+      .querySelector('.flex-1')
+      ?.textContent?.trim();
+    expect(railText).toBe('Notify owner');
+    fireEvent.click(within(await openRestorePopover()).getByTestId('studio-override-restore'));
     const dialog = await screen.findByTestId('studio-restore-original-dialog');
-    const vars = { item: 'Notify owner', package: 'HotCRM' };
+    const vars = { item: railText!, package: 'HotCRM' };
     expect(dialog).toHaveTextContent(tFormat('engine.studio.customize.restoreConfirm', 'en', vars));
     expect(dialog).toHaveTextContent(tFormat('engine.studio.customize.restoreFlowBody', 'en', vars));
     expect(dialog).toHaveTextContent(t('engine.studio.customize.restoreDraft', 'en'));

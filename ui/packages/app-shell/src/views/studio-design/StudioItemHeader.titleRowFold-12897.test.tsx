@@ -29,7 +29,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { Workflow } from 'lucide-react';
 import { StudioItemHeader, useStudioItemHeaderFold, useStudioTabRowFold, type StudioFoldedTool } from './StudioItemHeader';
 import { STUDIO_FOLD_LABEL, STUDIO_KIND_CHIP } from './studio-tokens';
-import { StudioCustomizeButton } from './StudioCustomizeControls';
+import { StudioCustomizeButton, StudioOverrideChip } from './StudioCustomizeControls';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch';
 import { t } from '../metadata-admin/i18n';
 
@@ -243,7 +243,10 @@ function FoldingLeaf({
   labelled = false,
   onCustomize = () => {},
   onToggle = () => {},
+  kind = 'View',
 }: {
+  /** What the kind chip holds: its word, or (objectstack#29692) the override mark. */
+  kind?: React.ReactNode;
   onOpen?: (id: string) => void;
   foldMenu?: boolean;
   /** The labelled actions a pillar draws: the Customize button and a flow's ledger switch. */
@@ -258,7 +261,7 @@ function FoldingLeaf({
       titleProps={{ 'data-testid': 'hdr-title', title: INTERNAL_ID }}
       chips={
         <span className={STUDIO_KIND_CHIP} data-testid="hdr-kind-chip">
-          View
+          {kind}
         </span>
       }
       foldMenu={foldMenu ? { label: 'More', testId: 'hdr-more' } : undefined}
@@ -436,5 +439,55 @@ describe('the fold order: chips and tools, then labels, then the title (objectst
     expect(entry).toHaveAttribute('role', 'menuitem');
     fireEvent.click(entry);
     expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+});
+
+describe('the override mark folded into the ⋯ menu (objectstack#29692)', () => {
+  let rangeSpy: { mockRestore: () => void } | null = null;
+  beforeEach(() => {
+    rangeSpy = vi.spyOn(Range.prototype, 'getBoundingClientRect').mockImplementation(() => rect(READABLE));
+  });
+  afterEach(() => {
+    rangeSpy?.mockRestore();
+    rangeSpy = null;
+  });
+
+  function foldedMark(onRestore = vi.fn()) {
+    layout.row = 330;
+    render(<FoldingLeaf kind={<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" onRestore={onRestore} />} />);
+    const menu = openOwnMore();
+    const entry = within(menu).getByTestId('studio-item-header-folded-chips');
+    return { menu, entry, chip: within(entry).getByTestId('studio-override-chip'), onRestore };
+  }
+
+  it('a press on the mark opens its popover once, and the menu stays open under it', () => {
+    const { chip } = foldedMark();
+    fireEvent.click(chip);
+    // One press, one toggle: the entry's own select does not press the mark again.
+    expect(chip).toHaveAttribute('data-state', 'open');
+    expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    // A second press closes it, and the menu is still there.
+    fireEvent.click(chip);
+    expect(chip).toHaveAttribute('data-state', 'closed');
+    expect(screen.queryByTestId('studio-override-popover')).toBeNull();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('chosen by the keys, the folded entry presses the mark: its popover opens and the menu stays open', () => {
+    const { entry, chip } = foldedMark();
+    act(() => entry.focus());
+    fireEvent.keyDown(entry, { key: 'Enter' });
+    expect(chip).toHaveAttribute('data-state', 'open');
+    expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('Restore in the popover asks the host once and closes the popover', () => {
+    const { chip, onRestore } = foldedMark();
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByTestId('studio-override-restore'));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('studio-override-popover')).toBeNull();
   });
 });
