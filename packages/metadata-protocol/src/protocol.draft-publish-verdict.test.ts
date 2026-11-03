@@ -1074,8 +1074,7 @@ describe('[#29557] a stored flow draft in a legacy D2 spelling the engine regist
         expect(await (protocol as any).draftPublishVerdict({ type: 'flow', name: 'legacy_fetch', body: stored, packageId: PKG }))
             .toEqual([]);
         // Served, it carries none of the rules the publish refused it on before.
-        // (The read's own schema half still judges the served body as stored;
-        // that seam is the read's, not the publish verdict's.)
+        // ([#29696] The read's own schema half is pinned in its own block below.)
         const codes = ((await draftDiagnostics(protocol, 'flow', 'legacy_fetch')).errors ?? []).map((e) => e.code);
         expect(codes).not.toContain('expression-invalid');
         expect(codes).not.toContain('flow-region-shape-invalid');
