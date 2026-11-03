@@ -757,7 +757,11 @@ A version token (`If-Match`, or `expectedVersion`) is compared only against a re
 caller can read: a stale token on such a record is answered `409 CONCURRENT_UPDATE`,
 whether or not the caller may write it. For a record the caller's read does not return,
 and for an id that names no record, a stale token changes none of the answers above. A
-caller refused reading the object gets that read refusal.
+caller refused reading the object gets that read refusal — and so does the same caller's
+update or delete of a permission assignment (`sys_user_permission_set`,
+`sys_user_position`), which is refused before the object's grants are read: for any
+`{record_id}`, with or without a token. A caller who reads the assignment object gets
+the administration refusal's own sentence instead.
 
 ### Delete Record
 

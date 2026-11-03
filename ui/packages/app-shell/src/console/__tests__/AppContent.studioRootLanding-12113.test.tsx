@@ -23,7 +23,8 @@
  *   - control: an app whose first entry is an `object` lands where it did;
  *   - control: an app that serves no navigation still gets the empty state;
  *   - an app whose entries address no page in the app (only `url` links)
- *     stays on its root with neither the empty state nor any page.
+ *     stays on its root with no page, and says it opens from its menu
+ *     (objectstack-ai/objectstack#29771; it used to draw nothing at all).
  *
  * NOTE ON SCOPE: routing only. `ConsoleLayout` and the lazily imported pages
  * are stubbed, as in `AppContent.emptyNavigationLanding-12079.test.tsx`.
@@ -243,7 +244,7 @@ describe('AppContent — the Studio app root lands on its first navigation entry
     expect(screen.getByTestId('pathname').textContent).toBe('/apps/clm');
   });
 
-  it('an app whose entries address no page in the app stays on its root, with no empty state and no page', async () => {
+  it('an app whose entries address no page in the app stays on its root, with the menu-only empty state and no page', async () => {
     metadataApps = [
       {
         name: 'links',
@@ -255,7 +256,10 @@ describe('AppContent — the Studio app root lands on its first navigation entry
 
     expect(await screen.findByTestId('console-layout')).toHaveAttribute('data-active-app', 'links');
     expect(screen.getByTestId('pathname').textContent).toBe('/apps/links');
-    expect(screen.queryByTestId('app-no-access-empty-state')).not.toBeInTheDocument();
+    // objectstack-ai/objectstack#29771 — the root says the app opens from its
+    // menu, never the "no access" sentence.
+    expect(screen.getByTestId('app-no-access-empty-state')).toContainElement(screen.getByRole('status'));
+    expect(screen.getByRole('status')).toHaveAttribute('data-reason', 'menu-only');
     expect(screen.queryByTestId('component-nav-view')).not.toBeInTheDocument();
     expect(screen.queryByTestId('metadata-directory-page')).not.toBeInTheDocument();
   });

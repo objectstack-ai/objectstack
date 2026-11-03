@@ -3,7 +3,7 @@
 /**
  * The provenance badge in the permission set editor has two answers: "Package"
  * (a package ships the set: the package door's `packageId`, or the layered
- * envelope's code artifact) and "Custom" (authored in this environment).
+ * envelope's code artifact) and "Added" (authored in this environment).
  *
  * objectui#12753 — spec 18 retired the authored `managedBy` on a permission set
  * (objectstack#23891). The badge used to read it for a third answer,
@@ -101,19 +101,19 @@ describe.each<Site>(['page', 'studio'])('the provenance badge (%s site)', (site)
     expect(badgeText()).toBe('Package');
   });
 
-  it('a set with neither reads "Custom"', async () => {
+  it('a set with neither reads "Added"', async () => {
     await renderWith(site, {});
-    expect(badgeText()).toBe('Custom');
+    expect(badgeText()).toBe('Added');
   });
 
   it('a stray managedBy "platform" on an old stored row does not read "Platform"', async () => {
     await renderWith(site, { managedBy: 'platform' });
-    expect(badgeText()).toBe('Custom');
+    expect(badgeText()).toBe('Added');
     expect(screen.queryByText('Platform')).not.toBeInTheDocument();
   });
 
   it('a stray managedBy "package" does not make an environment-authored set read "Package"', async () => {
     await renderWith(site, { managedBy: 'package' });
-    expect(badgeText()).toBe('Custom');
+    expect(badgeText()).toBe('Added');
   });
 });
