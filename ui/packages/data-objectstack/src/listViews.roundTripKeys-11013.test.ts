@@ -28,6 +28,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { VIEW_CONSOLE_ROUND_TRIP_KEYS } from '@objectstack/spec/ui';
 import { ObjectStackAdapter } from './index';
+import { answerObjectViewRead } from './objectViewRoute.test-support';
 
 const OBJECT = 'crm_task';
 const NAME = `${OBJECT}.my_board`;
@@ -64,14 +65,16 @@ function makeDS(seed: any[]) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
     // `updateView` asks the draft home first; nothing is pending here.
+    // objectstack#29550: the one-object view read answers from the same rows.
     fetch: vi.fn(async (input: RequestInfo | URL) =>
-      String(input).includes('state=draft')
+      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+      ?? (String(input).includes('state=draft')
         ? json({ error: 'not found' }, 404)
-        : json({ success: true, data: { capabilities: {}, routes: {} } })),
+        : json({ success: true, data: { capabilities: {}, routes: {} } }))),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta };
+  ds.client = { meta, getLocale: () => undefined };
   return { ds, rows };
 }
 
@@ -172,7 +175,8 @@ describe('objectui#11013 — controls: what the flatten still does', () => {
   });
 
   it('a flat saved row is returned whole, as before', async () => {
-    const flat = { name: `${OBJECT}.flat`, object: OBJECT, label: 'Flat', type: 'grid', isPinned: true, sortOrder: 1 };
+    // objectstack#29550: carries `viewKind`, as every row a read serves does.
+    const flat = { name: `${OBJECT}.flat`, object: OBJECT, viewKind: 'list', label: 'Flat', type: 'grid', isPinned: true, sortOrder: 1 };
     const { ds } = makeDS([flat]);
     const listed = await ds.listViews(OBJECT);
     expect(listed).toEqual([flat]);
