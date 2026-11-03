@@ -376,7 +376,7 @@ Lifecycle hooks:
 * Client SDK calls `POST /api/v1/notifications/devices` on login → `device-registry.upsert(...)`.
 * APNs / FCM `BadDeviceToken` / `Unregistered` response → channel returns `classifyError = 'invalid_recipient'` → dispatcher calls `device-registry.invalidate(token)` (sets `invalidated_at`, `enabled=false`) without dead-lettering the notification (it just routes around the dead token).
   > Amended (2026-11-03, #29041): the push channel (`push-channel.ts` in service-messaging) retires the dead token itself, through `INotificationService.invalidateDeviceToken`, because one delivery fans out to all of the recipient's devices and only the channel knows which token died; the other devices still get the push. The delivery is graded `invalid_recipient` (suppressed, not dead-lettered) only when every device was reported dead. The shipped device shape is `UserDeviceSchema` in `packages/spec/src/system/push-device.zod.ts`, narrowed to `apns` | `fcm` and `ios` | `android` | `web`. `service-push` ships the direct transport; the hosted relay, the default per cloud#3519, is not yet served (#29920), and `PushServicePlugin` refuses a relay configuration at init until it is.
-* Domestic vendors (HMS / Xiaomi / OPPO / VIVO) plug in as **alternate channel implementations** (one package each, named by kind like `service-push`), not as transports — their on-device SDKs and quotas are too different to share a code path.
+* Domestic vendors (HMS / Xiaomi / OPPO / VIVO) plug in as **alternate channel implementations** (`plugin-notification-push-hms` etc.), not as transports — their on-device SDKs and quotas are too different to share a code path.
 
 ### 7. Topic + Preference matrix
 

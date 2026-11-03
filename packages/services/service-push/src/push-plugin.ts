@@ -36,6 +36,20 @@ export interface PushServicePluginOptions {
 }
 
 /**
+ * The refusal a relay configuration meets at init. The relay is the schema's
+ * default (cloud#3519), but its sender is not served yet (follow-up card
+ * #29920; the text below is printed at the operator, so it names no tracker
+ * id, per check:doc-authoring): booting a
+ * `push` service that would deliver nothing is worse than refusing, because
+ * the channel would mount and every push would look sent.
+ */
+export const PUSH_RELAY_NOT_SERVED_MESSAGE =
+    "PushServicePlugin: the hosted push relay (transport: 'relay', which is also what an empty push config reads as) "
+    + 'is not served yet: its sender has not shipped, and nothing would deliver through it. For a white-label '
+    + "build signed with your own APNs key or Firebase project, write transport: 'direct' with an apns and/or fcm block, "
+    + 'each naming its secret by credentialRef.';
+
+/**
  * PushServicePlugin — registers the kernel's `push` service, the transport
  * half of the `push` notification channel (ADR-0012 §4, §6; amended
  * 2026-11-03: the transports ship here, the channel in service-messaging).
@@ -66,20 +80,6 @@ export interface PushServicePluginOptions {
  * }));
  * ```
  */
-/**
- * The refusal a relay configuration meets at init. The relay is the schema's
- * default (cloud#3519), but its sender is not served yet (follow-up card
- * #29920; the text below is printed at the operator, so it names no tracker
- * id, per check:doc-authoring): booting a
- * `push` service that would deliver nothing is worse than refusing, because
- * the channel would mount and every push would look sent.
- */
-export const PUSH_RELAY_NOT_SERVED_MESSAGE =
-    "PushServicePlugin: the hosted push relay (transport: 'relay', which is also what an empty push config reads as) "
-    + 'is not served yet: its sender has not shipped, and nothing would deliver through it. For a white-label '
-    + "build signed with your own APNs key or Firebase project, write transport: 'direct' with an apns and/or fcm block, "
-    + 'each naming its secret by credentialRef.';
-
 export class PushServicePlugin implements Plugin {
     name = 'com.objectstack.service.push';
     /** Services init() registers on every path (ADR-0116). */
