@@ -553,7 +553,10 @@ export function readAppObjectScope(
       const referencing = readObjectsReferencing?.(route.objectName);
       if (referencing?.state === 'pending') return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
       if (referencing?.state !== 'hit') return { candidate, scope: null, ready: false, ...NOT_READ };
-      return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId, referencing.value) };
+      return {
+        candidate,
+        ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId, referencing.value, true),
+      };
     }
     const extra = [route.objectName, ...appRequiredObjectNames(app)];
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
@@ -613,7 +616,10 @@ export function readAppObjectScope(
  * Only the route's object holds the route. `relatedNames` (objectstack#29552:
  * the objects that point at a record's object, whose related lists its
  * synthesized page draws) are asked with the route's names, and the route
- * waits for them as it waits for its own object.
+ * waits for them as it waits for its own object. `synthesizedRecordPage`
+ * (objectstack#29878): the route is a record route with no declared record
+ * page, whose synthesized page also reads the objects its record streams need
+ * ({@link recordStreamObjectNames}); the route waits for those too.
  */
 function readObjectRouteNames(
   readObjectScope: ReadObjectScope,
@@ -622,6 +628,7 @@ function readObjectRouteNames(
   search: string,
   packageId: string | undefined,
   relatedNames: readonly string[] = [],
+  synthesizedRecordPage = false,
 ): Omit<AppObjectScopeRead, 'candidate'> {
   // With no package and no name, nothing: the provider reads an empty
   // names-only ask as the whole registry (objectstack#29552, an app's root).
@@ -646,16 +653,41 @@ function readObjectRouteNames(
   const first = relatedNames.length > 0 ? inRelatedOrder(asked, relatedNames) : asked;
   const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
   const lookups = routeDef ? lookupTargetNames(routeDef) : [];
-  if (lookups.length === 0) return { scope: first, ready, ...routeOutcome };
+  const streamNames = synthesizedRecordPage && routeDef ? recordStreamObjectNames(routeDef) : [];
+  if (lookups.length === 0 && streamNames.length === 0) return { scope: first, ready, ...routeOutcome };
   // The lookup targets are asked without views, through the same scope as the
   // route's names: a lookup cell links and names its target and reads none of
   // its views, and a target outside the app bundle (`sys_user`) composed with
   // them read the whole `/meta/view` list (objectstack#29551). They join the
   // scope's objects as they land; the route's names keep their views.
   const readWithoutViews = readObjectScope as ReadNamesWithoutViews;
-  if (packageId) readWithoutViews({ packageId, names: lookups, views: false });
-  else readWithoutViews({ names: lookups, views: false });
-  return { scope: first, ready, ...routeOutcome };
+  const readNames = (names: readonly string[]) =>
+    packageId ? readWithoutViews({ packageId, names, views: false }) : readWithoutViews({ names, views: false });
+  if (lookups.length > 0) readNames(lookups);
+  if (streamNames.length === 0) return { scope: first, ready, ...routeOutcome };
+  // objectstack#29878 — the stream objects are asked the same way, once the
+  // route's object says it needs them, and the route waits for them: the
+  // record view reads them on its first render, where the page payload's ask
+  // goes out (`fieldChanges`). A refused, absent or failed read settles the
+  // wait without the object, so the stream it feeds stays off and the page is
+  // drawn; it is not the route's failure (`routeOutcome` reads the route's own
+  // object only).
+  const streamRead = readNames(streamNames);
+  return { scope: first, ready: ready && routeReadDone(streamRead), ...routeOutcome };
+}
+
+/**
+ * objectstack#29878 — the objects a synthesized record page's streams read
+ * off the route's object list, beyond the record's own object and its
+ * related ones: the audit log, whose field-change lines the record's timeline
+ * draws when the object declares `enable.trackHistory` (`RecordDetailView`'s
+ * `historyEnabled` asks the list whether it holds `sys_audit_log`). The
+ * registry held it; the route's scoped read holds only what is asked.
+ */
+const RECORD_HISTORY_OBJECT = 'sys_audit_log';
+function recordStreamObjectNames(routeDef: { name?: unknown; enable?: { trackHistory?: unknown } }): string[] {
+  if (routeDef.name === RECORD_HISTORY_OBJECT) return [];
+  return routeDef.enable?.trackHistory === true ? [RECORD_HISTORY_OBJECT] : [];
 }
 
 /**
