@@ -28,7 +28,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { Workflow } from 'lucide-react';
 import { StudioItemHeader, useStudioItemHeaderFold, useStudioTabRowFold, type StudioFoldedTool } from './StudioItemHeader';
-import { STUDIO_KIND_CHIP } from './studio-tokens';
+import { STUDIO_FOLD_LABEL, STUDIO_KIND_CHIP } from './studio-tokens';
+import { StudioCustomizeButton } from './StudioCustomizeControls';
+import { FlowLedgerSwitch } from './FlowLedgerSwitch';
+import { t } from '../metadata-admin/i18n';
 
 const TITLE = 'Task board (kanban view)';
 const INTERNAL_ID = 'Internal id: object · showcase_task';
@@ -43,6 +46,9 @@ const TITLE_TEXT = 178;
 /** objectstack#29693 — the item tools' button group, and the header's own ⋯. */
 const TOOLS = 146;
 const OWN_MORE = 32;
+/** objectstack#29693 — a labelled action: its glyph, and its label while the row shows labels. */
+const ACTION_GLYPH = 28;
+const ACTION_LABEL = 60;
 const layout = { row: 632 };
 
 const resizeCallbacks = new Set<() => void>();
@@ -58,7 +64,11 @@ const chipWidth = () => {
 };
 const toolsWidth = () => (screen.queryByTestId('probe-tools') ? TOOLS : 0);
 const ownMoreWidth = () => (screen.queryByTestId('hdr-more') ? OWN_MORE : 0);
-const actionsWidth = () => chipWidth() + OPEN_IN_DATA + toolsWidth() + ownMoreWidth();
+const labelsShown = () => !document.querySelector('[data-fold="labels"]');
+/** The labelled actions (the Customize button, the ledger switch): glyph, plus label while shown. */
+const labelledWidth = () =>
+  document.querySelectorAll('[data-studio-fold-label]').length * (ACTION_GLYPH + (labelsShown() ? ACTION_LABEL : 0));
+const actionsWidth = () => chipWidth() + OPEN_IN_DATA + toolsWidth() + ownMoreWidth() + labelledWidth();
 /** The kind chip, while the row holds it (objectstack#29693: it can fold into the menu). */
 const kindChipWidth = () => {
   const chip = screen.queryByTestId('hdr-kind-chip');
@@ -91,6 +101,7 @@ beforeEach(() => {
       if (this.dataset.testid === 'hdr-kind-chip') return rect(KIND_CHIP);
       if (this.dataset.testid === 'probe-tools') return rect(TOOLS);
       if (this.dataset.testid === 'hdr-more') return rect(OWN_MORE);
+      if (this.hasAttribute('data-studio-fold-label')) return rect(labelsShown() ? ACTION_LABEL : 1);
       if (this.dataset.testid === 'hdr-title') return rect(titleBox());
       if (this.parentElement && isRow(this.parentElement)) {
         // The identity chips' wrapper is a `contents` box in the console;
@@ -226,7 +237,20 @@ function ProbeTools({ onOpen }: { onOpen: (id: string) => void }) {
   return <div data-testid="probe-tools" data-studio-fold="tools" />;
 }
 
-function FoldingLeaf({ onOpen = () => {}, foldMenu = true }: { onOpen?: (id: string) => void; foldMenu?: boolean }) {
+function FoldingLeaf({
+  onOpen = () => {},
+  foldMenu = true,
+  labelled = false,
+  onCustomize = () => {},
+  onToggle = () => {},
+}: {
+  onOpen?: (id: string) => void;
+  foldMenu?: boolean;
+  /** The labelled actions a pillar draws: the Customize button and a flow's ledger switch. */
+  labelled?: boolean;
+  onCustomize?: () => void;
+  onToggle?: () => void;
+}) {
   return (
     <StudioItemHeader
       icon={Workflow}
@@ -240,6 +264,8 @@ function FoldingLeaf({ onOpen = () => {}, foldMenu = true }: { onOpen?: (id: str
       foldMenu={foldMenu ? { label: 'More', testId: 'hdr-more' } : undefined}
       actions={
         <>
+          {labelled && <StudioCustomizeButton block={null} baseLabel="HotCRM" locale="en" onCustomize={onCustomize} />}
+          {labelled && <FlowLedgerSwitch checked reading="on" locale="en" onToggle={onToggle} />}
           <ProbeTools onOpen={onOpen} />
           <button type="button">Open in Data</button>
         </>
@@ -283,6 +309,7 @@ describe('the title keeps a readable width: chips and item tools fold into the �
     const menu = openOwnMore();
     expect(within(menu).getByTestId('studio-item-header-folded-chips')).toContainElement(within(menu).getByTestId('hdr-kind-chip'));
     expect(within(menu).getAllByRole('menuitem').map((el) => el.getAttribute('data-testid'))).toEqual([
+      'studio-item-header-folded-chips',
       'studio-item-tool-layers',
       'studio-item-tool-references',
     ]);
@@ -325,5 +352,89 @@ describe('the title keeps a readable width: chips and item tools fold into the �
     expect(screen.getByTestId('probe-tools')).toBeInTheDocument();
     expect(screen.getByTestId('hdr-kind-chip')).toBeInTheDocument();
     expect(screen.getByTestId('hdr-title')).toHaveAttribute('title', `${TITLE}\n${INTERNAL_ID}`);
+  });
+});
+
+describe('the fold order: chips and tools, then labels, then the title (objectstack#29693)', () => {
+  let rangeSpy: { mockRestore: () => void } | null = null;
+  beforeEach(() => {
+    rangeSpy = vi.spyOn(Range.prototype, 'getBoundingClientRect').mockImplementation(() => rect(READABLE));
+  });
+  afterEach(() => {
+    rangeSpy?.mockRestore();
+    rangeSpy = null;
+  });
+
+  const customize = () => screen.getByTestId('studio-customize');
+  const ledger = () => screen.getByTestId('auto-ledger-switch');
+  const actions = () => screen.getByTestId('hdr-title').parentElement!.lastElementChild as HTMLElement;
+
+  it('stage 1 first: at 560 px the chips and the tools fold, and the labelled actions keep their labels', () => {
+    layout.row = 560;
+    render(<FoldingLeaf labelled />);
+    // Shown: 560 − 32 − 38 − 2 × 88 − 146 − 137 = 31 px. Chips and tools folded: 560 − 32 − 176 − 137 − 32 = 183 px.
+    expect(screen.queryByTestId('probe-tools')).toBeNull();
+    expect(screen.queryByTestId('hdr-kind-chip')).toBeNull();
+    expect(actions()).not.toHaveAttribute('data-fold');
+    expect(titleBox()).toBe(TITLE_TEXT);
+  });
+
+  it('stage 2 next: at 420 px the labels leave too, and the title keeps its twelve characters', () => {
+    layout.row = 420;
+    render(<FoldingLeaf labelled />);
+    // Stage 1 leaves 420 − 32 − 176 − 137 − 32 = 43 px; without the labels, 163 px.
+    expect(screen.queryByTestId('probe-tools')).toBeNull();
+    expect(actions()).toHaveAttribute('data-fold', 'labels');
+    expect(titleBox()).toBeGreaterThanOrEqual(READABLE);
+  });
+
+  it('the title is cut last: at 300 px both stages are taken and the ⋯ stays in the row', () => {
+    layout.row = 300;
+    render(<FoldingLeaf labelled />);
+    expect(actions()).toHaveAttribute('data-fold', 'labels');
+    expect(screen.getByTestId('hdr-more')).toBeInTheDocument();
+    expect(titleBox()).toBeLessThan(READABLE);
+    expect(screen.getByTestId('hdr-title')).toHaveAttribute('title', `${TITLE}\n${INTERNAL_ID}`);
+  });
+
+  it('unfolds in reverse: the labels come back before the chips and the tools', () => {
+    layout.row = 420;
+    render(<FoldingLeaf labelled />);
+    expect(actions()).toHaveAttribute('data-fold', 'labels');
+    resizeRow(560);
+    expect(actions()).not.toHaveAttribute('data-fold');
+    expect(screen.queryByTestId('probe-tools')).toBeNull();
+    resizeRow(700);
+    expect(screen.getByTestId('probe-tools')).toBeInTheDocument();
+    expect(screen.getByTestId('hdr-kind-chip')).toBeInTheDocument();
+  });
+
+  it('icon-only, each labelled action keeps its label as its accessible name, and fires the same action', () => {
+    layout.row = 420;
+    const onCustomize = vi.fn();
+    const onToggle = vi.fn();
+    render(<FoldingLeaf labelled onCustomize={onCustomize} onToggle={onToggle} />);
+    expect(actions()).toHaveAttribute('data-fold', 'labels');
+    for (const label of document.querySelectorAll('[data-studio-fold-label]')) {
+      expect(label.className).toBe(STUDIO_FOLD_LABEL);
+    }
+    expect(customize()).toHaveAccessibleName(t('engine.studio.customize.action', 'en'));
+    expect(ledger()).toHaveAccessibleName(t('engine.studio.auto.ledger.on', 'en'));
+    // Customize keeps the first slot of the actions.
+    expect(actions().firstElementChild).toBe(customize());
+    fireEvent.click(customize());
+    fireEvent.click(ledger());
+    expect(onCustomize).toHaveBeenCalledTimes(1);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('the folded chips are one menu entry, and choosing it keeps the menu open', () => {
+    layout.row = 330;
+    render(<FoldingLeaf />);
+    const menu = openOwnMore();
+    const entry = within(menu).getByTestId('studio-item-header-folded-chips');
+    expect(entry).toHaveAttribute('role', 'menuitem');
+    fireEvent.click(entry);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 });
