@@ -131,10 +131,15 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
-import { OVERLAY_MEMBER_COLUMN, overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
+import { OVERLAY_MEMBER_COLUMN, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { customizationPairEnsureRefusal, type PairRegistry } from './protocol-customization-package.js';
-import { overrideWriteMemberOf, type OverrideWriteSubject, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+import {
+    overlayPairFixAdmits,
+    overlayPairFixOf,
+    overrideWriteMemberOf,
+    type OverrideWriteSubject,
+    type OverrideWriteVerdict,
+} from './protocol-packaged-base-refusal.js';
 import { readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
@@ -710,14 +715,15 @@ export interface PackagelessWriteSubject {
  *    read-only package ships). `shadowed` applies to a stored row only: a
  *    first write has nothing in the pair to be shadowed by;
  *  - its move must be able to succeed, read from the steps the ceremony
- *    takes: the ensure door would ensure the pair
- *    ({@link customizationPairEnsureRefusal}), the base records a version
- *    (`basedOn`), and the override write gate admits the declared body into
- *    the pair. An `email_template` member at a locale the base does not ship
- *    is refused there (#28777) and stays open: the ceremony moves such a row
- *    as the pair's own member, declaring nothing (#28904), and the close
- *    reaches only the declared-override moves, so its package-less write is
- *    the one it had before the close.
+ *    takes: `overlayPairFixOf` and `overlayPairFixAdmits`
+ *    (`protocol-packaged-base-refusal.ts`), the predicate the close of the
+ *    write naming the base asks too — the ensure door would ensure the pair,
+ *    the base records a version (`basedOn`), and the override write gate
+ *    admits the declared body into the pair. An `email_template` member at a
+ *    locale the base does not ship is refused there (#28777) and stays open:
+ *    the ceremony moves such a row as the pair's own member, declaring
+ *    nothing (#28904), and the close reaches only the declared-override
+ *    moves, so its package-less write is the one it had before the close.
  *
  * Registry reads first; the one store read (the item's rows) only for a name
  * the registry has not already left open.
@@ -731,14 +737,9 @@ export async function packagelessCloseSubject(
     const shippers = this.overlayBaseShippers(request.type, request.name);
     if (shippers.length !== 1) return null; // environment metadata, or `multi_shipped`
     const base = shippers[0]!;
-    const pairId = customizationPackageId(base);
-    if (!pairId.ok) return null; // `no_pair`
-    const pair = pairId.value;
-    const registry = (this.engine as { registry?: PairRegistry } | undefined)?.registry;
-    if (!registry || typeof registry.getPackage !== 'function') return null;
-    if (customizationPairEnsureRefusal(this.engine, registry, base, pair) !== undefined) return null; // step 1 fails
-    const basedOn = baseVersionOf(this, base);
-    if (basedOn === undefined) return null; // no `basedOn` to record
+    // `no_pair`, a pair step 1 cannot ensure, or no `basedOn` to record.
+    const fix = overlayPairFixOf(this, base);
+    if (fix === null) return null;
 
     // The item's stored rows, both spellings, every package: the census's read.
     const spellings = [...new Set([type, SINGULAR_TO_PLURAL[type] ?? type])];
@@ -768,12 +769,6 @@ export async function packagelessCloseSubject(
     if (classified.disposition !== 'movable') return null;
 
     // Step 2's gate: the declared body, into the pair.
-    const disc = member === undefined ? undefined : overlayMemberField(type);
-    const declaredBody = {
-        ...(body ?? { name: request.name, ...(disc && member !== null ? { [disc]: member } : {}) }),
-        overrides: { package: base, basedOn },
-    };
-    const verdict = this.overrideWriteVerdict({ type, name: request.name, packageId: pair, item: declaredBody });
-    if (verdict.verdict === 'refuse') return null;
-    return { base, pair };
+    if (!overlayPairFixAdmits(this, fix, { type, name: request.name, body, member })) return null;
+    return { base, pair: fix.pair };
 }

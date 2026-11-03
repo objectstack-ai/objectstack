@@ -23,6 +23,7 @@ import {
 } from '../utils/artifact-precedence.js';
 import { ServeRestartCoordinator } from '../utils/dev-restart.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
+import { writeAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
 // The ONE port contract, shared with `dev` and with the `serve` child this
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
 // no range, no reader, no wording; a second copy of the bound is exactly what
@@ -312,9 +313,15 @@ export default class Start extends Command {
     // return 404 and breaks the Console's login flow.
     // Quick-start should "just work" without the user having to
     // export AUTH_SECRET.
-    const authSecret = flags['auth-secret']
-      ?? readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true })
-      ?? readOrCreateAuthSecret(homeDir);
+    //
+    // Where the secret came from travels to the child too: a persisted secret
+    // is not in the operator's shell, so a command the child prints for them
+    // to run (the v18 ownership refusal) has to export it from its file
+    // (`utils/internal-auth-secret-channel.ts`).
+    const operatorAuthSecret = flags['auth-secret']
+      ?? readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
+    const persistedAuthSecret = operatorAuthSecret === undefined ? readOrCreateAuthSecret(homeDir) : undefined;
+    const authSecret = persistedAuthSecret ? persistedAuthSecret.secret : operatorAuthSecret;
 
     // ── Banner ──────────────────────────────────────────────────────
     // `Config:` only when the cwd config takes part in this boot — the same
@@ -454,6 +461,7 @@ export default class Start extends Command {
       ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
       AUTH_SECRET: authSecret,
     };
+    writeAuthSecretFileChannel(localEnv, persistedAuthSecret?.file);
     // NODE_ENV is only forced to production when the user has not set it.
     // Allows `NODE_ENV=development objectstack start` to work for debugging.
     //
@@ -601,12 +609,14 @@ function resolveHome(
  * Read the persisted AUTH_SECRET from `<home>/auth-secret`, or generate
  * one on first run and persist it so subsequent restarts keep existing
  * sessions valid. Mode 0o600 to keep the secret reasonably private.
+ * `file` is the path only when the file holds the returned secret: a
+ * generated one whose write failed lives in this process alone.
  */
-function readOrCreateAuthSecret(homeDir: string): string {
+function readOrCreateAuthSecret(homeDir: string): { secret: string; file?: string } {
   const secretPath = path.join(homeDir, 'auth-secret');
   try {
     const existing = fs.readFileSync(secretPath, 'utf8').trim();
-    if (existing.length >= 32) return existing;
+    if (existing.length >= 32) return { secret: existing, file: secretPath };
   } catch {
     // file missing or unreadable — fall through to generation
   }
@@ -614,8 +624,9 @@ function readOrCreateAuthSecret(homeDir: string): string {
   try {
     makeDirectorySync(homeDir);
     fs.writeFileSync(secretPath, secret + '\n', { mode: 0o600 });
+    return { secret, file: secretPath };
   } catch {
     // best-effort persist; secret is still returned for this process
   }
-  return secret;
+  return { secret };
 }

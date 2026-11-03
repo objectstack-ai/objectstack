@@ -1839,6 +1839,15 @@ os migrate organization-ownership --apply --plan-file plan.json --backup-taken
 os migrate organization-ownership --dev …                    # boot as `os serve --dev` does
 ```
 
+- **Run it with the auth secret the deployment serves with.** The ceremony
+  composes the security plugin only when an auth secret resolves
+  (`OS_AUTH_SECRET`), as `os serve` does; without it the apply can stop at its
+  `authored-conversion` step. A deployment `os start` serves with the secret
+  it generated keeps that secret in `<home>/auth-secret`, and its refusal names
+  both commands with it exported:
+  `OS_AUTH_SECRET="$(cat <home>/auth-secret)" os migrate organization-ownership …`.
+  `--dev` composes the plugin as a development boot does.
+
 - **The plan writes nothing.** Per table it lists the fate (column dropped,
   mirror rows deleted, owner attributed, rows reported), the row counts, and the
   rows whose owner cannot be derived. It refuses to plan a table it cannot read.
