@@ -46,13 +46,36 @@
  * that folds by `useStudioTabRowFold` folds to its icon when the title would
  * otherwise be cut, so it gives way before the title does. A title that is
  * still cut says its whole text in its tooltip.
+ *
+ * objectstack#29693 — the title keeps a readable width: its first twelve
+ * characters (its whole text when shorter). When the row cannot give it that,
+ * the identity chips (the api-name chip and the pillar's `chips`) and the item
+ * tools fold into the ⋯ menu, so the title is not the first thing to go. The
+ * pillar says where they go (`foldMenu`): into its own ⋯ menu, which mounts
+ * `StudioItemHeaderFoldedItems`, or into a ⋯ the header draws at the end of
+ * the actions. The status chip stays in the row (its text already folds, and
+ * its icon says a draft is there). Folded, the row's boxes fit the row, so
+ * the ⋯ trigger stays inside the column, not under the right panel. Like
+ * every rule here, it measures the header's own row, never the viewport.
  */
 
 import * as React from 'react';
-import { PencilLine } from 'lucide-react';
-import { cn, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@object-ui/components';
+import { MoreHorizontal, PencilLine } from 'lucide-react';
+import {
+  cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@object-ui/components';
 import {
   STUDIO_API_CHIP,
+  STUDIO_HEADER_ICON_BUTTON,
   STUDIO_ICON_TILE,
   STUDIO_ITEM_HEADER,
   STUDIO_ITEM_META_FOLD,
@@ -297,6 +320,178 @@ function useCutTitle(ref: React.RefObject<HTMLElement | null>): string | null {
   return cut;
 }
 
+/** objectstack#29693 — how many of the title's characters it keeps readable. */
+export const STUDIO_TITLE_READABLE_CHARS = 12;
+
+/**
+ * objectstack#29693 — the width of the title's first
+ * {@link STUDIO_TITLE_READABLE_CHARS} visible characters (a reader-only span
+ * is not counted), capped at its whole text; 0 where the page cannot measure
+ * a text range (no layout).
+ */
+function readableTitleWidth(title: HTMLElement): number {
+  if (typeof document.createRange !== 'function') return 0;
+  const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) =>
+      node.parentElement?.closest('.sr-only') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  let first: Node | null = null;
+  let last: Node | null = null;
+  let lastOffset = 0;
+  let count = 0;
+  for (let node = walker.nextNode(); node && count < STUDIO_TITLE_READABLE_CHARS; node = walker.nextNode()) {
+    const chars = Array.from(node.textContent ?? '');
+    if (chars.length === 0) continue;
+    const take = Math.min(chars.length, STUDIO_TITLE_READABLE_CHARS - count);
+    first ??= node;
+    last = node;
+    // Code points, so a character outside the BMP is one character, not two.
+    lastOffset = chars.slice(0, take).join('').length;
+    count += take;
+  }
+  if (!first || !last) return 0;
+  const range = document.createRange();
+  range.setStart(first, 0);
+  range.setEnd(last, lastOffset);
+  const width = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect().width : 0;
+  return Math.min(width, title.scrollWidth);
+}
+
+/** The gap a box takes in the flex row that lays it out (a `contents` box's own parent does not). */
+function gapBeside(el: Element): number {
+  let parent = el.parentElement;
+  while (parent && getComputedStyle(parent).display === 'contents') parent = parent.parentElement;
+  return parent ? parseFloat(getComputedStyle(parent).columnGap) || 0 : 0;
+}
+
+/** The width the title row's foldable boxes take, each with its gap. */
+function foldableWidth(row: HTMLElement): number {
+  const boxes = [
+    ...Array.from(row.querySelector('[data-slot="identity-chips"]')?.children ?? []),
+    ...Array.from(row.querySelectorAll('[data-studio-fold]')),
+  ];
+  let width = 0;
+  for (const el of boxes) {
+    if (getComputedStyle(el).display === 'none') continue;
+    width += el.getBoundingClientRect().width + gapBeside(el);
+  }
+  return width;
+}
+
+/** objectstack#29693 — one item tool, as it reads in the ⋯ menu while the header is folded. */
+export interface StudioFoldedTool {
+  /** The tool's id: the menu item's test id is `studio-item-tool-<id>`, the button's. */
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  /** A count the button shows as a badge (references). */
+  count?: number;
+  onSelect: () => void;
+}
+
+interface StudioItemHeaderFoldValue {
+  /** The identity chips and the item tools are in the ⋯ menu, not in the row. */
+  folded: boolean;
+  /** What the row folds away: the api name and the pillar's chips. */
+  apiName?: string;
+  chips?: React.ReactNode;
+  tools: StudioFoldedTool[];
+  /** The item tools hand over their menu form; `null` takes it back. */
+  setTools: (tools: StudioFoldedTool[] | null) => void;
+}
+const StudioItemHeaderFoldContext = React.createContext<StudioItemHeaderFoldValue | null>(null);
+
+/**
+ * objectstack#29693 — the header's fold, for the item tools: whether they are
+ * folded into the ⋯ menu, and where they hand over their menu form. `null`
+ * outside a header, or in a header whose pillar names no `foldMenu`.
+ */
+export function useStudioItemHeaderFold(): Pick<StudioItemHeaderFoldValue, 'folded' | 'setTools'> | null {
+  return React.useContext(StudioItemHeaderFoldContext);
+}
+
+/**
+ * objectstack#29693 — what the title row folded away, at the top of a ⋯
+ * menu: the identity chips as they read in the row, then the item tools as
+ * menu items, then a separator before the menu's own items. Nothing while the
+ * row holds them. A pillar whose actions end with its own ⋯ menu mounts this
+ * in that menu's content and passes `foldMenu="pillar"`.
+ */
+export function StudioItemHeaderFoldedItems({ separator = true }: { separator?: boolean }): React.ReactElement | null {
+  const fold = React.useContext(StudioItemHeaderFoldContext);
+  if (!fold?.folded) return null;
+  const hasChips = !!fold.apiName || !!fold.chips;
+  if (!hasChips && fold.tools.length === 0) return null;
+  return (
+    <>
+      {hasChips && (
+        <div data-testid="studio-item-header-folded-chips" className="flex flex-wrap items-center gap-1.5 px-2 py-1.5">
+          {fold.apiName && <StudioApiChip apiName={fold.apiName} />}
+          {fold.chips}
+        </div>
+      )}
+      {fold.tools.map(({ id, label, icon: Icon, count, onSelect }) => (
+        <DropdownMenuItem key={id} data-testid={`studio-item-tool-${id}`} onSelect={onSelect}>
+          <Icon className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {count !== undefined && count > 0 && <span className="ml-2 text-[11px] text-muted-foreground">{count}</span>}
+        </DropdownMenuItem>
+      ))}
+      {separator && <DropdownMenuSeparator />}
+    </>
+  );
+}
+
+/**
+ * objectstack#29693 — whether the title row folds its identity chips and item
+ * tools into the ⋯ menu: when the room it leaves the title, with them shown,
+ * is less than the title's readable width. Folded, it remembers how wide they
+ * were, and shows them again once the title would keep that width beside
+ * them (`ownTrigger`: the header's own ⋯, which goes when they come back).
+ */
+function useTitleRowFold(
+  enabled: boolean,
+  row: React.RefObject<HTMLElement | null>,
+  title: React.RefObject<HTMLElement | null>,
+  ownTrigger: React.RefObject<HTMLElement | null>,
+): boolean {
+  const [folded, setFolded] = React.useState(false);
+  /** The foldable boxes' width, read while they were shown. */
+  const shown = React.useRef(0);
+  const measureRef = React.useRef<() => void>(() => {});
+  // Every render: the chips and the actions can change without the row resizing.
+  React.useLayoutEffect(() => {
+    const measure = () => {
+      const rowEl = row.current;
+      const titleEl = title.current;
+      if (!enabled) return setFolded(false);
+      if (!rowEl || !titleEl) return;
+      const readable = readableTitleWidth(titleEl);
+      if (readable <= 0) return;
+      const room = titleRoom(rowEl, titleEl);
+      if (!folded) {
+        shown.current = foldableWidth(rowEl);
+        if (shown.current <= 0) return;
+        return setFolded(room + 0.5 < readable);
+      }
+      const trigger = ownTrigger.current;
+      const freed = trigger ? trigger.getBoundingClientRect().width + gapBeside(trigger) : 0;
+      setFolded(room - shown.current + freed + 0.5 < readable);
+    };
+    measureRef.current = measure;
+    measure();
+  });
+  React.useEffect(() => {
+    const rowEl = row.current;
+    if (!rowEl || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => measureRef.current());
+    observer.observe(rowEl);
+    if (title.current) observer.observe(title.current);
+    return () => observer.disconnect();
+  }, [row, title]);
+  return enabled && folded;
+}
+
 export interface StudioItemHeaderProps {
   /** The icon component for the tile; omitted when the pillar has nothing open. */
   icon?: React.ElementType;
@@ -318,6 +513,15 @@ export interface StudioItemHeaderProps {
   tabs?: React.ReactNode;
   /** A leading control before the tile (the mobile rail toggle). */
   leading?: React.ReactNode;
+  /**
+   * objectstack#29693 — where the identity chips and the item tools go when
+   * the title would drop below its readable width. `'pillar'`: the pillar's
+   * own ⋯ menu, the last of its `actions`, which mounts
+   * `StudioItemHeaderFoldedItems`. An object: a ⋯ the header draws at the end
+   * of the actions while they are folded, with this accessible name and test
+   * id. Omitted: nothing folds.
+   */
+  foldMenu?: 'pillar' | { label: string; testId?: string };
   testId?: string;
   className?: string;
 }
@@ -333,6 +537,7 @@ export function StudioItemHeader({
   actions,
   tabs,
   leading,
+  foldMenu,
   testId,
   className,
 }: StudioItemHeaderProps): React.ReactElement {
@@ -347,6 +552,18 @@ export function StudioItemHeader({
   // objectui#12897 — a cut title says its whole text in its tooltip, before
   // the tooltip the pillar gives it (the machine name).
   const titleTooltip = cutTitle ? [cutTitle, titleProps?.title].filter(Boolean).join('\n') : titleProps?.title;
+  // objectstack#29693 — the identity chips and the item tools fold into the
+  // ⋯ menu before the title drops below its readable width.
+  const ownTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const folded = useTitleRowFold(foldMenu !== undefined, titleRowRef, titleRef, ownTriggerRef);
+  const [tools, setToolsState] = React.useState<StudioFoldedTool[]>([]);
+  const setTools = React.useCallback((next: StudioFoldedTool[] | null) => setToolsState(next ?? []), []);
+  const foldValue = React.useMemo<StudioItemHeaderFoldValue | null>(
+    () => (foldMenu === undefined ? null : { folded, apiName, chips, tools, setTools }),
+    [foldMenu, folded, apiName, chips, tools, setTools],
+  );
+  const ownMenu = typeof foldMenu === 'object' ? foldMenu : null;
+  const hasFolded = folded && (!!apiName || !!chips || tools.length > 0);
   return (
     <div data-testid={testId} className={cn(STUDIO_ITEM_HEADER, !tabs && 'pb-3', className)}>
       <div ref={titleRowRef} className={STUDIO_ITEM_ROW}>
@@ -360,8 +577,8 @@ export function StudioItemHeader({
           {title}
         </h1>
         <span className="contents" data-slot="identity-chips">
-          {apiName && <StudioApiChip apiName={apiName} />}
-          {chips}
+          {!folded && apiName && <StudioApiChip apiName={apiName} />}
+          {!folded && chips}
         </span>
         {status && <StudioStatusChip {...status} fold />}
         {meta && (
@@ -369,9 +586,30 @@ export function StudioItemHeader({
             {meta}
           </span>
         )}
-        {actions && (
+        {(actions || (ownMenu && hasFolded)) && (
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <StudioFoldRowContext.Provider value={titleFold}>{actions}</StudioFoldRowContext.Provider>
+            <StudioItemHeaderFoldContext.Provider value={foldValue}>
+              <StudioFoldRowContext.Provider value={titleFold}>{actions}</StudioFoldRowContext.Provider>
+              {ownMenu && hasFolded && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      ref={ownTriggerRef}
+                      type="button"
+                      data-testid={ownMenu.testId}
+                      aria-label={ownMenu.label}
+                      title={ownMenu.label}
+                      className={STUDIO_HEADER_ICON_BUTTON}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <StudioItemHeaderFoldedItems separator={false} />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </StudioItemHeaderFoldContext.Provider>
           </div>
         )}
       </div>
