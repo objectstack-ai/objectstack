@@ -299,6 +299,8 @@ const pt = {
       takePhoto: 'Tirar foto',
       takeSelfie: 'Tirar selfie',
       cameraCapture: 'Captura da câmera',
+      choosePhoto: 'Escolher foto',
+      photoFailed: 'Não foi possível obter a foto',
       uploading: 'Enviando…',
       uploadingPct: 'Enviando… ({{pct}} %)',
       fileFallback: 'Arquivo',

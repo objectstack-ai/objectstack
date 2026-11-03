@@ -296,6 +296,8 @@ const de = {
       takePhoto: 'Foto aufnehmen',
       takeSelfie: 'Selfie aufnehmen',
       cameraCapture: 'Kameraaufnahme',
+      choosePhoto: 'Foto auswählen',
+      photoFailed: 'Foto konnte nicht abgerufen werden',
       uploading: 'Wird hochgeladen…',
       uploadingPct: 'Wird hochgeladen… ({{pct}} %)',
       fileFallback: 'Datei',

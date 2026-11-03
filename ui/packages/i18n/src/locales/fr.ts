@@ -299,6 +299,8 @@ const fr = {
       takePhoto: 'Prendre une photo',
       takeSelfie: 'Prendre un selfie',
       cameraCapture: 'Capture photo',
+      choosePhoto: 'Choisir une photo',
+      photoFailed: "Impossible d'obtenir la photo",
       uploading: 'Téléversement…',
       uploadingPct: 'Téléversement… ({{pct}} %)',
       fileFallback: 'Fichier',

@@ -304,6 +304,8 @@ const es = {
       takePhoto: 'Tomar foto',
       takeSelfie: 'Tomar selfie',
       cameraCapture: 'Captura de cámara',
+      choosePhoto: 'Elegir foto',
+      photoFailed: 'No se pudo obtener la foto',
       uploading: 'Subiendo…',
       uploadingPct: 'Subiendo… ({{pct}} %)',
       fileFallback: 'Archivo',

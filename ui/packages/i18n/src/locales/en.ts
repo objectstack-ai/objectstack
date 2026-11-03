@@ -412,6 +412,8 @@ const en = {
       takePhoto: 'Take photo',
       takeSelfie: 'Take selfie',
       cameraCapture: 'Camera capture',
+      choosePhoto: 'Choose photo',
+      photoFailed: 'Could not get the photo',
       uploading: 'Uploading…',
       uploadingPct: 'Uploading… ({{pct}}%)',
       fileFallback: 'File',

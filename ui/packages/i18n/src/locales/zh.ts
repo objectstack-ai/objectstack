@@ -280,6 +280,8 @@ const zh = {
       takePhoto: '拍照',
       takeSelfie: '自拍',
       cameraCapture: '拍摄',
+      choosePhoto: '从相册选择',
+      photoFailed: '无法获取照片',
       uploading: '上传中…',
       uploadingPct: '上传中…（{{pct}}%）',
       fileFallback: '文件',

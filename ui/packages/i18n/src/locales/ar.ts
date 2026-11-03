@@ -314,6 +314,8 @@ const ar = {
       takePhoto: 'التقاط صورة',
       takeSelfie: 'التقاط صورة ذاتية',
       cameraCapture: 'التقاط بالكاميرا',
+      choosePhoto: 'اختيار صورة',
+      photoFailed: 'تعذّر الحصول على الصورة',
       uploading: 'جارٍ الرفع…',
       uploadingPct: 'جارٍ الرفع… ({{pct}}%)',
       fileFallback: 'ملف',

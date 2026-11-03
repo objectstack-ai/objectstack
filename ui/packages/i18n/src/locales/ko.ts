@@ -296,6 +296,8 @@ const ko = {
       takePhoto: '사진 촬영',
       takeSelfie: '셀피 촬영',
       cameraCapture: '카메라 촬영',
+      choosePhoto: '사진 선택',
+      photoFailed: '사진을 가져오지 못했습니다',
       uploading: '업로드 중…',
       uploadingPct: '업로드 중…（{{pct}}%）',
       fileFallback: '파일',
