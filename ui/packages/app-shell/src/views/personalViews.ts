@@ -245,11 +245,10 @@ export function usePersonalViews({
 
   useEffect(() => {
     if (!readKey) return;
+    // A read of a new scope reads as `loading` until it lands (the derived
+    // `status` below); a read again of the same scope keeps its views on
+    // screen meanwhile.
     let cancelled = false;
-    // A read again of the same scope keeps the views on screen until it lands.
-    setRead((prev) => (prev.scope === scopeKey && prev.status === 'ready'
-      ? prev
-      : { scope: scopeKey, status: 'loading', views: [] }));
     dataSource
       .find(PERSONAL_VIEW_OBJECT, {
         $filter: { object_name: objectName, user_id: userId },
