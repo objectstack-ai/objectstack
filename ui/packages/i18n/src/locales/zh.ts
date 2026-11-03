@@ -280,6 +280,8 @@ const zh = {
       takePhoto: '拍照',
       takeSelfie: '自拍',
       cameraCapture: '拍摄',
+      choosePhoto: '从相册选择',
+      photoFailed: '无法获取照片',
       uploading: '上传中…',
       uploadingPct: '上传中…（{{pct}}%）',
       fileFallback: '文件',
@@ -3077,6 +3079,12 @@ const zh = {
       save: '保存',
       saved: '语言偏好已更新。',
       readOnly: '您账户的语言由管理员管理。',
+    },
+    appLock: {
+      title: "应用锁",
+      off: "已关闭",
+      onImmediately: "已开启，离开应用后立即锁定",
+      onAfter: "已开启，离开应用{{duration}}后锁定",
     },
     password: {
       changeTitle: '修改密码',

@@ -38,7 +38,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 
 // Read from the implementation rather than restated: the notice is a contract
 // value, and a second spelling of it would agree only until one of them moves.
-import { FLOW_CLONE_NOTICE } from '../../../runtime/src/flow-clone.js';
+import { FLOW_CLONE_NOTICE, FLOW_CLONE_NOTICE_CODE } from '../../../runtime/src/flow-clone.js';
 
 /** The CRM app's own shipped flow — a real definition, not one this test injects. */
 const SOURCE = 'crm_convert_lead_wizard';
@@ -92,10 +92,12 @@ describe('#20676 — POST /automation/:name/clone is mounted on the dispatcher b
     expect(res.status, `legal clone: ${text}`).toBe(200);
     const body = (await res.json()) as {
       success?: boolean;
-      data?: { flow?: { name?: string; label?: string; status?: string }; packageId?: string; notice?: string };
+      data?: { flow?: { name?: string; label?: string; status?: string }; packageId?: string; notice?: string; noticeCode?: string };
     };
     expect(body.success).toBe(true);
     expect(body.data?.notice).toBe(FLOW_CLONE_NOTICE);
+    // [#29727] The notice is named by its code, for a console that translates it.
+    expect(body.data?.noticeCode).toBe(FLOW_CLONE_NOTICE_CODE);
     // [#28149, ADR-0146 D4] "New similar": switched off, in the CRM's paired
     // customization package, which the clone ensured on first use.
     expect(body.data?.flow).toMatchObject({ name: CLONE, label: CLONE_LABEL, status: 'obsolete' });

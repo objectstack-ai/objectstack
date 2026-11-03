@@ -48,6 +48,7 @@ import * as React from 'react';
 import { Label, Textarea } from '@object-ui/components';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
+import { fallbackFormPatch } from './fallbackFormPatch.js';
 import { t } from '../i18n.js';
 import {
   InspectorShell,
@@ -512,7 +513,7 @@ export function HookDefaultInspector({
             value={draft}
             hiddenFields={CURATED_FIELDS}
             readOnly={readOnly}
-            onChange={(next) => onPatch(next)}
+            onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         </div>
       )}

@@ -314,6 +314,8 @@ const ar = {
       takePhoto: 'التقاط صورة',
       takeSelfie: 'التقاط صورة ذاتية',
       cameraCapture: 'التقاط بالكاميرا',
+      choosePhoto: 'اختيار صورة',
+      photoFailed: 'تعذّر الحصول على الصورة',
       uploading: 'جارٍ الرفع…',
       uploadingPct: 'جارٍ الرفع… ({{pct}}%)',
       fileFallback: 'ملف',
@@ -3245,6 +3247,12 @@ const ar = {
       save: "حفظ",
       saved: "تم تحديث تفضيل اللغة.",
       readOnly: "يدير المسؤول لغة حسابك.",
+    },
+    appLock: {
+      title: "قفل التطبيق",
+      off: "متوقف",
+      onImmediately: "مفعّل، يُقفل فور مغادرة التطبيق",
+      onAfter: "مفعّل، مهلة القفل: {{duration}}",
     },
     password: {
       changeTitle: "تغيير كلمة المرور",

@@ -305,6 +305,8 @@ const ru = {
       takePhoto: 'Сделать фото',
       takeSelfie: 'Сделать селфи',
       cameraCapture: 'Съёмка камерой',
+      choosePhoto: 'Выбрать фото',
+      photoFailed: 'Не удалось получить фото',
       uploading: 'Загрузка…',
       uploadingPct: 'Загрузка… ({{pct}} %)',
       fileFallback: 'Файл',
@@ -3130,6 +3132,12 @@ const ru = {
       save: "Сохранить",
       saved: "Языковые настройки обновлены.",
       readOnly: "Язык вашей учётной записи настраивает администратор.",
+    },
+    appLock: {
+      title: "Блокировка приложения",
+      off: "Выкл.",
+      onImmediately: "Вкл., блокируется сразу после выхода из приложения",
+      onAfter: "Вкл., задержка блокировки: {{duration}}",
     },
     password: {
       changeTitle: "Изменить пароль",

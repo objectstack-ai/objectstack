@@ -299,6 +299,8 @@ const fr = {
       takePhoto: 'Prendre une photo',
       takeSelfie: 'Prendre un selfie',
       cameraCapture: 'Capture photo',
+      choosePhoto: 'Choisir une photo',
+      photoFailed: "Impossible d'obtenir la photo",
       uploading: 'Téléversement…',
       uploadingPct: 'Téléversement… ({{pct}} %)',
       fileFallback: 'Fichier',
@@ -3058,6 +3060,12 @@ const fr = {
       save: "Enregistrer",
       saved: "Préférence de langue mise à jour.",
       readOnly: "La langue de votre compte est gérée par votre administrateur.",
+    },
+    appLock: {
+      title: "Verrouillage de l'app",
+      off: "Désactivé",
+      onImmediately: "Activé, se verrouille dès que vous quittez l'app",
+      onAfter: "Activé, se verrouille {{duration}} après avoir quitté l'app",
     },
     password: {
       changeTitle: "Changer le mot de passe",

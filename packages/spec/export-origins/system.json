@@ -772,6 +772,8 @@
     "TranslationDiffStatusSchema": "src/system/translation.zod.ts#TranslationDiffStatusSchema (const)",
     "TranslationItem": "src/system/translation.zod.ts#TranslationItem (type)",
     "TranslationItemSchema": "src/system/translation.zod.ts#TranslationItemSchema (const)",
+    "TrustedAppScheme": "src/system/auth-config.zod.ts#TrustedAppScheme (type)",
+    "TrustedAppSchemeSchema": "src/system/auth-config.zod.ts#TrustedAppSchemeSchema (const)",
     "UserActivityStatus": "src/system/collaboration.zod.ts#UserActivityStatus (type)",
     "UserDevice": "src/system/push-device.zod.ts#UserDevice (type)",
     "UserDeviceSchema": "src/system/push-device.zod.ts#UserDeviceSchema (const)",

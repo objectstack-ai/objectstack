@@ -296,6 +296,8 @@ const de = {
       takePhoto: 'Foto aufnehmen',
       takeSelfie: 'Selfie aufnehmen',
       cameraCapture: 'Kameraaufnahme',
+      choosePhoto: 'Foto auswählen',
+      photoFailed: 'Foto konnte nicht abgerufen werden',
       uploading: 'Wird hochgeladen…',
       uploadingPct: 'Wird hochgeladen… ({{pct}} %)',
       fileFallback: 'Datei',
@@ -2999,6 +3001,12 @@ const de = {
       save: "Speichern",
       saved: "Spracheinstellung aktualisiert.",
       readOnly: "Die Sprache Ihres Kontos wird von Ihrer Administration verwaltet.",
+    },
+    appLock: {
+      title: "App-Sperre",
+      off: "Aus",
+      onImmediately: "An, sperrt sofort, wenn Sie die App verlassen",
+      onAfter: "An, sperrt {{duration}} nach dem Verlassen der App",
     },
     password: {
       changeTitle: "Passwort ändern",

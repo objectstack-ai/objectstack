@@ -299,6 +299,8 @@ const pt = {
       takePhoto: 'Tirar foto',
       takeSelfie: 'Tirar selfie',
       cameraCapture: 'Captura da câmera',
+      choosePhoto: 'Escolher foto',
+      photoFailed: 'Não foi possível obter a foto',
       uploading: 'Enviando…',
       uploadingPct: 'Enviando… ({{pct}} %)',
       fileFallback: 'Arquivo',
@@ -3057,6 +3059,12 @@ const pt = {
       save: "Salvar",
       saved: "Preferência de idioma atualizada.",
       readOnly: "O idioma da sua conta é gerenciado pelo seu administrador.",
+    },
+    appLock: {
+      title: "Bloqueio do app",
+      off: "Desativado",
+      onImmediately: "Ativado, bloqueia assim que você sai do app",
+      onAfter: "Ativado, bloqueia {{duration}} depois que você sai do app",
     },
     password: {
       changeTitle: "Alterar senha",

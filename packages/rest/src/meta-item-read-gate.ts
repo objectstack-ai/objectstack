@@ -2185,12 +2185,22 @@ export function metaTypeReadRefusal(
  *
  * Its READ row exists because its read door requires
  * `manage_platform_settings`. Its WRITE door — `POST
- * /datasources/:name/external/refresh-catalog` — requires
+ * /datasources/:name/external/refresh-catalog` — requires, for the write,
  * `FEDERATION_WRITE_CAPABILITY` (`manage_metadata`, in
  * `./external-datasource-routes.ts`), which every `/meta` write door already
  * demands. ⛔ A row here names the capability the type's own WRITE door
- * requires — matched, never minted; a type whose write door asks nothing beyond
- * the authoring admission has no row.
+ * requires FOR THE WRITE — matched, never minted; a type whose write door asks
+ * nothing beyond the authoring admission for the write has no row.
+ *
+ * That door also requires `manage_platform_settings` (the 2026-11-03 ruling:
+ * seeing a datasource's remote structure needs the read capability on every
+ * route, writes included), and for what it ANSWERS, not for the write: it
+ * answers with the snapshot it wrote. The `/meta` write doors answer a
+ * receipt — the save, the publish, the rollback and the delete each return
+ * `success` with a version token or `seq`, never the stored document (their
+ * declared return types in `@objectstack/metadata-protocol`) — so there is no
+ * remote structure for that requirement to guard here. Where `/meta` does
+ * answer the snapshot, it already asks it: the READ row above.
  *
  * ## Which requests
  *

@@ -296,6 +296,8 @@ const ko = {
       takePhoto: '사진 촬영',
       takeSelfie: '셀피 촬영',
       cameraCapture: '카메라 촬영',
+      choosePhoto: '사진 선택',
+      photoFailed: '사진을 가져오지 못했습니다',
       uploading: '업로드 중…',
       uploadingPct: '업로드 중…（{{pct}}%）',
       fileFallback: '파일',
@@ -2999,6 +3001,12 @@ const ko = {
       save: "저장",
       saved: "언어 설정을 업데이트했습니다.",
       readOnly: "이 계정의 언어는 관리자가 관리합니다.",
+    },
+    appLock: {
+      title: "앱 잠금",
+      off: "꺼짐",
+      onImmediately: "켜짐: 앱을 나가면 바로 잠금",
+      onAfter: "켜짐: 앱을 나가고 {{duration}} 후 잠금",
     },
     password: {
       changeTitle: "비밀번호 변경",

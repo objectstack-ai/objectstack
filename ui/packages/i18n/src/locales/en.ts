@@ -412,6 +412,8 @@ const en = {
       takePhoto: 'Take photo',
       takeSelfie: 'Take selfie',
       cameraCapture: 'Camera capture',
+      choosePhoto: 'Choose photo',
+      photoFailed: 'Could not get the photo',
       uploading: 'Uploading…',
       uploadingPct: 'Uploading… ({{pct}}%)',
       fileFallback: 'File',
@@ -3585,6 +3587,12 @@ const en = {
       save: 'Save',
       saved: 'Language preference updated.',
       readOnly: 'Your administrator manages the language for your account.',
+    },
+    appLock: {
+      title: 'App lock',
+      off: 'Off',
+      onImmediately: 'On, locks as soon as you leave the app',
+      onAfter: 'On, locks {{duration}} after you leave the app',
     },
     password: {
       changeTitle: 'Change Password',

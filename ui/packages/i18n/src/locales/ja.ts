@@ -296,6 +296,8 @@ const ja = {
       takePhoto: '写真を撮る',
       takeSelfie: '自撮り',
       cameraCapture: 'カメラ撮影',
+      choosePhoto: '写真を選択',
+      photoFailed: '写真を取得できませんでした',
       uploading: 'アップロード中…',
       uploadingPct: 'アップロード中…（{{pct}}%）',
       fileFallback: 'ファイル',
@@ -3001,6 +3003,12 @@ const ja = {
       save: "保存",
       saved: "言語の設定を更新しました。",
       readOnly: "このアカウントの言語は管理者が管理しています。",
+    },
+    appLock: {
+      title: "アプリロック",
+      off: "オフ",
+      onImmediately: "オン：アプリを離れるとすぐにロック",
+      onAfter: "オン：アプリを離れて{{duration}}後にロック",
     },
     password: {
       changeTitle: "パスワードを変更",

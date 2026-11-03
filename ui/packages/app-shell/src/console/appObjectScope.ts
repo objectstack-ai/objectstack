@@ -40,7 +40,13 @@
  * (`usePageAssignment`'s choice). A record route with no declared record page,
  * or a slotted one, reads the whole registry: its synthesized page derives
  * the related lists from every object that points at the record's object, in
- * any package.
+ * any package. objectstack#29552 — except in an app with no package, for an
+ * object its navigation reaches: the app bundle holds every object that points
+ * at it (`BundledReads.objectsReferencing`), so the route reads those by name,
+ * with the object's own names, instead (measured on a production Console: the
+ * registry was 553 KB of a console-created app's 888 KB record route). Until
+ * the bundle has answered it waits; an object outside the navigation, no
+ * bundle, or draft preview reads the registry as before.
  *
  * Everywhere else the route reads the whole registry, as before. For the
  * related lists' reason a record overlay (`?recordId=`, `?form=`) reads the
@@ -78,6 +84,7 @@ import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { COMMAND_PALETTE_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_PARAM } from '../urlParams.js';
 import type { ReadNamesWithoutViews } from '../hooks/useObjectPresence.js';
+import type { BundledRead } from '../providers/bundledReads.js';
 
 type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
 export type AppObjectScope = ReturnType<ReadObjectScope>;
@@ -468,6 +475,7 @@ export function readAppObjectScope(
   readPage?: (pageName: string) => PageRead,
   readPages?: () => PagesRead,
   readDashboard?: (dashboardName: string) => DashboardRead,
+  readObjectsReferencing?: (objectName: string) => BundledRead<readonly string[]>,
 ): AppObjectScopeRead {
   const route = matchObjectScopeRoute(subPath, hostPaths);
   const candidate = !!route && !!readObjectScope && !hasRecordFormOverlay(search);
@@ -499,7 +507,19 @@ export function readAppObjectScope(
     const pagesRead = readPages?.();
     if (!pagesRead?.settled) return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
     const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined);
-    if (!page) return { candidate, scope: null, ready: false, ...NOT_READ };
+    if (!page) {
+      // objectstack#29552 — the synthesized page of an app with no package:
+      // its related lists are derived from every object that points at the
+      // record's object, which the app bundle holds for an object the app's
+      // navigation reaches. Those are read by name with the route's own names
+      // (a bundled object is answered from the bundle, asked of no route).
+      // A packaged app, and a bundle that cannot say, read the registry.
+      if (packageId) return { candidate, scope: null, ready: false, ...NOT_READ };
+      const referencing = readObjectsReferencing?.(route.objectName);
+      if (referencing?.state === 'pending') return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
+      if (referencing?.state !== 'hit') return { candidate, scope: null, ready: false, ...NOT_READ };
+      return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, undefined, referencing.value) };
+    }
     const extra = [route.objectName, ...appRequiredObjectNames(app)];
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
       extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
@@ -555,7 +575,10 @@ export function readAppObjectScope(
  * root), the objects the app's own navigation and area entries require (the
  * sidebar's capability gate answers from this scope), the navigation's objects
  * while the command palette is open, and the route object's lookup targets.
- * Only the route's object holds the route.
+ * Only the route's object holds the route. `relatedNames` (objectstack#29552:
+ * the objects that point at a record's object, whose related lists its
+ * synthesized page draws) are asked with the route's names, and the route
+ * waits for them as it waits for its own object.
  */
 function readObjectRouteNames(
   readObjectScope: ReadObjectScope,
@@ -563,20 +586,25 @@ function readObjectRouteNames(
   objectName: string | undefined,
   search: string,
   packageId: string | undefined,
+  relatedNames: readonly string[] = [],
 ): Omit<AppObjectScopeRead, 'candidate'> {
   // With no package and no name, nothing: the provider reads an empty
   // names-only ask as the whole registry (objectstack#29552, an app's root).
   const read = (names: readonly string[]): AppObjectScope =>
     packageId ? readObjectScope({ packageId, names }) : names.length > 0 ? readObjectScope({ names }) : NO_OBJECT_SCOPE;
   const routeRead = read(objectName ? [objectName] : []);
-  const ready = routeReadDone(routeRead);
+  const ready =
+    routeReadDone(routeRead) &&
+    (relatedNames.length === 0 || routeReadDone(read([...(objectName ? [objectName] : []), ...relatedNames])));
   const routeOutcome = { failedNames: failedNamesOf(routeRead), routeObjectRefusal: refusalOf(routeRead, objectName) };
   const names = appRequiredObjectNames(app);
   if (objectName) names.push(objectName);
+  names.push(...relatedNames);
   if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
     names.push(...navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
   }
-  const first = read(names);
+  const asked = read(names);
+  const first = relatedNames.length > 0 ? inRelatedOrder(asked, relatedNames) : asked;
   const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
   const lookups = routeDef ? lookupTargetNames(routeDef) : [];
   if (lookups.length === 0) return { scope: first, ready, ...routeOutcome };
@@ -589,6 +617,30 @@ function readObjectRouteNames(
   if (packageId) readWithoutViews({ packageId, names: lookups, views: false });
   else readWithoutViews({ names: lookups, views: false });
   return { scope: first, ready, ...routeOutcome };
+}
+
+/**
+ * objectstack#29552 — a scope whose objects that `relatedNames` names come in
+ * that order. A record page synthesized for an object draws its related lists
+ * in the order of the objects it is handed (`deriveRelatedLists`), and the
+ * registry hands them in the object list's order. A names-only scope holds its
+ * names in the order they landed, across every reader of the shared entry (an
+ * app's `requiresObject` names land first), so the related objects are put in
+ * the order the bundle lists them. One array per (scope objects, names), so a
+ * reader's memo on it holds.
+ */
+const RELATED_ORDER = new WeakMap<readonly unknown[], WeakMap<readonly string[], AppObjectScope['objects']>>();
+function inRelatedOrder(scope: AppObjectScope, relatedNames: readonly string[]): AppObjectScope {
+  let byNames = RELATED_ORDER.get(scope.objects);
+  if (!byNames) RELATED_ORDER.set(scope.objects, (byNames = new WeakMap()));
+  let objects = byNames.get(relatedNames);
+  if (!objects) {
+    const rank = (o: { name?: unknown } | null | undefined) => relatedNames.indexOf(o?.name as string);
+    // Stable: the objects outside `relatedNames` keep their places ahead of them.
+    objects = [...scope.objects].sort((a, b) => rank(a) - rank(b));
+    byNames.set(relatedNames, objects);
+  }
+  return { ...scope, objects } as AppObjectScope;
 }
 
 /** An adapter that loads app metadata bundles (`ObjectStackAdapter.loadAppBundle`). */
