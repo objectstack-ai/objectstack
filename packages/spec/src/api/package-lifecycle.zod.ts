@@ -48,6 +48,7 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataLockSchema } from '../kernel/metadata-protection.zod';
+import { ManifestSchema } from '../kernel/manifest.zod';
 
 // Ruling 5A — the `/api` re-export of the one existing declaration. The
 // schema (and its type) stay declared in `system/metadata-persistence.zod.ts`
@@ -177,11 +178,21 @@ export const RollbackToPackageCommitResponseSchema = lazySchema(() => z.object({
  * `GET /packages/:id/export` — the package's portable manifest (ADR-0070
  * offline export), the same shape `marketplace-install-local` consumes.
  *
+ * Two of the fixed keys below come from the package's registry row rather
+ * than from its items: `namespace` and `dependencies`, each the install
+ * manifest's own declaration (`ManifestSchema`), so an export reinstalled
+ * elsewhere keeps both. Without them an install door falls
+ * back to the namespace derived from the id (a `.custom` pair lands under
+ * `custom`, not the namespace it was installed with), and the pair loses its
+ * edge to its base, which orders the install after the base (ADR-0141 D5) and
+ * admits its overrides (ADR-0146 D2). Each is written when the row declares it
+ * and absent when it does not.
+ *
  * HONESTLY OPEN (#12038 ruling 4A). `assemblePackageManifest`
  * (`runtime/src/domains/packages.ts`) builds the key set DYNAMICALLY from the
  * metadata type registry — one plural key per type present
  * (`manifest[plural] = items.map(clean)`), partitioning `views` per #5320 —
- * plus the five fixed keys below. Only the fixed keys are pinnable;
+ * plus the seven fixed keys below. Only the fixed keys are pinnable;
  * enumerating the registry here would freeze this contract against future
  * metadata types, so everything else deliberately falls to the open
  * catch-all. Freezes nothing.
@@ -208,6 +219,16 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
   id: z.string().describe('The exported package\'s id.'),
   name: z.string().describe('The exported package\'s machine name.'),
   version: z.string().describe('The exported package\'s version.'),
+  namespace: ManifestSchema.shape.namespace.describe(
+    'The namespace the package was installed with, as its registry row\'s manifest declares it; absent when the '
+    + 'row declares none. An install of the export keeps it instead of deriving one from the id, so a `.custom` '
+    + 'pair is reinstalled under its own namespace rather than `custom`.',
+  ),
+  dependencies: ManifestSchema.shape.dependencies.describe(
+    'The packages this package depends on, each id mapped to its version range, as its registry row\'s manifest '
+    + 'declares them; absent when the row declares none. An install of the export orders it after each of them '
+    + '(ADR-0141 D5), and a `.custom` pair keeps the edge to its base that admits its overrides (ADR-0146 D2).',
+  ),
   label: z.string().optional().describe('Display label, when the package declares one.'),
   withheldMaps: z.array(z.object({
     type: z.literal('connector').describe('Metadata type of the item whose map was withheld.'),

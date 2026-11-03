@@ -50,6 +50,7 @@ import type { DataSource } from '@object-ui/types';
 import * as dataObjectstack from '@object-ui/data-objectstack';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { buildViewTabs, loadViewOverrides, sanitizeViewOverride } from './ObjectView';
+import { answerObjectViewRead } from './__tests__/objectViewRoute';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { stripComments as stripCommentsUntyped } from '../../../../scripts/js-comment-mask.mjs';
 
@@ -105,15 +106,18 @@ function makeMetaStore() {
 function makeAdapter(meta: any) {
     const ds: any = new ObjectStackAdapter({
         baseUrl: 'http://test.local',
-        fetch: vi.fn(async () =>
-            new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+        // objectstack#29550: the adapter reads one object's views on
+        // `GET /meta/view?object=`, answered here from the same store.
+        fetch: vi.fn(async (input: RequestInfo | URL) =>
+            (await answerObjectViewRead(input, () => meta.getItems('view')))
+            ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' },
             })),
     });
     ds.connected = true;
     ds.connectionState = 'connected';
-    ds.client = { meta };
+    ds.client = { meta, getLocale: () => undefined };
     return ds;
 }
 
@@ -121,9 +125,14 @@ function makeAdapter(meta: any) {
  * Put a personalization overlay in the store the way the retired toolbar write
  * (`updateViewConfig`, objectui#12504) stored one: the body, with `object`,
  * `name` and the `_isOverride` marker stamped on it.
+ *
+ * objectstack#29550: and `viewKind`, as the row is stored. The server's save
+ * inherits it from the registry entry the overlay shadows
+ * (`normalizeViewMetadata`, objectstack#2555), and the one-object read serves
+ * only rows that carry it.
  */
 function plantOverlay(rows: Map<string, any>, body: Record<string, unknown>) {
-    rows.set(`view::${VIEW_ID}`, { ...body, object: OBJECT_NAME, name: VIEW_ID, _isOverride: true });
+    rows.set(`view::${VIEW_ID}`, { ...body, viewKind: 'list', object: OBJECT_NAME, name: VIEW_ID, _isOverride: true });
 }
 
 const fallbackTab = () => ({ id: 'all', label: 'All records', type: 'grid', columns: [] });

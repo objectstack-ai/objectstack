@@ -3352,6 +3352,42 @@ function declaresOverrideOf(item: unknown, packageId: string): boolean {
         && (overrides as { package?: unknown }).package === packageId;
 }
 
+/**
+ * [#29563, #29649, ADR-0146 D8 item 3] A package's own documents of one type,
+ * out of its per-package layer `items`: an item that declares it overrides
+ * `packageId` ({@link declaresOverrideOf}) is the package's `.custom` pair's
+ * override, never one of the package's documents, so it is replaced, in its
+ * place, by the package's own code artifact of the name when the layer lists
+ * none beside it, and dropped otherwise. The artifact is the registry's
+ * prefer-local answer for the package (`getArtifactItem`), kept only when it is
+ * the package's own (`_packageId`) and declares no override itself.
+ */
+function ownDocumentsOf(items: any[], type: string, packageId: string, registry: any): any[] {
+    const own = new Set(items
+        .filter((it) => !declaresOverrideOf(it, packageId))
+        .map((it) => (it as { name?: unknown } | null)?.name));
+    const out: any[] = [];
+    for (const it of items) {
+        if (!declaresOverrideOf(it, packageId)) {
+            out.push(it);
+            continue;
+        }
+        const name = (it as { name?: unknown } | null)?.name;
+        if (typeof name !== 'string' || own.has(name)) continue;
+        let artifact: unknown;
+        try {
+            artifact = registry?.getArtifactItem?.(type, name, packageId);
+        } catch {
+            artifact = undefined;
+        }
+        if ((artifact as { _packageId?: unknown } | null | undefined)?._packageId !== packageId) continue;
+        if (declaresOverrideOf(artifact, packageId)) continue;
+        own.add(name);
+        out.push(artifact);
+    }
+    return out;
+}
+
 async function assemblePackageManifest(
 deps: DomainHandlerDeps,
 packageId: string,
@@ -3430,7 +3466,23 @@ context: HttpProtocolContext,
         // the base's export carried both, the second with the edited label and
         // the `overrides` block. A protocol with no per-package layer is read
         // as before.
-        if (perPackageLayer) items = items.filter((it) => !declaresOverrideOf(it, packageId));
+        //
+        // [#29649] …and the package's own document is served in its place: the
+        // override copy is not always listed BESIDE the base's item. On a boot
+        // that also holds the base's code documents in the metadata service
+        // (`MetadataPlugin`'s artifact door, as every `defineStack` host does),
+        // the layer merges the registry's items over the service's, one per
+        // `(name, package)` slot, so the copy wearing the base's envelope takes
+        // the base's slot and the base's own item is not listed at all.
+        // Measured on a real showcase boot: a published dashboard or report
+        // override left the base's export without the item, and after #29640
+        // took those two out of the bare slot, a page, app, dataset, doc or
+        // book override still did (#29613 holds them). The package's own
+        // document is its code artifact, read prefer-local from the registry
+        // (`getArtifactItem` with the package's id: the composite slot
+        // `registerApp` filled, which the bare-slot copy never reaches), the
+        // same body the layer serves for the name while no override is live.
+        if (perPackageLayer) items = ownDocumentsOf(items, singular, packageId, registry);
         if (items.length === 0) continue;
         // [#5320] `views` is partitioned rather than dumped: the registry's
         // ADR-0017 dual-read returns the container AND its expanded per-view
@@ -3476,6 +3528,17 @@ context: HttpProtocolContext,
     if (pkg?.manifest?.label ?? pkg?.label) {
         manifest.label = pkg?.manifest?.label ?? pkg?.label;
     }
+    // [#29617, ADR-0141 D5 / ADR-0146 D2] The two install-manifest keys an
+    // install of this export decides by, read off the registry row's manifest
+    // as it declares them (`PackageExportManifestSchema.namespace` /
+    // `.dependencies`): without `namespace` the install door derives one from
+    // the id (a `.custom` pair lands under `custom`), and without
+    // `dependencies` a pair loses the edge to its base that orders its install
+    // and admits its overrides. Absent on the row ⇒ absent here.
+    const namespace = pkg?.manifest?.namespace;
+    if (namespace !== undefined && namespace !== null) manifest.namespace = namespace;
+    const dependencies = pkg?.manifest?.dependencies;
+    if (dependencies !== undefined && dependencies !== null) manifest.dependencies = { ...dependencies };
     // [#28640 ruling ③A] Every connector map the served read withheld whole,
     // named so an import can tell an incomplete map from one never written.
     // Omitted, not emptied, when nothing was withheld.
