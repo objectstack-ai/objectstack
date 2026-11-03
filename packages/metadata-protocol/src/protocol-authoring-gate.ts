@@ -92,6 +92,7 @@ export interface AuthoringGateHost {
     tenancyPostureInForce: ObjectStackProtocolImplementation['tenancyPostureInForce'];
     unknownDatasourceSaveRefusal: ObjectStackProtocolImplementation['unknownDatasourceSaveRefusal'];
     unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
+    unknownPicklistBindingSaveRefusal: ObjectStackProtocolImplementation['unknownPicklistBindingSaveRefusal'];
     seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
 }
 
@@ -126,7 +127,7 @@ export function restoredBodyWriter(
 
 /** The body of `ObjectStackProtocolImplementation#refuseRestoredBodyTheSaveDoorRefuses`; the method's docblock there is its contract. */
 export async function refuseRestoredBodyTheSaveDoorRefuses(
-    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'seedExternalIdSaveRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal'>,
+    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'seedExternalIdSaveRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>,
     type: string,
     name: string,
     body: unknown,
@@ -145,6 +146,8 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
     if (datasourceRefusal) throw datasourceRefusal;
     const grantRefusal = await this.unknownGrantObjectSaveRefusal(type, body, name);
     if (grantRefusal) throw grantRefusal;
+    const picklistRefusal = await this.unknownPicklistBindingSaveRefusal(type, body, name);
+    if (picklistRefusal) throw picklistRefusal;
     const seedKeyRefusal = await this.seedExternalIdSaveRefusal(type, body, name);
     if (seedKeyRefusal) throw seedKeyRefusal;
     const repo = this.getOverlayRepo();
