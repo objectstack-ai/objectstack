@@ -123,7 +123,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } f
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IFieldFileService, IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
-import { applyConversionsToFlow, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
 import { type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -393,7 +393,7 @@ import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, store
 // [#25467 cut 17] The object-owner verdicts: which contributor kind a stored object row registers as, and handing an adopted object's name to its rebound row.
 import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protocol-object-owner.js';
 // [#25467 cut 18] The flow save's retired-spelling replay verdict (#23903 ruling B′): does a save newly introduce a retired spelling no stored row carries.
-import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
+import { flowSaveReplaysRetired, flowVerdictBody, storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 // [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
 // [#28574, ADR-0146 D10] An object extension as an authorable item: the doors' gate, its shape schema, and the body every sync registers.
@@ -579,7 +579,7 @@ export {
     MalformedVersionTokenError,
     canonicalVersionInstant,
 } from './protocol-version-tokens.js';
-import { CLONE_STRIP_FIELDS, FLOW_FALLBACK_VERDICT_NOT_REPLAYED } from './protocol-write-constants.js';
+import { CLONE_STRIP_FIELDS } from './protocol-write-constants.js';
 export { FLOW_FALLBACK_VERDICT_NOT_REPLAYED } from './protocol-write-constants.js';
 import {
     carryCatalogedErrorCode,
@@ -1762,6 +1762,9 @@ export class ObjectStackProtocolImplementation implements
      * ({@link objectNamespacePrefixViolation}, `NAMESPACE_PREFIX`), the one
      * rule outside the gate that the promotion doors refuse a draft on — the
      * same judge, on the draft row's package, never a copy of it.
+     *
+     * [#29557] …and on the body the promotion judges: a flow draft in its
+     * D2-converted spelling (`storedFlowVerdictBody`, the save door's seam).
      */
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
@@ -8761,7 +8764,10 @@ export class ObjectStackProtocolImplementation implements
      *    regime D6 recognises — the package definition wins. Such rows were
      *    written through the `OS_METADATA_WRITABLE` hatch before the seal; they
      *    stay at rest, untouched, and the boot report names them per type with
-     *    the two remedies ({@link reportSealedOverlayRows}).
+     *    the two remedies ({@link reportSealedOverlayRows}). [#29613] Except,
+     *    for a `page`, `app`, `dataset`, `doc` or `book`, the shipping
+     *    package's declared `.custom` override (`row`, below): ADR-0146 D8
+     *    item 2 serves it, as a dashboard's.
      *
      * ⛔ Never a row's, slot's or body's `origin` — the caller sets it.
      *
@@ -10848,11 +10854,11 @@ export class ObjectStackProtocolImplementation implements
      * after, measured for each reader. What changes is the registry-direct
      * read of the name, which answers the shipping package's own item.
      *
-     * ⛔ Those three types only. A row of a package that ships its own artifact
-     * of the name keeps its bare entry (#4624). `page`, `app`, `dataset`, `doc`
-     * and `book` still register: their reads serve a pair's override from the
-     * bare entry, so it can go only once they serve it from the row. `flow`
-     * registers with no artifact envelope (below).
+     * ⛔ Those three types, and [#29613] `page`, `app`, `dataset`, `doc` and
+     * `book`, whose reads serve a pair's declared override from its row since
+     * {@link declinesStoredRow} admits it. A row of a package that ships its own
+     * artifact of the name keeps its bare entry (#4624). `flow` registers with
+     * no artifact envelope (below).
      *
      * ## [#23233] The entry carries the row's package binding
      *
@@ -11012,7 +11018,7 @@ export class ObjectStackProtocolImplementation implements
         // bound to a package that ships no artifact of its name, under a name
         // another package ships, is not registered under the bare name, where
         // it would wear that other package's envelope. Its reads answer it from
-        // its row. ⛔ Those three types only.
+        // its row. ⛔ Those three types, and [#29613] page, app, dataset, doc and book.
         if (declinesBorrowedEnvelope(canonicalType, options.packageId, artifact)) return true;
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
@@ -14423,10 +14429,8 @@ export class ObjectStackProtocolImplementation implements
                 }
             }
             if (!canonicalized) {
-                flowGateVerdictBody = applyConversionsToFlow(request.item, {
-                    includeRetired,
-                    excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
-                });
+                // [#29557] The seam both publish doors judge a stored draft through.
+                flowGateVerdictBody = flowVerdictBody(request.item, { includeRetired });
             }
         }
 
@@ -16589,7 +16593,11 @@ export class ObjectStackProtocolImplementation implements
                 type: singularType,
                 name: request.name,
                 state: 'active',
-                body: draftForGate.body,
+                // [#29557] The save door's verdict body: a flow draft is judged
+                // in its D2-converted spelling (the save door stored it raw after
+                // judging it so, #21982), and promoted, stored and served as
+                // stored; the credential read below reads the stored draft.
+                body: storedFlowVerdictBody(singularType, draftForGate.body),
                 // [#9612] The package binding the CALLER stated for this
                 // promotion — the same value threaded into `repo.promoteDraft`
                 // below, so the gate and the write resolve the draft under one

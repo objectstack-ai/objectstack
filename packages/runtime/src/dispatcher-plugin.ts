@@ -1537,6 +1537,70 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             domainDecidesEveryVerb('POST', `${prefix}/notifications/read`);
             domainDecidesEveryVerb('POST', `${prefix}/notifications/read/all`);
 
+            // ── Push devices (ADR-0012 §6) ──────────────────────────────
+            // The device registry's two faces, served by the same domain
+            // (`handleNotificationRequest`) behind the same anonymous floor:
+            // `POST /notifications/devices` registers or refreshes the
+            // caller's device, `DELETE /notifications/devices/:deviceId`
+            // removes the caller's own. Mounted here because this is the only
+            // HTTP owner the standalone server has for `/notifications*`; the
+            // cloud hosts reach the domain through `dispatch()` as before.
+            //
+            // The device id is re-encoded on the way in: the router hands
+            // `req.params` decoded, and the domain decodes the segment it
+            // reads, so an id carrying `/` or `%` reaches the service as sent.
+            server.post(`${prefix}/notifications/devices`, async (req: any, res: any) => {
+                try {
+                    const result = await dispatcher.dispatch('POST', '/notifications/devices', deferRequestBody(req), req.query, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+            server.delete(`${prefix}/notifications/devices/:deviceId`, async (req: any, res: any) => {
+                try {
+                    const path = `/notifications/devices/${encodeURIComponent(String(req.params?.deviceId ?? ''))}`;
+                    const result = await dispatcher.dispatch('DELETE', path, undefined, req.query, { request: req });
+                    sendResult(result, res);
+                } catch (err: any) {
+                    errorResponse(err, res);
+                }
+            });
+            // [#24024] As for the three inbox faces: every other verb on the two
+            // device paths is mounted too, so it reaches the domain's anonymous
+            // floor (401) instead of the adapter's 405, and a signed-in caller
+            // gets the domain's 404. No body is handed on: none is a face.
+            const mountDevicesRefusal = (
+                pattern: '/notifications/devices' | '/notifications/devices/:deviceId',
+                method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+            ) => {
+                const register =
+                    method === 'GET' ? server.get
+                        : method === 'POST' ? server.post
+                            : method === 'PUT' ? server.put
+                                : method === 'PATCH' ? server.patch
+                                    : server.delete;
+                register.call(server, `${prefix}${pattern}`, async (req: any, res: any) => {
+                    try {
+                        const path = pattern === '/notifications/devices'
+                            ? pattern
+                            : `/notifications/devices/${encodeURIComponent(String(req.params?.deviceId ?? ''))}`;
+                        const result = await dispatcher.dispatch(method, path, undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+            for (const method of ['GET', 'PUT', 'PATCH', 'DELETE'] as const) {
+                mountDevicesRefusal('/notifications/devices', method);
+            }
+            for (const method of ['GET', 'POST', 'PUT', 'PATCH'] as const) {
+                mountDevicesRefusal('/notifications/devices/:deviceId', method);
+            }
+            domainDecidesEveryVerb('POST', `${prefix}/notifications/devices`);
+            domainDecidesEveryVerb('GET', `${prefix}/notifications/devices/:deviceId`);
+
             // ── Packages ────────────────────────────────────────────────
             // Single pipeline (ADR-0076 D11 / OQ#9): every package route flows
             // through dispatch() — like analytics / i18n / automation / AI —

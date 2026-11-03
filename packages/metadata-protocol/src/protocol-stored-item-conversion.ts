@@ -13,7 +13,9 @@
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
  * re-indented one level and otherwise unedited: the same `flow` exemption,
  * the same chain call, the same warn-once key and text, and the same page
- * default.
+ * default. Since the move, the notice names the item by its list-slot
+ * identity (`listSlotNameOf`), so a stored `object_extension` is named by its
+ * target (#29596).
  *
  * ## How the moved bodies reach the class
  *
@@ -39,6 +41,7 @@ import { applyConversionsToStoredItem, type ConversionNotice, type ConversionTod
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { withDeclaredPageTypeDefault } from './protocol.js';
+import { listSlotNameOf } from './protocol-object-extension-item.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -60,7 +63,10 @@ export function convertStoredItem(
 ): unknown {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     const converted = this.convertStoredItemDetailed(type, data, (n) => {
-        const name = (data as { name?: unknown } | null | undefined)?.name;
+        // [#29596] The item's identity, not its `name` key: an `object_extension`
+        // body carries `extend` and no `name`, so reading `name` warned every
+        // stored extension as `<unnamed>` and keyed them all to one notice.
+        const name = listSlotNameOf(singular, data);
         const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
         if (this.storedConversionWarned.has(key)) return;
         this.storedConversionWarned.add(key);
