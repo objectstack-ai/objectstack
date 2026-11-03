@@ -76,11 +76,12 @@ type FailureLogger = {
  * `error` when the host logger carries it, else its guaranteed `warn`, else —
  * no host logger at all — the console: the level better-auth's own
  * background-task log used for the same failure while the send ran inside the
- * request. Called through the property, never an extracted reference (a
- * class-based logger needs its receiver).
+ * request. `what` names the send, its medium included (`password-reset
+ * email`, `phone password-reset text`). Called through the property, never an
+ * extracted reference (a class-based logger needs its receiver).
  */
 export function logAfterResponseSendFailure(logger: unknown, what: string, error: unknown): void {
-  const message = `[AuthManager] ${what} email was not delivered: ${
+  const message = `[AuthManager] ${what} was not delivered: ${
     error instanceof Error ? error.message : String(error)
   }`;
   const sink = logger as FailureLogger | undefined;
