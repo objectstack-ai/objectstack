@@ -4084,7 +4084,7 @@ function usePackageNavTargets(
         // row serves (objectstack-ai/objectstack#22200), so the picker offers
         // it by that label, as it offers a published one.
         const draftOnly: NavTargetRow[] = [];
-        for (const draft of drafts) {
+        for (const draft of (drafts ?? []) as Array<{ name?: string | null; label?: I18nLabel | null }>) {
           const name = typeof draft?.name === 'string' ? draft.name : '';
           if (name && !byName.has(name) && !draftOnly.some((row) => row.name === name)) {
             draftOnly.push({ name, label: draft.label ?? undefined });
