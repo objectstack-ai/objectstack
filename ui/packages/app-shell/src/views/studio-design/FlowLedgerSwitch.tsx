@@ -33,6 +33,7 @@ import * as React from 'react';
 import { Power } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@object-ui/components';
 import { t } from '../metadata-admin/i18n.js';
+import { STUDIO_FOLD_LABEL } from './studio-tokens.js';
 import type { ActivationReading } from '../setup/packagedFlows.js';
 
 export function FlowLedgerSwitch({ checked, reading, notRunningReason, busy, walledReason, locale, onToggle }: {
@@ -99,11 +100,14 @@ export function FlowLedgerSwitch({ checked, reading, notRunningReason, busy, wal
         />
       </span>
       <Power className="h-3 w-3 shrink-0" aria-hidden="true" />
-      {reading === 'on'
-        ? t('engine.studio.auto.ledger.on', locale)
-        : notRunning
-          ? t('engine.studio.auto.ledger.notRunning', locale)
-          : t('engine.studio.auto.ledger.off', locale)}
+      {/* objectstack#29693 — on a narrow item header the switch keeps its track and glyph; the word stays its name. */}
+      <span data-studio-fold-label="" className={STUDIO_FOLD_LABEL}>
+        {reading === 'on'
+          ? t('engine.studio.auto.ledger.on', locale)
+          : notRunning
+            ? t('engine.studio.auto.ledger.notRunning', locale)
+            : t('engine.studio.auto.ledger.off', locale)}
+      </span>
     </button>
   );
   const hintLine = (

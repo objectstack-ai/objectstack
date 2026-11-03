@@ -412,8 +412,8 @@ export function useStudioItemHeaderFold(): Pick<StudioItemHeaderFoldValue, 'fold
 
 /**
  * objectstack#29693 — what the title row folded away, at the top of a ⋯
- * menu: the identity chips as they read in the row, then the item tools as
- * menu items, then a separator before the menu's own items. Nothing while the
+ * menu: the identity chips as they read in the row (one entry), then the item
+ * tools as menu items, then a separator before the menu's own items. Nothing while the
  * row holds them. A pillar whose actions end with its own ⋯ menu mounts this
  * in that menu's content and passes `foldMenu="pillar"`.
  */
@@ -424,11 +424,18 @@ export function StudioItemHeaderFoldedItems({ separator = true }: { separator?: 
   if (!hasChips && fold.tools.length === 0) return null;
   return (
     <>
+      {/* One menu entry, reachable by the keys like the others; choosing it
+          keeps the menu open, so a chip with its own control (the override
+          chip) is used from here as from the row. */}
       {hasChips && (
-        <div data-testid="studio-item-header-folded-chips" className="flex flex-wrap items-center gap-1.5 px-2 py-1.5">
+        <DropdownMenuItem
+          data-testid="studio-item-header-folded-chips"
+          onSelect={(event) => event.preventDefault()}
+          className="flex flex-wrap items-center gap-1.5"
+        >
           {fold.apiName && <StudioApiChip apiName={fold.apiName} />}
           {fold.chips}
-        </div>
+        </DropdownMenuItem>
       )}
       {fold.tools.map(({ id, label, icon: Icon, count, onSelect }) => (
         <DropdownMenuItem key={id} data-testid={`studio-item-tool-${id}`} onSelect={onSelect}>
@@ -443,40 +450,82 @@ export function StudioItemHeaderFoldedItems({ separator = true }: { separator?: 
 }
 
 /**
- * objectstack#29693 — whether the title row folds its identity chips and item
- * tools into the ⋯ menu: when the room it leaves the title, with them shown,
- * is less than the title's readable width. Folded, it remembers how wide they
- * were, and shows them again once the title would keep that width beside
- * them (`ownTrigger`: the header's own ⋯, which goes when they come back).
+ * objectstack#29693 — how far the title row has folded: `0` nothing; `1` the
+ * identity chips and the item tools are in the ⋯ menu; `2` the header's
+ * labelled actions show their icon alone too (`STUDIO_FOLD_LABEL`).
+ */
+type TitleRowFoldStage = 0 | 1 | 2;
+
+/** The width the labelled actions' labels take (`data-studio-fold-label`). */
+function foldLabelWidth(row: HTMLElement): number {
+  let width = 0;
+  for (const el of Array.from(row.querySelectorAll('[data-studio-fold-label]'))) width += el.getBoundingClientRect().width;
+  return width;
+}
+
+/**
+ * objectstack#29693 — how far the title row folds so the title keeps its
+ * readable width. Each stage is taken while the room the row leaves the title
+ * is less than that width: first the identity chips and the item tools leave
+ * for the ⋯ menu, then the labelled actions drop their labels. Each step reads
+ * the room it freed (the room after it, less the room before), so it is given
+ * back only once the title would keep its width without that room: the step
+ * never undoes itself the moment it is taken. A title still short after both
+ * is cut, its whole text in its tooltip (objectui#12897); the ⋯ stays in the
+ * row.
  */
 function useTitleRowFold(
   enabled: boolean,
   row: React.RefObject<HTMLElement | null>,
   title: React.RefObject<HTMLElement | null>,
-  ownTrigger: React.RefObject<HTMLElement | null>,
-): boolean {
-  const [folded, setFolded] = React.useState(false);
-  /** The foldable boxes' width, read while they were shown. */
-  const shown = React.useRef(0);
+): TitleRowFoldStage {
+  const [stage, setStage] = React.useState<TitleRowFoldStage>(0);
+  /**
+   * `freed[0]`: the room the first stage freed; `freed[1]`: the second's.
+   * `pending`: a step just taken, with the room before it, read on the next
+   * measure.
+   */
+  const memo = React.useRef<{ freed: [number, number]; pending: { step: 0 | 1; before: number } | null }>({
+    freed: [0, 0],
+    pending: null,
+  });
   const measureRef = React.useRef<() => void>(() => {});
   // Every render: the chips and the actions can change without the row resizing.
   React.useLayoutEffect(() => {
     const measure = () => {
       const rowEl = row.current;
       const titleEl = title.current;
-      if (!enabled) return setFolded(false);
+      if (!enabled) return setStage(0);
       if (!rowEl || !titleEl) return;
       const readable = readableTitleWidth(titleEl);
       if (readable <= 0) return;
       const room = titleRoom(rowEl, titleEl);
-      if (!folded) {
-        shown.current = foldableWidth(rowEl);
-        if (shown.current <= 0) return;
-        return setFolded(room + 0.5 < readable);
+      const m = memo.current;
+      if (m.pending) {
+        m.freed[m.pending.step] = Math.max(0, room - m.pending.before);
+        m.pending = null;
       }
-      const trigger = ownTrigger.current;
-      const freed = trigger ? trigger.getBoundingClientRect().width + gapBeside(trigger) : 0;
-      setFolded(room - shown.current + freed + 0.5 < readable);
+      const short = (width: number) => width + 0.5 < readable;
+      const fold = (next: 1 | 2) => {
+        m.pending = { step: next === 1 ? 0 : 1, before: room };
+        if (next === 2 && stage === 0) m.freed[0] = 0;
+        setStage(next);
+      };
+      if (stage === 0) {
+        if (!short(room)) return;
+        if (foldableWidth(rowEl) > 0) return fold(1);
+        if (foldLabelWidth(rowEl) > 0) return fold(2);
+        return;
+      }
+      if (stage === 1) {
+        // A pixel of margin, so a row exactly at the edge does not flip.
+        if (!short(room - m.freed[0] - 1)) return setStage(0);
+        if (short(room) && foldLabelWidth(rowEl) > 0) fold(2);
+        return;
+      }
+      if (short(room - m.freed[1] - 1)) return;
+      if (m.freed[0] > 0) return setStage(short(room - m.freed[1] - m.freed[0] - 1) ? 1 : 0);
+      setStage(0);
     };
     measureRef.current = measure;
     measure();
@@ -489,7 +538,7 @@ function useTitleRowFold(
     if (title.current) observer.observe(title.current);
     return () => observer.disconnect();
   }, [row, title]);
-  return enabled && folded;
+  return enabled ? stage : 0;
 }
 
 export interface StudioItemHeaderProps {
@@ -554,8 +603,8 @@ export function StudioItemHeader({
   const titleTooltip = cutTitle ? [cutTitle, titleProps?.title].filter(Boolean).join('\n') : titleProps?.title;
   // objectstack#29693 — the identity chips and the item tools fold into the
   // ⋯ menu before the title drops below its readable width.
-  const ownTriggerRef = React.useRef<HTMLButtonElement | null>(null);
-  const folded = useTitleRowFold(foldMenu !== undefined, titleRowRef, titleRef, ownTriggerRef);
+  const foldStage = useTitleRowFold(foldMenu !== undefined, titleRowRef, titleRef);
+  const folded = foldStage > 0;
   const [tools, setToolsState] = React.useState<StudioFoldedTool[]>([]);
   const setTools = React.useCallback((next: StudioFoldedTool[] | null) => setToolsState(next ?? []), []);
   const foldValue = React.useMemo<StudioItemHeaderFoldValue | null>(
@@ -587,14 +636,16 @@ export function StudioItemHeader({
           </span>
         )}
         {(actions || (ownMenu && hasFolded)) && (
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div
+            className="group/item-actions ml-auto flex shrink-0 items-center gap-2"
+            data-fold={foldStage === 2 ? 'labels' : undefined}
+          >
             <StudioItemHeaderFoldContext.Provider value={foldValue}>
               <StudioFoldRowContext.Provider value={titleFold}>{actions}</StudioFoldRowContext.Provider>
               {ownMenu && hasFolded && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
-                      ref={ownTriggerRef}
                       type="button"
                       data-testid={ownMenu.testId}
                       aria-label={ownMenu.label}
