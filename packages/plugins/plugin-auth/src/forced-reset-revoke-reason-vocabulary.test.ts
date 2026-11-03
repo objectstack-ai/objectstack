@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SysApiKey, SysSession } from '@objectstack/platform-objects/identity';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation';
+import { INTERACTIVE_REVOKE_REASON } from './session-tombstone';
 import { managedExtensionEditableFields, managedExtensionFields } from './managed-extension-fields';
 
 // `sys_session.revoke_reason` is free text; its description is the only
@@ -10,6 +11,15 @@ describe('sys_session.revoke_reason vocabulary', () => {
     expect(FORCED_RESET_REVOKE_REASON).toBe('admin_password_reset');
     const description = String((SysSession.fields as any).revoke_reason.description);
     expect(description).toContain(FORCED_RESET_REVOKE_REASON);
+  });
+
+  it('names every value the interactive-revoke ledger writes, the password-reset doors\' included', () => {
+    const description = String((SysSession.fields as any).revoke_reason.description);
+    const written = [...new Set(Object.values(INTERACTIVE_REVOKE_REASON))].sort();
+    expect(written).toEqual(['admin', 'password_reset', 'user_revoked']);
+    for (const value of written) {
+      expect({ value, named: new RegExp(`\\b${value}\\b`).test(description) }).toEqual({ value, named: true });
+    }
   });
 });
 

@@ -369,7 +369,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "Motivo de la revocación",
-        help: "Por qué se revocó la sesión (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, …)."
+        help: "Por qué se revocó la sesión (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
       active_organization_id: {
         label: "Organización activa"

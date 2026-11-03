@@ -24,13 +24,19 @@
  * (`auth-manager-auth-instance.ts`), and every door that sets a password from a
  * reset token or code inherits the rule without a door of its own.
  *
- * What an ended session leaves behind is not what the forced reset leaves. The
- * reset paths are in neither the interactive-revoke ledger nor the erasure
- * paths (`session-tombstone.ts`), so the session rows are deleted, not
- * stamped: no `revoked_at` / `revoke_reason` trail is written. No `logout`
- * audit row is written either — `logoutEventFor` (`auth-session-audit.ts`)
- * records a `/sign-out` alone. And the account's API keys are untouched; the
- * forced reset's key revocation is its own switch.
+ * A session a password reset ends leaves a revocation trail. Every reset door
+ * — the two above, and the email-OTP door on its own path — is in the
+ * interactive-revoke ledger (`session-tombstone.ts`,
+ * `INTERACTIVE_REVOKE_REASON`) with the value `password_reset`, and is not an
+ * erasure path. better-auth's bulk delete reaches the adapter's per-row
+ * reconcile, so each session row is stamped in place rather than deleted —
+ * `expires_at` a second in the past, `revoked_at`, `revoke_reason:
+ * password_reset` — and is hidden from better-auth's session reads, so the
+ * session answers 401. The value is not the forced reset's
+ * `admin_password_reset`: the row says who ended the session. No `logout`
+ * audit row is written — `logoutEventFor` (`auth-session-audit.ts`) records a
+ * `/sign-out` alone. And the account's API keys are untouched; the forced
+ * reset's key revocation is its own switch.
  *
  * ## The declared key
  *
