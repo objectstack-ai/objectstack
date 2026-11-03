@@ -2481,10 +2481,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.ledger.toggleFailedHttp': 'Could not change activation (HTTP {status}).',
   'engine.studio.auto.ledger.toggleFailed': 'Could not change activation.',
   'engine.studio.auto.on': 'On',
-  // objectstack#29705 — the Studio state vocabulary's "switched off", the word
-  // the landing's count already uses.
-  'engine.studio.auto.off': 'Switched off',
-  'engine.studio.auto.offTitle': 'Switched off — will not run',
+  'engine.studio.auto.off': 'Off',
+  'engine.studio.auto.offTitle': 'Disabled — will not run',
   'engine.studio.auto.onBound': 'Enabled · bound to its trigger',
   'engine.studio.auto.onUnbound': 'Enabled · no trigger (run manually)',
   // objectui#11779 — an enabled flow whose declared trigger is not armed on this

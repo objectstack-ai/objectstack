@@ -15,9 +15,9 @@ describe('FlowStatusDot', () => {
     expect(screen.getByText('On')).toBeTruthy();
   });
 
-  it('shows "Switched off" for a disabled flow', () => {
+  it('shows "Off" for a disabled flow', () => {
     render(<FlowStatusDot state={{ enabled: false, bound: false }} locale="en" />);
-    expect(screen.getByText('Switched off')).toBeTruthy();
+    expect(screen.getByText('Off')).toBeTruthy();
   });
 
   it('renders nothing when the flow has no runtime state (never published)', () => {

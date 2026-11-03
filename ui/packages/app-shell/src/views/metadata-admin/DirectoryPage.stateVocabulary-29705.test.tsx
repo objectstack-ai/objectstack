@@ -200,7 +200,8 @@ const VOCABULARY: ReadonlyArray<{ state: string; key: string; en: string; zh: st
   { state: 'can be added', key: 'engine.studio.customize.addable', en: 'Can be added', zh: '可新增' },
   { state: 'customized', key: 'engine.customizationMark.customized', en: 'Customized ({baseName})', zh: '已定制（{baseName}）' },
   { state: 'added', key: 'engine.customizationMark.added', en: 'Added', zh: '新增' },
-  { state: 'switched off', key: 'engine.studio.auto.off', en: 'Switched off', zh: '已停用' },
+  // en still reads "Off" here; its move to "Switched off" is objectstack#29729.
+  { state: 'switched off', key: 'engine.studio.auto.off', en: 'Off', zh: '已停用' },
 ];
 
 /** Every other key that draws one of the states, and the word it must carry. */
@@ -208,7 +209,6 @@ const SAME_WORD: ReadonlyArray<{ key: string; en: string; zh: string }> = [
   { key: 'engine.directory.customizations.tile', en: 'customized', zh: '已定制' },
   { key: 'engine.studio.landing.customizations.customized', en: 'customized', zh: '已定制' },
   { key: 'engine.studio.landing.customizations.switchedOff', en: 'switched off', zh: '已停用' },
-  { key: 'engine.studio.auto.offTitle', en: 'Switched off', zh: '已停用' },
   { key: 'engine.directory.hideReadOnly', en: 'read-only', zh: '只读' },
 ];
 
@@ -239,8 +239,6 @@ describe('the state vocabulary census (objectstack#29705)', () => {
     }
     for (const value of Object.values(EN)) for (const s of RETIRED_SPELLINGS.en) expect(value).not.toBe(s);
     for (const value of Object.values(ZH)) for (const s of RETIRED_SPELLINGS.zh) expect(value).not.toBe(s);
-    // "Off" alone was the second spelling of switched off.
-    expect(Object.entries(EN).filter(([k, v]) => k.startsWith('engine.studio.auto.') && v === 'Off')).toEqual([]);
   });
 
   it('typeStateWord: the mapping in every context', () => {
