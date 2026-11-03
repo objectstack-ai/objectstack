@@ -371,6 +371,26 @@ result set — a response indistinguishable from a successful query.
 **Fix:** Use pagination (`limit`/`offset` or cursor-based) for large datasets. Batch operations for bulk creates.  
 **Retry:** `no_retry`
 
+### `QUERY_PAGE_SIZE_EXCEEDED`
+**Cause:** The deployment sets `OS_DATA_MAX_PAGE_SIZE` and a list or analytics
+read named a `limit` (`$top`, `top` or `limit`) above it, or an analytics read
+that named no `limit` answered more rows than `OS_DATA_DEFAULT_PAGE_SIZE`. The
+message names the maximum (or the default).  
+**Fix:** Name a `limit` within the maximum and page with `offset`. See
+[Read limits a deployment may set](/docs/api/data-api#read-limits-a-deployment-may-set).  
+**Why it is an error and not a shorter page:** a clamped page is a different
+page from the one asked for, so a caller paging by its own `limit` would skip
+rows, and an analytics answer has no `hasMore` to say it was cut.  
+**Retry:** `no_retry`
+
+### `QUERY_ROW_BUDGET_EXCEEDED`
+**Cause:** The deployment sets `OS_DATA_QUERY_ROW_BUDGET` and the read's
+`offset` plus its rows would walk more than that budget. The message names the
+budget.  
+**Fix:** Narrow the read with a filter, or use a smaller `offset` and `limit`.
+See [Read limits a deployment may set](/docs/api/data-api#read-limits-a-deployment-may-set).  
+**Retry:** `no_retry`
+
 ---
 
 ## Authentication Errors (401)
