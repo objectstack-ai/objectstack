@@ -804,7 +804,12 @@ const ARRAYS_PROBE = `
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 const m = await import(pathToFileURL(process.argv[2]).href);
-const digest = (c) => createHash('sha256').update(JSON.stringify(c, (k, v) => (typeof v === 'function' ? 'fn:' + v.toString() : v))).digest('hex');
+const source = (v) => {
+  const text = v.toString();
+  if (/\\(0,\\s*import_[\\w$]+\\./.test(text)) throw new Error('arrays probe: a function was loaded as CommonJS (its imports are rewritten), so its source is not comparable');
+  return 'fn:' + text;
+};
+const digest = (c) => createHash('sha256').update(JSON.stringify(c, (k, v) => (typeof v === 'function' ? source(v) : v))).digest('hex');
 const byMajor = {};
 for (const k of Object.keys(m.CONVERSIONS_BY_MAJOR)) byMajor[k] = m.CONVERSIONS_BY_MAJOR[k].map((c) => c.id);
 process.stdout.write(JSON.stringify({
@@ -839,6 +844,10 @@ function arraysProof(ref) {
   try {
     const probe = join(scratch, 'probe.mts');
     writeFileSync(probe, ARRAYS_PROBE);
+    // Both trees load as ES modules. Under the spec package's CommonJS default the loader rewrites every
+    // imported call to `(0, import_x.name)(…)`, so a moved entry's function source would differ only by the
+    // loader's spelling of its import (measured on #29987: 93 of 112 digests). The probe refuses that spelling.
+    writeFileSync(join(scratch, 'package.json'), '{"type":"module"}\n');
     // Base: this tree's src, with conversions/ exactly as REF has it.
     const baseSrc = join(scratch, 'base-src');
     cpSync(join(ROOT, SPEC_REL, 'src'), baseSrc, { recursive: true });
@@ -850,7 +859,9 @@ function arraysProof(ref) {
     execFileSync('tar', ['-xf', tar, '-C', unpack]);
     cpSync(join(unpack, CONV_REL), join(baseSrc, 'conversions'), { recursive: true });
     const before = loadTables(join(baseSrc, 'conversions', HOST_BASENAME), probe);
-    const after = loadTables(HOST_PATH, probe);
+    const headSrc = join(scratch, 'head-src');
+    cpSync(join(ROOT, SPEC_REL, 'src'), headSrc, { recursive: true });
+    const after = loadTables(join(headSrc, 'conversions', HOST_BASENAME), probe);
     const failures = compareTables(before, after);
     return {
       failures,
