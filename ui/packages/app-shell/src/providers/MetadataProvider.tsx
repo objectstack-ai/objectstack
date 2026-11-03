@@ -754,6 +754,56 @@ function bundledViews(items: AppBundleItems): BundledRead<unknown[]> {
   return hit;
 }
 
+/**
+ * objectstack#29552 — whether an app document's navigation reaches
+ * `objectName`: an `object` entry naming it in the trees the server's bundle
+ * walks (`appNavigationReach` in `@objectstack/rest`): top-level `navigation`,
+ * each area's `navigation`, and `children` at any depth.
+ */
+function navigationReachesObject(app: unknown, objectName: string): boolean {
+  const walk = (entries: unknown): boolean =>
+    Array.isArray(entries) &&
+    entries.some((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const e = entry as Record<string, unknown>;
+      return (e.type === 'object' && e.objectName === objectName) || walk(e.children);
+    });
+  if (!app || typeof app !== 'object') return false;
+  const a = app as Record<string, unknown>;
+  return (
+    walk(a.navigation) ||
+    (Array.isArray(a.areas) && a.areas.some((area) => walk((area as Record<string, unknown> | null)?.navigation)))
+  );
+}
+
+/**
+ * objectstack#29552 — the names of the bundled objects with a `lookup` /
+ * `master_detail` field whose `reference` names `objectName`, the reading of
+ * "points at" the server's `inboundRelationObjects` and the record page's
+ * `deriveRelatedLists` both make. One array per (bundle answer, object), so a
+ * reader's memo on it holds.
+ */
+const BUNDLED_REFERENCING = new WeakMap<AppBundleItems, Map<string, BundledRead<readonly string[]>>>();
+function bundledReferencing(items: AppBundleItems, objectName: string): BundledRead<readonly string[]> {
+  let byObject = BUNDLED_REFERENCING.get(items);
+  if (!byObject) BUNDLED_REFERENCING.set(items, (byObject = new Map()));
+  let hit = byObject.get(objectName);
+  if (!hit) {
+    const names: string[] = [];
+    for (const [name, entry] of items.get('object') ?? []) {
+      if (name === objectName) continue;
+      const fields = (entry.item as { fields?: unknown } | null)?.fields;
+      const defs: any[] = Array.isArray(fields) ? fields : fields && typeof fields === 'object' ? Object.values(fields) : [];
+      if (defs.some((f) => (f?.type === 'lookup' || f?.type === 'master_detail') && f.reference === objectName)) {
+        names.push(name);
+      }
+    }
+    hit = Object.freeze({ state: 'hit' as const, value: Object.freeze(names) });
+    byObject.set(objectName, hit);
+  }
+  return hit;
+}
+
 /** What a reader that has no views to compose with yet holds. */
 const NO_VIEWS: unknown[] = [];
 
@@ -1015,6 +1065,32 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       const bundledObjects = peek.items.get('object');
       for (const name of objectNames) if (!bundledObjects?.has(name)) return BUNDLE_MISS;
       return bundledViews(peek.items);
+    },
+    [peekBundle],
+  );
+  const readBundledReferencing = useCallback(
+    (appName: string, objectName: string): BundledRead<readonly string[]> => {
+      const peek = peekBundle();
+      if (!peek) return BUNDLE_MISS;
+      if (peek.status !== 'ready') return BUNDLE_PENDING;
+      const apps = peek.items.get('app');
+      const app = apps?.get(appName);
+      if (!app) {
+        // objectstack#29552 — the bundle held is another app's: `appName` is
+        // entered from an effect of this same commit, so the read stays
+        // pending, and this provider's effect below looks again once it is
+        // (its load re-renders the readers when it lands). A bundle that holds
+        // no app at all is the answer for this one: there is none.
+        if (apps && apps.size > 0) {
+          bundleNoneAskedRef.current = true;
+          return BUNDLE_PENDING;
+        }
+        return BUNDLE_MISS;
+      }
+      if (!navigationReachesObject(app.item, objectName) || !peek.items.get('object')?.has(objectName)) {
+        return BUNDLE_MISS;
+      }
+      return bundledReferencing(peek.items, objectName);
     },
     [peekBundle],
   );
@@ -1802,8 +1878,8 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   // A new identity per version, so a reader re-renders when the bundle lands.
   const bundledReads = useMemo<BundledReads>(() => {
     void version;
-    return { item: readBundledItem, viewsFor: readBundledViews };
-  }, [version, readBundledItem, readBundledViews]);
+    return { item: readBundledItem, viewsFor: readBundledViews, objectsReferencing: readBundledReferencing };
+  }, [version, readBundledItem, readBundledViews, readBundledReferencing]);
 
   return (
     <MetadataCtx.Provider value={value}>
