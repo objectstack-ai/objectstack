@@ -31,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
+
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import {
@@ -144,7 +146,7 @@ describe('revokeSessionsOnPasswordReset retirement — ADR-0087 registration', (
 // The key name is unique to this setting (better-auth's option of the same
 // name aside — see the exclusions), so the matcher is the key in KEY POSITION
 // (`revokeSessionsOnPasswordReset:` or its quoted JSON form), with comment
-// contents masked in code; the tombstone declaration itself
+// contents masked in code (`scripts/js-comment-mask.mjs`); the tombstone declaration itself
 // (`: retiredKey(`) is never an offence. Excluded, each for its reason:
 //   - this file, which writes the key to prove the refusal;
 //   - plugin-auth's `password-reset-ends-sessions.test.ts`, which writes it as
@@ -179,12 +181,6 @@ describe('tree-scoped absence: nothing inside the declared radius still writes e
   const JSON_SCHEMA_PROJECTION = 'packages/spec/json-schema/';
 
   const IN_KEY_POSITION = /(^|[\s{,(])["']?revokeSessionsOnPasswordReset["']?\s*:(?!\s*retiredKey\()/g;
-
-  /** Code with `//` and block-comment CONTENTS blanked, offsets kept. */
-  const maskComments = (src: string): string =>
-    src
-      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-      .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, (m, lead: string) => lead + ' '.repeat(m.length - lead.length));
 
   const walk = (dir: string, out: string[]) => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
