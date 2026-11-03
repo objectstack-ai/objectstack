@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note.
 
 > **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
@@ -39,6 +39,9 @@
 > environment hosting several organizations is outside S1: there a no-organization read is
 > refused, never answered from an arbitrary organization's grant. Not taken: a second auth block
 > on the datasource (two grants per vendor that drift), and a static key for OAuth sources.
+> *(Amended 2026-11-03, see the note under §10: in such an environment, whose rows an external
+> object serves — one organization's or every organization's — is the object's own declaration,
+> and an object that makes none is refused at boot rather than read as shared.)*
 
 > **Amendment note (2026-10-27, ADR-0143) — attribution only, no decision changes.** ADR-0018,
 > ADR-0022, ADR-0023, ADR-0024 and ADR-0097 put OAuth2 refresh and per-tenant connection lifecycle
@@ -782,6 +785,9 @@ managed Postgres for low-latency joins.
 - **Tenant scope**: a `Datasource` is environment-scoped (per ADR-0006
   v4). It is not organisation-overlay-customisable; admins of one
   environment cannot see another environment's external datasources.
+  *(Amended 2026-11-03, see the note below: the datasource's scope is the
+  environment; each external OBJECT's organization scope is its own
+  declaration, owed under a walled tenancy posture.)*
 - **Permissions**: ACLs apply unchanged. A new optional convenience —
   `Datasource.external.requirePermission?: string` — lets admins gate
   the entire datasource behind a single role without writing per-object
@@ -790,6 +796,43 @@ managed Postgres for low-latency joins.
   Postgres logical decoding), the `realtime` service may opt-in;
   otherwise federated objects fall back to poll-based change feeds.
   This is out of scope for v1.
+
+> **Amendment note (2026-11-03 — maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a);
+> `plugin-security/src/external-organization-scope.ts`) — under a walled tenancy posture every
+> external object states its organization scope.** The platform provisions no storage for an
+> external object, so the `organization_id` the registry injects into its schema is a column the
+> remote may not carry, and whose rows the object serves — one organization's or every
+> organization's — is a fact only its author knows. Under the `isolated` and `group` postures
+> (ADR-0105 D1) the object therefore states it, in one of three ways:
+>
+> - its own `organization_id` field — the remote rows carry the organization column and the driver
+>   returns it; a remote column of another name is mapped onto it with
+>   `external.columnMap: { <remote column>: 'organization_id' }`. The Layer 0 wall (ADR-0095 D1)
+>   keys on it, and the engine's floor (`external-driver-floor.ts`) re-applies the predicate to
+>   whatever the driver answered, so a driver that ignores `where` stays walled and a row without
+>   the column reads to no one;
+> - `tenancy: { enabled: false }` — the object is shared by every organization;
+> - `systemFields: { tenant: false }` — the same opt-out, spelled on the system fields
+>   (`systemFields: false` includes it).
+>
+> An external object registered by the time the boot completes that states none is refused BY
+> NAME from `SecurityPlugin`'s `kernel:ready` handler, beside the ADR-0131 D5 refusal, naming the
+> three ways out. One registered after the boot (Studio, a runtime datasource) that states none is
+> DENIED by the Layer 0 verdict (`computeTenantLayer0Verdict` answers `deny`: zero rows on every
+> read, every write refused) and the plugin says so once — the shape the owner anchor takes when no
+> owner is provable. Neither door reads an unstated scope as "shared": an unstated scope is a
+> configuration defect and fails toward isolation. `tenancy.tenantField` naming a column other
+> than `organization_id` is closed the same way on an external object — the wall keys on
+> `organization_id` alone, and a declared tenant field is read only by storage the platform
+> provisions — so it is refused at boot and denied after it, with `external.columnMap` onto
+> `organization_id` or `tenancy: { enabled: false }` as the remedy. The `single` posture enforces no
+> wall, owes no declaration and is unchanged. Not taken: reading an unstated scope as shared under
+> a wall (the state this note replaces: the wall stood down on an external object whose anchor
+> was the registry's, so its rows answered to every organization), and enforcing a declared
+> `tenantField` on an external object (a second wall column would need the verdict schema and the
+> deny sentinel to carry it; `columnMap` already reaches the one column the wall reads). The
+> reference test is `packages/runtime/src/plugin-driver-external-object.spike.test.ts`, block (h);
+> the upgrade entry is the ADR-0087 D3 semantic `external-object-organization-scope-declared`.
 
 > **Amendment note (2026-10-31, #28208 — ruling 6525963988 on #27687, option 5; the failure text and
 > the collision claim as PR #28325 left them) — a third credential route, for a datasource defined

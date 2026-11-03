@@ -427,6 +427,54 @@ is unmapped is tracked in
 [#27332](https://github.com/objectstack-ai/objectstack/issues/27332).
 </Callout>
 
+### Several organizations on one deployment: declare the object's scope
+
+A deployment that walls its organizations apart (`OS_TENANCY_POSTURE=isolated` or `group`)
+stores every platform row with an `organization_id` and reads it back through that wall. A
+virtual object has no platform row: whether the rows your driver serves belong to one
+organization or to every organization is something only you know, so **under a walled
+posture every external object states its organization scope**, in one of three ways.
+
+```typescript
+// Walled: the remote rows carry the organization column and the driver returns it.
+// A member of organization A reads only rows whose organization_id is A.
+{
+  name: 'berth_slot',
+  datasource: 'port_schedule',
+  external: { remoteName: 'slots' },
+  fields: { name: { type: 'text', label: 'Name' }, organization_id: { type: 'text', label: 'Organization' } },
+}
+
+// Shared: every organization reads the same rows (a reference catalogue, a tariff table).
+{ name: 'tariff', datasource: 'port_schedule', external: { remoteName: 'tariffs' }, tenancy: { enabled: false }, fields: { /* … */ } }
+
+// Shared, spelled on the system fields: the same declaration.
+{ name: 'tariff', datasource: 'port_schedule', external: { remoteName: 'tariffs' }, systemFields: { tenant: false }, fields: { /* … */ } }
+```
+
+What the reference test pins, under `isolated` with two organizations (block (h)):
+
+- **A member of A reads only A's rows** of a walled object, and the driver is asked with
+  `where: { organization_id: 'A' }` — forward it to the remote as you forward any other
+  condition.
+- **A driver that ignores `where` stays walled.** The engine re-applies the whole query to
+  the rows the driver returns, so a remote that cannot filter by organization still answers
+  only the caller's rows to the caller.
+- **A row missing the organization column reads to no one.**
+- **An external object that states none of the three fails the boot**, by name, with the
+  three ways out in the error. The boot that runs the `single` posture owes no declaration:
+  the first seven blocks of the reference test boot exactly such a stack.
+
+A remote whose organization column has another name is mapped onto the wall's column with
+`external.columnMap: { org_ref: 'organization_id' }` on a built-in SQL driver; on a plugin
+driver, return the column as `organization_id` yourself — the engine does not apply
+`columnMap` there. `tenancy.tenantField` does not do this: the wall keys on `organization_id`
+alone, so on an external object a `tenantField` naming another column is refused at boot
+with the same remedy. An object registered after the boot (a Studio import, a runtime
+datasource) that states nothing is not refused — it is **denied**: every read answers zero
+rows and every write is refused, and the boot log says why, until it declares one of the
+three.
+
 ### The engine re-applies every query
 
 For a datasource whose `schemaMode` is not `managed` and whose `driver` is not a built-in
