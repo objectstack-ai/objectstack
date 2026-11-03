@@ -2,8 +2,8 @@
   "number": 29710,
   "kind": "issue",
   "title": "Gate `check:package-naming`: every `packages/services/` package is `@objectstack/service-*`, and the `@objectstack/plugin-*` set is a ratchet frozen at today's ten",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,7 @@
   "labels": [
     "domain:devx",
     "enhancement",
-    "pm:dispatched"
+    "priority:p2"
   ],
   "assignees": [
     "os-warren"
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T02:18:30Z",
-  "updated_at": "2026-11-03T02:22:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T04:37:09Z",
+  "closed_at": "2026-11-03T04:34:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29710",
   "body": "domain:server#2 · os-warren · session_01JQwxbXKRzgnVvjzxaYxLUf\n\n立卡门类别: ③ 维护者直派. 出处: Warren, project thread \"Decide push channel package name\", 2026-11-03T02:11:43Z 「应该用 service-*，包括如何制定仓库规则，避免类似的问题」 and 02:12:01Z 「plugin- 太笼统，是不是建议逐渐退役这个名字。」; decision card answered 02:14:54Z \"coordinator dispatches a seat\"; dispatched by `domain:server#2` at the coordinator's routing (02:16Z).\n业务理由: ③ — the maintainer's words above. Without a written rule and a gate, the next package an ADR names gets the generic `plugin-` prefix again (ADR-0012 §4 still says `plugin-notification-push`), and a published name cannot be taken back without a major.\n动手的读者: a `domain:devx` card thread dispatched by `domain:server#2`: one new gate `scripts/check-package-naming.mjs` wired like its siblings. Suggested-grade: p2 · the mechanical half of the maintainer-directed rule.\n查重 (`gh api search/issues`, includes closed, 2026-11-03T02:17Z): title `\"package name\" ADR precedent` 0, `naming rule packages` 0, `plugin prefix naming` 0, `package naming gate` 3 (all closed, dispatch-gates / lock-family findings, unrelated), `\"service-\" prefix` 4 (service-storage / service-sms behaviour, unrelated). Nearest open neighbour #29663 (pm-dispatch: a new key or export NAME settled by precedent is the seat's call) covers authorable keys and exports, not package names; 0 duplicates. #29041 is the consumer (`service-push`).\n\n## Context\n\n- #29041 asked for the push channel. ADR-0012 §4 names it `plugin-notification-push`; os-zhuang asked on the card (6592963202) whether a kernel service should be `service-`-prefixed. Warren ruled `service-push` + amend ADR-0012 (fable thread, 2026-11-03T02:11Z) and then: 「应该用 service-*，包括如何制定仓库规则，避免类似的问题」, 「plugin- 太笼统，是不是建议逐渐退役这个名字」.\n- Measured at `3d5933a9`: no `plugin-notification-*` package exists; ADR-0012's inbox/email/webhook names were never built either. The channels that shipped are `sms-channel.ts` / `email-channel.ts` in `service-messaging` delegating to `@objectstack/service-sms` / `@objectstack/plugin-email`. `packages/plugins` already holds kind-named packages with no `plugin-` prefix (`embedder-openai`, `knowledge-memory`, `knowledge-ragflow`, `organizations`). The only written placement rule is the AGENTS.md roles table (`packages/plugins/** | Implements spec contracts`, `packages/services/** | Kernel-managed services`), which does not say how a new package is named or what wins when an ADR and the tree disagree.\n- The ten `plugin-*` packages are published names with 15–392 references each outside their own directory (`plugin-security` 392, `plugin-auth` 259, `plugin-hono-server` 183, `plugin-audit` 157, `plugin-sharing` 126, `plugin-approvals` 93, `plugin-email` 79, `plugin-webhooks` 48, `plugin-dev` 22, `plugin-pinyin-search` 15). Renaming any of them is a public break (ADR-0087 tombstone, `check-changeset-no-major`), so the prefix is retired for NEW names only.\n\n## Wanted (the gate; the rule text is #29709)\n\n1. `check:package-naming` (`scripts/check-package-naming.mjs`, on `scripts/workspace-enumerator.mjs`), wired into `check:all` / CI like `check:workspace-manifest-cycles`:\n   - every package under `packages/services/` is named `@objectstack/service-*` and its directory basename equals the unscoped name;\n   - the set of `@objectstack/plugin-*` names is a ratchet frozen at today's ten (pattern: `scripts/check-skills-token-ratchet.mjs`); a new one fails with the remedy \"name it by its kind\";\n   - a `--self-test` arm like the sibling gates.\n2. Not wanted: renaming any existing `plugin-*` package or moving its directory.\n\n## Acceptance\n\n- The gate reds on a fixture package `packages/services/plugin-x` and on an eleventh `@objectstack/plugin-*`, and is green on `main`.\n- The #29041 PR (`service-push`) passes the new gate unchanged.\n- The frozen set equals the ten named in #29709's rule text."

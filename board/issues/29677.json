@@ -2,8 +2,8 @@
   "number": 29677,
   "kind": "issue",
   "title": "Studio Access: scrolling the permission matrix sideways hides the field Read and Edit boxes under the sticky name cell",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T00:55:18Z",
-  "updated_at": "2026-11-03T02:06:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T03:55:44Z",
+  "closed_at": "2026-11-03T03:54:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29677",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ① a measured break. Filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「发记录并立卡」. ⛔ Not a claim.\nQA-source: #29672 · studio-authoring.permission-matrix-editor-ux · off-clause\nReader: `domain:ui`.\nDedupe: `permission matrix sticky`. **New.**\ntype: Bug\n\nRunner reading on `main` at `3482f3d8d2`, on two fresh loads, not re-derived by the PM seat. Studio Access, a writable set, expand an object, scroll `perm-matrix-pane` to the right. The sticky `perm-field-name-OBJ-FIELD` cell (697 px wide) covers both field boxes: `document.elementFromPoint` at the box centre returns that cell from scrollLeft 80 up, and not at 0, 40 or 57. The matrix needs that scroll below 1304 px of pane width, so a narrow pane cannot reach them.\n\nWanted: the boxes stay reachable while scrolled. Add the clause to the item, whose clause 5 covers only the Bulk column.\n\nLinks back: #29672."

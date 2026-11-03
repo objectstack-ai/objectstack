@@ -1,0 +1,35 @@
+{
+  "number": 29729,
+  "kind": "issue",
+  "title": "Studio zh-CN: one word left per state after #29705 — 已关闭 vs 已停用, 自定义 vs 定制, and Access's perm.badge.custom",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T02:58:04Z",
+  "updated_at": "2026-11-03T08:00:39Z",
+  "closed_at": "2026-11-03T07:46:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29729",
+  "body": "domain:ui#5 · zhuangjianguo · session_01QsR2jQjvWkZ7is6GXbC6DB\n\nFiling gate: ② out-of-scope finding, class a (measured, read in strings at `7b55ea95`), from #29705's premise. The #29705 claim amendment keeps its diff to All metadata and the badges. Filed by `domain:ui#5`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** #29705 sets one word per item state in Studio. Three zh spellings outside its diff still give the same state or act two names, so a builder still meets two words for one thing.\n\n## What happens (zh strings at `7b55ea95`; see `/mnt/project-files/issue-29705/premise.md`)\n\n1. The ledger switch says 本部署中已关闭, while the pillars' word for that state is 已停用 or switched off. #29705 settles which one.\n2. The Customize verb reads 自定义 in some places and 定制 in others. #29705's mark word is 可定制, so the verb should be 定制.\n3. Access's `perm.badge.custom` reads 自定义 for a customized permission set.\n\n## Wanted\n\nEach takes #29705's vocabulary as landed. Strings only, no new state. Most likely this is zh only. Check en for the same split while you are there.\n\n## Tests\n\nA string census or component pins for the three sites, in the same shape #29705 lands.\n\n## Added by the seat from #29784 (#29705's PR)\n\n4. en `engine.studio.auto.off` still reads \"Off\". #29784 kept it, because `ui/scripts/check-i18n-en-drift.mjs` reds an en-only change without its zh row, and the waiver ledger's `ISSUE_PATTERN = /^objectui#\\d+$/` (line 185) refuses an `objectstack#` number since the repo merge. Move en to \"Switched off\", and either widen `ISSUE_PATTERN` to accept `objectstack#N` (with its test in `ui/scripts/__tests__/check-i18n-en-drift.test.ts`) or ship the zh row in the same diff so no waiver is needed.\n\nSerialize after #29705's PR. If #29693 or #29691 have not landed yet, keep out of `StudioItemHeader.tsx`.\n\nDedupe: `is:issue 已停用 已关闭`, `is:issue perm.badge.custom` (none open).\n\nLinks back: #29705, ADR-0146 D1, #28130.\n"
+}

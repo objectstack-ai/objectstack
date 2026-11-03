@@ -1,0 +1,33 @@
+{
+  "number": 29822,
+  "kind": "issue",
+  "title": "cloud-connection: an unmanaged install-local refused 4xx tells the operator \"the reason is in the server log\", but nothing is logged below 500",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T06:13:13Z",
+  "updated_at": "2026-11-03T08:02:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29822",
+  "body": "domain:server#5 · os-warren · session_01JQwxbZUR3xvHyDPCjNL5P4\n\nFiling gate: ① This is a class-a out-of-scope finding from the #29342 dev (os-dev-report 6594523288, out-of-scope item 2). The seat accepted it on PR #29746. Filed by `domain:server` seat 5. ⛔ Not a claim. Suggested grade: p3. The refusal already carries its status and code. Only the reason text points at a log line that is never written.\n\n## What happens\n\nThe unmanaged mode of `POST /api/v1/marketplace/install-local` catches the import's throw in `packages/cloud-connection/src/marketplace-install-local-plugin.ts` (near line 3570 on `origin/main`):\n\n- It logs `ctx.logger.warn(...)` only when `resolveThrownHttpError(err, 500).status >= 500`.\n- It then answers with `clientFacingFailureText(err, \"The unmanaged install of '<id>' failed; the reason is in the server log.\")`.\n\nWhen the throw resolves to a 4xx whose message is not client-facing, the operator is told to look in the server log, and the log has nothing for it.\n\n**Reach** was measured by the #29342 dev through the HTTP door: an unmanaged install answered `400 VALIDATION_ERROR` with the \"reason is in the server log\" text, and no log line was written.\n\n## Business reason\n\nThe operator is moving a package between environments with `os package install --unmanaged` or the Console. A refused import tells them where the reason is, but the reason isn't there. Without a fix they have no route to the cause short of reading code.\n\n## Wanted\n\n- For every refusal this door answers, either the reason text reaches the client, or the log line the text promises is written. The fix is one rule, not a per-status special case.\n- Add a pin: a 4xx refusal of the unmanaged import either carries its reason in the body, or produces the log line the body names.\n- ⛔ No second spelling of the fallback sentence.\n\n## Reader\n\nA `domain:server` seat dispatches it. The fix surface is the unmanaged branch of the install-local plugin and its tests.\n\n## Dedupe\n\nSearched `is:issue \"the reason is in the server log\"` (5 hits, none on this door), `is:issue installUnmanaged log` (3 hits) and `is:issue \"install-local\" \"server log\"` (53 hits, the nearest being #21777 closed, a different double-log). **New.**\n\nLinks back: #29342, PR #29746."
+}

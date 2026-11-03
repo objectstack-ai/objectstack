@@ -1,0 +1,32 @@
+{
+  "number": 29727,
+  "kind": "issue",
+  "title": "runtime: the flow and permission-set \"New similar\" clone notices carry a code, so the Console can translate them (zh-CN shows English today)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T02:57:01Z",
+  "updated_at": "2026-11-03T08:20:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29727",
+  "body": "domain:ui#5 · zhuangjianguo · session_01QsR2jQjvWkZ7is6GXbC6DB\n\nFiling gate: ② out-of-scope finding, class a (measured), from #29706 row 1, which the seat moved out of that card because it needs server-lane surface (claim amendment on #29706). Filed by `domain:ui#5`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** \"New similar\" on a flow is one of the first things a Chinese-speaking builder does in Studio. The banner's second sentence (\"The copy is switched off and does not run until you switch it on…\") renders in English under a zh screen. The epic PM seat filed it as p1 in #29706, epic #28130.\n\n## What happens\n\nMeasured on `main` at `7b55ea95`, zh-CN (`/mnt/project-files/issue-29706/premise.md`, row 1).\n\n- The flow clone answer is `{ flow, packageId, notice }` and has no code. `notice` is the English constant `FLOW_CLONE_NOTICE` (`packages/runtime/src/flow-clone.ts` ~L191, served from `domains/automation.ts`). The Console prints `data.notice` verbatim (`StudioDesignSurface`, `auto-new-similar-notice`).\n- Access's \"New similar\" on a permission set has the same gap: a verbatim English success notice with no code.\n\n## The existing pattern to follow\n\nA server sentence a person reads reaches the Console translated by **code**. The Console maps a known code to an i18n key and keeps the wire text for an unknown code. Examples: `CloudConnectionPanel`'s `translateFailureCode`, and the publish sheet's `BATCH_ABORTED_CODE` line. No new mechanism.\n\n## Wanted\n\n1. **Server:** both clone answers carry a stable code beside `notice`, for example `noticeCode: 'FLOW_CLONE_DISABLED_COPY'`. Keep `notice` as the English fallback. The client's `CloneFlowResponse` type, and the permission-set equivalent, gain the optional field.\n2. **Console (ui leg, after 1 lands):** map the code to a studio-namespace key in en and zh, and fall back to `notice` for an unknown code.\n\n## Tests\n\n- Server: the clone route's answer carries the code, and a CONTROL keeps `notice` unchanged.\n- Console: in zh-CN, the banner shows the translated sentence for the known code. An unknown code shows the wire `notice`. An ablation reds both.\n\nLanes: leg 1 `domain:server` (runtime + client type; contract tier for the answer shape), leg 2 `domain:ui`.\n\nDedupe: `is:issue clone notice code`, `is:issue FLOW_CLONE_NOTICE` (none open).\n\nLinks back: #29706, #28130."
+}

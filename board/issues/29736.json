@@ -1,0 +1,36 @@
+{
+  "number": 29736,
+  "kind": "issue",
+  "title": "spec(auth): declare the mobile sign-in hand-off surface (one-time-token generate/verify paths, the registered app-scheme list, any advertised feature flag) before #29714 enables it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:03:49Z",
+  "updated_at": "2026-11-03T06:47:10Z",
+  "closed_at": "2026-11-03T06:45:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29736",
+  "body": "domain:server#2 · os-warren · session_01JQwxbXKRzgnVvjzxaYxLUf\n\n立卡门类别: ④ 协调节点 — the spec slice of #29714 (carries the contract-first half of #29714; #29714 keeps the server half). Triage first-touch on #29714 (6594269680): 「the new public surface is declared in `packages/spec` by a `domain:spec` card or PR before the server PR goes ready. The server seat files it at claim」. Routed to `domain:server#2` to dispatch by the coordinator (2026-11-03 03:02Z).\n业务理由: ④ — inherits #29714's: a mobile user whose identity provider refuses embedded WebViews (Google among them) cannot sign in to the app today. #29714 (maintainer-ruled option B, mobile#148 comment 6593861138) enables better-auth's one-time-token plugin; the routes and config it adds are public, so the spec declares them first.\n动手的读者: a `domain:spec` card thread dispatched by `domain:server#2`; one spec PR under `packages/spec/src/api/` (and `kernel/public-auth-features.ts` / `system/auth-config.zod.ts` if they are touched). Suggested-grade: p2 · inherits #29714.\n查重 (includes closed): `is:issue one-time-token spec` 9 (only #29714 relevant), `is:issue AuthEndpointPaths one-time` 0, `is:issue app scheme auth spec` 45 (only #29714 relevant; #26768 / #28277 are outbound connector auth), `is:issue mobile sign-in handoff` 4 (none about this). 0 duplicates.\n\n## What main declares today\n\n- `packages/spec/src/api/auth-endpoints.zod.ts` `AuthEndpointPaths` lists better-auth paths (sign-in, session, two-factor, passkey, magic-link, device) and no `/one-time-token/*` path.\n- `packages/spec/src/system/auth-config.zod.ts` has `trustedOrigins` and no list of registered native app schemes.\n- `packages/spec/src/kernel/public-auth-features.ts` is the registry every served `features` flag must be classified in (plugin-auth's drift guard reds an unclassified one).\n\n## Wanted\n\n1. Declare the two routes #29714 serves, by the precedent of their siblings in `AuthEndpointPaths` and its request/response schemas: generate (authenticated session → single-use token, server-side only if that is #29714's shape) and verify (token, plus the interception binding #29714 chooses, e.g. a verifier → session).\n2. Declare where a deployment registers the app schemes the server may redirect a token to (key name by repo precedent, e.g. beside `trustedOrigins`; a new key name settled by precedent is the seat's call under the veto window), with its refusal for an unregistered scheme stated in the docblock.\n3. If #29714 advertises the capability on `/api/v1/auth/config` `features`, classify that flag in `public-auth-features.ts`.\n4. Coordinate the exact shapes with the #29714 card thread before the PR goes ready; this card lands first, and #29714's PR stays draft until it does.\n\n**Level:** widens the published surface: expect `Clause-②: yes` and `Metadata-protocol: added` if an authorable key is added."
+}

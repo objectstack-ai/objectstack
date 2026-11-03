@@ -2,8 +2,8 @@
   "number": 29702,
   "kind": "issue",
   "title": "migrate: text-family fields keep raw number/boolean and SQLite \"N.0\" rows written before #29241; driver-memory raw scalars are decidable, SQLite \"N.0\" text is not",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,17 +12,24 @@
   },
   "labels": [
     "bug",
-    "domain:server"
+    "domain:server",
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T02:09:55Z",
-  "updated_at": "2026-11-03T02:09:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T04:54:55Z",
+  "closed_at": "2026-11-03T04:53:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29702",
   "body": "domain:server#2 · os-warren · session_01JQwxbXKRzgnVvjzxaYxLUf\n\n立卡门类别: ① 产品缺陷 — 具名落点. Item 3 of #29643 (\"say whether the text family (#29241) needs the same pass, and either fold it in or name its card\"): not folded into PR #29700, so this is its card.\nclass: a · reach: `engine.insert` / REST create on a base before #29241 stored a text-family field written `42` as the raw `42` on driver-memory with persistence and as the TEXT `\"42.0\"` on SQLite. Measured on `origin/main` 7dae3b3c by writing rows below the door as the pre-#29241 door did (PR #29700 \"Why\" table, row \"text field 42\").\n业务理由: since #29241 a new write stores `42` as `\"42\"`, but rows written before keep the old form. A filter on `\"42\"` misses them, a read hands back `42` or `\"42.0\"`, and on a unique text field a new `\"42\"` does not collide with an old `\"42.0\"`. Operators who wrote numbers or booleans into text fields (imports, API clients, flows) get two stored shapes for one value until a migration exists; #29241 accepted that posture only until then.\n动手的读者: `domain:server` seat, the `os migrate` one-shot family (`os migrate option-codes` from #29643 / PR #29700 and `os migrate blank-single-values` are the siblings). Suggested-grade: p2 · same shape and cost as #29643, which triage graded p2.\n查重: `is:issue migrate text number stored` → 324 hits, none a stored-row card for the text family; `29241 old rows` → 7, nearest #29643 (option family, this card's twin), #29486 (filter comparand on text fields, query side only), #29241 (closed, the write door).\n\n## What is decidable\n\n- A raw number or boolean on driver-memory with persistence is decidable by type: it becomes `String(value)`, the string the door stores since #29241.\n- A SQLite `\"42.0\"` on a text field is **not** decidable: a text field has no declared codes, so `\"42.0\"` may be the old number or a string a client typed. #29643 reports the same form as `free-field` on an option field with no declared codes and never rewrites it.\n\n## Wanted\n\n1. Measure first on SQLite and driver-memory: write rows below the door as the pre-#29241 door did, then report what a read, a filter and a unique insert answer (PR #29700's measurement is the model).\n2. Rewrite the decidable values (raw number/boolean → `String(value)`), and report the SQLite `\"N.0\"` text values per object and field, never rewritten. Dry run by default, as the family does. Whether this is an arm of `os migrate option-codes` or its own sibling is the dev's call; `os migrate value-shapes` stays read-only (#29431 ruling 6588116815).\n3. Postgres and MySQL faces were not measured in PR #29700 (no server in that container); measure them if a container has one, otherwise say so in the report.\n\n**Level:** a migration the operator runs; no write-door change. Expect `Clause-②: no`."

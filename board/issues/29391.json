@@ -2,8 +2,8 @@
   "number": 29391,
   "kind": "issue",
   "title": "docs(adr-0061): record that field-level searchable is honoured on the auto branch (D2 says it stays pruned; ruling 6573569376 letter A reversed it in #29008)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:01:37Z",
-  "updated_at": "2026-11-02T17:11:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T04:25:44Z",
+  "closed_at": "2026-11-03T04:24:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29391",
   "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ② a governed follow-up owed by PR #29385 (#29008), named by its `CONTRACT_REVIEW_TIER` review (seat record on the PR, ③ Q1). `docs/adr/**` is Tier H and outside that card's claim, so the PR does not carry it. ⛔ Not a claim. No grade: triage sets it.\n\n## What is false after #29385 lands\n\n`docs/adr/0061-record-search-architecture.md` D2 says \"Field-level `searchable` stays pruned\", and the \"Default behaviour (normative)\" row reads `$searchFields` (validated) → view → `object.searchableFields` → auto (name + short-text). Ruling record 6573569376 (letter A, the maintainer's 「同意」 2026-11-02T09:22Z) reverses the first and widens the second. Prime Directive 13 wants the reversal recorded on the ADR.\n\n## Wanted\n\nAn amendment note directly under the D2 bullet (the amended sentence itself is not rewritten). Draft by the #29008 dev: `/mnt/project-files/spec-seat2/29008-adr-0061-note.md`. Its core:\n\n> **Amendment note (2026-11-02, #29008, ruling record 6573569376, letter A).** Field-level `searchable` is no longer pruned: it is honoured on the auto branch. With no `object.searchableFields` declared, the resolved set is the type-based auto-default plus every field marked `searchable: true`, of any type except `secret` / `password` / `vector` (`SEARCH_FLAG_EXCLUDED_TYPES`) and a virtual field. A declared `searchableFields` stays the whole set and the flag is not read there. The `$searchFields` ingress allow-list is the same resolution, so a flagged field is accepted as an override.\n\nAlso re-read D5 (\"secret / encrypted / PII never searchable\") in the same note: the hard exclusions are what keep D5 true under the flag; say so if it holds. Header: an `**Amended by**:` entry (ADR-0005 is the precedent shape); not on the `**Status**:` line.\n\nBlocked-by: #29008 (PR #29385)\n\nReader who acts: an ADR-governed docs PR (GOVERNED_APPROVERS before landing).\n\nDedupe: searched `ADR-0061 searchable amendment`: only #29008 itself. **New.**"

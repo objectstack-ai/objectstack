@@ -1,0 +1,35 @@
+{
+  "number": 29770,
+  "kind": "issue",
+  "title": "console: remove \"Add development environment\", its dialog branch, the DEV_ENV_* entitlement copy and the i18n keys; only \"create production environment\" remains (cloud#3487 D, card B)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T04:03:12Z",
+  "updated_at": "2026-11-03T05:32:07Z",
+  "closed_at": "2026-11-03T05:32:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29770",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate: executing a recorded ruling. objectstack-ai/cloud#3487 was ruled **D** by the maintainer on 2026-11-03 (「同意D」, 「现有的开发环境可以直接归档」, 「立卡之后立刻优先派发处理」). Every organization has exactly one environment, its production environment, and the development type is retired. Ruling of record: https://github.com/objectstack-ai/cloud/issues/3487#issuecomment-6595099217. Analysis and file surfaces: https://claude.ai/artifact/2DWMYczN7szdJHWQtC7WSD (last section).\n\n## Ask (`ui/packages/app-shell`)\n\n- Remove the \"Add development environment\" entry, the development branch of the create-environment dialog, and the `DEV_ENV_*` refusal and entitlement copy, with their i18n keys in every locale bundle.\n- Creating a production environment is the only creation path left.\n- Tests: no development-environment door renders; the production path is unchanged.\n\n## Order\n\nThis card lands with cloud card A, objectstack-ai/cloud#3501, which closes the server doors (`DEV_ENV_RETIRED`). Cloud's next framework pin carries this change. Cloud card D, which removes the development type end to end, waits for that pin.\n\n## Reader\n\nFiled and dispatched by the cloud seat at once, as the maintainer instructed."
+}

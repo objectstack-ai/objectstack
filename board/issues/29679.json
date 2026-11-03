@@ -2,8 +2,8 @@
   "number": 29679,
   "kind": "issue",
   "title": "checklist: re-point the Studio clauses the 2026-11-03 run measured as stale",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:studio",
     "domain:devx",
-    "pm:queue",
     "priority:p2",
     "tests"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T00:55:24Z",
-  "updated_at": "2026-11-03T01:59:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T06:39:54Z",
+  "closed_at": "2026-11-03T06:38:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29679",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ the run's stale-spec and assertion dispositions, one collecting card. Filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「发记录并立卡」. ⛔ Not a claim.\nQA-source: #29672 · studio-authoring.record-page-roundtrip · acceptance[0]\nQA-source: #29672 · studio-authoring.api-written-keys-survive-studio-save · acceptance[2]\nQA-source: #29672 · i18n.studio-follows-app-locale · acceptance[3]\nReader: `domain:devx` (`docs/qa/platform-checklist/**`).\ntype: checklist revision, no product change.\n\nEach item gets a revision and a `history` row; `node scripts/check-platform-checklist.mjs` stays green. Runner readings on `main` at `3482f3d8d2`.\n\n| item | what is stale | re-point to |\n|:--|:--|:--|\n| `studio-authoring.record-page-roundtrip` [0] | #28907 draws `record:highlights` only for declared `highlightFields`, and `showcase_contact` declares none | `showcase_account`, which seeds it |\n| `studio-authoring.api-written-keys-survive-studio-save` [2] | `titleFormat` is retired (3557366c02); publish refuses it | a live key |\n| `i18n.studio-follows-app-locale` [3] | the #25884 ruling paints absolute dates in a grid, relative only as the tooltip | the tooltip |\n| `studio-authoring.org-scope-flows` fixtures.requires[1], steps[1] | the clone door now lands in `.custom` (#28149), so it makes no package-less flow | a fixture that still reaches one |\n| `studio-authoring.no-entry-property-matrix` | `drawerSide` and `drawerWidth` answer 422 now; the inspector now offers Layout, Columns, Default Tab and Tab Position | drop the rows, per step 4 |\n| `studio-authoring.first-run-loop` | names no locale, and only zh-CN fails | a named zh-CN leg |\n\nFixture gaps found, same card: a launch entry with `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1` (`flow-status-matches-runtime`) and with `OS_PAGE_REACT_ENABLED=false` (`custom-page-source-tiers`); `picklist-bound-select`'s fixture needs a source edit.\n\nLinks back: #29672."

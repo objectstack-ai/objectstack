@@ -2,8 +2,8 @@
   "number": 29415,
   "kind": "issue",
   "title": "spec(migrations): register the `user`-field deleteBehavior enforcement (#29253) as an ADR-0087 semantic entry and stop the spec prose saying a `user` field never joins the delete walk",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:22:49Z",
-  "updated_at": "2026-11-03T00:58:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T03:55:30Z",
+  "closed_at": "2026-11-03T03:54:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29415",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the contract review of PR #29368 (#29253), should-fixes A and B. The server PR lands as is. Both items need `packages/spec/**`, which the server card could not touch.\n\n**A. ADR-0087 entry.** #29368 makes a declared `deleteBehavior` on a `user` field take effect when the user is deleted (`restrict` → 409, `cascade` deletes holders, `set_null` clears). No key moved, but an accepted declaration's enforcement changed, and a stored population exists: objects saved before #9784 may carry a materialized `set_null` on a `user` field. The two 18.x semantic entries `field-master-detail-set-null-refused` and `user-field-foreign-reference-refused` are the precedent. Add a `SemanticMigration` entry under `packages/spec/src/migrations/entries/semantic/` so that `objectstack migrate meta` and the upgrade guide reach it. Its consumer judgment: `set_null` on a non-required `user` field is accepted as is. A `required` `user` field carrying the era `set_null` now refuses the delete with 409; the author removes the declaration or picks the behaviour they want.\n\n**B. Spec prose that says a `user` field never joins the walk** (read on `main`; recheck after #29368 merges):\n- `field.zod.ts`: the `.overwrite` comment and the user-reference refusal message.\n- The D3 entry text.\n- `hook.zod.ts`: the `referentialFieldClear` / `referentialCascadeDelete` describes.\n- `contracts/objectql-engine.ts`: the `getCascadeDeleteObjects` docblock.\n- `api/protocol.zod.ts`: the `cascadeDeleteObjects` describe.\n- `field.form.ts` / `object.form.ts`: these show `deleteBehavior` only for lookup / master_detail, so Studio cannot author or clear it on a `user` field. Add `user` to the visibility rule.\n\nText, the entry, and the form visibility rule only. No runtime change. Lands after #29368."

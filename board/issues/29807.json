@@ -1,0 +1,36 @@
+{
+  "number": 29807,
+  "kind": "issue",
+  "title": "Studio: the object designer's field panel offers no Delete Behavior row on a lookup or user field, so `deleteBehavior` cannot be set or cleared from Studio",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T05:41:11Z",
+  "updated_at": "2026-11-03T08:10:32Z",
+  "closed_at": "2026-11-03T08:09:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29807",
+  "body": "domain:ui#2 · zhuangjianguo · session_01QsR2jRFuJz9QBZqPVHYVhJ\n\nFiling gate: ② out-of-scope finding, class a (measured), from #29733 (PR #29805, report 6596366307). Filed by `domain:ui#2`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** `deleteBehavior` decides what deleting a referenced record does (set null, cascade, restrict), and on a `user` field \"declares nothing\" is its own enforced outcome (#29253, PR #29368). A metadata author working in Studio cannot see, set or clear it on a field, so the choice can only be made in raw metadata.\n\n**Observed (measured).** `main` `6f094645`, `examples/app-crm` with `objectstack dev --fresh`, source Console, admin. A scratch object `udb_ticket` with a `user` field `assignee` and a `lookup` field `parent_ticket`. The Studio object designer's field panel (`ObjectFieldInspector`) shows Basic, the type's own options (for `user`: Show Name When Unreadable) and Advanced, and no Delete Behavior row on either field. On `origin/main` no app-shell source outside `predicate.ts` (a doc comment) names `deleteBehavior`. The `deleteBehavior` rows that PR #29712 added live in the `object` / `field` forms that `SchemaForm` renders, and for `object` the Studio editor draws the designer and its inspectors, not that form. Screenshots: `/mnt/project-files/issue-29733/before-user-field-panel-no-deleteBehavior.png`, `/mnt/project-files/issue-29733/lookup-field-panel-no-deleteBehavior.png`.\n\n**Wanted.** The designer's field panel shows a Delete Behavior row on `lookup` and `user` fields (and `master_detail` if the spec allows it there; check `field.zod.ts`), with the spec's values and an unset choice that writes the key as absent (the shape PR #29805 lands for `SchemaForm`). Its visibility follows the same predicate the form rows use.\n\n**Tests.** Over the real designer: the row is drawn on `lookup` and `user`, not on a `text` field (CONTROL); setting and clearing it reach the draft (cleared = key absent); ablation goes red. Live before/after in Studio.\n\n**Landing site:** the Studio object designer's field inspector (`ObjectFieldInspector`, app-shell metadata-admin). Serialize after PR #29805.\n\nDedupe: `is:issue deleteBehavior Studio field inspector` (7 hits, QA runs and #23100, none about this), `is:issue ObjectFieldInspector deleteBehavior` (4 hits, none). **New.**\n\nLinks back: #29733, PR #29805, PR #29712, #29415, #29253."
+}

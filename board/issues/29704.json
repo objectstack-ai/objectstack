@@ -2,8 +2,8 @@
   "number": 29704,
   "kind": "issue",
   "title": "Studio: the publish sheet and load errors speak in plain words, and a load error carries the server's real reason",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T02:11:47Z",
-  "updated_at": "2026-11-03T02:11:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T05:11:16Z",
+  "closed_at": "2026-11-03T05:07:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29704",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ② filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「第二批也立卡」. Priority on 「相关卡 p1, 让车道处理」. ⛔ Not a claim.\nReader: `domain:ui` (`ui/packages/app-shell/src/preview/DraftChangesPanel.tsx`; the list load error at `console/AppContent.tsx:2112`).\nDedupe: `publish sheet`, `loadErrorMessage`. #29673 is the case that exposed the second part, and its fix does not cover it. **New.**\ntype: enhancement\n\n**Business reason.** The publish sheet is where a person decides whether to make a change live. It should say what will change in their terms. When a page cannot load, it should say why.\n\n## What happens\n\nMeasured on `main` at `3482f3d8d2`, zh-CN.\n\n- The sheet's diff for a customized dashboard reads `+ overrides` and `~ Label`. A view reads a raw key list, and the extension's type group reads `object_extension`. An independent review also saw `+ isDefault`, `+ viewKind` and 平台生成 (6) on a new item.\n- An object that failed to register (#29673) has its records page ask the person to check their network (请检查网络连接后重试), though the server answered 404 `OBJECT_NOT_FOUND` with a clear sentence. `AppContent.tsx:2112` uses the generic sentence.\n\n## Direction\n\n- 新增: no key list. 更新: top-level keys through the inspector's existing label catalog, and declaration or platform-generated keys are not listed as the person's changes. Type groups use the type's translated name.\n- The load-error state shows the server's code and sentence when one came back. The network sentence is only for a request that got no answer. One rule, on the list and record pages alike.\n- No new diff capability.\n\nLinks back: #29673, #29690–#29693."

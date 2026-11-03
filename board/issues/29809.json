@@ -1,0 +1,37 @@
+{
+  "number": 29809,
+  "kind": "issue",
+  "title": "Studio Access: a permission set the .custom pair added reads \"Package\" in its header, beside the rail's \"Added\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T05:46:01Z",
+  "updated_at": "2026-11-03T07:43:43Z",
+  "closed_at": "2026-11-03T07:33:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29809",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ① a measured break. Filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「一个未立卡的小问题，有问题为什么不立卡？」. `priority:p1` per the maintainer's standing word on this seat's cards: 「你的相关任务都应该标记为 p1」. ⛔ Not a claim.\nReader: `domain:ui` (`ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx`).\nDedupe: `perm.badge`, `provenance badge`, `shippedByPackage`, `包内置`. #29729 (in flight) changes the words of `perm.badge.custom`; it does not touch which badge is chosen, so this is **new**. The #29674 landing note mentions the symptom and filed nothing.\nreach: every permission set authored in a base's `.custom` pair, whether copied by New similar or created there, as far as the code reads. Only the copy was measured.\ntype: Bug\n\n**Business reason.** An administrator who copied a vendor permission set opens their own copy, and its header says it is built into the package. The rail says Added and the page lets them edit it. They cannot tell from the header whose set this is, or whether a package upgrade would own it.\n\n## What happens\n\nMeasured on `main` at `601832b1a6`, fresh database, showcase app, zh-CN console.\n\n1. `POST /api/v1/security/permission-sets/showcase_contributor/clone` with `{name, label}`: 200, in `com.example.showcase.custom`.\n2. Open `/_console/studio/com.example.showcase/access?surface=permission%3Ashowcase_contributor_verify`.\n3. The rail row reads 新增. The header chip beside the name reads 包内置. The same page says 位于 com.example.showcase.custom, and it saves edits as drafts.\n\nThe #29674 landing note places this badge on the rail. Measured here, it is on the header, and the rail row shows only 新增.\n\n## Cause\n\nRead from code, not traced in a run: `PermissionMatrixEditor.tsx:727` is `const shippedByPackage = !!packageId || codeIsArtifact;`, and both `perm.badge.package` sites (lines 1965 and 2211) read it. Any set opened through a package door therefore reads Package. The pair is a package, so its own additions do too. The comment at that line still describes the two answers from before pairs existed.\n\n## Wanted\n\n- A set the pair added or copied does not read as built into the package. The header and the rail tell one story about it.\n- A set a read-only package really ships still reads Package. `StudioDesignSurface.accessTabs-12456.test.tsx:121` pins that case and stays green.\n- The rule comes from what already answers this question (`customizationMarks.ts`), not a second copy of it. Which word the chip shows follows #29705's vocabulary as landed.\n\n## Tests\n\nA component pin for both cases: a set added in the pair, and a set the base package ships.\n\nSerialize with #29729 if its diff reaches the same badge lines.\n\nLinks back: #29674, #28236 (closed), ADR-0146 D3."
+}

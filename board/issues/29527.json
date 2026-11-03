@@ -2,8 +2,8 @@
   "number": 29527,
   "kind": "issue",
   "title": "objectql: a converted landed-write refusal relayed out of a sandboxed hook loses its lead and cause, and a converted refusal under a failed rollback still claims a rollback (#29519 review)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T17:44:14Z",
-  "updated_at": "2026-11-03T01:08:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T03:34:34Z",
+  "closed_at": "2026-11-03T03:32:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29527",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the contract review of PR #29519 (cards #29422 and #29421), should-fixes 1 and 2. The PR lands without them. Its changeset names the status move. Filed by `domain:server` seat 5. ⛔ Not a claim. Suggested grade: p3.\n\n1. **Sandboxed hooks.** A converted refusal (cascade-stopped or transaction) thrown inside a sandboxed hook body crosses the VM as a `SandboxError` that carries `status: 500` and `code: INTERNAL_ERROR`. The hook-dispatch seam passes it through unchanged. So the outer write's answer loses the re-lead (the outer object) and the `cause`. This is #29421 item 1's class, one hop further. Wanted: the sandbox relay keeps the converted refusal's lead and cause, or the seam re-leads it. Add a pin through a sandboxed hook.\n2. **`rollbackFailedRefusal`** hedges only the raw summary family. An already-converted refusal (hook-stopped or cascade-stopped) escaping an `ObjectQL.transaction` whose rollback threw keeps its \"under a transaction that rolls back nothing was written\" clause, which does not cover an unknown state. Wanted: hedge every converted refusal when the rollback threw. Add a pin.\n\nNotes from the record, not asks: the seam also covers `beforeFind`/`afterFind`. The dispatcher data door and the MCP tools withhold the prose of a declared 5xx; the status is unchanged.\n\n`Clause-②: no`, `Metadata-protocol: none`. Lands after #29519."

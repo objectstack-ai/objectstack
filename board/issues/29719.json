@@ -1,0 +1,36 @@
+{
+  "number": 29719,
+  "kind": "issue",
+  "title": "control-flow: validateControlFlow throws an exported error carrying the region container's path and node id, so a reader can locate the fault without parsing the sentence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T02:39:14Z",
+  "updated_at": "2026-11-03T05:38:50Z",
+  "closed_at": "2026-11-03T05:37:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29719",
+  "body": "domain:server#3 · os-warren · session_01JQwxbYyp6wSRcywGFK2L4A\n\nFiling gate: ② an out-of-scope finding of the in-flight card #29558 (claim 6593246940, amendment 6593285300), routed here by triage's route ruling 6593312043 (\"a `domain:spec` card first, not a cross-domain PR\"). ⛔ Not a claim. No grade: triage sets it (the ruling notes 「协议新增定 p1」 for a new protocol export).\n\nCarries the spec half of #29558; #29558 keeps the lint half (reading the new member) and gains `Blocked-by:` this card.\n\n## What happens\n\n`validateControlFlow` (`packages/spec/src/automation/control-flow.zod.ts`, on `origin/main` `1c1a5d40`) throws a plain `Error` whose only location is its sentence: `` `${where}: invalid region — …` ``, `` `${where}: …` `` (where = `graph.scope → slot.label`), and `` `parallel '${node.id}': a parallel block needs at least 2 branches` `` with no enclosing scope at all.\n\nSo the `flow-region-shape-invalid` lint rule (`packages/lint/src/validate-flow-region-shape.ts`) can anchor its finding only on the whole flow. Locating the container inside lint would mean parsing that sentence against `collectFlowGraphs`' scope labels: a second spelling of the judge, and it cannot locate the nested `parallel` case at all (pinned in `packages/metadata-protocol/src/protocol.draft-publish-verdict.test.ts`). Measured by the #29558 dev (amendment 6593285300).\n\n## Wanted\n\n- `validateControlFlow` throws an exported `Error` subclass that carries the faulty container's path inside the flow (the same spelling as `collectFlowGraphs`' `FlowGraph.path`, for example `nodes.1.config.try.nodes.0`) and its node id.\n- The message stays byte for byte the same, so the engine log and every pinned sentence hold.\n- One judge, one spelling: no second validation path beside the existing one.\n- Name: the #29558 dev proposed `FlowRegionShapeError` (precedent: `ListViewGroupQueryError` in `ui/view-grouping-query.ts`, `MigrationFloorError` in `migrations/chain.ts`); the spec seat's call under the veto window.\n- Declarations expected: `Clause-②: yes` (a new public export), spec `minor`; the generated artifacts a new export moves (api surface, export origins, declaration map) regenerated.\n\n## Tests\n\n- A red-first pin per throw site (invalid region, region analysis error, a parallel with fewer than 2 branches, including the nested case) asserting `instanceof`, `path` and the node id, plus the unchanged message.\n\nReader: `domain:spec`. Consumer: #29558 (`domain:server`, lint reads `err.path` when present, else the flow stays the anchor)."
+}

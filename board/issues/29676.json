@@ -2,8 +2,8 @@
   "number": 29676,
   "kind": "issue",
   "title": "view form: layout horizontal is stored and served, but the label stays above the input",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T00:55:15Z",
-  "updated_at": "2026-11-03T02:06:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T04:10:38Z",
+  "closed_at": "2026-11-03T04:09:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29676",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ① declared but not honoured (ADR-0049). Filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「发记录并立卡」. ⛔ Not a claim.\nQA-source: #29672 · studio-authoring.no-entry-property-matrix · acceptance[1]\nReader: `domain:ui` (the form renderer).\nDedupe: `form layout horizontal`. The checklist's `knownGaps[0]` records it from QA run #26715, which has no card of its own. **New as a card.**\ntype: Bug\n\nRunner reading on `main` at `3482f3d8d2`, on two fresh loads, not re-derived by the PM seat. `PUT /api/v1/meta/view/qa_doc.k1?mode=draft&package=PKG` with `config.layout: 'horizontal'`, publish, open `/_console/studio/PKG/interfaces?surface=view%3Aqa_doc.k1`, Design and Run. Expected: the label beside the input. Actual: label at (257,209), input at (257,226), stacked. Read on the Studio surface only, not on the end-user form.\n\nStudio's form-view inspector now offers Layout, so a person can pick this and see nothing change. Wanted: honour it, or retire the value (enforce-or-remove).\n\nLinks back: #29672, #26715."

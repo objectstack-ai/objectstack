@@ -2,8 +2,8 @@
   "number": 28914,
   "kind": "issue",
   "title": "packages: a tenant exports its whole ontology — every installed package, its `.custom` pair and environment customizations — as installable packages for the open runtime (`os package export` + the read it calls)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T04:09:55Z",
-  "updated_at": "2026-11-03T02:22:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T05:02:58Z",
+  "closed_at": "2026-11-03T05:01:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28914",
   "body": "director#1 · zhuangjianguo · session_01QsR2jV5sBSzCYNEDgpYLJw\n\nBlocked-by: #29617\nUnlock-action: re-check #29617 when it is closed (server slice resumes; claim 6589102677 released)\n\nFiling gate: **② a maintainer decision.** The maintainer, on docs.objectos.ai #334 question 1 (batch #452 item 5), verbatim: 「Cloud/Enterprise 租户怎么导出本体?同意,同时立开发卡。」 — ruling 6568804196 (docs.objectos.ai #334): the docs narrow their \"exportable\" sentences to a planned capability now, and the platform builds the capability. This card is that capability. ⛔ Not a claim. Grade and lane are triage's; the read and the command are a new served surface, so the spec slice comes first.\nBusiness reason: ObjectOS's positioning (E1 in `apps/docs/lib/positioning.ts` of docs.objectos.ai, and six docs pages) promises a customer that the ontology they build on ObjectOS Cloud or Enterprise is theirs: they can export it and run it on the Apache-2.0 runtime. Today no door does that. A customer who asks \"how do I take my ontology out\" gets no command and no page. Exit right is the promise that makes \"no lock-in\" true; until this lands the docs say \"planned\".\nReader who acts: `domain:spec` for the shape (`packages/spec/src/api/export.zod.ts` / `package-lifecycle.zod.ts`, `Metadata-protocol: added`, `Clause-②: yes (widening)`, `CONTRACT_REVIEW_TIER`), then `domain:server` (`packages/runtime/src/domains/packages.ts`, `packages/cli`). The docs page \"export your ontology\" follows on docs.objectos.ai #334 once this lands.\nDedupe (open AND closed): `ontology export` → 10 hits, none about an export door (#27261 federation, #26140/#22951/#22172/#21838 positioning prose, the rest unrelated); `export in:title is:open` → 0; `\"deployment export\" OR \"tenant export\" OR \"export all packages\"` → 0 relevant (#24143 and #8484 are the CSV data export). Nearest shipped neighbour: `GET /packages/:id/export` (ADR-0070, per-package layer #28409, pair override declarations ADR-0146 D8.3), which is one package at a time.\n\n## 维护者速读\n\n- **改了什么**(本卡要做的):给平台加一个「导出整个租户本体」的门:一次调用导出这个部署里所有已安装的包(基础包、它们的 `.custom` 配对包、环境级定制),得到一组可以在开源运行时上直接安装的包;配一个 `os package export` 命令调用它。\n- **为什么**:官网和文档承诺「本体是你的,可以导出到开源运行时跑」,今天没有任何入口;docs #334 按您的裁定先把文案收窄成「规划中」,这张卡把它做成真的。\n- **先看**:今天只有按包导出 `GET /packages/:id/export`(27 种元数据类型,一次一个包);CLI 只有 `package install` / `package publish`。\n- **需要你做的**:无;分诊定级定车道后由 spec 席先定形状。\n\n## Measured (`origin/main` `9a9823d9`, read-only)\n\n- `GET /packages/:id/export` exists (`packages/runtime/src/domains/packages.ts:402`): the whole-package export of one package, 27 metadata types, reading that package's own layer (#28409) and carrying a pair's override declarations (ADR-0146 D8.3). It is gated by the builder roles like `GET /packages/:id`.\n- There is no read that exports every package a deployment holds, and nothing that names the set of installed packages as one exportable bundle with their dependency order.\n- `packages/cli/src/commands/package/` holds `install.ts` and `publish.ts` only; `os package export` does not exist (docs.objectos.ai #332 removed a mention of it).\n- Secrets: #28596 withholds connector credential positions on read; an export must inherit that (a bundle never carries a credential, a `credentialRef` is kept as the reference it is).\n\n## Wanted\n\n1. **The shape (spec first).** One served read that answers the deployment's whole ontology as a bundle: the list of installed packages in dependency order, and for each the same body `GET /packages/:id/export` serves today (so the per-package export stays the single producer and the bundle composes it). The `.custom` pair of each base is included as its own package with its override declarations; environment-scope customizations are included under the package that owns them, as the per-package export already places them. Whether this is a new route (for example `GET /packages/export`) or a new member of an existing read is the spec card's call; the response shape is declared in `packages/spec/src/api`, and the liveness row and `Metadata-protocol: added` follow.\n2. **The command.** `os package export [--out DIR]` calls that read and writes one directory per package, each installable with `os package install` on an open runtime, in the dependency order the read gives. A refusal (no builder standing, a package that cannot be exported) is loud and names the package.\n3. **Nothing secret leaves.** The bundle carries no credential value: the #28596 withholding applies on this read as on every other, and `credentialRef` names survive as references. A test proves a connector with `auth.credentialRef` exports with the reference and without the secret.\n4. **Round trip.** A test installs the exported bundle on a fresh runtime and reads the same objects, fields, flows, apps and permission sets back (names and counts), base and pair alike.\n\n## Done criteria\n\n- `os package export` on a deployment with a base, its `.custom` pair and a third package that extends the base produces three installable packages; `os package install` of the bundle on a fresh runtime yields the same metadata names and counts (test).\n- A connector with `auth.credentialRef` exports with the reference and without any credential value (test).\n- The served read's response is declared in `packages/spec/src/api` and validated by the route (`Metadata-protocol: added`, `CONTRACT_REVIEW_TIER` record on the PR).\n- docs.objectos.ai #334 gets its \"export your ontology\" page as a follow-up once this lands (the docs lane files it; not this card's scope).\n\nDedupe words: ontology export, tenant export, whole-deployment export, os package export, export bundle, exit right.\n\nRuling-ref: docs.objectos.ai #334 comment 6568804196 (batch #452 item 5, Q1 → B + development card).\nRelated: docs.objectos.ai #334, #28409 (per-package export layer), ADR-0070, ADR-0146 D8, #28596 (credential withholding).\n"

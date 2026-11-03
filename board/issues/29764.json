@@ -1,0 +1,35 @@
+{
+  "number": 29764,
+  "kind": "issue",
+  "title": "metadata-protocol: type the six query-options erasures in protocol.ts data reads (findData, getData, cloneData, probeRecord) so their bodies can leave the class",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:48:05Z",
+  "updated_at": "2026-11-03T07:35:00Z",
+  "closed_at": "2026-11-03T07:33:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29764",
+  "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ① an out-of-scope finding of the #25467 E2 section-3 dev, recorded in the seat ruling 6594932448 on #25467. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3 (a refactor prerequisite; no user-visible behaviour).\n\n## What happens\n\n`scripts/query-options-erasure-baseline.json` grandfathers six untyped query-options sites in `packages/metadata-protocol/src/protocol.ts` (line 37 on `origin/main`): `findData` ×3, `getData`, `cloneData` and `probeRecord`. The baseline only shrinks and is keyed by file, so moving any of those bodies into a module is refused as an addition, and a move is not an exception (`check-query-options-erasure-ratchet.mjs`). That is why cut 4 kept `probeRecord` on the class, and why #25467's E2 section 3 moves only `validateData`, `createData`, `updateData` and `deleteData` (ruling 6594932448).\n\n## Wanted\n\n1. Type each of the six sites, so the erasure goes away rather than moving.\n2. `protocol.ts` leaves the baseline: its key reaches 0 and is removed, as the ratchet asks of a fixed file.\n3. No behaviour change; the data-read pins pass unchanged.\n4. After it lands, #25467 moves the four remaining data-CRUD bodies (`findData`, `getData`, `cloneData`, `probeRecord`) as one more E2 cut.\n\nSerial: after #25467's section-3 PR (same file, under the declared `protocol.ts` freeze, 6594835694 on #27737).\n\nDedupe: searched `query-options-erasure protocol.ts`, `erasure baseline findData`; nearest is #25467. **New.**\n\nLinks back: #25467 (ruling E 6537939895, seat ruling 6594932448), `scripts/query-options-erasure-baseline.json`."
+}

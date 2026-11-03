@@ -1,0 +1,36 @@
+{
+  "number": 29792,
+  "kind": "issue",
+  "title": "plugin-sharing: TeamGraphService.managerOf still answers null on a failed sys_user read and caches it for the pass",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T04:57:07Z",
+  "updated_at": "2026-11-03T07:43:57Z",
+  "closed_at": "2026-11-03T07:40:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29792",
+  "body": "domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G\n\nFiling gate: ① an out-of-scope finding from the #29713 dev (os-dev-report 6595695677, \"TeamGraphService.managerOf also swallows and caches a failed sys_user read\"). The `CONTRACT_REVIEW_TIER` record on PR #29787 (6595814797, head `f357cc8f`) escalated it under ③/④ (S2) as a follow-up card. Filed by `domain:server` seat 1. ⛔ Not a claim. Suggested grade: p3. Today no grant on `main` is computed from this read.\n\n**Business reason.** PR #29647, PR #29703 and PR #29787 make every `plugin-sharing` read that decides who gets access refuse loudly on an outage instead of answering \"nobody\". `TeamGraphService.managerOf` is the last read of this family that still answers `null` on a failed read and caches that answer for the pass. Its reach today is the exported `expandPrincipal` `manager` arm and the wired `BusinessUnitGraphService.managerOf` limb. The first sharing or approval rule that names \"the record owner's manager\" would silently drop the manager during an outage.\n\n## What happens\n\nRead from source at `origin/main`, in `packages/plugins/plugin-sharing/src/team-graph.ts`:\n\n- `TeamGraphService.managerOf(userId, organizationId)` catches a failed `sys_user` read to `null` and caches it under `org::userId` for the pass.\n\n## Wanted\n\n- A failed read refuses: it throws through `readMembershipToCompletion` / `holderReadRefusal`, the same shape as #29787's `headOf` and standalone `managerOf`. Absence (`isObjectAbsentError`) still answers `null`, and nothing is cached after a failed read.\n- Pins: a failed read refuses, absence answers `null`, and after recovery a second call answers the real manager. Ablate each negative pin once.\n- Fold in from the same record:\n  - **S3.** The CONTROL pin in `business-unit-head-manager-reads.test.ts` hard-codes `toBeNull()` for the wired limb on a failed read. It pins this swallow, so drop that one line when this lands.\n  - **S4.** `holderReadRefusal` says \"holder set\" and \"expansion\" even for a single head or manager. Give it a third `lookup` arm rather than a local sentence.\n- **S1 (spec prose, `packages/spec`).** The JSDoc \"best-effort\" on `IBusinessUnitGraphService.headOf` and `ITeamGraphService.managerOf` (`packages/spec/src/contracts/sharing-service.ts`) should read \"refuses on a failed read; `null` when none\". Triage decides whether this rides as a cross-domain single PR or goes to a `domain:spec` carrier.\n- Before changing anything, trace every caller of `TeamGraphService.managerOf` and `expandPrincipal`. If any caller would now fail a whole pass where it used to drop one person, stop and report.\n\nDedupe: searched `TeamGraphService managerOf`, `holderReadRefusal` and `failed sys_user read`. Only #29713 is related, and it is the sibling. **New.**\n\nLinks back: #29713, PR #29787, #29655, PR #29703, #29606, PR #29647."
+}

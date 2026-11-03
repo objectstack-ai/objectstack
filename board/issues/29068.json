@@ -2,8 +2,8 @@
   "number": 29068,
   "kind": "issue",
   "title": "notifications: build the device registry (sys_user_device, /notifications/devices routes, client methods) on #29067's contract (server slice 1 of #29041)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:automation",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:51:36Z",
-  "updated_at": "2026-11-03T01:46:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T02:39:05Z",
+  "closed_at": "2026-11-03T02:37:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29068",
   "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: server runtime slice 1 of #29041 (p1), split off by `domain:server` seat 5. The spec face is #29067, and the push channel stays on #29041, which is blocked on this card. Graded p1, the same as its parent (served routes and a system object that ADR-0012 marks \"MUST ship M1\"). Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: a signed-in session (the Console in the mobile shell, #29042) registering, refreshing and unregistering its device's push token.\nReader who acts: a `domain:server` seat.\n\n## Wanted (on the contract #29067 lands; ⛔ no `packages/spec/**` hunk)\n\n1. **Storage:** `sys_user_device` per #29067's `UserDeviceSchema`, system-owned (a user reaches their own rows only through the routes, never through the data API's generic writes), in the package ADR-0012 §11 names, or `service-messaging` if no push plugin exists yet. State the choice.\n2. **Routes** under `/api/v1/notifications/devices`, in `packages/runtime/src/domains/notifications.ts`, mounted in the dispatcher as well (see memory: a new route must also be mounted in `dispatcher-plugin.ts`):\n   - register or refresh: an upsert by `deviceId` for the current user. A token already held by another user moves to this user.\n   - unregister: the caller's own device only. Another user's `deviceId` answers as not found and is never deleted.\n   - Anonymous callers are refused like the other `/notifications` routes.\n3. **Service:** the `INotificationService` device members #29067 declares, including `invalidate(token)`, which the push channel calls when APNs/FCM reports a dead token (`enabled=false`, `invalidated_at` set; the row is kept).\n4. **Client:** restore the device methods on `packages/client` `notifications` (removed in #3612), and add the route-ledger row the client docblock promises.\n\n## Tests (red first)\n- Register, then refresh the same `deviceId` (one row; token and `last_seen_at` updated). A second user registering the same token takes it over. Unregister by a non-owner is not found, and the row survives.\n- `invalidate(token)` marks the row and keeps it.\n- Client methods and the route ledger agree (the ledger test that pins client-bound rows).\n\nDeclarations: `Clause-②: yes` (new served routes). `Metadata-protocol` per what #29067 decides.\n\nBlocked-by: #29067.\nBlocks: #29041 (push channel and delivery).\n\nDedupe: searched `sys_user_device`, `notifications/devices route`; only #29041 and #29042. **New.**\n\nLinks back: #29041, #29067, #29042, ADR-0012 §6 / §11."

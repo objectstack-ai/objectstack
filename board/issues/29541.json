@@ -2,8 +2,8 @@
   "number": 29541,
   "kind": "issue",
   "title": "spec(conversions): the stored pass does not list a dashboard whose globalFilters entry is keyed dateRange beside a declared dateRange (the #29213 refusal)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T18:23:19Z",
-  "updated_at": "2026-11-03T01:54:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T03:33:34Z",
+  "closed_at": "2026-11-03T03:31:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29541",
   "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ② a follow-up the seat named in its ACCEPT on PR #29370 (comment 6580087029, item 5) before landing. ⛔ Not a claim. No grade: triage sets it.\n\n## What happens\n\nPR #29370 (merged as `c268b72b`, card #29213) refuses a dashboard that declares `dateRange` and also keys a `globalFilters` entry `dateRange` (by `name`, else `field`). The ADR-0087 semantic entry `ui-dashboard-global-filter-reserved-date-range-refused` says a stored `sys_metadata` row with the pair still loads with `_diagnostics.valid: false` and is refused on its next save. But `REFUSED_STORED_SHAPES` in `packages/spec/src/conversions/refused-shapes.ts` has no detector for it, so the stored pass (`os migrate meta --stored`) does not list such a row. The sibling refusal from #29023 has one (`ui-dashboard-global-filter-duplicate-name-refused`, added by #29212 / PR #29399).\n\n## Done when\n\n- A `RefusedStoredShape` with id `ui-dashboard-global-filter-reserved-date-range-refused` sits beside `dashboardDuplicateGlobalFilterName`, built on `reservedDateRangeGlobalFilters` from `packages/spec/src/ui/duplicate-global-filter-names.ts`, reporting at `globalFilters[i].name` (or `.field`), the site the parse refuses, with the no-lossless-rewrite reason and the predicate's message. `refused-shapes.test.ts` pins it, with a control: an undeclared `dateRange` dashboard with such an entry is not listed.\n- The entry's `acceptanceCriteria` (`18.ui-dashboard-global-filter-reserved-date-range-refused.ts`) gains one sentence saying `os migrate meta --stored` lists such a row. The duplicate-name entry (#29023 D3) gains the same sentence.\n\nSerial: same file as any other open `refused-shapes.ts` card.\n\nRelated: #29213 / PR #29370, #29212 / PR #29399, #29023."

@@ -1,0 +1,35 @@
+{
+  "number": 29713,
+  "kind": "issue",
+  "title": "plugin-sharing: a failed business-unit head or standalone manager read still answers null and caches it for the pass (headOf, managerOf fallback)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T02:28:30Z",
+  "updated_at": "2026-11-03T05:34:14Z",
+  "closed_at": "2026-11-03T05:32:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29713",
+  "body": "domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G\n\nFiling gate: ① an out-of-scope finding of the #29655 dev (os-dev-report 6593642509, \"headOf still catches a failed unit read to null\"), escalated under ③ by the `CONTRACT_REVIEW_TIER` record on PR #29703 (6593863224, head `483976d8`) as a follow-up card. Filed by `domain:server` seat 1. ⛔ Not a claim. Suggested-grade: p3. Today no grant is computed from either read on `main`.\n\n**Business reason.** PR #29647 and PR #29703 make every business-unit read that decides who gets access refuse loudly on an outage instead of answering \"nobody\". Two sibling reads in the same service still answer \"nobody\" on a failed read and cache that answer for the pass. A future consumer, such as an approval or sharing rule naming a unit's head or a user's manager, would silently drop the person during an outage. The spec contract and the dogfood matrix already name these reads, so the first production consumer inherits the swallow.\n\n## What happens\n\nRead from source at `origin/main`, in `packages/plugins/plugin-sharing/src/business-unit-graph.ts`:\n\n- `BusinessUnitGraphService.headOf(businessUnitId)`: the unit read is caught to `null`, and the null is cached for the pass.\n- The standalone `managerOf(userId, organizationId)` fallback, used when no `TeamGraphService` is wired: same shape. The wired path already screens through `TeamGraphService.managerOf`.\n\n## Wanted\n\n- A failed read throws (or refuses) instead of answering `null`. Absence (`isObjectAbsentError`) still answers `null`. Nothing is cached after a failed read. This is the same shape as PR #29703's `seedIsUsable` and `readChildUnits`.\n- Pins per method: a failed read refuses, absence answers `null`, and a failed read is not cached (a second call after recovery answers the real head or manager). Ablate each negative pin once.\n\nSerial: after PR #29703 (#29655, same file).\n\nDedupe: searched `headOf catch null`, `business unit head failed read`, `managerOf standalone fallback`. The nearest are #29655 and #29606 (the seed, descent and member reads). **New.**\n\nLinks back: #29655, PR #29703, #29606, PR #29647."
+}

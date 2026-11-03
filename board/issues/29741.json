@@ -1,0 +1,36 @@
+{
+  "number": 29741,
+  "kind": "issue",
+  "title": "pm-dispatch(execution-duties): docs-only `docs/adr/**` cards dispatch at CONTRACT_REVIEW_TIER + effort `xhigh` by standing order — seats stop asking the maintainer per card (Warren 2026-11-03)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:10:00Z",
+  "updated_at": "2026-11-03T08:09:54Z",
+  "closed_at": "2026-11-03T08:09:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29741",
+  "body": "domain:server#3 · os-warren · session_01JQwxbYyp6wSRcywGFK2L4A\n\nFiling gate: ③ 维护者直派 (filed at the maintainer's word, relayed by the project coordinator). Filed from decision thread \"Decide model and effort for ADR cards\"\n(`cmsg_01U5RdnAAmkSQmZbqh6FtqZ8J4b6HtE1woV1vFhHdSyVJE`, project chan_01U5RdnAAmkSQmZbqh6FtqZ8). ⛔ Not a claim.\n\n**Maintainer's words, verbatim.** Warren, 2026-11-03T03:05:25Z, decision card 「ADR 卡 #29391、#29601 的模型与 effort 怎么定?」,\ntapped option A 「fable + xhigh,立为常设令」; then 03:05:33Z: 「这个应该立卡更新 skills」.\n\n**Governing text.** `.claude/skills/pm-dispatch/references/execution-duties.md` 〈派发〉:\n- 「强制条款①:凡改协议语义面或 `docs/adr/**` 的卡一律契约复审档;后者 effort 下限 `xhigh`。」\n- 「S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭点名或常设令。」\n- SKILL.md claim template `Container & model:` — `model: <…天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻)…>`.\n- `scripts/pm/dispatch-gates.data.mjs` MANDATORY row `docs/adr/**` → CONTRACT_REVIEW_TIER (2026-10-25 order 「adr 这种任务都需要 fable extra」).\n\n**What is wrong today.** The text fixes the tier and an effort *floor*, but not the effort itself, and a 常设令 is only\nmentioned as a way to reach `max`. So a seat dispatching a docs-only ADR card reads it as a per-card maintainer call:\n#29601's body says 「The dispatching seat asks the maintainer for the model and effort before dispatch」, and #29391 and\n#29601 both waited on a decision thread for an answer the rule already implied. Each such ask is a round trip to the\nmaintainer for a one-paragraph ADR edit.\n\n**Wanted.** Record the standing order in `execution-duties.md`, folded into the existing 条款① line (file sits at its\n188-line ratchet ceiling, `scripts/pm/check-skill-line-ratchet.mjs`; net zero lines):\n- A docs-only `docs/adr/**` card (an amendment note, a wording fix, an `Amended by` entry; no code, no spec) dispatches at\n  CONTRACT_REVIEW_TIER with effort `xhigh`, fixed — no per-card ask, no decision card. The claim's `Container & model:`\n  line cites `reason: 常设档位令 Warren 2026-11-03T03:05Z (thread cmsg_01U5RdnAAmkSQmZbqh6FtqZ8J4b6HtE1woV1vFhHdSyVJE)`;\n  once this card lands, the citation is this card's number.\n- `max` on an ADR card stays 凭点名 (a named per-card word), as the existing line says.\n- Outside the order: a card that needs a new decision, a superseding ADR, or an ADR+code mixed diff — those still go to\n  a fable decision thread or split per the existing rules.\n- Mirror the same sentence wherever the card template or `dispatch-runbook.md` tells a seat to ask the maintainer for a\n  tier; measure first (grep `维护者` near 档位/effort), change only what repeats the ask.\n\nReader who acts: `domain:skills` seat (os-dev on `.claude/**`, Tier S: 达档复核 PASS → ready). First cards dispatched under the order: #29391, #29601 (server seat 3).\n\nDedupe: `is:issue repo:objectstack-ai/objectstack \"docs/adr\" tier effort skills` → 171 hits, nearest #25729 (closed: tier + xhigh floor, no one-line exit), #28901 (closed: seats at `high`, os-dev keeps per-card effort, floor xhigh). Both set the floor; neither removes the per-card ask or names the effort. **New.**\n\nClause-②: no · Metadata-protocol: none · skip-changeset (`.claude/**` is not published).\n\nSuggested-grade: p3 · rules text only; removes a per-card maintainer round trip."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 29758,
+  "kind": "issue",
+  "title": "automation-api: CloneFlowResponseSchema declares an optional `noticeCode` beside `notice`, so the Console can translate the flow \"New similar\" notice",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:40:07Z",
+  "updated_at": "2026-11-03T05:17:32Z",
+  "closed_at": "2026-11-03T05:15:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29758",
+  "body": "domain:server#3 · os-warren · session_01JQwxbYyp6wSRcywGFK2L4A\n\nFiling gate: ② the contract-first half of the audited p1 card #29727 (triage audit 6594359287: \"the answer shape declared contract-first\"), split out by the server seat on triage's route precedent 6593312043 on #29558 (\"a `domain:spec` card first, not a cross-domain PR\"). ⛔ Not a claim. No grade: triage sets it (the audit notes 「协议新增定 p1」 for a key added to a served answer).\n\nCarries the spec half of #29727; #29727 keeps the server half (serving the code from the flow and permission-set clone doors) and gains `Blocked-by:` this card.\n\n## What happens\n\n`CloneFlowResponseSchema` (`packages/spec/src/api/automation-api.zod.ts`, on `origin/main` `c76c0e04`) declares `data: { flow, packageId, notice }`. `notice` is the English constant `FLOW_CLONE_NOTICE` (`packages/runtime/src/flow-clone.ts`), and nothing in the answer lets a client tell which sentence it is. So the Console prints it verbatim and zh-CN shows English (measured by `domain:ui#5` on `7b55ea95`, `/mnt/project-files/issue-29706/premise.md` row 1). The client's `automation.clone` returns `CloneFlowResponse['data']` (`packages/client/src/index.ts`), so the type follows the schema.\n\n## Wanted\n\n- `data` gains an optional string key that names the notice by a stable code (for example `'FLOW_CLONE_DISABLED_COPY'`), with a describe that says: the Console maps a known code to its own translated sentence and falls back to `notice` for an unknown or absent code; `notice` stays the English fallback and is not removed.\n- Name: `noticeCode` is the proposal (the code names the `notice` beside it; no closer precedent in `packages/spec/src/api/*.zod.ts`). The spec seat's call under the veto window.\n- Optional, so an older server's answer still parses.\n- Declarations expected: `Clause-②: yes (widening)`, spec `minor`; the generated artifacts the member moves (authorable/api surface, docs) regenerated.\n- ⛔ Not in scope: the permission-set clone door (`POST /security/permission-sets/:name/clone`) has no spec response schema (route ledger: server-only), so its half stays on #29727.\n\n## Tests\n\n- A pin that the schema accepts `noticeCode` and still accepts an answer without it, and that `notice` is still required.\n\nReader: `domain:spec`. Consumer: #29727 (`domain:server`, serves the code), then the Console leg (`domain:ui`, maps the code; #29706).\n\nDedupe: `is:issue CloneFlowResponseSchema noticeCode`, `is:issue clone notice code` → only #29727 (open). **New.**"
+}

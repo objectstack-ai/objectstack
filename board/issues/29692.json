@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T01:43:49Z",
-  "updated_at": "2026-11-03T01:57:29Z",
+  "updated_at": "2026-11-03T07:23:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29692",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ② filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「同意立卡」, agreeing the four UX proposals with the direction written here. Priority on 「相关卡 p1, 让车道处理」. ⛔ Not a claim.\nReader: `domain:ui` (`StudioOverrideChip`, `if-item-more`, `auto-item-more`).\nGoverns: ADR-0146 D2 (\"Restore package original\").\nDedupe: `Restore package original chip`. **New.**\ntype: enhancement\n\n**Business reason.** Customize is a button in the header; its undo is a menu item. A person who wants to know how to go back cannot see that they can, and that is what lets them customize without worry.\n\n## What happens\n\nMeasured on `main` at `3482f3d8d2`. After publishing an override, `studio-restore-original` is only in the item's more menu. In a pane about 1024 px wide that menu's trigger sits under the right panel until the panel is collapsed. `studio-override-chip` reads 覆盖 ObjectStack Showcase and offers no action.\n\nAn independent review also reports the dialog naming \"Task List\" for an item the rail calls 任务清单. Measured here: the dashboard's dialog used the translated label, and the flow's used its English label, which has no translation. Check it.\n\n## Direction (agreed)\n\n- The override chip opens a small popover: what it overrides, the version it was based on, and Restore package original, which goes through the existing confirmation dialog.\n- ⛔ Restore does not take the primary slot that Customize holds: a destructive action is not the most prominent button in the header.\n- Whether the more-menu entry stays is the dev's call; one obvious door is preferred.\n- Every type that draws the chip gets this: view, dashboard, report and flow.\n\nLinks back: #28236, ADR-0146 D2."

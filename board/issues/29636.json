@@ -2,8 +2,8 @@
   "number": 29636,
   "kind": "issue",
   "title": "plugins: extract one shared own-row delete door from the unreact door and the personal-view door, which are near line-for-line copies",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T23:03:39Z",
-  "updated_at": "2026-11-03T02:15:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T04:48:12Z",
+  "closed_at": "2026-11-03T04:46:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29636",
   "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ④ 维护债 — should-fix S3 of contract review 6586971553 on PR #29575 (#29443), deferred by seat ruling 6587007982 point 7. It also carries the two comment-only should-fixes of round-2 record 6590198210.\nreach: two served doors today, `DELETE` unreact in plugin-audit (`comment-reaction-routes.ts`, #26161) and `DELETE /api/v1/personal-views/:id` in plugin-auth (`personal-view-routes.ts`, PR #29575). Every future own-row door would be a third copy.\n业务理由: a security-relevant sequence (read the row as the caller and answer 404, check owner equals caller and answer 403, then delete as the system with `attributedUserId`) now lives in two hand-copied files. A fix to one, such as the 404/403 order or the attribution, silently misses the other. One door means one place to audit.\n动手的读者: `domain:server`. Triage grades and routes it; the seat suggests p3.\n查重 (includes closed issues): `own-row door shared`, `comment-reaction-routes personal-view-routes` and `unreact door extract` find only #26161, #29443 and PR #29575. **New.**\n\n## Wanted\n\n- One shared own-row delete door. Each object supplies its object name, owner column, route path and ledger rows, and the two existing doors use it with no change in behaviour. Both doors' route-ledger conformance tests, route-envelope declarations and authz-resolver `DELEGATORS` rows stay green, along with their dogfood pins.\n- Decide where it lives, a package both plugins already depend on, and state the choice.\n- Carry the two comment fixes from 6590198210:\n  - (a) Census row 26c and the `personal-view-hooks.ts` docblock should say that the `isSystem` skip also admits app-authored automation elevated to system (`runAs: 'system'` flows, hooks, `sudo()`, action bodies, the family `flow-system-identity-write-refusal.ts` names).\n  - (b) The stale \"default flag\" comment in `packages/plugins/plugin-auth/src/manifest.ts`; the default flag was dropped in #29443 round 2.\n\n**Level:** a refactor with no served change, so `Clause-②: no` and `Metadata-protocol: none`."

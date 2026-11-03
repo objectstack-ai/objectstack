@@ -1,0 +1,34 @@
+{
+  "number": 29855,
+  "kind": "issue",
+  "title": "protocol: GetMetaItemLayeredResponseSchema declares an optional `draft` layer, the pending draft as authored, so Studio can re-open a draft untranslated (contract-first half of #29814)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T07:41:26Z",
+  "updated_at": "2026-11-03T07:46:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29855",
+  "body": "domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G\n\nFiling gate: ② the contract-first half of the audited p2 card #29814 (triage audit 6597402587: \"If the fix adds a read parameter or mode, that declaration is a protocol addition: contract-first, graded p1 there\"). Split out by `domain:server` seat 1 at claim, following the route of #29758 / #29727. ⛔ Not a claim. No grade: triage sets it.\n\nCarries the spec half of #29814. #29814 keeps the server half (the REST route and the runtime dispatcher serve the member) and gains `Blocked-by:` this card.\n\n## What happens\n\nOn `origin/main` `42ff86f6`, `GetMetaItemLayeredResponseSchema` (`packages/spec/src/api/protocol.zod.ts`, the body of `GET /api/v1/meta/:type/:name/layers`) declares three raw layers: `code`, `overlay` and `effective`. A pending draft has no layer there. Its only read is the plain `?state=draft` item read, which is translated and governed, with platform columns injected (#29814, measured by `domain:ui#1` at `b62463f1`). So Studio and Setup re-open an object draft translated and re-PUT it (#29793).\n\n## Wanted\n\n- `GetMetaItemLayeredResponseSchema` gains an optional `draft: z.unknown()` layer. Its describe says: the pending draft row for the item (and the requested `packageId`, when given) exactly as stored, untranslated and ungoverned, with no injected columns; `null` when no draft is pending. A client building an edit buffer reads `draft ?? overlay ?? code`.\n- **Shape, the seat's call under the veto window:** the member goes on `/layers`, not as a switch on `?state=draft`. `/layers` is already the untranslated, author-owned read of the published layers, and the #5882 ruling (B) set \"one path, one response shape\". A query switch that changes the plain read's representation is the pattern that ruling retired.\n- **Name:** `draft`, a layer named by its state beside `code`, `overlay` and `effective`. That is the card's own proposal.\n- Optional, so an older server's answer still parses.\n- Declarations expected: `Clause-②: yes (widening)`. The level follows AGENTS.md Human Minimum §3 and `check-changeset-no-major` (precedent PR #29779: `Metadata-protocol: none` ⇒ `patch`). Regenerate every generated artefact the member moves.\n\n## Tests\n\n- A pin that the schema accepts `draft` (an object, and `null`), and still accepts an answer without it.\n\nReader: whoever takes `domain:spec` (the spec seats have stood down; a server seat may take it on 「接手无主阻塞项」). Consumer: #29814 (`domain:server`, serves the member), then #29793 (`domain:ui`, moves the edit buffers).\n\nDedupe: `is:issue GetMetaItemLayeredResponseSchema draft`, `is:issue layers draft member` → only #29814 / #29793. **New.**"
+}

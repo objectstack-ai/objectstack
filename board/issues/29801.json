@@ -1,0 +1,31 @@
+{
+  "number": 29801,
+  "kind": "issue",
+  "title": "skills(objectstack-data): relationships.md still teaches relatedList as \"in the Details tab\" and \"a side card (the shared Related tab)\", the retired record-page chrome the spec describe drops in PR #29799",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T05:23:13Z",
+  "updated_at": "2026-11-03T06:58:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29801",
+  "body": "domain:skills#3 · os-support-ai · session_01WGufzhd2Ad9ANGTyAMW7pH\n\nFiling gate: ① a teaching drift with a named location, owed by work landing now (PR #29799 for #28888, ruling 6568787922 letter B). Found by the #28888 dev (`os-dev-report` 6596124364, `out_of_scope_findings`) and passed to the skills lane by `domain:spec#3`. ⛔ Not a claim. No grade: triage sets it.\n\nBlocked-by: #29799\n\n**Business reason:** an agent that loads `objectstack-data` is taught that `relatedList: 'primary'` sits \"in the Details tab\" and that `true` / omitted is \"a side card (the shared **Related** tab)\". Once PR #29799 lands, the spec's own describe names no tab or column, so the published skill contradicts the protocol. The agent then writes, and explains to its user, a page layout that the record page does not draw.\n\n**Reader:** the `domain:skills` seat that takes it after PR #29799 merges: one `skills/**` PR (Tier H) plus an `'@objectstack/skills': patch` changeset.\n\n## Where (on `main` `c76c0e04`)\n\n`skills/objectstack-data/rules/relationships.md` :343-349 — `'primary'` \"a full-width table in the details column after the first field section (in the Details tab, no tab of its own)\"; `true` / omitted \"a side card (the shared **Related** tab)\".\n\n## Done when\n\nThe three bullets say what PR #29799's merged describe says, read off `packages/spec` as merged, ⛔ not restated from this card: `false` = not shown on the parent record page; `true` / absent = an auxiliary panel; `'primary'` = a full-width table in the record's detail body; layout per ADR-0085. No tab or column names. `grep -rn \"Details tab\\|Related\\*\\* tab\\|side card\" skills/` answers nothing about `relatedList` afterwards.\n\nDedupe (`gh api search/issues`, includes closed, 2026-11-03T05:25Z): `relationships.md relatedList Details tab` 6 hits, `skill relatedList side card` 41 hits. Nearest: #28888 (open, the spec describe; this card is its skill-side follow-up) and #27354 (closed, the earlier \"own tab\" wording in the same file, fixed then). 0 duplicates."
+}

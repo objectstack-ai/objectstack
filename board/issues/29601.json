@@ -2,8 +2,8 @@
   "number": 29601,
   "kind": "issue",
   "title": "docs(adr-0146): D8 item 2's \"the export of X's app surface\" can be read as GET /packages/X/export, which item 3 says carries the base unchanged; name the export it means",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T20:47:52Z",
-  "updated_at": "2026-11-02T21:02:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T05:42:59Z",
+  "closed_at": "2026-11-03T05:41:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29601",
   "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ① open question of the #29563 dev (os-dev-report `6588016343`), answered A by this seat on PR #29597. Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested grade: p3 (wording only; no code reads it).\n\n⛔ Model tier: a `docs/adr/**` edit is MANDATORY at the ceiling tier with effort xhigh (`dispatch-gates --tier`). The dispatching seat asks the maintainer for the model and effort before dispatch.\n\n## What happens\n\nADR-0146 D8 item 2 lists \"the export of X's app surface\" among the reads that serve a `.custom` override. Read literally as `GET /packages/X/export`, it contradicts item 3 (\"the base export is unchanged; the pair's export carries the override with its `overrides` block\"). PR #29597 (#29563) implements item 3 and reads item 2 as the pair's export, `GET /packages/X.custom/export`, which is also how the `getMetaItemsPerPackage` docblock reads it. #29563 itself named the ambiguity as a defect.\n\n## Wanted\n\n- One docs-only edit to ADR-0146 D8 item 2 that names the export it means, so items 2 and 3 agree. Two readings fit item 3: the pair's export (`GET /packages/X.custom/export`, the reading PR #29597 took) or a whole-surface export that serves effective documents (the tenant ontology export of #28914). The edit says which, and that it is never `GET /packages/X/export`.\n- No code change, no schema change. `Clause-②: no`, `Metadata-protocol: none`, `skip-changeset` per the repo's docs-only rule.\n\nDedupe: searched `ADR-0146 D8 export`; nearest #29563, #28914 (the ontology export, open), #28236 (the epic). **New.**\n\nLinks back: #29563, PR #29597, #28914, #28236, ADR-0146.\n"

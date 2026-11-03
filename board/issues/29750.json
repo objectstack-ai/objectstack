@@ -1,0 +1,36 @@
+{
+  "number": 29750,
+  "kind": "issue",
+  "title": "Console: resolve an app-relative push route in the native navigate listener, as the inbox does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:17:30Z",
+  "updated_at": "2026-11-03T07:06:54Z",
+  "closed_at": "2026-11-03T06:12:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29750",
+  "body": "## Context\n\nThe push delivery contract merged in #29218 (`packages/spec/src/api/push-delivery.zod.ts`, around lines 28–39 and 82–83). It says `route` is the notification's `actionUrl`:\n- either app-relative, `/opportunity/123`;\n- or a Console route, `/apps/crm/opportunity/123`.\n\nIt also says the tap is resolved \"as the inbox does, never verbatim\": an app-relative path is hosted under `/apps/APP/`, and an `/apps/…` route passes through.\n\nNothing resolves it today:\n- **Mobile shell.** It hands the route to the Console with the `objectstack-native:navigate` event, and on a cold start falls back to `<server>/_console<route>`. The shell has no app context and does no resolving. A search of `objectstack-ai/mobile` `main` for `resolveNotificationTarget` and app-relative hosting finds nothing.\n- **Console listener.** `ui/packages/mobile/src/useNativeHost.ts:153-163` checks `isInAppRoute(target)` and then calls `navigate(target)` verbatim.\n\nSo a push for `/opportunity/123` falls to the Console's catch-all and lands on the home page, not the record. This is the defect objectui#5179 fixed for the inbox (`ui/packages/app-shell/src/utils/appRoute.ts:328-399`, `resolveNotificationTarget`).\n\nThe bug is not visible yet, because no push channel delivers today (#29041). It will be on day one of push.\n\n## Ask\n\n1. In the native navigate listener, resolve the route with the same resolver every inbox door uses before navigating: `resolveNotificationTarget(route, hostAppSegment)`, as `openInboxNotification.ts` does.\n   - `/apps/…` passes through.\n   - `/{object}/{id}` is hosted under the current app, or the default app when none is open.\n   - A route that resolves to nothing leaves the user where they are, rather than going to the catch-all.\n2. The cold-start fallback in the shell (`location.assign` of the raw route) must not bypass this. Once the shell waits for `ready` (mobile #162, landed), the event path is the normal one. Confirm that the cold-start tap goes through the listener, and add a Console-side guard that resolves an app-relative path arriving as the initial URL.\n\n## Acceptance\n\n- Unit test on the listener: `/opportunity/123` with host app `crm` → `/apps/crm/opportunity/123`; `/apps/x/y/1` passes through; an unresolvable path does not navigate.\n- The same resolver function is imported, not re-implemented."
+}

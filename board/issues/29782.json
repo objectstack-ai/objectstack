@@ -1,0 +1,36 @@
+{
+  "number": 29782,
+  "kind": "issue",
+  "title": "data-objectstack: a plain list read answered 404 OBJECT_NOT_FOUND reads as an empty list (\"no data yet\"), so the list never shows the server's reason",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T04:26:08Z",
+  "updated_at": "2026-11-03T07:34:36Z",
+  "closed_at": "2026-11-03T07:33:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29782",
+  "body": "domain:ui#5 · zhuangjianguo · session_01QsR2jQjvWkZ7is6GXbC6DB\n\nFiling gate: ② out-of-scope finding, class a (observed live), from #29704's os-dev report (PR #29780, item 4). Filed by `domain:ui#5`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** #29704 makes a list whose read the server answered with 404 `OBJECT_NOT_FOUND` show the server's sentence and code, not \"check your connection\". That only works on the list's raw read path, the one with `$expand` or `$search`. On the plain path, the same answered 404 reads as 这里还没有数据 (\"no data yet\"). That tells a builder whose object failed to register (#29673) that the object is merely empty.\n\n## What happens (by reading at `main`, and live in the #29704 dev's run)\n\n`ObjectStackAdapter.find` (`ui/packages/data-objectstack/src/index.ts`, ~L3814–3858):\n- On the SDK path (no `$expand` and no `$search`), any 404 that is not an `enable`-block denial adds the resource to `missingResources` and answers `{ data: [], total: 0 }`.\n- Every later `find` of that resource short-circuits to the same empty answer.\n\nThe memo exists for **optional collections** (`sys_presence`, `sys_activity`, …), whose absence means the feature is unavailable. But it also swallows the 404 of a list's **own** object, including one the server names `OBJECT_NOT_FOUND` with a sentence. In the #29704 live run, the count read (`$top=0`) took this path and answered empty. Only the list's expand read reached the error panel.\n\n## Wanted\n\nKeep the optional-collection behaviour, but stop it absorbing a 404 that is about the list's own object. Read it from the answer: a 404 whose body names `OBJECT_NOT_FOUND` (or the equivalent code the server sends for an unregistered object) is rethrown and not memoised. Then the list's error state, which #29704 teaches to show the server's code and sentence, gets it. Check `is404Error`'s callers for the optional-collection cases and keep them empty.\n\n## Tests\n\n- Adapter: a plain `find` answered 404 `OBJECT_NOT_FOUND` rejects, and does not memoise.\n- CONTROL: a 404 with no code, on an optional collection, still answers empty and memoises.\n- Over the real ListView: the plain path shows the server sentence and code.\n- An ablation reds the first test.\n\nSerialize after PR #29780 (#29704), which adds `answeredLoadFailure`.\n\nLanding site: `ui/packages/data-objectstack/src/index.ts` (`find`'s 404 branch). Note that seat work on `data-objectstack/src/index.ts` collides often, so check open PRs on it first.\n\nDedupe: `is:issue missingResources 404`, `is:issue OBJECT_NOT_FOUND empty list` (none open).\n\nLinks back: #29704, #29673, #29728."
+}

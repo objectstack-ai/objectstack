@@ -2,8 +2,8 @@
   "number": 29665,
   "kind": "issue",
   "title": "pm-dispatch(security): a security#1 seat owns every security finding end to end — intake, the opaque advisory ledger, the no-card fix order, the rule-level review — and security-findings.md names it as the owner",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T00:42:04Z",
-  "updated_at": "2026-11-03T01:50:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T03:13:14Z",
+  "closed_at": "2026-11-03T03:13:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29665",
   "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\n**Filing gate ③: the maintainer's decision.** In the triage seat's session on 2026-11-03, the maintainer said, verbatim: 「设 security#1 座位」. They were answering triage's analysis of who owns a security finding today, with option B recommended (a dedicated seat) over A (status quo) and C (triage absorbs it). ⛔ Not a claim. This card is rule-level only: it names no finding, and no mechanism.\n\n## 维护者速读\n\n- **问题：** `security-findings.md`（#29111）规定了安全发现**怎么**处理，但没有规定**谁**负责到底，现在是谁发现谁处理。11-02 一天就出现：两张安全发现被公开立卡，靠分诊按 §7 推送止损；中继报告通道在第一份之后返回 403（#29402），只能会话专递给维护者；没有任何座位记着有几份公告、修到哪一步；一张安全修复卡在交班时被退回了 `pm:queue`。\n- **改什么：** 设 `security#1` 座位，由管理员账号的会话坐（公告只有管理员与受邀协作者可见）。它负责接收、台账、派修与规则层复核。文本只改 `security-findings.md`（加「归属」一节）、新增 `lanes/security.md`、在信箱词表加一个键，`lanes/triage.md` 改为转交。\n- **不改什么：** 不新增门禁、不新增标签、不新增巡查行。公告发布与契约裁定仍归维护者。\n\n## Change\n\n1. **`security-findings.md`, a new section \"归属 · Owner: `security#1`\".**\n   - Every security finding is owned by `security#1` from intake to publish.\n   - The finder's only act is a relay `advisory_create` draft, plus one doorbell to `security#1` carrying the advisory's opaque id.\n   - If the relay refuses (§3), the mechanism goes in session to the `security#1` seat, or to the maintainer when the seat is vacant.\n   - The other sections keep their text. §8's 「一处成文」 holds: the new seat file points here and restates nothing.\n2. **`lanes/security.md`, the seat's charter.** Brief, and pointing to `security-findings.md` for every rule. It covers:\n   - **Who sits it:** a session under an account that can read and write repository security advisories, meaning an admin or a security manager.\n   - **The ledger:** on the seat post, opaque advisory ids and their states only (`received` / `fixing` / `merged` / `awaiting publish` / `published`). ⛔ No detail.\n   - **Fixes:** a no-card pm-dispatch order to `os-dev` at `xhigh`, with the mechanism only in the order and the advisory.\n   - **Reviews:** the fix PR's contract review is the seat's, with the record at rule level and the mechanism only in a local `security-note.md` (§6).\n   - **Accidental public cards (§7):** the seat takes them over directly. It adds the `security` label, adds no detail, and puts the move-to-advisory question to the maintainer.\n   - **Hand-over:** at sign-off, the ledger and every in-flight advisory stay with the seat post, never released into `pm:queue`.\n3. **The mailbox vocabulary.** One row in `MAILBOX_KEYS` (`scripts/pm/record-recognisers.mjs`) and in `project-forms.md`: `Notify: security · <advisory id>`. Any seat sends it to `security#1`. Opaque id only; ⛔ never a mechanism, a path or an object name. Add a self-test row for it and a refusal for a variant that carries free text.\n4. **`lanes/triage.md`.** Push ① stays: a security finding is pushed to the maintainer at once. The rest becomes a hand-over: triage forwards to `security#1` and stops there. Triage grades nothing about a finding beyond `security` + p1 when a public card exists. While the seat is vacant, triage keeps today's §7 handling.\n5. **The seat post.** The seating session opens the `security#1` `[PM seat]` post, as every lane seat does. Its ledger section starts empty.\n\n⛔ No gate, no new label (`security` and `pm:seat` exist), no patrol row. The maintainer's word is quoted above, as `instrument-discipline.md` asks for a process change.\n\n## Acceptance\n\n- The four text edits and the `MAILBOX_KEYS` row land in one PR (`.claude/skills/pm-dispatch/**`, `scripts/pm/record-recognisers.mjs`), governed as the skills lane's surfaces are.\n- `node scripts/pm/record-recognisers.mjs --mailbox-keys` lists `Notify: security`, and its `--self-test` passes, with a refusal pinned for a free-text variant.\n- The new text names no finding, path or mechanism. A reviewer can check this by reading.\n\nReader who acts: `domain:skills`. The seat itself is seated by the maintainer's admin-account session once this lands.\n\nRelated: #29111 (the rule this extends), #29402 (the relay 403), #29410 and #29420 (the advisory relay ops).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

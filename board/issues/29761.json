@@ -1,0 +1,33 @@
+{
+  "number": 29761,
+  "kind": "issue",
+  "title": "Virtual objects on a plugin driver get no organization scoping: no Layer-0 wall and no tenant in DriverOptions, so a multi-org deployment following the #27130 recipe leaks rows across organizations",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:46:34Z",
+  "updated_at": "2026-11-03T06:28:29Z",
+  "closed_at": "2026-11-03T06:28:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29761",
+  "body": "**Edition:** ObjectOS Enterprise (licensed, self-managed)\n**Version:** 18.2.0 in production. The virtual-object route is evaluated against 18.3.0 (`origin/main` `0b2b309c`).\n\n## Background\n\n#27130 (closed) was answered with the virtual-object recipe: a plugin driver behind an external object (`content/docs/data-modeling/virtual-objects.mdx`, reference test `packages/runtime/src/plugin-driver-external-object.spike.test.ts`). We are migrating our production-scheduling gantt to that recipe. Our deployment is **multi-organization**: several companies share one instance, and each must see only its own projects, plans and work orders.\n\nThe current endpoint scopes every read to the caller's organization (we shipped a P0 fix for a cross-company leak there). The recipe gives us no way to keep that scoping.\n\n## What happens\n\nRead on `origin/main` `0b2b309c`:\n\n1. **No Layer-0 wall on a virtual object.** An object with an `external` block whose `organization_id` is the platform-injected definition is treated as having no tenant column: `hasPhantomTenantAnchor` (`packages/plugins/plugin-security/src/federated-phantom-anchors.ts:131`) makes `objectHasOrgIdField` false (`packages/plugins/plugin-security/src/tenant-layer.ts:112`), so the verdict is `none`. No `organization_id` condition reaches the driver's `where`, under any posture.\n2. **The driver is not told who is asking.** `find(object, query, options?)` gets the object name, the query and `DriverOptions`. For a federated object `tenantId` / `tenantIds` are withheld on purpose (`packages/objectql/src/engine-driver-options.ts:131`, `tenantObject = … && !isFederated`). There is no user field in `DriverOptions` either.\n3. So a driver written as the guide shows reads its source with a system identity, and **every organization sees every row the driver returns**. Nothing refuses it and nothing warns.\n\nThe guide and the reference test do not cover this: the spike runs under the default `single` posture, and the guide does not mention organization scoping.\n\n## What we found as a workaround (unverified)\n\nIf the virtual object declares its **own** `organization_id` field (any definition that differs from `TENANT_SCOPE_FIELD_DEF`), `hasPhantomTenantAnchor` returns false, the Layer-0 wall applies, and `{ organization_id: <org> }` (or the deny filter) arrives in the driver's `where`. The driver then has to return `organization_id` on every row and push that condition down.\n\nThis depends on the exact-equality check in `equalsShippedDef` and is not documented, so we would rather not build on it without a platform answer.\n\n## Request\n\nOne of the following, or both:\n\n- **(a) Document and pin the workaround.** State in the virtual-objects guide that a multi-organization deployment must declare its own `organization_id` on the virtual object and return it from the driver. Add an `isolated` / `group` posture case to the reference test that proves the wall reaches the driver's `where`, and that a caller of org A never reads org B's rows.\n- **(b) Give a plugin driver the caller's scope.** For a plugin-published driver (not a built-in SQL driver federating a remote database), pass `tenantId` / `tenantIds` in `DriverOptions`, so the driver can scope its own source. The reason #7738 withholds them from federated SQL objects (a remote table has no tenant column) does not apply to code that computes its rows.\n\nEither way, a `validate` warning for \"external object on a plugin driver, walled posture, no declared `organization_id`\" would catch the leak before it ships. #27332 added the same kind of warning for the sharing model.\n\n## Related\n\n- #27130 (the original report), #27261 (virtual-objects epic), #27277 (engine floor), #27332 (owner-unmapped warning), #7738 / #7835 (tenant scope withheld on federated objects)"
+}

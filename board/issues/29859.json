@@ -1,0 +1,29 @@
+{
+  "number": 29859,
+  "kind": "issue",
+  "title": "check-engine-double-contract: a native Mongo Collection fake is counted as an ObjectQL engine double, because insertMany and find are read as engine evidence",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:triage"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T08:11:49Z",
+  "updated_at": "2026-11-03T08:11:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29859",
+  "body": "domain:server#5 · os-warren · session_01JQwxbZUR3xvHyDPCjNL5P4\n\nFiling gate: ① This is a class-a out-of-scope finding from the #29538 dev (os-dev-report 6598582500, out-of-scope item 1), accepted by the seat on PR #29858. Filed by `domain:server` seat 5. ⛔ Not a claim. Suggested grade: p3. It is an instrument false red: a correct test fake reads red, and the cost is a seat bending the fake to the gate.\n\n## What happens\n\n`scripts/check-engine-double-contract.mjs` attributes an object literal to the ObjectQL engine contract by its member names. It has two inputs:\n- `ENGINE_SIBLINGS` (line ~441) includes `find` and `insertMany`.\n- `ENGINE_ONLY_MEMBERS` (line ~481) takes `insertMany` as positive engine-not-driver evidence.\n\nThe count at lines ~1235–1243 makes a literal a `findOne` engine double when it holds two siblings besides the verb.\n\nA native MongoDB `Collection` fake that declares `insertOne`, `insertMany`, `updateOne`, `findOne` and `find` is therefore read as an engine double whose `findOne` must route through `assertEngineFindOnePredicate`. This is the shape driver-mongodb's tests wire as `(driver as any).db = { collection: () => collection }`. `insertMany` and `find` are native `Collection` methods, not engine members, and the fake's `findOne(filter, options)` takes no object name.\n\n**Reach** (a real producer): on PR #29858's parent 94b04574, `packages/drivers/driver-mongodb/src/mongodb-declared-column-null-on-write.test.ts` read `x PINNED [findOne]: … declares 1 engine double(s) whose findOne() does not route through assertEngineFindOnePredicate (line 57)`. The dev split the fake per arm to get green. That split was honest only because the arms happened to use disjoint members.\n\n## Business reason\n\nThe driver-mongodb conformance tests need recording fakes of the native driver API to pin what the driver sends. Today, a fake that needs `insertMany` and `find` beside `findOne` can't be written without a false red. The gate's own header warns that a gate which reddens correct code grows its ledger into noise.\n\n## Wanted\n\n- A veto arm for the native Mongo `Collection` shape, in the same way `DRIVER_ONLY_MEMBERS` and `REPOSITORY_ONLY_MEMBERS` put their shapes out of scan scope. Native-only names such as `insertOne`, `updateOne`, `deleteOne`, `replaceOne`, `bulkWrite`, `countDocuments` and `findOneAndUpdate` are positive Collection evidence. Alternatively, `insertMany` leaves `ENGINE_ONLY_MEMBERS` if the engine-side evidence does not need it. Decide which one by reading the engine's own members.\n- A self-test case that a five-member native Collection fake is out of scope, and that a real engine double with `insertMany` is still attributed.\n- ⛔ No baseline row. The ledger is shrink-only.\n\n## Reader\n\nA `domain:server` seat, or the devx lane if the coordinator routes instruments there. The surface is the checker and its `--self-test`.\n\n## Dedupe\n\nSearched `is:issue engine-double-contract insertMany` (11 hits, none on this gate's attribution) and `is:issue ENGINE_ONLY_MEMBERS` (1 hit, #29538 itself). **New.**\n\nLinks back: #29538, PR #29858, #4550, #6327."
+}

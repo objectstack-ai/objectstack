@@ -22,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T23:51:40Z",
-  "updated_at": "2026-11-03T02:15:05Z",
+  "updated_at": "2026-11-03T02:52:30Z",
   "closed_at": "2026-11-03T02:13:53Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -30,7 +30,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29650",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236, filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-03: 「发记录并立卡」 and 「相关卡 p1, 让车道处理」. ⛔ Not a claim.\nQA-source: #29648 · automation.package-flow-override · off-clause\nPart of #28236 · governs: ADR-0146 D2, D4, D9\nReader: `domain:server` (the clone door in `packages/runtime`).\nDedupe (open and closed): `clone override`, `New similar`, `NOT_OVERRIDABLE clone`. #28567 and #28149 built the door, and both predate a live override as the clone's source. **New.**\nreach: any packaged flow customized in Studio. Studio and the API both meet it.\ntype: Bug\n\n**Business reason.** An administrator who customized a flow and wants a second variant presses New similar and gets an English sentence about a declaration they never wrote. The only way forward in the product today is to delete their customization first.\n\n## What happens\n\nMeasured on `main` at `322cf9068f`, twice in Studio and once over the API.\n\n| source state | `POST /api/v1/automation/showcase_budget_approval/clone` |\n|:--|:--|\n| no override | 200, status `obsolete`, `packageId com.example.showcase.custom` |\n| published override | **403 NOT_OVERRIDABLE**: \"'flow/showcase_budget_approval_copy' declares an override of 'com.example.showcase', which ships no flow named 'showcase_budget_approval_copy'. Remove `overrides` to keep it as 'com.example.showcase.custom''s own item, or correct the name (ADR-0146 D2).\" |\n\nThe Studio dialog (`auto-new-similar-dialog`) shows that sentence and stays open. No flow is written.\n\n## Reproduce\n\n1. Publish an override of `showcase_budget_approval` (Customize, edit a node label, Publish).\n2. `POST /api/v1/automation/showcase_budget_approval/clone` with `{name:'showcase_budget_approval_copy', label:'x'}`. Expected: a switched-off copy in the pair (ADR-0146 D4). Actual: the 403 above.\n3. Restore package original, and repeat step 2: 200.\n\n## Why (read from source, the dev confirms)\n\n`cloneFlowDefinition` (`packages/runtime/src/flow-clone.ts:255`) copies the whole definition and removes only `FLOW_CLONE_DROPPED_KEYS` (`:159`), which do not include `overrides`. So the copy declares it overrides the base under a name the base does not ship, and the write gate is right to refuse that.\n\n## Wanted\n\n- The copy never carries the source's `overrides` block: it is the pair's own item, under a new name (D2, D4).\n- It copies what the source serves: with a live override, the override's definition. The dev states this in the PR, and asks if the code says otherwise.\n- A pin at the clone door with a live override as the source, and a clause added to `automation.package-flow-override`, whose steps today clone only after the restore, so they cannot see this.\n\nLinks back: #29648, #28567, #28149, #28236, ADR-0146 D4."

@@ -2,8 +2,8 @@
   "number": 29377,
   "kind": "issue",
   "title": "spec(data): add a shared NULL-distinct `unique` conformance case-set beside value-roundtrip and the filter sets, so every driver proves two NULLs do not collide",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:spec",
-    "needs-user-decision",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T13:27:44Z",
-  "updated_at": "2026-11-02T21:56:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T06:39:25Z",
+  "closed_at": "2026-11-03T06:38:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29377",
-  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ③ escalation of the server lane's contract review on #29278 (record 6577415377), recorded in its landing note 6578310168: the card's \"Wanted\" case-set lives in `packages/spec/src/data`, outside the server lane's claim. Handed to the spec lane. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec` (the case-set and its census registration); each driver's adoption follows in its own lane.\n\n## What is missing\n\nPR #29339 (#29278) made `driver-mongodb` treat two `null` values in a `unique` field as distinct, matching `driver-sql` and `driver-memory`. The agreement is measured in that PR, but no shared case-set asserts it, so a fourth driver (or a regression in one of the three) can collapse NULLs onto one key and every driver-conformance cell stays green. It is the gap `value-roundtrip-conformance.ts` describes for value storage: no case-set, no evidence.\n\n## Done when\n\n- `packages/spec/src/data/unique-null-distinct-conformance.ts` (name per the house pattern) declares the canonical cases: two rows with `null` in a `unique` field both insert; an absent value behaves as `null`; two equal non-null values still collide with the driver's unique refusal; a compound unique key with one `null` member does not collide (measure what the three drivers do today before writing that row, and cite the measurement — every row is a measured value or a control, as in value-roundtrip).\n- The case-set is registered with the driver-conformance census (`scripts/check-driver-conformance.mjs`) the way the existing sets are, so a driver that does not run it is scored.\n- Spec patch, `Clause-②: no` · `Metadata-protocol: none` (test-support export only; if the census needs a new public export name, it is named in the PR for the maintainer).\n- Driver adoption (`driver-sql`, `driver-memory`, `driver-mongodb`, then the rest) follows in the drivers' lane, one PR each, citing this card.\n\nDedupe: #29278 / PR #29339 (landed, the mongodb fix). **New.**"
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nRuled: 6595804527 · letter A · 2026-11-03T04:55Z\nRuling-ref: 6595804527\n\nFiling gate: ③ escalation of the server lane's contract review on #29278 (record 6577415377), recorded in its landing note 6578310168: the card's \"Wanted\" case-set lives in `packages/spec/src/data`, outside the server lane's claim. Handed to the spec lane. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec` (the case-set and its census registration); each driver's adoption follows in its own lane.\n\n## What is missing\n\nPR #29339 (#29278) made `driver-mongodb` treat two `null` values in a `unique` field as distinct, matching `driver-sql` and `driver-memory`. The agreement is measured in that PR, but no shared case-set asserts it, so a fourth driver (or a regression in one of the three) can collapse NULLs onto one key and every driver-conformance cell stays green. It is the gap `value-roundtrip-conformance.ts` describes for value storage: no case-set, no evidence.\n\n## Done when\n\n- `packages/spec/src/data/unique-null-distinct-conformance.ts` (name per the house pattern) declares the canonical cases: two rows with `null` in a `unique` field both insert; an absent value behaves as `null`; two equal non-null values still collide with the driver's unique refusal; a compound unique key with one `null` member does not collide (measure what the three drivers do today before writing that row, and cite the measurement — every row is a measured value or a control, as in value-roundtrip).\n- The case-set is registered with the driver-conformance census (`scripts/check-driver-conformance.mjs`) the way the existing sets are, so a driver that does not run it is scored.\n- Spec patch, `Clause-②: no` · `Metadata-protocol: none` (test-support export only; if the census needs a new public export name, it is named in the PR for the maintainer).\n- Driver adoption (`driver-sql`, `driver-memory`, `driver-mongodb`, then the rest) follows in the drivers' lane, one PR each, citing this card.\n\nDedupe: #29278 / PR #29339 (landed, the mongodb fix). **New.**"
 }

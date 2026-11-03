@@ -1,0 +1,34 @@
+{
+  "number": 29825,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): a precedent-settled new key or export name is the seat's call under the veto window",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T06:21:34Z",
+  "updated_at": "2026-11-03T07:05:24Z",
+  "closed_at": "2026-11-03T07:05:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T07:05:21Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29825",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBUyArWn6eHL33NNgvdpkwiW)_\nFixes #29663\n\n## 维护者速读\n\n- 改了什么:pm-dispatch 技能文本加两句:先例已定拼写的新键名/值/导出名归席位,PR 点名先例、否决窗口落地;分诊审计不自加批准门,只有语义或契约形状真分歧才呈你。\n- 为什么改:你 2026-11-03 的两条回答(「只有真分歧才送」「立,我来立」);此前六个 PR 只为等一个已有先例的名字获批而停在队外。\n- 风险与回滚:只改规则文本,不动代码、门禁或已裁的六张卡;回滚即 revert 本 PR。\n- 先看:`.claude/skills/pm-dispatch/SKILL.md` 〈升级与决策〉新增行(及为付行数删掉的「速读六行固定」一行,它在 `os-dev.md` 原样保留),再看 `references/triage-duties.md` 第 40 行。\n- 两分钟验证:`pnpm check:pm-skill-ratchet && pnpm check:pm-skill-id-lint`,预期两门绿,SKILL.md 仍为 319 行。\n- 需要你做的:无,席位达档复核后落地。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nTwo sentences of rule text under `.claude/skills/pm-dispatch/`, nothing else.\n\n- `SKILL.md` 〈升级与决策〉, right after the discretion sentence (「其余归 PM 裁量:派发与排序,维护者否决窗口而非许可门」), gains one line: 「新键/值/导出名有先例(spec、生产者或标准同词同概念):席位点名先例,否决窗口落地。」 — the precedent test (same word, same concept, in the spec, the producer or the standard the key implements), the seat's call, landed under the veto window with the precedent named in the PR body. The escalation test two lines above it (「选项在产品语义或公开契约形状上真实分歧且既有规范定不了」) stays the only path to the maintainer.\n- `references/triage-duties.md`, right after the `needs-user-decision` definition line, gains one line: 「先例已定新键/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。」 — a precedent-settled name is not a 契约形状提案, triage's audit comment adds no approval gate of its own, and only a genuine divergence on semantics or shape goes to the maintainer.\n- Line ratchet, `SKILL.md`: paid line for line. The cut is 「速读六行固定:改了什么/为什么改/风险与回滚/先看/两分钟验证/需要你做的。」 in the seat-record block; its content lives verbatim in `.claude/agents/os-dev.md` (「六行固定:改了什么/为什么改/风险与回滚/先看/两分钟验证/需要你做的。」), the file whose reader writes those six lines; the SKILL.md lines beside it still say the seat corrects the six lines of the dev's draft. No re-wrap anywhere.\n\n## Why\n\nThe maintainer's order, quoted on the card verbatim: 「以后新键名/导出名还送你批吗? → 只有真分歧才送」 and 「立一张 skills 卡补这句澄清吗? → 立,我来立」. Neither file said what a new key name on an already-ruled protocol card is, and triage read every such name as a 契约形状提案 that waits for the maintainer's approval line.\n\n## Tests\n\nRule text only; no test file moves. The gates that read these files are in Verification.\n\n## Acceptance notes\n\n- Premise measured on `origin/main` @ `10e4a774` before the edit: `SKILL.md` 319 lines at its ratchet ceiling (319); `triage-duties.md` 96 lines, the `needs-user-decision` definition on line 39 (the card says 42); no 「先例」/precedent rule in either file.\n- Line budget as dispatched: `SKILL.md` net 0 (319 → 319), `triage-duties.md` +1 (96 → 97). Touched lines: 114 and 116 bytes, under 120. No issue number in operative text.\n- Nothing in `AGENTS.md`, the DELIBERATE CORRECTION class of `check-empty-changeset`, or the six already-ruled cards moves.\n- Concurrent `.claude/skills/pm-dispatch/**` work (the one-line `references/execution-duties.md` edit on another seat's PR) touches neither file here; the branch was fast-forwarded to `origin/main` @ `10e4a774` before the edit.\n- `skip-changeset`: `.claude/**` publishes nothing from any released package.\n\n## Verification\n\nHead `87c5223b` = `origin/main` @ `10e4a774` + this one commit. Every reading below was taken on that tree.\n\n<details><summary>Derived gates — dispatch-gates --commands --repo objectstack-ai/objectstack</summary>\n\n22 families derived (2 paths vs merge base 10e4a774). All 22 run, each exit code captured before any pipe: 22 × exit 0. `check:doc-formula-expressions` first answered exit 3 (PREREQUISITE NOT MET: `@objectstack/formula` and `@objectstack/lint` not built); after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under `os-verify-lock` (VERDICT command-exit 0, 113 s) it was rerun: exit 0. `dispatch-gates --ran`: 22 derived, 22 run, 0 NOT-MEASURED, 0 UNRUN. Included: `check:pm-skill-ratchet` exit 0, `check:pm-skill-id-lint` exit 0, `check:pm-governed-prose` exit 0, `check:skill-frame-sync` exit 0.\n\n</details>\n\n<details><summary>Not run locally</summary>\n\n`pnpm lint` and the rest of the repo-wide farm are CI's run. Tier: `dispatch-gates --tier` on `SKILL.md` answers MANDATORY claude-fable-5-1 (clause ①); the sentence landed in `SKILL.md` as well as `references/triage-duties.md`, so the tier stays as dispatched.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` is CI's run on this PR.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. Publishes nothing (`skip-changeset`); both declaration lines are above.\n- [x] 6. `packages/spec` not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English; the quoted rulings stay verbatim.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzeuZW7cui7Lktvjq41\n"
+}

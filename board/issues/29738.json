@@ -1,0 +1,33 @@
+{
+  "number": 29738,
+  "kind": "issue",
+  "title": "docs(adr-0142): amend D2 — a failed member read refuses for the D7 grant recompute and the D6 approver slate, and still answers nobody for admission consumers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:06:56Z",
+  "updated_at": "2026-11-03T07:02:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29738",
+  "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ② a maintainer decision. Warren picked option B on #29604 at 2026-11-03T03:05Z (decision card in the thread \"Decide ruling for card #29604\"). B runs in two PRs: this ADR amendment first, then the code on #29604. Sub-issue of #29604, so it carries the parent's domain. ⛔ Not a claim. Suggested-grade: p2, as the parent.\n\n## What the amendment says\n\nGoverning text: `docs/adr/0142-ownership-queue-membership-claim-and-assignment-rules.md` D2 (\"An empty expansion is a fact, not a fault: the consumers below each say what they do with it\"), D5 (a failed assignment read leaves the row and warns), D6 item 2 (empty slate warns and returns `[]`), D7 item 1 (an empty queue grants nothing and warns).\n\nNeither D2 nor D6/D7 says what happens when the member table behind a queue cannot be read. Today the expander answers \"nobody\", so the D7 grant pass is recomputed against an empty set and revokes every grant the queue gave, and a D6 slate shrinks. Every other sharing and approvals recipient read now refuses on a failed read (#29362, #29503 / PR #29602, #29606 / PR #29647).\n\n## Wanted\n\n1. D2 separates **an empty expansion** (a fact) from **a failed read** (a fault), and names who reads which:\n   - admission consumers — the access path (D3), the claim admission (D4), the assignment pool (D5) — keep \"nobody\" on a failed read, because answering nobody denies;\n   - the D7 grant recompute and the D6 approver slate refuse on a failed read.\n2. D7 adds: a refused grant pass keeps the rule's existing grants and warns (the #29362 posture).\n3. D6 adds: a refused slate follows the approvals failure class of #29503.\n4. The status line gets an `Amended (2026-11-03, #29604)` note in the shape of the existing one.\n5. Nothing else in the record moves. No code, no schema, no changeset in this PR.\n\n## Process\n\n`docs/adr/**` is Tier H: this PR needs the maintainer's approval. It runs at the fable tier with effort xhigh, as the ruling set. The code half (#29604) is dispatched after this PR merges.\n\nDedupe: searched `ADR-0142 D2 amend`, `queue failed read refuse`; nearest is the parent #29604. **New.**\n\nLinks back: #29604 (filing addendum 6588472222, queue-limit comment 6591670782), #29362, #29503, #29606, ADR-0142."
+}

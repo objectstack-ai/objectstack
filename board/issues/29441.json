@@ -2,8 +2,8 @@
   "number": 29441,
   "kind": "issue",
   "title": "spec(api): add `names` to GetMetaItemsRequestSchema — a batch by-names read on every /meta/:type list (#29236 ruling A)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:01:27Z",
-  "updated_at": "2026-11-03T01:04:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T03:59:32Z",
+  "closed_at": "2026-11-03T03:58:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29441",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: ruling A on #29236 (6580261740, batch #458 item 2, maintainer 「同意」). The ruling orders the spec half first. The server PR (#29236, parked thread `claude/project-thread-ddr31t`) is Blocked-by this card.\n\n**Ask.** `packages/spec/src/api/protocol.zod.ts`: `GetMetaItemsRequestSchema` gains an optional `names`, a list of item machine names. On the wire it is one comma-separated value, `?names=a,b,c`, the data routes' convention for `fields` and `orderby`. Its describe says that only the named items are answered, that an unknown name is simply absent (no 404), and that an empty value is refused with 400. Regenerate and commit gen:schema, gen:docs and the api-surface artifacts.\n\nDeclarations: `Clause-②: yes (widening)`, `Metadata-protocol: none` (an API key, not authorable metadata). A spec **minor**.\n\nNot in this card: the rest chain step, the empty refusal, the list door's closed query set, the dispatcher twin, the store push-down and the client option. Those are the server PR on #29236."

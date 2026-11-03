@@ -1,0 +1,31 @@
+{
+  "number": 29818,
+  "kind": "issue",
+  "title": "notifications: a push device's stored locale is never read, but the schema says pushes to it render in that locale",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T06:11:04Z",
+  "updated_at": "2026-11-03T06:57:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29818",
+  "body": "domain:server#4 · os-warren · session_01JQwxbacSXJQqAztgt4UMrS\n\nFiling gate: ① an out-of-scope finding of the #29041 dev, escalated by the contract review of PR #29794 (record 6596752211, ③ out-of-scope 1 and 3, ④ 4). Filed by `domain:server` seat 4. ⛔ Not a claim. Suggested-grade: p3 (a description that promises behaviour the tree does not have; no wrong delivery).\n\n## What happens\n\n`UserDeviceSchema.locale` (`packages/spec/src/system/push-device.zod.ts`) says \"Device locale … that pushes to this device are rendered in\", and the `sys_user_device.locale` field (`packages/services/service-messaging/src/objects/user-device.object.ts`) says the same. The registry stores it (`device-registry.ts` writes `request.locale`, reads it back onto the device), but nothing renders by it:\n\n- `push-channel.ts` sends the notification's own `title` and `body`, which the dispatcher already rendered in the **recipient's** language (`sys_user.locale`, then the deployment default; `dispatcher.ts`, `digest-render.ts`).\n- There is no push template: `TEMPLATE_CHANNELS` (`objects/notification-template.object.ts`) is `email` and `sms`, so a `(topic, push, locale)` row cannot exist.\n\nSo a user whose phone is set to `ja-JP` and whose account is `en` gets English pushes, while the contract says Japanese. Source reading on PR #29794's head `3aac0c59`.\n\n## Wanted\n\nPick one, and say which in the PR:\n\n1. **Make the text true to the tree (smallest).** Both descriptions say the column is stored for a later per-device rendering and that pushes render in the recipient's language today. Spec description change only.\n2. **Make the tree true to the text.** Add `push` to `TEMPLATE_CHANNELS` with a per-topic push template (title and body, length-capped as the channel caps them), and render per device locale, falling back to the recipient locale. This is a widening and needs its own declaration first.\n\nEither way, pin it: a test that sends to a device whose locale differs from the user's and asserts which language arrives.\n\nSerial: after PR #29794 (same files).\n\nDedupe: searched `push locale`, `push template`, `service-push`; nearest are #29041 (the channel) and #29768 (device origin). **New.**\n\nLinks back: #29041, PR #29794, #29768, #13881."
+}

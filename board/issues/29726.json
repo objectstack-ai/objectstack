@@ -1,0 +1,36 @@
+{
+  "number": 29726,
+  "kind": "issue",
+  "title": "pm-dispatch(security): the security lane charter carries the maintainer's working rules — reviewed escalation, cloud cards, the close-out of every object, advisory intake and reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T02:55:31Z",
+  "updated_at": "2026-11-03T07:36:19Z",
+  "closed_at": "2026-11-03T07:33:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29726",
+  "body": "domain:skills#2 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n**Filing gate ③: the maintainer's order.** In session `session_01QSeKYn5CmmdShCJifm6WYj` on 2026-11-03, after the seat described how it works the security lane, the maintainer said, verbatim: 「这些都应该写到你的skills」. This card turns those working rules into the lane charter `references/lanes/security.md` (landing in #29695, card #29665). It also takes that PR's contract-review should-fix items. Rule-level only: it names no finding, no advisory, no mechanism.\n\n## Rulings to write in, each verbatim from the same session\n\n1. 「后续需要我决裁的问题，先用 fable 审核之后再和我沟通。」 Before the security seat puts any question to the maintainer (a `needs-user-decision` analysis, an in-session question, a pick between options), an isolated agent at `CONTRACT_REVIEW_TIER` reviews the analysis. It checks that the four-axis analysis holds, that no option is missing, that the recommendation stands, and that the evidence is real. It is fed the analysis and the evidence, never the seat's conclusion. The question to the maintainer carries the review's verdict and any dissent. ⛔ No model id in the text; the tier constant names it.\n2. 「复杂的任务可以开云卡片」 The security seat dispatches a fix order as a cloud card (`create_session`, one order per container) when it is L/XL, build-heavy (`packages/spec/src/**` plus another package), long-running or browser-verified, per `execution-duties.md`'s backend rules. Smaller orders stay `mode:subagent`. The seat archives each cloud card when its work lands.\n3. 「这些都应该写到你的skills」 covers the close-out the seat described, per object:\n   - **Card:** `Fixes #N` closes on merge, and the seat then posts the landing record and removes the `pm:*` state label in the next stroke; a `Part of #N` card the seat closes itself when its last part lands.\n   - **PR:** the merge queue merges it, and the seat confirms MERGED before it closes out the card.\n   - **Advisory:** after its fix merges, its ledger state moves to `merged` / `awaiting publish`, and the maintainer is told. Publishing is the maintainer's alone (the relay refuses `published` by name). The seat moves an advisory to `closed` through the relay `advisory_state` only when the maintainer names that advisory.\n   - **Cloud card:** archived by the seat. **Subagent:** ends itself, and removes its own worktree.\n\n## Intake and reads (the seat's measured readings, 2026-11-02/03)\n\n- A cloud seat cannot list the repository's advisories: its token carries no repository-advisories grant, and the relay refuses the bare collection by design. The ids come from the maintainer or from a `Notify: security` doorbell.\n- An advisory's text is read only through the relay `advisory_read`, sealed to the seat's one-time key, and printed only to the seat's own stdout with `--reveal`. ⛔ Never into a file, a log or a background task's output file. The sender gate is write on the target (#29644).\n- Claims on advisory fixes live in the seat post's ledger (opaque id · session · state), never in session memory.\n\n## From PR #29695's contract review (comment 6594119935), should-fix\n\n- S1: `lanes/security.md` line 12 and the 「⛔ 不换账号重发」 clause on line 17 restate `security-findings.md` §3. Replace them with pointers (§8 「一处成文」).\n- S2: the §7 hand-over (triage → `security#1`) has no mailbox instrument: `Notify: security` refuses a card number by design. One sentence must say how the seat learns of a `security`-labelled public card: its own patrol reading the label, or triage drafting through the relay and ringing as the finder of record.\n- S3: the `MAILBOX_KEYS` `notify:security` row's `from:` (\"any seat, dev or QA runner\") overreaches §5. A dev's or a runner's finding goes privately to its PM session (`os-dev.md`, `checklist-test`), so the ringer is the seat holding the finding.\n\n## Also\n\n- The lane list lives in three copies (`check-half-states.mjs` `SIGNATURE_LANE_SOURCE`, `fleet-roster.mjs` `SIGNATURE_LINE`, `mailbox-open.mjs` `SEAT_BARE_LANES`), kept in step by text alone. If the dev measures that one can import from another, with no new gate, make it one source. Otherwise leave a note. ⛔ No new gate. (`coordinator` signs but has no mailbox. Whether it should have one is not this card's question.)\n\n## Acceptance\n\n- `lanes/security.md` carries rulings 1–3 and the intake/read rules as pointers plus the minimum new text, restating no never-public rule. S1–S3 are resolved.\n- The line ratchet rows rise only by the measured delta, citing this card body as the ruling record.\n- The contract review at `CONTRACT_REVIEW_TIER` passes before landing (Tier S).\n\nReader who acts: `domain:skills` (the PM seat in this session claims it)."
+}

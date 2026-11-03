@@ -1,0 +1,34 @@
+{
+  "number": 29795,
+  "kind": "pull_request",
+  "title": "docs(spec): name the producer of ConnectorConnectionState.redirectUri",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T05:00:01Z",
+  "updated_at": "2026-11-03T05:54:15Z",
+  "closed_at": "2026-11-03T05:54:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T05:54:13Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29795",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufziW5z48GckZ3oXYCab\n<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwB9wL8eUVeLSJG2twNqGtFc8)_\n\nFixes #29715\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`ConnectorConnectionState.redirectUri` 的 TSDoc 末句，原来说「先声明、服务还没答，任何回答都不带它」，现在改成点名生产者：`@objectstack/service-automation` 的 `AutomationServicePlugin.getConnectorConnection` 在能推导出地址时设上它，否则不带。\n- 为什么改：连接读取已经会返回 `redirectUri`（服务端那半已合并），但 spec 文档还说「没有回答带它」。这段注释随 `dist` 发布，照着它写客户端的人或 AI 会为一个其实总会返回的键写兜底逻辑。\n- 风险与回滚：只改注释文字和新增一条 changeset，没有任何类型、schema 或取值变化；回滚即还原本 PR。\n- 先看：`packages/spec/src/contracts/automation-service.ts`（`redirectUri` 上方注释的最后一句）、`.changeset/29715-connector-redirect-uri-producer.md`（同版本 changelog 的更正段）。\n- 两分钟验证：`pnpm --filter @objectstack/spec exec vitest run src/contracts/connector-connection-redirect-uri.pin.test.ts`，应见全部用例通过；`git grep \"until the automation service sets\" packages/spec` 应无命中。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n**Before** (`origin/main` `3eeb81d1`), `packages/spec/src/contracts/automation-service.ts` L1196–L1198, the end of the `ConnectorConnectionState.redirectUri` TSDoc:\n\n> Read-only: no connection request takes it. Declared ahead of the service that answers it: until the automation service sets it, no answer carries it.\n\n**After:**\n\n> Read-only: no connection request takes it. Its producer is `@objectstack/service-automation`: `AutomationServicePlugin.getConnectorConnection` (`packages/services/service-automation/src/plugin.ts`) sets it whenever the derivation has a base, and it is absent otherwise.\n\nRead against the producer on `origin/main`: `getConnectorConnection` (`plugin.ts` L4128–L4134) spreads `redirectUri` into the state only when `derivedConnectorOAuthRedirectUri()` returns a value, and that helper (L3861–L3866) answers `undefined` when neither the `connectorOAuthRedirectUri` option nor an `http(s)` `OS_AUTH_URL` / `OS_BASE_URL` base exists. The wording follows `approval-service.ts`, which names its producer the same way (\"plugin-approvals' `rowFromRequest` serves it\").\n\nOther copies, searched with `git grep` over `packages/spec/**`: no other \"declared ahead\" or \"no answer carries\" prose about `redirectUri` (the other \"declared ahead\" hits are about unrelated keys). `content/docs/automation/connectors.mdx` already says the status read answers `redirectUri`. No reference page is generated from this docblock: `ConnectorConnectionState` is a TypeScript interface, not a Zod schema, so neither `json-schema/` nor `content/docs/references/` carries it.\n\n**Changeset route (the seat's call).** `.changeset/29574-connector-redirect-uri.md` is left untouched: the pending `.changeset/29463-connector-redirect-uri-read.md` in the same release already says the read now answers `redirectUri`. This PR's own changeset (`@objectstack/spec` patch) carries a \"Supersedes, in the same release\" paragraph saying the earlier \"Declared ahead of the service\" note no longer holds.\n\n## Tests\n\nNo test changes. The existing pin `connector-connection-redirect-uri.pin.test.ts` reads this docblock and asserts the callback path, the derivation chain and both absence conditions; the edit leaves those sentences unchanged and the pin stays green.\n\nAll on head `3a5cdb13`, under `os-verify-lock`:\n\n<details><summary>spec build + local suite + typecheck, full build + spec repo suite</summary>\n\n- `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec test && pnpm --filter @objectstack/spec typecheck`: `Test Files 803 passed (803)`, `Tests 23800 passed | 1 todo (23801)`; `check:test-typecheck: OK`; VERDICT command-exit 0.\n- `pnpm turbo run build --concurrency=2 && pnpm --filter @objectstack/spec test:repo`: `Tasks: 118 successful, 118 total`; `Test Files 89 passed (89)`, `Tests 1522 passed (1522)`; VERDICT command-exit 0.\n\n</details>\n\nNo dogfood run: no `!` in the title and no `(narrowing)` arm. No ablation: no tested behaviour changes (prose only).\n\n## Acceptance notes\n\n- `.changeset/29574-connector-redirect-uri.md` still says \"until the automation service sets the key, no answer carries it\". Left as the seat ruled; this PR's changeset supersedes it in the same release.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 72 families on `3a5cdb13` (2 paths vs merge base `3eeb81d1`).\n\n<details><summary>72 derived gates: 72 exit 0</summary>\n\n- First serial pass: 68 exit 0, 4 exit 3 (built-output prerequisites: `check-plugin-teardown-shape --self-test` needs its pinned fixture commit on the shallow clone; lint `check:doc-formula-expressions`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` need a full build).\n- After `git fetch origin 621a4876` and the full `turbo run build --concurrency=2` above, the 4 were rerun: all exit 0.\n- `dispatch-gates --ran`: \"72 derived famil(ies) accounted for — 72 run, 0 NOT-MEASURED\".\n\n</details>\n\n`check-changeset-no-major` with this body as the event: exit 0 (direction arm none declared, `Metadata-protocol: none`). `check-closing-keyword-parity --body`: the only closing target is `Fixes #29715`.\n\nCI families are read from this PR's check-runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufziW5z48GckZ3oXYCab)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufziW5z48GckZ3oXYCab\n"
+}

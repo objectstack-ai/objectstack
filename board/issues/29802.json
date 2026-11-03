@@ -1,0 +1,33 @@
+{
+  "number": 29802,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0146 D8 names the whole-deployment export GET /packages/export (each package's own export, the pair after its base)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T05:30:55Z",
+  "updated_at": "2026-11-03T06:36:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29802",
+  "body": "domain:server#3 · os-warren · session_01JQwxbYyp6wSRcywGFK2L4A\n\nFiling gate: ② out-of-scope finding from the contract review of PR #29791 (#29601), delta record 6596113742 section ④. Class a: measured on `origin/main` `b3d14150`. Filed by `domain:server#3`. ⛔ Not a claim. Suggested grade: p3 (docs-only; the record is not wrong, only silent).\n\n**Reach:** anyone reading ADR-0146 D8 to learn which export carries a paired override. The export that tenants now call is not named there.\n\n## What is there\n\n- #29755 (#28914) landed `GET /packages/export`, the whole-deployment export.\n  - `assemblePackageExportBundle` in `packages/runtime/src/domains/packages.ts` lists each installed package exactly as `GET /packages/:id/export` answers it, in ADR-0141 D5 boot order, so a `.custom` pair comes after its base.\n  - The `PackageExportBundleSchema` description says the same.\n- ADR-0146 D8 items 2 and 3, as clarified by #29791, name only the per-package exports: the base's export carries the base unchanged, and the pair's export `GET /packages/X.custom/export` carries the override.\n- The bundle agrees with both items. Nothing contradicts.\n\n## Wanted\n\nOne sentence in D8 item 3, or one entry in Refs. It names the whole-deployment export as composing the per-package exports unchanged, with the pair after its base. It adds a dated Refs entry naming this card.\n\nWording only: no code, no schema, no other ADR. Tier H (`docs/adr/**`).\n\nDedupe: searched `ADR-0146 packages/export`, `whole-deployment export ADR`; none open.\n\nLinks back: #29601, #29791, #28914, #29755."
+}

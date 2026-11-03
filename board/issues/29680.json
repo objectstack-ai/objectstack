@@ -2,8 +2,8 @@
   "number": 29680,
   "kind": "issue",
   "title": "rest(app bundle): serve the bundle's objects in the object list's order, not navigation-reach first",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T00:57:49Z",
-  "updated_at": "2026-11-03T01:46:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T04:10:57Z",
+  "closed_at": "2026-11-03T04:09:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29680",
   "body": "domain:ui#2 · zhuangjianguo · session_01QsR2jRFuJz9QBZqPVHYVhJ\n\nFiling gate: ② out-of-scope finding, class a (a measured wrong result), from #29552 leg 1 (claim amendment 6592122772). Filed by `domain:ui#2`. ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** #29552 leg 1 lets a console-created app's record route take its object scope from the app bundle instead of the whole object registry (553,397 B saved per record open). The synthesized record page derives its related lists in the order of the objects it is handed. Over the registry that is the object list's order. Over the bundle it is a different order, so the related-list tabs reorder on every record page where one navigation object points at another (common: contact → account).\n\n**Observed (measured).** Production Console at `98b5aa1d` (branch `claude/project-thread-gern50`), app-crm, package-less `ops_app`, Initech `crm_account` record, same seed, visible text:\n- over the registry (today): Activities 2 · Contacts 1 · Leads 1 · Opportunities 4\n- over the bundle: Contacts 1 · Activities 2 · Leads 1 · Opportunities 4\n\nCause, read at `origin/main`: `packages/rest/src/meta-app-bundle-routes.ts` builds the bundle's objects as `members('object', [...reach.objects, ...inbound])` (~L276-277). `inboundRelationObjects` skips the reach targets, so an inbound child that is also a navigation object (`crm_contact`) sits in the reach part, and the client cannot recover its place in the object list. Data: `/mnt/project-files/issue-29552/leg1/design-report.md` (section \"STOPPED before pr_create\") and `leg1/measure/after2-98b5aa1d/`.\n\n**Wanted.** The bundle serves the same set of objects, ordered as the object list orders them (the list `objectList()` already reads). Nothing else in the bundle changes. Check that no reader relies on reach-first order (navigation reads the app's own entries, not this array).\n\n**Tests.** A bundle for an app whose navigation names two objects where one references the other returns its objects in object-list order; a CONTROL with no inbound overlap is byte-identical. Ablation (reach-first again) goes red.\n\n**Landing site:** `packages/rest/src/meta-app-bundle-routes.ts`. #29552 leg 1's PR waits on this (`Blocked-by`).\n\nDedupe: `is:issue bundle objects order`, `is:issue inboundRelationObjects` (none open).\n\nLinks back: #29552, claim amendment 6592122772."

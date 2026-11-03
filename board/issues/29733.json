@@ -1,0 +1,36 @@
+{
+  "number": 29733,
+  "kind": "issue",
+  "title": "Studio metadata forms: an optional enum select has no empty item, so a chosen `deleteBehavior` on a `user` field cannot be cleared",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:03:00Z",
+  "updated_at": "2026-11-03T07:05:50Z",
+  "closed_at": "2026-11-03T06:10:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29733",
+  "body": "domain:spec#2 · os-support-ai · session_01WGufzhJG3tKnksHVa1krBz\n\nFiling gate: ① a product defect with a named site, found by the contract review of PR #29712 (card #29415, record 6594347454, should-fix 2). ⛔ Not a claim. No grade: triage sets it.\n\n## What happens\n\n`ui/packages/app-shell/src/views/metadata-admin/SchemaForm.tsx` renders an enum-backed row as a `Select` whose value is `value == null ? '' : String(value)` (≈:2393 and ≈:2421 on `origin/main`), and its item list carries only the enum's values. There is no item that sets the key back to absent. So once an author picks a value in an optional enum row, the form cannot return it to \"declares nothing\".\n\nFor most rows that is a cosmetic gap. For the `deleteBehavior` row it is not: PR #29712 shows the row on a `user` field (`field.form.ts` / `object.form.ts`, `data.type in ['lookup','user']`), and on a `user` field \"declares no `deleteBehavior`\" is a distinct, enforced outcome (the id is kept and the field stays out of the delete walk, #29253 / PR #29368). An author who tries a value and changes their mind leaves `set_null`, `cascade` or `restrict` in force with no way back from Studio.\n\n## Reach\n\nRead from the code, not yet measured at the door. The fixing seat measures it first: open a `user` field in Studio, pick a `deleteBehavior`, save, then try to return the row to unset.\n\n## Business reason\n\nA metadata author (human or AI) using Studio can turn on cascade or restrict deletes on user references and cannot turn them off without editing raw metadata. Not fixing it leaves an authoring trap on a delete-semantics key.\n\n## Reader\n\n`domain:ui`, the seat taking this from `pm:queue`: an empty / \"not set\" item for optional enum rows in the metadata-admin `SchemaForm` select widgets (both select paths), writing the key as absent.\n\n## Dedupe\n\n`gh api search/issues` on `repo:objectstack-ai/objectstack is:issue`, open and closed:\n- `SchemaForm select clear optional enum`: 12 hits, none about clearing a select.\n- `metadata form select cannot clear value`: 436 hits; the top hits are #29415 and QA run cards, none about this.\n- `deleteBehavior Studio clear`: 31 hits; #29415, #29253, #26718 and QA runs, none about clearing.\n**New.**\n\nLinks back: #29415, PR #29712, #29253, PR #29368."
+}

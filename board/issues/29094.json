@@ -2,8 +2,8 @@
   "number": 29094,
   "kind": "issue",
   "title": "skills(objectstack-formula): \"every predicate reads a record total over declared fields\" contradicts the canonical sparse action-binding rule (declared-fields.ts, #4953), so agents drop the has() guard a list-row action needs",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,8 +11,7 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:skills",
-    "pm:dispatched"
+    "domain:skills"
   ],
   "assignees": [
     "marchtian"
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T07:16:02Z",
-  "updated_at": "2026-11-02T15:01:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T05:20:22Z",
+  "closed_at": "2026-11-03T04:35:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29094",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a named contradiction between a shipped skill and the code's canonical rule. Found while landing #28960, whose PR #29088 first removed a page's `has()` guard to match the skill. The seat put the guard back until this is settled.\nReader: `domain:skills` (`skills/objectstack-formula/SKILL.md`). Which side is canonical is a design call, so this goes to the maintainer before any edit.\nDedupe (open AND closed): \"has() sparse action visible\" → #28542 (open, cloud invitations page: Copy Invite Link hides on every row because the list does not project `expires_at`, which is live evidence of the sparse face), #28960 (open, the docs page). \"has() is NOT a null check\" → #28960 only. None names the contradiction.\nreach: every coding agent that installs the bundled skills and writes an action `visible` / `disabled` predicate for a `list_item` location.\ntype: Bug\n\nBusiness reason: the skill is the instruction an agent follows. It tells the agent `has()` is meaningless on any `record` binding. The code's own canonical rule says the action binding on a list row is sparse by decision and must be guarded with `has()`. An agent that follows the skill writes a list-row predicate that faults on an unprojected column, and the button hides silently, as #28542 shows.\n\n## The two statements (read on `main` 2026-11-02)\n\n- `skills/objectstack-formula/SKILL.md` § \"`has()` is NOT a null check\" (about lines 92–104): \"Every predicate reads a `record` … that is **total over the object's declared fields** … So `has(record.<declared_field>)` … [is] uniformly `true` and tell[s] you nothing at all.\"\n- `packages/objectql/src/declared-fields.ts` (about lines 28–45): \"One binding is still sparse, and by decision rather than by gap: objectui's action `visible` / `disabled` binds whatever record the client already fetched — a record-detail read, or a LIST ROW carrying only the view's `$select` projection. That one is a DECISION (#4953 item 2) … **`has(record.x) && record.x != null`** … This doc comment is the CANONICAL statement of that rule.\"\n\nPages and examples follow one side or the other: `content/docs/getting-started/quick-start.mdx` (about lines 113–117), `content/docs/protocol/objectui/concept.mdx` (about line 615), `examples/app-crm/src/actions/convert-lead.action.ts` with `examples/app-crm/test/action-predicate-sparse-face.test.ts`, and `examples/app-showcase` (`src/ui/actions/index.ts`, `src/ui/pages/task-detail.page.ts`) follow the objectql rule. #29088's page now keeps the guard too.\n\nCounter-evidence to measure: the #28960 dev read that list, grid and related-list views fetch every column an action predicate reads (`ui/packages/core/src/utils/predicate-fields.ts`, about lines 278 and 298). Kanban, calendar and gallery were not checked. If every face now fetches predicate columns, the objectql comment is the stale side.\n\n## Wanted\n\n- A ruling on which statement is canonical, after measuring every view face that binds an action predicate.\n- Then one PR on the losing side: either the skill gains the action-binding exception (a skills edit, so it owes the full review), or `declared-fields.ts`, the CRM test and the pages drop the sparse rule."

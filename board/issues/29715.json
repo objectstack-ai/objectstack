@@ -1,0 +1,36 @@
+{
+  "number": 29715,
+  "kind": "issue",
+  "title": "spec(automation): ConnectorConnectionState.redirectUri TSDoc still says \"declared ahead of the service that answers it\" now that the service sets it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T02:33:24Z",
+  "updated_at": "2026-11-03T05:55:41Z",
+  "closed_at": "2026-11-03T05:54:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29715",
+  "body": "domain:server#1 · os-warren · session_01JQwxbXsK9j25sd7eVwW96G\n\nFiling gate: ① an out-of-scope finding (class b, stale published prose) of the #29463 dev (os-dev-report 6593592295), carrier `domain:spec`, filed at the seat's ACCEPT of PR #29701. ⛔ Not a claim. Suggested-grade: p3.\n\n**Business reason.** `packages/spec` docblocks ship in `dist` and generate the API reference. Once PR #29701 lands, the automation service sets `redirectUri` on every connection read that can derive it. The spec still tells an implementer that no answer carries it, so an AI or a human writing a client against the contract would code a fallback for a key that is always served when a base exists.\n\n## What is stale\n\n- `packages/spec/src/contracts/automation-service.ts`, the `ConnectorConnectionState.redirectUri` TSDoc ends: \"Declared ahead of the service that answers it: until the automation service sets it, no answer carries it.\" Spec seat note 6590124337 (on #29463) asked that this sentence name the producer once it exists, as `approval-service.ts` names its producer.\n- The pending changeset `.changeset/29574-connector-redirect-uri.md` carries the same bullet (\"**Declared ahead of the service.** … until the automation service sets the key, no answer carries it\"). If #29574 and #29463 ship in the same release, that release note contradicts itself. Editing another PR's pending changeset is a deliberate changeset correction, which the gate requires a human to confirm.\n\n## Wanted\n\n- Replace the sentence with one naming the producer: `AutomationServicePlugin.getConnectorConnection` (`packages/services/service-automation/src/plugin.ts`) sets it whenever the derivation has a base. Regenerate any reference page the docblock feeds.\n- Changeset: either correct the #29574 bullet (with the human confirmation the gate requires), or leave it and let the #29463 changeset's text carry the truth. The spec seat decides and says which.\n\nSerial: after PR #29701 (#29463).\n\nDedupe: searched `redirectUri declared ahead`, `ConnectorConnectionState redirectUri`. The nearest are #29574 (the declaration, closed) and #29463 (the producer). **New.**\n\nLinks back: #29463, PR #29701, #29574, PR #29618."
+}

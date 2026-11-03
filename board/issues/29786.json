@@ -1,0 +1,38 @@
+{
+  "number": 29786,
+  "kind": "issue",
+  "title": "Studio: draw the items other packages contribute to a base (nav entries, fields, flows) greyed, with the contributing package",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T04:45:02Z",
+  "updated_at": "2026-11-03T07:59:08Z",
+  "closed_at": "2026-11-03T07:59:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29786",
+  "body": "domain:ui#4 · zhuangjianguo · session_01QsR2jR7ZFkpqmm4U8S1f9y\n\nFiling gate: ② filed on a ruling. Director ruling 6566915346 (batch #451 item 2, letter E, maintainer 「同意」 2026-11-02T01:29Z) names this card in its Execution line: \"after it lands, `domain:server` seat 3 finishes #28722 Wanted 3 … and ui seat 4 files the drawing card\". #28722 landed at 04:40Z on 2026-11-03 (PR #29742, `8d208a4d`), and seat 3 notified this seat in mailbox comment 6595648482. Filed by `domain:ui#4` · ⛔ Not a claim.\nRuling-ref: https://github.com/objectstack-ai/objectstack/issues/27928#issuecomment-6566915346\ntype: enhancement\n\n**Business reason.** An administrator opens a vendor base such as HotCRM in Studio. Several other packages add navigation entries, fields and flows to it. Studio shows none of those items on the base. The live app shows them all, so the person cannot tell what will change if they customize, disable or uninstall something. #27356 row 20 records the visible case: the navigation tree says \"No items in this package\" while the app draws the contributed entries.\n\n## What is served now\n\n`GET /api/v1/packages/:id/customizations` carries `contributions` (`packages/spec/src/api/package-lifecycle.zod.ts`, about L587). It is one list with three kinds:\n\n- `field`: another package's object extension adds a field to one of the base's objects. The entry has `object`, `name` and `packageId`.\n- `flow`: another package ships a flow whose trigger object is one of the base's objects. The entry has `object`, `name` and `packageId`.\n- `nav` (new, PR #29742): another package's `navigationContributions` adds an item to an app the base owns. The entry has `app`, an optional `group`, `name` (the nav item's id) and `packageId`.\n\n`counts.contributions` is `contributions.length`. A disabled package's contributions are not listed. The base and its `<base>.custom` pair are never contributors.\n\n## What the Console does with it now\n\nNothing. At `origin/main` (`8d208a4d`), no file under `ui/` reads `contributions`. `packageCustomizations-io.ts` and `customizationMarks.ts` read the overrides and the counts only. #28572 drew the overrides and added items; it did not draw contributions.\n\n## Wanted\n\n1. **Interfaces navigation tree, on the base.** Each `nav` entry draws in its app, under its `group` when one is named and at the top level otherwise. The entry is greyed and labelled with the contributing package's display name (\"from HotCRM Service\"). It is read-only on the base's surface: it cannot be dragged, renamed or deleted there. Opening it, if anything, goes to the contributing package. A `group` the app does not declare draws at the top level and says so in its tooltip.\n2. **Data pillar, on the base's object.** Each `field` entry for that object draws in the field list as a greyed row with the package label. It is read-only on the base, as in item 1.\n3. **Automations rail, on the base.** Each `flow` entry for one of the base's objects draws as a greyed row with the package label.\n4. **One reader.** Take all three from the one customizations read the surfaces already make. Do not add a second request, and do not join names client-side (the ruling's \"never by a client-side join on names\").\n5. **The empty state.** A base tree that holds only contributed entries no longer says \"No items in this package\". **Measure first:** on the contributor's own tree (HotCRM Service), say what the served reads allow it to show. If no read names what it contributes, leave its text and report it rather than inventing one.\n6. All strings go through the ten i18n packs. No metadata key is added.\n\n## Done when\n\nOn a showcase or HotCRM with at least one contributing package, each of the three surfaces shows the contributed items greyed with their package, before and after screenshots are attached, and a pin covers each kind's placement, including a `nav` entry with an undeclared `group`.\n\n**Reader.** `domain:ui`, size M. `Clause-②: no` is expected: it reads a served member and changes no contract. Serial notes: #29693 (PR #29765) reworks the item header, not the rails. #29691 (seat 1) touches `BuilderLanding.tsx` and the pending-changes sheet. Check the open Studio rail PRs before claiming.\n\n**Dedupe.** Searched `contributed entries greyed`, `contributions greyed Studio` and `navigationContributions Studio tree`: every hit is closed and is a source of this card (#27928, #28722, #28572, #27356). **New.**\n\nLinks back: ruling 6566915346 (#27928), #28722 / PR #29742, #27356 row 20, #28572, ADR-0029 D7, ADR-0146 D3.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

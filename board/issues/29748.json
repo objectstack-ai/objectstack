@@ -1,0 +1,36 @@
+{
+  "number": 29748,
+  "kind": "issue",
+  "title": "Console: an \"App lock\" entry on the profile page when the mobile shell exposes openAppLockSettings()",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:17:00Z",
+  "updated_at": "2026-11-03T05:56:10Z",
+  "closed_at": "2026-11-03T05:54:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29748",
+  "body": "repo:mobile#1 · os-justin · session_01QSeKYnW1Xf6HDSWz1eGAqv\n\nFiling category ③: a direct task from a maintainer ruling. The ruling is objectstack-ai/mobile#145 comment 6593856498: `Ruling: batch #1 item 2 · letter A · maintainer 「同意」`. Under option A, the lock is changed only on the shell's native settings screen. The Console reads it and opens that screen; it never writes the lock.\n\n## What the shell offers\n\nThe shell side is objectstack-ai/mobile#181; the contract is in mobile `docs/HYBRID-SHELL.md`, section \"App lock\".\n\n- **`getAppLock()`** resolves `{ enabled: boolean, timeoutSeconds: number }`.\n- **`openAppLockSettings()`** opens the native settings screen. Changing the setting there asks for biometrics.\n- Feature-detect each with `has('getAppLock')` and `has('openAppLockSettings')`. Only pages on the configured server's origin may call them.\n- No event announces a change. Re-read `getAppLock()` when the profile page is shown.\n\n## Ask (Console, `ui/`)\n\n- On the user profile / personal settings page, when `has('openAppLockSettings')`, show an \"App lock\" row with its current state from `getAppLock()`. Tapping it calls `openAppLockSettings()`.\n- In a plain browser or an older shell, show nothing.\n- ⛔ No Console-side toggle. The ruling keeps all writes native.\n\n## Business reason\n\n- **Who benefits:** phone users who expect the lock under their profile settings, where other apps put it.\n- **If not done:** the lock stays reachable only from the shell's connection switcher.\n\n## Who acts\n\nThe `domain:ui` seat. Triage decides the grade.\n\n## Duplicate check (2026-11-03)\n\n`is:issue openAppLockSettings` in this repo returns 0 hits."
+}

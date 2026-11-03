@@ -1,0 +1,36 @@
+{
+  "number": 29799,
+  "kind": "pull_request",
+  "title": "docs(spec): relatedList describe states each value's role, not the record page's tabs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T05:19:46Z",
+  "updated_at": "2026-11-03T06:10:22Z",
+  "closed_at": "2026-11-03T06:10:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T06:10:20Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29799",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzgh6TyUUCFMAfapZqb\n<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBBBNTDAYRKaoWkKn1quxAC4)_\n\nFixes #28888\nRuling-ref: 6568787922\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — this PR moves no skill text. One skill sentence still names the old chrome for the same placement, `skills/objectstack-data/rules/relationships.md:345-348` (\"in the Details tab, no tab of its own\", \"a side card\"); it is out of this card's file surface (spec only) and is reported to the seat for its own card.\n\n## 维护者速读\n\n- 改了什么：`relatedList` 字段的说明文字（`.describe()` 与上方 TSDoc）不再提任何标签页或栏位：`false` = 父记录页不显示该子对象；`true` 或不写 = 记录页上的一个辅助面板；`'primary'` = 记录详情主体里的一张通栏表格。版式只引 ADR-0085，不复述。\n- 为什么改：裁决 6568787922（字母 B）。旧文字描述的共用「Related」标签和「Details」标签在现在的记录页上已不存在，AI 作者照着读会把用户引向不存在的标签。\n- 风险与回滚：只改文字，不动键、默认值、可接受值；`@objectstack/spec` patch。生成的参考页（field / object / migration 三页的同一行）随之重生成。回滚即还原本 PR。\n- 先看：`packages/spec/src/data/field.zod.ts`（describe 与 TSDoc）、`packages/spec/src/data/record-page-describes.test.ts`（原来钉着旧措辞的用例改钉新措辞，并加一条「不提 tab / column / Related / Details / side card」）。\n- 两分钟验证：`pnpm --filter @objectstack/spec exec vitest run src/data/record-page-describes.test.ts` 全绿；换回 `origin/main` 的 `field.zod.ts` 再跑，2 条红。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`packages/spec/src/data/field.zod.ts`, the `relatedList` `.describe()` and the TSDoc block above it. Every other clause keeps its meaning: the master_detail + inlineEdit `'primary'` default, `relatedLists` ordering, and the derived-list sort sentences are unchanged.\n\n**Before** (the value clauses):\n\n> false = suppress; true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page); 'primary' = part of the record's main content, drawn in the record's body (the details column, after its first field section) as a full-width table (inside the Details tab on the tabbed page, with no tab of its own). Absent on a master_detail field that sets inlineEdit, the list is 'primary' by default; write true to keep it a side card. 'primary' places a list and does not order it: the parent object's relatedLists orders the body tables and the side cards (ADR-0085).\n\n**After:**\n\n> false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; 'primary' = part of the record's main content, shown as a full-width table in the record's detail body. Absent on a master_detail field that sets inlineEdit, the list is 'primary' by default; write true to keep it an auxiliary panel. 'primary' places a list and does not order it: the parent object's relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085.\n\nThe TSDoc drops \"related column\", \"shared \\\"Related\\\" tab\", \"details column\", \"Details tab ... no tab of its own\" and \"side card\" the same way, and adds one line saying the layout is ADR-0085's to define. It keeps the sentence that a field group's `relatedList` can place a primary list among the field sections, since that is a real placement key, not page chrome.\n\nGenerated: `content/docs/references/data/field.mdx`, `data/object.mdx`, `system/migration.mdx` (the same `relatedList` row; `check:generated --fix`, then `check:generated` clean).\n\n## Why\n\nRuling 6568787922, letter B: the describe states the field's meaning, not the page's chrome, so the next layout card under #26676 does not make it wrong again.\n\n## Verification\n\n- Acceptance: `git grep -n 'Related tab\\|Details tab' -- packages/spec/src/data/field.zod.ts` is empty at head.\n- `record-page-describes.test.ts`: the `[#27312]` case that pinned \"the details column, after its first field section\" and \"inside the Details tab on the tabbed page, with no tab of its own\" now pins the three new value clauses and the ADR-0085 sentence; a new case refuses `tab(s)`, `column`, `\"Related\"`, `Details` and `side card` in the describe. Red first: with `origin/main`'s `field.zod.ts`, `Tests 2 failed | 9 passed (11)`; restored, green.\n- `pnpm exec vitest run src/data/record-page-describes.test.ts src/data/field.test.ts` under os-verify-lock: `Tests 303 passed (303)`, VERDICT command-exit 0.\n- Derived gates: `dispatch-gates --commands` derived 102 families at `9a801adf`; 95 exit 0, 0 red, 7 NOT MEASURED (exit 3, prerequisite not met: `check-plugin-teardown-shape --self-test` needs its pinned fixture commit in this shallow clone; `check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples`, `check:docs-transcript-drift`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` need a full build). `dispatch-gates --ran`: 102 accounted, 0 unrun. CI covers the 7.\n\n## Acceptance notes\n\nGrep of `packages/spec/src/**` for the record page's \"Related\" / \"Details\" tab and its columns, other than this describe:\n- `src/data/record-page-describes.test.ts` (the old pin, changed here).\n- `src/data/object.zod.ts:1251,1273` and `src/data/object.form.ts:113`: `fieldGroups[i].relatedList` says \"details column\", \"body table\" and \"side card\". That is a different key (a field group's placement), so per the order it is reported, not fixed.\n- `src/migrations/entries/semantic/18.field-group-related-list-side-card-refused.ts`: migration history text, left as it is.\n\n## Human Minimum\n\nNone; the seat lands it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzgh6TyUUCFMAfapZqb\n"
+}

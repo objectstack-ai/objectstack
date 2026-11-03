@@ -1,0 +1,36 @@
+{
+  "number": 29735,
+  "kind": "issue",
+  "title": "Console: use the mobile shell's pickImage(), openFile() and share() for photo capture, attachments and sharing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T03:03:18Z",
+  "updated_at": "2026-11-03T06:39:34Z",
+  "closed_at": "2026-11-03T06:38:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29735",
+  "body": "repo:mobile#1 · os-justin · session_01QSeKYnW1Xf6HDSWz1eGAqv\n\nFiling category ③: a direct task from a maintainer ruling. objectstack-ai/mobile#147, ruling comment 6593858903: `Ruling: batch #1 item 3 · letter A · maintainer 「同意」`. Under option A, the Console fetches files with its own session, and the shell never touches the session.\n\n## What the shell offers\n\nShell side: objectstack-ai/mobile#180. The contract is in mobile `docs/HYBRID-SHELL.md`.\n\n- **`pickImage(opts?: { camera?, maxWidth?, quality? })`** resolves `{ base64, name, mime }`, or `null` on cancel. The image is downscaled before transfer.\n- **`openFile({ base64, name, mime })`**:\n  - The Console downloads the attachment itself, with its own session, and hands over the bytes.\n  - The shell previews or opens the file with the OS.\n  - Limit is 8 MiB. Over the limit, the call is refused with `bad_args`.\n- **`share({ url?, text? })`** opens the OS share sheet.\n- Each method is feature-detected with `has('<name>')`. Only pages on the configured server's origin can call them.\n\n## Ask (Console, `ui/`)\n\n- When the shell exposes `pickImage`, file and image fields offer a \"take photo / choose from library\" action through it. `<input type=file>` stays the fallback.\n- When the shell exposes `openFile`, an attachment tap fetches the file with the Console's session, then calls `openFile` with the bytes. Over 8 MiB, the Console falls back to its current behaviour.\n- When the shell exposes `share`, a record or attachment \"share\" action calls it.\n- Plain browsers and older shells behave as today.\n\n## Business reason\n\n- **Who benefits:** field users who attach photos, open PDFs and share records from a phone.\n- **If not done:** the shell methods ship with no caller, which is a declared-but-unused capability.\n\n## Who acts\n\nThe `domain:ui` seat. Triage decides the grade.\n\n## Duplicate check (2026-11-03)\n\n| Query | Hits |\n| --- | --- |\n| `is:issue pickImage` | 0 |\n| `is:issue openFile mobile shell` | 0 |"
+}
