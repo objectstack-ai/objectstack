@@ -85,19 +85,9 @@
       "seeded"
     ],
     "environment": [
-      "addDevelopment",
-      "developmentLocked",
       "entitlement.contactSalesCta",
-      "entitlement.freePlan",
-      "entitlement.limitBody",
-      "entitlement.limitBodyWithCount",
-      "entitlement.limitTitle",
-      "entitlement.namedPlan",
-      "entitlement.planLockedBody",
-      "entitlement.planLockedTitle",
       "entitlement.productionLimitBody",
       "entitlement.productionLimitTitle",
-      "entitlement.upgradeCta",
       "setUpProduction"
     ],
     "organizations": [
@@ -113,9 +103,6 @@
       "searchPlaceholder",
       "subtitle",
       "title"
-    ],
-    "planTier": [
-      "teamAndUp"
     ],
     "workspace": [
       "createButton",

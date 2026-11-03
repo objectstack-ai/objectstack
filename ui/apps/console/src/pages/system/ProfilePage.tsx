@@ -37,11 +37,29 @@ import {
 } from '@object-ui/components';
 import { useUpload } from '@object-ui/providers';
 import { ConsolePageHeader } from '@object-ui/app-shell';
-import { useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 import { useAdapter, extractFieldErrors, extractWriteErrorMessage } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { resolveFieldAffordance } from '@object-ui/core';
-import { CheckCircle2, AlertCircle, User, Lock, Upload, Loader2, X, Globe } from 'lucide-react';
+import {
+  nativeGetAppLock,
+  nativeHostCan,
+  nativeOpenAppLockSettings,
+  useNativeHost,
+  type NativeAppLock,
+} from '@object-ui/mobile';
+import {
+  CheckCircle2,
+  AlertCircle,
+  User,
+  Lock,
+  Upload,
+  Loader2,
+  X,
+  Globe,
+  Fingerprint,
+  ChevronRight,
+} from 'lucide-react';
 
 /**
  * The access the console resolves for the signed-in user, as a translated word
@@ -299,6 +317,9 @@ export function ProfilePage() {
       {/* Language — the user's own `sys_user.locale` */}
       <LanguageCard userId={user.id} />
 
+      {/* App lock — the mobile shell's own setting, shown only inside a shell that offers it */}
+      <AppLockCard />
+
       {/* Password Change */}
       <PasswordCard
         changePassword={changePassword}
@@ -307,6 +328,107 @@ export function ProfilePage() {
       />
     </div>
     </div>
+  );
+}
+
+/**
+ * The timeout as a localized duration ("5 minutes", "1 hour"), in the largest
+ * whole unit. `Intl` names the unit and its plural, so no locale pack carries
+ * a count family for it. The unit is named in the sentence's own language (the
+ * UI language); a tag `Intl` refuses falls back to the display locale.
+ */
+function formatLockTimeout(seconds: number, sentenceLocale: string, displayLocale: string): string {
+  const [value, unit] =
+    seconds % 3600 === 0 ? [seconds / 3600, 'hour'] : seconds % 60 === 0 ? [seconds / 60, 'minute'] : [seconds, 'second'];
+  const options: Intl.NumberFormatOptions = { style: 'unit', unit, unitDisplay: 'long' };
+  try {
+    return new Intl.NumberFormat(sentenceLocale, options).format(value);
+  } catch {
+    return new Intl.NumberFormat(displayLocale, options).format(value);
+  }
+}
+
+/**
+ * The mobile shell's app lock (objectstack-ai/mobile `docs/HYBRID-SHELL.md`,
+ * "App lock"), as one row that opens the shell's native settings screen.
+ *
+ * - Read-only by ruling (objectstack-ai/mobile#145, option A): the lock changes
+ *   only on the native screen, behind biometrics. ⛔ No Console-side toggle, and
+ *   no bridge call here writes anything.
+ * - Drawn only when the shell announces and carries `openAppLockSettings`. A
+ *   plain browser, or a shell older than the app lock, draws nothing.
+ * - The state comes from `getAppLock()`. No event announces a change, so it is
+ *   read again whenever the page is shown: on mount, when the document becomes
+ *   visible again, and when the window regains focus. A read the shell does not
+ *   answer leaves the row without a state line rather than guessing one.
+ */
+function AppLockCard() {
+  const { t, language } = useObjectTranslation();
+  const displayLocale = useDisplayLocale();
+  const available = nativeHostCan(useNativeHost(), 'openAppLockSettings');
+  const [lock, setLock] = useState<NativeAppLock | null>(null);
+
+  useEffect(() => {
+    if (!available) return;
+    let latest = 0;
+    let mounted = true;
+    const read = () => {
+      const seq = ++latest;
+      void nativeGetAppLock().then((result) => {
+        // Only the newest read lands: two reads in flight may answer out of order.
+        if (!mounted || seq !== latest) return;
+        setLock(result.status === 'ok' ? result.value : null);
+      });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') read();
+    };
+    read();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', read);
+    return () => {
+      mounted = false;
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', read);
+    };
+  }, [available]);
+
+  if (!available) return null;
+
+  const state =
+    lock === null
+      ? null
+      : !lock.enabled
+        ? t('profile.appLock.off', { defaultValue: 'Off' })
+        : lock.timeoutSeconds <= 0
+          ? t('profile.appLock.onImmediately', { defaultValue: 'On, locks as soon as you leave the app' })
+          : t('profile.appLock.onAfter', {
+              defaultValue: 'On, locks {{duration}} after you leave the app',
+              duration: formatLockTimeout(lock.timeoutSeconds, language || displayLocale, displayLocale),
+            });
+
+  return (
+    <Card data-testid="profile-app-lock">
+      <button
+        type="button"
+        onClick={() => void nativeOpenAppLockSettings()}
+        className="flex w-full min-h-11 items-center gap-3 rounded-[inherit] px-4 py-4 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-6"
+        data-testid="profile-app-lock-row"
+      >
+        <Fingerprint className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-semibold sm:text-lg">
+            {t('profile.appLock.title', { defaultValue: 'App lock' })}
+          </span>
+          {state !== null && (
+            <span className="block text-sm text-muted-foreground" data-testid="profile-app-lock-state">
+              {state}
+            </span>
+          )}
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </button>
+    </Card>
   );
 }
 

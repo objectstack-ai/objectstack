@@ -74,7 +74,7 @@ describe('PageShell compact header wraps instead of squeezing the breadcrumb (ob
     expect(nav.nextElementSibling).toBe(meta);
     // The chips, the subtitle, the stats and the actions all live in it.
     expect(meta).toContainElement(screen.getByText('Security'));
-    expect(meta).toContainElement(screen.getByText('create-only'));
+    expect(meta).toContainElement(screen.getByText('Can be added'));
     expect(meta).toContainElement(screen.getByText('Permission set'));
     expect(meta).toContainElement(screen.getByText('Objects granted'));
     expect(meta).toContainElement(screen.getByRole('button', { name: 'Clone to customize' }));

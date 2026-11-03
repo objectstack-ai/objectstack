@@ -3063,6 +3063,12 @@ const es = {
       saved: "Preferencia de idioma actualizada.",
       readOnly: "El idioma de su cuenta lo gestiona su administrador.",
     },
+    appLock: {
+      title: "Bloqueo de la app",
+      off: "Desactivado",
+      onImmediately: "Activado, se bloquea en cuanto sale de la app",
+      onAfter: "Activado, se bloquea {{duration}} después de salir de la app",
+    },
     password: {
       changeTitle: "Cambiar contraseña",
       setTitle: "Establecer contraseña local",
@@ -4064,25 +4070,12 @@ const es = {
     buyCredits: "Comprar un paquete de créditos",
     upgradePlan: "Mejorar el plan",
   },
-  planTier: {
-    teamAndUp: "Desde el plan Team",
-  },
   environment: {
     setUpProduction: "Configure su entorno de producción",
-    addDevelopment: "Añadir entorno de desarrollo",
-    developmentLocked: "Entornos de desarrollo · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "Ya tiene su entorno de producción",
       productionLimitBody: "Cada organización incluye exactamente un entorno de producción. Cree una organización aparte para tener otro, o contáctenos para conocer un acuerdo Enterprise.",
-      planLockedTitle: "Los entornos de desarrollo son una función de pago",
-      planLockedBody: "Su {{plan}} incluye un entorno de producción. Mejore su plan para añadir entornos de desarrollo: construya en desarrollo y luego publique en producción.",
-      limitTitle: "Límite de entornos de desarrollo alcanzado",
-      limitBody: "La capacidad crece con los puestos de IA. Añada un puesto de IA, o archive un entorno de desarrollo sin usar para liberar espacio.",
-      limitBodyWithCount: "Está usando {{used}} de {{limit}} entornos de desarrollo. La capacidad crece con los puestos de IA: añada un puesto de IA, o archive un entorno de desarrollo sin usar.",
-      freePlan: "plan gratuito",
-      namedPlan: "plan {{plan}}",
-      upgradeCta: "Mejorar plan",
       contactSalesCta: "Contactar con ventas",
     },
   },
@@ -4608,6 +4601,7 @@ const es = {
       draftedByMcp: 'Incluye cambios redactados por un cliente MCP',
       detailChangedKeys: 'También cambió:',
       detailNewKeys: 'Incluye:',
+      detailNewItem: 'Al publicar se añade este elemento.',
       generatedGroup: 'Generado por la plataforma ({{n}})',
       confirmNote: 'Publicar libera juntos los {{count}} borradores pendientes de este paquete: o se publican todos, o ninguno.',
       confirmNote_one: 'Publicar libera {{count}} borrador pendiente de este paquete: se publica, o no cambia nada.',
@@ -4672,6 +4666,10 @@ const es = {
         email_template_one: '{{count}} plantilla de correo',
         email_template_many: '{{count}} de plantillas de correo',
         email_template_other: '{{count}} plantillas de correo',
+        object_extension: '{{count}} extensiones de objeto',
+        object_extension_one: '{{count}} extensión de objeto',
+        object_extension_many: '{{count}} de extensiones de objeto',
+        object_extension_other: '{{count}} extensiones de objeto',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

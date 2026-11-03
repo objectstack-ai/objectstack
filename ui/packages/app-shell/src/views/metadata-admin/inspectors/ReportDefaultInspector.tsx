@@ -44,6 +44,7 @@ import { toFieldNameLoose, toFieldNameOrEmpty } from '../previews/object-fields-
 import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
+import { fallbackFormPatch } from './fallbackFormPatch.js';
 import type { ObjectFieldInfo } from '../previews/useObjectFields.js';
 import {
   useDatasetCatalog,
@@ -698,7 +699,7 @@ export function ReportDefaultInspector({
             hiddenFields={['type', 'label', 'name', 'dataset', 'values', 'rows', 'columns', 'chart']}
             readOnly={readOnly}
             widgetContext={widgetContext}
-            onChange={(next) => onPatch(next)}
+            onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         ) : (
           <p className="text-[11px] text-muted-foreground">

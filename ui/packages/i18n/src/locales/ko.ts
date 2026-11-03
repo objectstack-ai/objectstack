@@ -3000,6 +3000,12 @@ const ko = {
       saved: "언어 설정을 업데이트했습니다.",
       readOnly: "이 계정의 언어는 관리자가 관리합니다.",
     },
+    appLock: {
+      title: "앱 잠금",
+      off: "꺼짐",
+      onImmediately: "켜짐: 앱을 나가면 바로 잠금",
+      onAfter: "켜짐: 앱을 나가고 {{duration}} 후 잠금",
+    },
     password: {
       changeTitle: "비밀번호 변경",
       setTitle: "로컬 비밀번호 설정",
@@ -3980,25 +3986,12 @@ const ko = {
     buyCredits: "크레딧 팩 구매",
     upgradePlan: "요금제 업그레이드",
   },
-  planTier: {
-    teamAndUp: "Team 요금제 이상",
-  },
   environment: {
     setUpProduction: "프로덕션 환경 설정",
-    addDevelopment: "개발 환경 추가",
-    developmentLocked: "개발 환경 · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "이미 프로덕션 환경이 있습니다",
       productionLimitBody: "조직마다 프로덕션 환경은 하나만 포함됩니다. 하나 더 필요하면 별도의 조직을 만들거나 엔터프라이즈 계약에 대해 문의해 주세요.",
-      planLockedTitle: "개발 환경은 유료 기능입니다",
-      planLockedBody: "{{plan}}에는 프로덕션 환경 하나가 포함됩니다. 업그레이드하면 개발 환경을 추가할 수 있습니다 — 개발 환경에서 만들고 프로덕션에 게시하세요.",
-      limitTitle: "개발 환경 한도에 도달했습니다",
-      limitBody: "한도는 AI 좌석 수에 따라 늘어납니다. AI 좌석을 추가하거나 사용하지 않는 개발 환경을 보관하여 자리를 확보하세요.",
-      limitBodyWithCount: "개발 환경을 {{used}}/{{limit}}개 사용 중입니다. 한도는 AI 좌석 수에 따라 늘어납니다 — AI 좌석을 추가하거나 사용하지 않는 개발 환경을 보관하세요.",
-      freePlan: "무료 요금제",
-      namedPlan: "{{plan}} 요금제",
-      upgradeCta: "요금제 업그레이드",
       contactSalesCta: "영업팀 문의",
     },
   },
@@ -4507,6 +4500,7 @@ const ko = {
       draftedByMcp: 'MCP 클라이언트가 초안으로 작성한 변경 사항 포함',
       detailChangedKeys: '기타 변경:',
       detailNewKeys: '포함:',
+      detailNewItem: '게시하면 이 항목이 추가됩니다.',
       generatedGroup: '플랫폼에서 생성됨 ({{n}})',
       confirmNote: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 함께 게시됩니다. 모두 게시되거나, 하나도 게시되지 않습니다.',
       confirmNote_one: '게시하면 이 패키지의 대기 중인 초안 {{count}}개가 게시됩니다. 게시되거나, 아무것도 바뀌지 않습니다.',
@@ -4557,6 +4551,9 @@ const ko = {
         email_template: '이메일 템플릿 {{count}}',
         email_template_one: '이메일 템플릿 {{count}}',
         email_template_other: '이메일 템플릿 {{count}}',
+        object_extension: '객체 확장 {{count}}',
+        object_extension_one: '객체 확장 {{count}}',
+        object_extension_other: '객체 확장 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
