@@ -5,9 +5,10 @@
  *
  * ## Why
  *
- * A reset request answers the same way, in the same time, for any address. So
- * on the public door the reset mail — its template, its `sys_identity_email`
- * row, its transport — is built and sent after the response, never inside it
+ * A reset request answers the same way for any address, answers at once and
+ * does not wait on the send. So on the public door the reset mail — its
+ * template, its `sys_identity_email` row, its transport — is built and sent
+ * after the response, never inside it
  * (`auth-manager-auth-instance.ts`, `sendResetPassword`), and what the send
  * does is the server's to log, never the caller's to see — which it already
  * never was: better-auth answers `{ status: true }` whatever the send does.

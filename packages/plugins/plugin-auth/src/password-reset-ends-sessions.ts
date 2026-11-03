@@ -24,10 +24,13 @@
  * (`auth-manager-auth-instance.ts`), and every door that sets a password from a
  * reset token or code inherits the rule without a door of its own.
  *
- * The reset paths are not in the interactive-revoke ledger
- * (`session-tombstone.ts`), so the rows are deleted rather than stamped, as a
- * ban's are; the session-delete hooks still run, so the `logout` audit row and
- * any OIDC back-channel logout fire for each ended session.
+ * What an ended session leaves behind is not what the forced reset leaves. The
+ * reset paths are in neither the interactive-revoke ledger nor the erasure
+ * paths (`session-tombstone.ts`), so the session rows are deleted, not
+ * stamped: no `revoked_at` / `revoke_reason` trail is written. No `logout`
+ * audit row is written either — `logoutEventFor` (`auth-session-audit.ts`)
+ * records a `/sign-out` alone. And the account's API keys are untouched; the
+ * forced reset's key revocation is its own switch.
  *
  * ## The declared key
  *

@@ -396,9 +396,10 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // with the outcome (and re-raises it unchanged).
       // `account-invitation-marker.ts` holds the legs that keep it server-only.
       //
-      // A reset request answers the same way, in the same time, for any
-      // address: a call that carries a `Request` — the public door — answers
-      // at once, and the mail is built and sent after the response
+      // A reset request answers the same way for any address, answers at once
+      // and does not wait on the send: a call that carries a `Request` — the
+      // public door — resolves immediately, and the mail is built and sent
+      // after the response
       // (`sendAfterResponseOnPublicDoor`); what the send does is logged on
       // the server and never reaches the caller. The identity import's own
       // server-side call (no `Request`) still awaits its send, because it

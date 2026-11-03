@@ -13,6 +13,9 @@
  *  - the session signed in before a completed reset is refused afterwards
  *    (401 `UNAUTHENTICATED`, the declared answer for no session), and a fresh
  *    sign-in with the new password is served (the control: the account works);
+ *  - the same through the phone OTP reset (`plugins.phoneNumber` with an SMS
+ *    service): the session signed in before a reset completed with the texted
+ *    code is refused afterwards, and a fresh sign-in is served;
  *  - a reset that does not complete (a token that does not match) ends nothing;
  *  - with no configuration at all, the auth instance asks better-auth to end
  *    sessions on every reset door;
@@ -41,6 +44,7 @@ const SECRET = 'test-secret-at-least-32-chars-long-reset-ends-sessions';
 const EMAIL = 'reset-ends-sessions@example.com';
 const FIRST = 'F1rst!Password-For-Reset';
 const SECOND = 'S3cond!Password-After-Reset';
+const SYS = { context: { isSystem: true } } as never;
 
 const engines = sqliteEnginePool(async () => {
   const engine = new ObjectQL();
@@ -98,16 +102,17 @@ async function answer(res: Response): Promise<{ status: number; code?: string; e
 }
 
 interface Account {
+  engine: ObjectQL;
   manager: AuthManager;
   /** The session signed in before any reset. */
   earlier: string;
   sent: Array<{ template: string; data: Record<string, unknown> }>;
 }
 
-async function signedInAccount(): Promise<Account> {
+async function signedInAccount(config: Record<string, unknown> = {}): Promise<Account> {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   const engine = await engines.take();
-  const manager = new AuthManager({ secret: SECRET, baseUrl: BASE, dataEngine: engine as never } as never);
+  const manager = new AuthManager({ secret: SECRET, baseUrl: BASE, dataEngine: engine as never, ...config } as never);
   const sent: Account['sent'] = [];
   manager.setEmailService({
     sendTemplate: async (input: any) => {
@@ -122,7 +127,7 @@ async function signedInAccount(): Promise<Account> {
   const earlier = cookieFrom(signedIn);
   // Non-vacuity: the earlier session is served before any reset.
   expect(await answer(await getSession(manager, earlier))).toEqual({ status: 200, email: EMAIL });
-  return { manager, earlier, sent };
+  return { engine, manager, earlier, sent };
 }
 
 /** The token the reset mail carries, read the way its recipient reads it. */
@@ -168,6 +173,40 @@ describe("a completed password reset ends the account's other sessions", () => {
     };
     expect(auth.options.emailAndPassword?.revokeSessionsOnPasswordReset).toBe(true);
   });
+});
+
+describe("a completed phone OTP reset ends the account's other sessions", () => {
+  const PHONE = '+15550142';
+
+  it('the session signed in before the reset is refused afterwards; a fresh sign-in with the new password is served', async () => {
+    const a = await signedInAccount({ plugins: { phoneNumber: true } });
+    const texts: Array<{ to: string; templateParams?: { code?: string } }> = [];
+    a.manager.setSmsService({
+      async send(input: { to: string; templateParams?: { code?: string } }) {
+        texts.push(input);
+        return { id: `sms${texts.length}`, status: 'sent' };
+      },
+      isConfigured: () => true,
+    } as never);
+    const [user] = (await a.engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    await a.engine.update('sys_user', { id: user.id, phone_number: PHONE, phone_number_verified: true }, SYS);
+
+    const requested = await post(a.manager, '/phone-number/request-password-reset', { phoneNumber: PHONE });
+    expect(requested.status, await requested.clone().text()).toBe(200);
+    await vi.waitFor(() => expect(texts.map((t) => t.to)).toEqual([PHONE]));
+    const otp = String(texts[0].templateParams?.code ?? '');
+    expect(otp, 'the reset text carries its code').not.toBe('');
+
+    const reset = await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND });
+    expect(reset.status, await reset.clone().text()).toBe(200);
+
+    expect(await answer(await getSession(a.manager, a.earlier))).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
+
+    // The control: the account itself works, with the password just set.
+    const fresh = await post(a.manager, '/sign-in/email', { email: EMAIL, password: SECOND });
+    expect(fresh.status, await fresh.clone().text()).toBe(200);
+    expect(await answer(await getSession(a.manager, cookieFrom(fresh)))).toEqual({ status: 200, email: EMAIL });
+  }, 60_000);
 });
 
 describe('revokeSessionsOnPasswordReset: false is refused, never silently overridden', () => {
