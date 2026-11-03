@@ -11,6 +11,14 @@
  * organization administrator and a platform administrator alike. An echo of
  * the stored owner is no change, and saves.
  *
+ * "The system" is every context that carries `isSystem`: the platform's own
+ * writers, and also app-authored automation elevated to system (a
+ * `runAs: 'system'` flow, a hook's `runAs: 'system'` api or `ctx.api.sudo()`,
+ * an action body's `ctx.api`), the family plugin-security's
+ * `flow-system-identity-write-refusal.ts` names. This rule reads no
+ * app-automation elevation mark, so such automation can hand a row to another
+ * owner.
+ *
  * A save rule is the one place that judges the CHANGE of owner; why the row
  * scope alone does not is row 26c of `content/docs/permissions/system-context.mdx`.
  *

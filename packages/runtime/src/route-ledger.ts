@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 116 rows.
+ * CENSUS (generated): this list holds 127 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -399,6 +399,26 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
   { route: 'DELETE /notifications/read/all', domain: '/notifications', disposition: 'server-only',
     note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  // Push devices (ADR-0012 §6): the device registry's two faces and their
+  // refusal-only verbs, mounted for the same every-face anonymous floor.
+  { route: 'POST /notifications/devices', domain: '/notifications', disposition: 'sdk', client: 'notifications.registerDevice' },
+  { route: 'DELETE /notifications/devices/:deviceId', domain: '/notifications', disposition: 'sdk', client: 'notifications.unregisterDevice' },
+  { route: 'GET /notifications/devices', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 with or without an inbox (its 501 only when no notification service is registered)' },
+  { route: 'PUT /notifications/devices', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 with or without an inbox (its 501 only when no notification service is registered)' },
+  { route: 'PATCH /notifications/devices', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 with or without an inbox (its 501 only when no notification service is registered)' },
+  { route: 'DELETE /notifications/devices', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 with or without an inbox (its 501 only when no notification service is registered)' },
+  { route: 'GET /notifications/devices/:deviceId', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 with or without an inbox (its 501 only when no notification service is registered)' },
+  { route: 'POST /notifications/devices/:deviceId', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 with or without an inbox (its 501 only when no notification service is registered)' },
+  { route: 'PUT /notifications/devices/:deviceId', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 with or without an inbox (its 501 only when no notification service is registered)' },
+  { route: 'PATCH /notifications/devices/:deviceId', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 with or without an inbox (its 501 only when no notification service is registered)' },
 
   // ── security (ADR-0090 suggested audience bindings) ───────────────────────
   { route: 'GET /security/suggested-bindings', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.list' },
@@ -543,6 +563,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     responseSchema: 'RollbackToPackageCommitResponseSchema',
     note: 'Enveloped — the named schema is the `data`: `rollbackToPackageCommit`\'s declared return, the ADR-0067 COMMIT rollback. Fillable only after the retirement of `PackageRollbackResponseSchema` + `PackageApiContracts.rollbackPackage`, the VERSION-rollback declaration the spec had falsely bound to this exact path. Conformance: spec `api/package-lifecycle.test.ts`' },
   { route: 'POST /packages/:id/revert', domain: '/packages', disposition: 'sdk', client: 'packages.revert' },
+  // [#28914] The whole-deployment export: every installed package as installable packages, in one read.
+  { route: 'GET /packages/export', domain: '/packages', disposition: 'sdk', client: 'packages.exportAll',
+    responseSchema: 'PackageExportBundleSchema',
+    note: 'Enveloped — the named schema is the `data`: `{ packages }`, each entry exactly what `GET /packages/:id/export` answers (`assemblePackageManifest`, the one producer), for every registry row whose `source` is not `code`, disabled ones included, in ADR-0141 D5 dependency order (`orderHydrationBatch`, so a `.custom` pair follows its base). Same read gate as the per-package export; closed query set (none: a parameter is refused 400 `VALIDATION_ERROR` naming it); whole or absent (a package whose export cannot be assembled fails the read, naming it). Matched ahead of `GET /packages/:id`; `export` is never a package id. Pinned in `domains/packages-export-bundle.test.ts`, which drives THIS handler and parses the payload through the response schema; the round trip onto a fresh runtime is the dogfood `package-export-bundle-round-trip.dogfood.test.ts`' },
   { route: 'GET /packages/:id/export', domain: '/packages', disposition: 'sdk', client: 'packages.export',
     responseSchema: 'PackageExportManifestSchema',
     note: 'Enveloped — the named schema is the `data`: the ADR-0070 portable manifest. Four fixed keys (`id`, `name`, `version`, `label?`) plus an OPEN catch-all — the remaining keys are registry-derived per metadata type present, deliberately not enumerated (freezes nothing). Conformance: spec `api/package-lifecycle.test.ts`' },

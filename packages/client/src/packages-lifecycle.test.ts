@@ -81,6 +81,14 @@ describe('client.packages lifecycle (#3563 PR-4)', () => {
         expect(manifest.id).toBe('p1');
     });
 
+    it('exportAll GETs the whole-deployment export, with no query, and returns the bundle in the order served', async () => {
+        const packages = [{ id: 'com.acme.crm', name: 'crm', version: '1.0.0' }, { id: 'com.acme.crm.custom', name: 'crm-custom', version: '0.1.0' }];
+        const { client, fetchMock } = createMockClient({ success: true, data: { packages } });
+        const bundle = await client.packages.exportAll();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(`${BASE}/export`);
+        expect(bundle.packages.map((p) => p.id)).toEqual(['com.acme.crm', 'com.acme.crm.custom']);
+    });
+
     it('duplicate requires targetPackageId and forwards the renaming options', async () => {
         const { client, fetchMock } = createMockClient({ success: true, data: { ok: true } });
         await client.packages.duplicate('p1', 'p2', { targetName: 'Copy', targetNamespace: 'copy' });

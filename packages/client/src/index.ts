@@ -46,6 +46,9 @@ import {
   ListNotificationsResponse,
   MarkNotificationsReadResponse,
   MarkAllNotificationsReadResponse,
+  RegisterDeviceRequest,
+  RegisterDeviceResponse,
+  UnregisterDeviceResponse,
   // The AI wire types (#3718). `Ai{Nlq,Suggest,Insights}{Request,Response}`
   // used to be here; they typed three endpoints nothing has ever mounted and
   // went with the methods that called them. These type the routes that exist.
@@ -128,6 +131,7 @@ import {
   RevertPackageCommitResponse,
   RollbackToPackageCommitResponse,
   PackageExportManifest,
+  PackageExportBundle,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
   EnsureCustomizationPackageResponse,
@@ -3111,6 +3115,23 @@ export class ObjectStackClient {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/export`);
         return this.unwrapResponse<PackageExportManifest>(res);
+    },
+
+    /**
+     * [#28914] The deployment's whole ontology as installable packages, in one
+     * read (`GET /packages/export`, `PackageExportBundleSchema`): every
+     * installed package the deployment's own code does not register (registry
+     * `source` other than `code`), enabled or not, each exactly as
+     * {@link export} answers it, dependencies first, so a `.custom` pair
+     * follows its base. Install the entries in the order listed; never
+     * re-sort them. No credential value travels: a `credentialRef` stays the
+     * reference it is. A package whose export cannot be assembled fails the
+     * whole read, naming it.
+     */
+    exportAll: async (): Promise<PackageExportBundle> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/export`);
+        return this.unwrapResponse<PackageExportBundle>(res);
     },
 
     /**
@@ -6806,10 +6827,11 @@ export class ObjectStackClient {
   /**
    * Notification Services
    *
-   * Device registration and preference methods were removed in #3612 — the
-   * /notifications/devices and /notifications/preferences server routes that
-   * ADR-0012 describes were never built. They return together with the server
-   * (and a route-ledger row keeps them honest).
+   * The device methods (`registerDevice` / `unregisterDevice`) returned with
+   * the server's device registry (ADR-0012 §6), and their route-ledger rows
+   * (`runtime/src/route-ledger.ts`) keep them honest. The preference methods
+   * removed in #3612 stay gone: no server route serves
+   * `/notifications/preferences`.
    */
   notifications = {
     /**
@@ -6854,6 +6876,37 @@ export class ObjectStackClient {
         method: 'POST'
       });
       return this.unwrapResponse<MarkAllNotificationsReadResponse>(res);
+    },
+
+    /**
+     * Register or refresh this user's push device (`POST /notifications/devices`).
+     *
+     * Send the `deviceId` the server answered on every later registration:
+     * re-registering it refreshes that device (token, vendor, app, locale)
+     * instead of adding another. Without one the server mints an id and
+     * answers it. `vendor` may be omitted for `ios` (apns) and `android`
+     * (fcm); a `web` registration names it.
+     */
+    registerDevice: async (request: RegisterDeviceRequest): Promise<RegisterDeviceResponse> => {
+      const route = this.getRoute('notifications');
+      const res = await this.fetch(`${this.baseUrl}${route}/devices`, {
+        method: 'POST',
+        body: JSON.stringify(request)
+      });
+      return this.unwrapResponse<RegisterDeviceResponse>(res);
+    },
+
+    /**
+     * Unregister one of this user's push devices
+     * (`DELETE /notifications/devices/:deviceId`), on sign-out or account
+     * switch. A device id this user does not hold answers 404 `NOT_FOUND`.
+     */
+    unregisterDevice: async (deviceId: string): Promise<UnregisterDeviceResponse> => {
+      const route = this.getRoute('notifications');
+      const res = await this.fetch(`${this.baseUrl}${route}/devices/${encodeURIComponent(deviceId)}`, {
+        method: 'DELETE'
+      });
+      return this.unwrapResponse<UnregisterDeviceResponse>(res);
     }
   };
 

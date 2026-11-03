@@ -11,17 +11,26 @@ import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-vi.mock('@object-ui/i18n', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useObjectTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
-  }),
-}));
+// `t()` answers each key's default text; a describe that sets `i18nMode.real`
+// reads the shipped packs through the real hook instead.
+const i18nMode = vi.hoisted(() => ({ real: false }));
+vi.mock('@object-ui/i18n', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/i18n')>();
+  return {
+    ...actual,
+    useObjectTranslation: (ns?: string) =>
+      i18nMode.real
+        ? actual.useObjectTranslation(ns)
+        : { t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k },
+  };
+});
 
+import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  i18nMode.real = false;
 });
 
 /* ─────────────── computeChangeDetail (pure) ─────────────── */
@@ -247,5 +256,42 @@ describe('DraftChangesPanel — /meta routes are addressed in the singular', () 
     // names its type through the `object` count family (objectui#13221); an
     // unfolded `objects` group would read the raw `{{n}} {{type}}` fallback.
     expect(screen.getByRole('heading', { level: 4 }).textContent).toBe('{{count}} objects');
+  });
+});
+
+/* ─────────────── where a customization is saved (ADR-0146 D3) ─────────────── */
+
+/**
+ * objectstack#29691 — reviewing a read-only base's `.custom` pair, the sheet
+ * says where the changes are saved, in the one sentence the item header
+ * shares: 保存到 BASE 的定制. Rendered through the real i18next hook and the
+ * shipped packs.
+ */
+describe('DraftChangesPanel — names the base whose customizations it saves (objectstack#29691)', () => {
+  function renderIn(lang: 'en' | 'zh', extra: Partial<React.ComponentProps<typeof DraftChangesPanel>> = {}) {
+    i18nMode.real = true;
+    mockRoutes();
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    return render(
+      <I18nProvider instance={i18n} persistLanguage={false}>
+        <DraftChangesPanel open onOpenChange={() => {}} packageId="com.x" {...extra} />
+      </I18nProvider>,
+    );
+  }
+
+  it('says 保存到 HotCRM 的定制 under the title for a pair, in zh', async () => {
+    renderIn('zh', { customizationOf: 'HotCRM' });
+    await waitFor(() => expect(screen.getByTestId('draft-changes-saved-to')).toHaveTextContent(/^保存到 HotCRM 的定制$/));
+  });
+
+  it('says “Saved to HotCRM’s customizations” in en', async () => {
+    renderIn('en', { customizationOf: 'HotCRM' });
+    expect(await screen.findByTestId('draft-changes-saved-to')).toHaveTextContent(/^Saved to HotCRM’s customizations$/);
+  });
+
+  it('CONTROL: a writable package’s own drafts carry no such sentence', async () => {
+    renderIn('en');
+    await waitFor(() => expect(screen.getByText('ticket')).toBeInTheDocument());
+    expect(screen.queryByTestId('draft-changes-saved-to')).not.toBeInTheDocument();
   });
 });

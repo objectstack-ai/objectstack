@@ -1872,6 +1872,74 @@ describe('environmentId stays OUT of the meta-read request shape — transport-l
   });
 });
 
+// Its own import lines, as the blocks around it: this group pins one member.
+import { z } from 'zod';
+import type { GetMetaItemsRequest } from './protocol.zod';
+
+describe('GetMetaItemsRequestSchema declares `names` — the batch by-names list read', () => {
+  // Ruling A on #29236: the list narrows to the named items, an unknown name
+  // is simply absent, and an empty value is refused rather than read as every
+  // item. This is the protocol's post-parse shape — a list; the wire's one
+  // comma-separated value is split by the REST door. As in the blocks above,
+  // accept-pins assert the parsed VALUE: the object is non-strict, so
+  // `success` alone is also what an undeclared, stripped key looks like.
+
+  it('accepts names and PRESERVES the list through parse', () => {
+    const result = GetMetaItemsRequestSchema.safeParse({ type: 'app', names: ['crm', 'helpdesk'] });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.names).toEqual(['crm', 'helpdesk']);
+  });
+
+  it('keeps names OPTIONAL — a request without it lists every item, and parse invents none', () => {
+    const result = GetMetaItemsRequestSchema.safeParse({ type: 'app' });
+    expect(result.success).toBe(true);
+    if (result.success) expect('names' in result.data).toBe(false);
+  });
+
+  it('refuses an EMPTY list, at `names` — an empty filter is never read as every item', () => {
+    const result = GetMetaItemsRequestSchema.safeParse({ type: 'app', names: [] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toHaveLength(1);
+      expect(result.error.issues[0]).toMatchObject({ code: 'too_small', path: ['names'] });
+    }
+  });
+
+  it('judges no member — a name that matches no item is kept, to be simply absent from the answer', () => {
+    for (const names of [['no_such_app'], [''], ['crm', 'crm']]) {
+      const result = GetMetaItemsRequestSchema.safeParse({ type: 'app', names });
+      expect(result.success, JSON.stringify(names)).toBe(true);
+      if (result.success) expect(result.data.names).toEqual(names);
+    }
+  });
+
+  it('refuses the wire spelling — a comma string is the REST door\'s to split, not a protocol value', () => {
+    expect(GetMetaItemsRequestSchema.safeParse({ type: 'app', names: 'crm,helpdesk' }).success).toBe(false);
+    expect(GetMetaItemsRequestSchema.safeParse({ type: 'app', names: [1] }).success).toBe(false);
+  });
+
+  it('states the minimum in the published JSON Schema (a minimum, not a refinement)', () => {
+    const json = z.toJSONSchema(GetMetaItemsRequestSchema, { io: 'input', unrepresentable: 'any' }) as {
+      properties: Record<string, Record<string, unknown>>;
+      required?: string[];
+    };
+    expect(json.properties.names).toMatchObject({ type: 'array', minItems: 1, items: { type: 'string' } });
+    expect(json.required ?? []).not.toContain('names');
+  });
+
+  it('types names as an optional string list, input and output alike', () => {
+    expectTypeOf<GetMetaItemsRequest['names']>().toEqualTypeOf<string[] | undefined>();
+  });
+
+  it('is declared ahead of its producer: the describe opens with the planned marker, never a tracker id', () => {
+    // No list door reads `names` yet; the change that serves it drops the
+    // marker and this pin with it.
+    const description = GetMetaItemsRequestSchema.shape.names.description ?? '';
+    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(description).not.toMatch(/#\d{3,}/);
+  });
+});
+
 describe('MetadataProtocol declares getMetaItemLayered', () => {
   // Type-level pins (compiled by the spec test typecheck, the
   // translation-typegen.test.ts pattern). The member is an interface

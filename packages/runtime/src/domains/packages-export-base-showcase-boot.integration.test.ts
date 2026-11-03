@@ -32,10 +32,10 @@
  *    item in it carries an `overrides` block;
  *  - the same holds on a restart over the same database;
  *  - the pair's export carries the overriding item with its `overrides` block
- *    (view, dashboard, report; see `pairServed`);
- *  - CONTROL: the pair's override row is published, and for view, dashboard
- *    and report the effective read of the base's name serves it, so the base
- *    export's answer is the export's own.
+ *    (every type since #29613; see `pairServed`);
+ *  - CONTROL: the pair's override row is published, and the effective read of
+ *    the base's name serves it, so the base export's answer is the export's
+ *    own.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -116,20 +116,21 @@ const SERVICE_COLLECTIONS = {
 
 /**
  * `pairServed`: whether the pair's export and the effective read serve the
- * override. For the five types #29640 left in the bare slot neither does on
- * this boot shape (the pair's per-package layer lists none of them, and the
- * effective read serves the base's document; #29613), so only the base's half
- * is pinned for them.
+ * override. [#29613] True for every type: page, app, dataset, doc and book
+ * were false while the reads declined their pair override as a sealed overlay
+ * (the pair's per-package layer listed none of them, and on this boot shape,
+ * with a `MetadataManager`, the effective read served the base's document).
+ * The reads now serve it from its row, as a dashboard's.
  */
 const TYPES = [
     { type: 'view', plural: 'viewItems', name: VIEW, pairServed: true },
     { type: 'dashboard', plural: 'dashboards', name: DASHBOARD, pairServed: true },
     { type: 'report', plural: 'reports', name: REPORT, pairServed: true },
-    { type: 'page', plural: 'pages', name: 'showcase_start_here', pairServed: false },
-    { type: 'app', plural: 'apps', name: 'showcase_app', pairServed: false },
-    { type: 'dataset', plural: 'datasets', name: 'showcase_task_metrics', pairServed: false },
-    { type: 'doc', plural: 'docs', name: 'showcase_index', pairServed: false },
-    { type: 'book', plural: 'books', name: 'showcase_manual', pairServed: false },
+    { type: 'page', plural: 'pages', name: 'showcase_start_here', pairServed: true },
+    { type: 'app', plural: 'apps', name: 'showcase_app', pairServed: true },
+    { type: 'dataset', plural: 'datasets', name: 'showcase_task_metrics', pairServed: true },
+    { type: 'doc', plural: 'docs', name: 'showcase_index', pairServed: true },
+    { type: 'book', plural: 'books', name: 'showcase_manual', pairServed: true },
 ] as const;
 
 /** The base's body, as the showcase's `defineStack` carries it: one fresh copy per reader. */

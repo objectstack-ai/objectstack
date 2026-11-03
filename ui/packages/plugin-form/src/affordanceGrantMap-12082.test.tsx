@@ -734,6 +734,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // record; the list page draws Clone only when that create's row is held.
   'packages/app-shell/src/views/metadata-admin/SharingRuleCloneDialog.tsx :: SharingRuleCloneDialog > submit :: create':
     mapped(['declarationClone'], RESOURCE_LIST_PAGE),
+  // The reader's own list views (My views); the delete goes through the owner's door, not a data source.
+  'packages/app-shell/src/views/personalViews.ts :: usePersonalViews > save :: create':
+    outOfFamily("the caller's OWN sys_personal_view row (Save as my view), offered behind perms.can(sys_personal_view, create) in ObjectView; the server keeps the rows owner-scoped; no record the caller browses is written"),
+  'packages/app-shell/src/views/personalViews.ts :: usePersonalViews > rename :: update':
+    outOfFamily("the caller's OWN sys_personal_view row (Rename), offered behind perms.can(sys_personal_view, update) in ObjectView; the server keeps the rows owner-scoped and fixes the owner; no record the caller browses is written"),
   // ── core ──
   'packages/core/src/actions/TransactionManager.ts :: TransactionManager > executeBatch :: batch':
     door('the action engine\'s transaction executor runs the operations its caller hands it'),

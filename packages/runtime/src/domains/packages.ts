@@ -70,6 +70,10 @@ import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
 import { declaredDependencyIds } from '@objectstack/core';
+// [#28914, ADR-0141 D5] The one sorter of installed packages by their declared
+// dependencies: the order a boot hydrates them in is the order the
+// whole-deployment export lists them in.
+import { orderHydrationBatch } from '@objectstack/core';
 // [#9960] The uninstall seam's DECLARED shapes, from the same producer and for
 // the same reason as the predicate above: this door reached `deletePackage`
 // through `protocol` and routinely sent two keys — `organizationId`
@@ -2580,6 +2584,23 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             return { handled: true, response: deps.error('Metadata service not available', 503) };
         }
 
+        // GET /packages/export → [#28914] the deployment's whole ontology as
+        // installable packages, in one read (`PackageExportBundleSchema`).
+        // Matched here, ahead of `GET /packages/:id`: `export` is never a
+        // package id (`MANIFEST_ID_PATTERN` needs two dot-separated segments),
+        // so the path shadows no package. See {@link assemblePackageExportBundle}.
+        if (parts.length === 1 && parts[0] === 'export' && m === 'GET') {
+            // The per-package export's read gate, asked before anything is read.
+            const denied = requireReadCapability(deps, _context); if (denied) return denied;
+            // Closed query set: the door reads none, so a parameter is a
+            // request it would otherwise answer as if it had been honoured.
+            const unknownQuery = unknownQueryParamRefusalMessage(query, []);
+            if (unknownQuery !== undefined) {
+                return { handled: true, response: deps.error(unknownQuery, 400, { code: 'VALIDATION_ERROR' }) };
+            }
+            return { handled: true, response: await assemblePackageExportBundle(deps, registry, _context) };
+        }
+
         // GET /packages/:id/export → assemble a portable manifest from
         // sys_metadata overlay rows bound to this package (offline export).
         if (parts.length === 2 && parts[1] === 'export' && m === 'GET') {
@@ -3261,7 +3282,8 @@ async function readPackageCustomizations(
  * [#28722, ADR-0029 D7 as amended by ADR-0146 D3] The `contributions` of
  * `GET /packages/:id/customizations`: every field and flow a package other than
  * the base `baseId` and its pair `pairId` contributes to an object the base
- * OWNS (`getObjectOwner`), each entry naming that package. Read from the two
+ * OWNS (`getObjectOwner`), and every navigation item such a package contributes
+ * to an app the base owns, each entry naming that package. Read from the three
  * registries that already record the contributor, never inferred:
  *
  *  - **field** — the object registry's `extend` contributors of the object, as
@@ -3274,27 +3296,40 @@ async function readPackageCustomizations(
  *    already leaves a disabled package's out), whose `start` node's
  *    `config.objectName` is a base-owned object, attributed to the package
  *    stamp the registration put on it (its `_packageId`).
+ *  - **nav** — [#27928, ruling 6566915346 letter E] the navigation-contribution
+ *    registry (`getAppNavContributions`), the one the served app's fold
+ *    (`applyNavContributions`) reads, for every app registered under the base
+ *    (`listItems('app', baseId)`, which already leaves a disabled base's app
+ *    out: nothing is served to contribute to). One entry per item of a
+ *    contribution's `items` that declares an `id`, naming the contribution's
+ *    `group` when it targets one; a contributed group's children ride inside
+ *    it, as the fold folds them. A disabled package's contributions are
+ *    skipped by the fold's own predicate (`isPackageDisabled`, #28117), so the
+ *    list and the served navigation agree. No key is read from or written to
+ *    any nav item.
  *
- * Both kinds ask ONE question of their stamp, {@link codePackageOf}: is it a
+ * Every kind asks ONE question of its stamp, {@link codePackageOf}: is it a
  * code package's ({@link isCodeArtifactBody}: not the package-less
  * `sys_metadata` sentinel, not a tenant-authored body), and neither the base
  * nor its pair? Only where the stamp is read differs: the contributor's
- * `packageId` beside its `definition`, or the flow's own `_packageId`. An item
- * authored in this environment is the environment's, not a package's, and is
- * not listed, whichever kind it is.
+ * `packageId` beside its `definition`, the flow's own `_packageId`, or the
+ * nav contribution's `packageId`. An item authored in this environment is the
+ * environment's, not a package's, and is not listed, whichever kind it is.
  *
- * Ordered by object, kind, name and package.
+ * Ordered as the member declares: the `field` and `flow` entries first, by
+ * object, kind, name and package; then the `nav` entries, by app, group (an
+ * entry with no group first), name and package.
  */
 function readBaseContributions(
     baseId: string,
     pairId: string | undefined,
     registry: any,
 ): GetPackageCustomizationsResponse['contributions'] {
-    // The `field` and `flow` entries: the `nav` kind is declared in the spec
-    // ahead of this producer (#27928) and is not listed here yet (#28722).
-    type Contribution = Exclude<GetPackageCustomizationsResponse['contributions'][number], { kind: 'nav' }>;
-    const contributions: Contribution[] = [];
-    if (typeof registry?.getAllObjects !== 'function') return contributions;
+    type Contribution = GetPackageCustomizationsResponse['contributions'][number];
+    type ObjectContribution = Exclude<Contribution, { kind: 'nav' }>;
+    type NavContribution = Extract<Contribution, { kind: 'nav' }>;
+    const contributions: ObjectContribution[] = [];
+    const navs: NavContribution[] = [];
     // The one stamp reading both kinds share: the package `packageId` names
     // when `body` is a code package's item and the package is neither the base
     // nor its pair; `undefined` otherwise.
@@ -3305,7 +3340,7 @@ function readBaseContributions(
     };
 
     const owned = new Set<string>();
-    for (const object of registry.getAllObjects(baseId) as Array<{ name?: unknown }>) {
+    for (const object of (typeof registry?.getAllObjects === 'function' ? registry.getAllObjects(baseId) : []) as Array<{ name?: unknown }>) {
         const name = object?.name;
         if (typeof name === 'string' && registry.getObjectOwner(name)?.packageId === baseId) owned.add(name);
     }
@@ -3334,11 +3369,39 @@ function readBaseContributions(
         }
     }
 
+    if (typeof registry?.listItems === 'function' && typeof registry.getAppNavContributions === 'function') {
+        const apps = new Set<string>();
+        for (const app of registry.listItems('app', baseId) as Array<{ name?: unknown }>) {
+            if (typeof app?.name === 'string') apps.add(app.name);
+        }
+        for (const app of apps) {
+            for (const contribution of registry.getAppNavContributions(app) as Array<{ packageId?: unknown; group?: unknown; items?: unknown }>) {
+                // [#28117] The fold's own predicate, asked per read as the fold asks it.
+                if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(contribution.packageId)) continue;
+                const packageId = codePackageOf(contribution.packageId, undefined);
+                if (packageId === undefined) continue;
+                // The fold targets a group only when one is named (`if (c.group)`).
+                const group = typeof contribution.group === 'string' && contribution.group !== '' ? contribution.group : undefined;
+                for (const item of Array.isArray(contribution.items) ? contribution.items : []) {
+                    const id = (item as { id?: unknown } | null | undefined)?.id;
+                    if (typeof id !== 'string' || id === '') continue;
+                    navs.push({ kind: 'nav', app, ...(group !== undefined ? { group } : {}), name: id, packageId });
+                }
+            }
+        }
+    }
+
     const kindOrder = { field: 0, flow: 1 } as const;
-    return contributions.sort((a, b) => a.object.localeCompare(b.object)
+    contributions.sort((a, b) => a.object.localeCompare(b.object)
         || kindOrder[a.kind] - kindOrder[b.kind]
         || a.name.localeCompare(b.name)
         || a.packageId.localeCompare(b.packageId));
+    navs.sort((a, b) => a.app.localeCompare(b.app)
+        || Number(a.group !== undefined) - Number(b.group !== undefined)
+        || (a.group ?? '').localeCompare(b.group ?? '')
+        || a.name.localeCompare(b.name)
+        || a.packageId.localeCompare(b.packageId));
+    return [...contributions, ...navs];
 }
 
 /**
@@ -3602,6 +3665,63 @@ async function withheldConnectorMaps(
         }
     }
     return withheld;
+}
+
+/**
+ * [#28914] The answer of `GET /packages/export`: every package whose registry
+ * row's `source` is not `code`, enabled or not, each once, dependencies first,
+ * each entry exactly what `GET /packages/:id/export` answers for it
+ * ({@link assemblePackageManifest}, the one producer: ⛔ no item is assembled,
+ * cleaned or redacted a second way here). `PackageExportBundleSchema` is the
+ * contract; its docblock argues each rule.
+ *
+ *  - **Which packages.** A `code` row is registered by the deployment's own
+ *    code and travels with it, never with the bundle; the row's `source` is the
+ *    one key that says so (⛔ not `manifest.scope`, not `writable`).
+ *  - **Order.** ADR-0141 D5's, through the boot's own sorter
+ *    ({@link orderHydrationBatch}) over each row's declared dependency ids
+ *    ({@link declaredDependencyIds}): a `.custom` pair comes after its base,
+ *    and a cycle keeps the registry's listing order among its members.
+ *  - **Whole or absent.** A package whose export cannot be assembled fails the
+ *    read, naming that package; ⛔ never a bundle that silently lacks one.
+ */
+async function assemblePackageExportBundle(
+deps: DomainHandlerDeps,
+registry: any,
+context: HttpProtocolContext,
+): Promise<NonNullable<HttpDispatcherResult['response']>> {
+    const rows: any[] = Array.isArray(registry.getAllPackages?.()) ? registry.getAllPackages() : [];
+    const seen = new Set<string>();
+    const nodes: Array<{ item: string; label: string; packageIds: string[]; declaredIds: string[] }> = [];
+    for (const row of rows) {
+        if (row?.source === 'code') continue;
+        const id = row?.manifest?.id ?? row?.id;
+        if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+        seen.add(id);
+        nodes.push({ item: id, label: id, packageIds: [id], declaredIds: declaredDependencyIds(row?.manifest) });
+    }
+    const packages: Record<string, any>[] = [];
+    for (const id of orderHydrationBatch(nodes).ordered) {
+        let manifest: Record<string, any> | null;
+        try {
+            manifest = await assemblePackageManifest(deps, id, registry, context);
+        } catch (e: any) {
+            const answer: any = deps.errorFromThrown(e, 500);
+            const error = answer?.body?.error;
+            if (error && typeof error.message === 'string') {
+                error.message = `The export of package '${id}' could not be assembled, so no bundle is answered: ${error.message}`;
+            }
+            return answer;
+        }
+        if (!manifest) {
+            return deps.error(
+                `The export of package '${id}' could not be assembled (the metadata protocol answered nothing for it), so no bundle is answered.`,
+                500,
+            );
+        }
+        packages.push(manifest);
+    }
+    return deps.success({ packages });
 }
 
 /**

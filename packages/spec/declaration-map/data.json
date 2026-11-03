@@ -253,6 +253,8 @@
     "RangeOperatorSchema": "data/RangeOperator",
     "ReferenceIdValue": "data/ReferenceIdValue",
     "ReferenceIdValueSchema": "data/ReferenceIdValue",
+    "ReferenceNameOnlyValue": "data/ReferenceNameOnlyValue",
+    "ReferenceNameOnlyValueSchema": "data/ReferenceNameOnlyValue",
     "ReferenceResolution": "data/ReferenceResolution",
     "ReferenceResolutionError": "data/ReferenceResolutionError",
     "ReferenceResolutionErrorSchema": "data/ReferenceResolutionError",

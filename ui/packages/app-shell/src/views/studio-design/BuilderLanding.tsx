@@ -36,6 +36,7 @@ import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataArea.js';
 import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.js';
+import { foldCustomizationPairs } from './StudioRailCustomizations.js';
 
 /**
  * objectui#11808 — where a read-only package's card sends the author beyond
@@ -117,8 +118,15 @@ export function BuilderLanding(): React.ReactElement {
           .filter((item): item is RecentNamedItem => item.type === 'package')
           .slice(0, RECENT_PACKAGES_SHOWN);
 
-  const writable = pkgs?.filter((p) => p.writable) ?? [];
-  const readonly = pkgs?.filter((p) => !p.writable) ?? [];
+  // ADR-0146 D3 — a base's `.custom` pair has no card of its own: it is
+  // folded under its base, the way the package switcher folds it
+  // (`foldCustomizationPairs`). The base's card carries the pair through its
+  // customized line and link, and the pair's export and delete stay on the
+  // Packages page, which lists every package. A pair whose base is not listed
+  // keeps its card.
+  const cards = pkgs === null ? [] : foldCustomizationPairs(pkgs).rows;
+  const writable = cards.filter((p) => p.writable);
+  const readonly = cards.filter((p) => !p.writable);
 
   // ADR-0146 D3 — each read-only BASE's card carries "n customized, m switched
   // off", the server's counts (`GET /packages/:id/customizations`), one read
