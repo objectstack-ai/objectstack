@@ -23,8 +23,9 @@
  *                   is refused on every field whose declared value is a SCALAR
  *                   — a `where` clause pasted into the SET half of a write
  *                   (#5922).
- *  - string types   (`BOUNDED_STRING_FIELD_TYPES`) a plain object or an array
- *                   is `invalid_type`, never stringified (#29133); a number or
+ *  - string types   (`BOUNDED_STRING_FIELD_TYPES`) any object (a plain object,
+ *                   an array, a `Date`, a `Map`, a class instance) is
+ *                   `invalid_type`, never stringified (#29133, #29645); a number or
  *                   a boolean is judged, and stored, as its string reading
  *                   (#29241). Then, on that string:
  *    - `maxLength` / `minLength`
@@ -886,16 +887,17 @@ function isPlainObjectValue(value: unknown): boolean {
 
 /**
  * [#29562] Any object: a plain object, an array, a `Date`, a `Map`, a class
- * instance. The option arms' shape test. An option code is a string, and no
- * object has a string reading a caller meant as one (`String(new Date())` is
- * not a code), so the option arms refuse every object rather than only the
- * plain ones {@link isPlainObjectValue} names.
+ * instance. The option arms' shape test, and [#29645] the string arm's. An
+ * option code or a text value is a string, and no object has a string reading
+ * a caller meant as one (`String(new Date())` is neither a code nor a title),
+ * so those arms refuse every object rather than only the plain ones
+ * {@link isPlainObjectValue} names.
  */
 function isObjectValue(value: unknown): value is object {
   return typeof value === 'object' && value !== null;
 }
 
-/** [#29562] The received-shape word an option arm's refusal names. */
+/** [#29562] The received-shape word an option or string arm's refusal names. */
 function receivedObjectShape(value: object): string {
   return Array.isArray(value) ? 'an array' : 'an object';
 }
@@ -969,8 +971,8 @@ function receivedObjectShape(value: object): string {
  * `42`.
  *
  * ⛔ Not touched: a string (judged and written as itself), `null` and a missing
- * key, a plain object or an array (the arm refuses them, #29133), every other
- * non-scalar, and every field outside the set — `json` and the structured
+ * key, an object of any kind (the arm refuses it, #29133 / #29645), every
+ * other non-scalar, and every field outside the set — `json` and the structured
  * types, the number and boolean fields and the reference types. The option
  * types have their own half, below.
  *
@@ -1328,10 +1330,18 @@ function validateOne(
     // [#29241] `normalizeNumericStringValues` has already written that string
     // into the payload at the door, so the driver stores what was judged; a
     // filter-operator object was already refused above, with its own sentence.
-    if (isPlainObjectValue(value) || Array.isArray(value)) {
+    //
+    // [#29645] Every object, not only a plain one, by the option arms' test
+    // (#29562): a `Date`, a `Map`, a `Set`, a class instance or a typed array
+    // passed on its string reading, so driver-memory stored the object itself
+    // and SQLite stored a `Date` as its epoch number and the rest as their
+    // JSON text (`{}` for a `Map` or a `Set`). On `email`, `url` and `phone`
+    // the format check refused that string by accident; the shape is now
+    // refused first, on all twelve types alike. It is never stringified.
+    if (isObjectValue(value)) {
       return fail(
         'invalid_type',
-        { type: t, detail: `expected a string, received ${Array.isArray(value) ? 'an array' : 'an object'}` },
+        { type: t, detail: `expected a string, received ${receivedObjectShape(value)}` },
         // The ADR-0104 shape sentence the operator refusal above also uses:
         // one catalog entry for "this value's SHAPE is wrong for this type".
         'invalid_value_shape',
