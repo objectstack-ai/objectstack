@@ -267,7 +267,6 @@ export function isSystemObject(obj: AnyRec): boolean {
   return obj.isSystem === true || String(obj.name ?? '').startsWith('sys_');
 }
 
-/** snake_case identifier contains the reserved token `role`/`roles`. */
 /**
  * [ADR-0066 D2 / ①] Does `set` hold the super-user ("View/Modify All Data")
  * bypass on `objectName`? A verbatim copy of `holdsSuperuserBypass` in
@@ -298,6 +297,7 @@ export function holdsSuperuserBypass(
   return bit === 'modify' ? Boolean(op.modifyAllRecords) : Boolean(op.viewAllRecords || op.modifyAllRecords);
 }
 
+/** snake_case identifier contains the reserved token `role`/`roles`. */
 function identifierHasRoleToken(name: unknown): boolean {
   if (typeof name !== 'string') return false;
   return name
