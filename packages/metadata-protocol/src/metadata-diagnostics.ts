@@ -38,6 +38,7 @@ import { zodIssuesToMetadataIssues } from './protocol.js';
 // landed by #8300). Composed into `decorateMetadataItem` below — see the
 // ordering note there for why it is not applied per read exit.
 import { redactMetadataItem } from './metadata-redaction.js';
+import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 // [#26707] The snapshot key a write type's findings are spelled under — the
 // runtime gate's own answer, so the publish verdict below is re-spelled
 // against the same prefix the gate wrote it with.
@@ -276,7 +277,18 @@ export function computeMetadataDiagnostics(
     // [#26886] …and judge each picklist-bound field as its author wrote it:
     // the `options` the runtime resolved onto it are not part of that shape
     // ({@link withoutResolvedPicklistOptions}).
-    const candidate = withoutResolvedPicklistOptions(stripReadDecorations(item));
+    //
+    // [#29696] …and judge a FLOW in the spelling every door judges it in: its
+    // ADR-0087 D2-converted body ({@link storedFlowVerdictBody}, the seam the
+    // save door's fallback verdict, both publish doors and the restore doors
+    // judge through). A served flow is a row at rest that no read converts
+    // (`convertStoredItem` skips `flow`; the engine converts it when it
+    // registers it), so judged as stored a legacy D2 spelling (`get_record`
+    // `config.filters`) read `valid: false` while every door and the engine
+    // accepted it. For the VERDICT only: the read serves the body it was
+    // handed. Not a redaction, so the #8154 order below is untouched: the
+    // body judged is still the unredacted one.
+    const candidate = withoutResolvedPicklistOptions(storedFlowVerdictBody(singular, stripReadDecorations(item)));
 
     // [#25783] A document parsed before against this same schema is answered
     // from the memo — see "The verdict memo" above.

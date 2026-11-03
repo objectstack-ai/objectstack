@@ -591,3 +591,56 @@ pinBothDoors({
     },
     expectDetail: (error) => expect(error.message).toBe('refused in state active'),
 });
+
+// ─── [#29696] A flow version stored in a legacy ADR-0087 D2 spelling ─────────
+//
+// The restore doors judge a flow version the way both publish doors judge a
+// stored flow draft (#29557): the runtime authoring rules read it in its
+// D2-converted spelling (`storedFlowVerdictBody`), and the version is restored
+// as stored. Measured on `origin/main` `0eb97fa4` before the fix: a version in
+// the legacy `get_record` `config.filters` spelling, which the save door, the
+// publish doors and the engine all accept, was refused at both restore doors
+// (422 `INVALID_METADATA`, `expression-invalid` at `config.filters`).
+
+const LEGACY_FLOW = 'acme_fetch';
+/** start → get_record → end, the match map spelled under `filterKey`; `brokenEdge` adds a conditional edge whose CEL does not parse. */
+const fetchFlow = (label: string, filterKey: 'filters' | 'filter', brokenEdge = false) => ({
+    name: LEGACY_FLOW,
+    label,
+    type: 'autolaunched',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'fetch', type: 'get_record', label: 'Fetch', config: { objectName: 'acme_deal', [filterKey]: { name: 'Acme' }, outputVariable: 'deal' } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+        { id: 'e1', source: 'start', target: 'fetch' },
+        brokenEdge
+            ? { id: 'e2', source: 'fetch', target: 'end', type: 'conditional', condition: 'record.name ==' }
+            : { id: 'e2', source: 'fetch', target: 'end' },
+    ],
+});
+
+pinBothDoors({
+    title: '[#29696] a flow version in a legacy D2 spelling is judged converted: restored as stored, and refused only where its converted spelling is',
+    type: 'flow',
+    name: LEGACY_FLOW,
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v1', 'filter') });
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v2', 'filter') });
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v3', 'filter') });
+        // Both versions as rows at rest in the legacy spelling; v2 also
+        // carries an edge the rules refuse in any spelling.
+        rewriteHistory(h, 'flow', LEGACY_FLOW, 1, () => fetchFlow('v1', 'filters'));
+        rewriteHistory(h, 'flow', LEGACY_FLOW, 2, () => fetchFlow('v2', 'filters', true));
+        return { refused: 2, accepted: 1 };
+    },
+    // Refused on the edge alone: nothing is reported at the legacy spelling.
+    expectDetail: (error) => {
+        const rules = (error.issues ?? []).map((i: { rule?: string }) => i.rule);
+        expect(rules).toContain('expression-invalid');
+        expect(JSON.stringify(error.issues)).not.toContain('filters');
+    },
+});

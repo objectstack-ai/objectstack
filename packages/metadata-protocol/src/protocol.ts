@@ -466,6 +466,8 @@ import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-crede
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 // [#28665] The null-master rows a `controlled_by_parent` detail stops serving, counted into the finding that makes its master required.
 import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
+// [#29510] `getMetaTypes()`'s named return type and the equality its pin reads.
+import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
 // [#25467 E0] The module preamble that stood here moved, verbatim, into the themed
 // `protocol-*.ts` modules below. What this file exported from it, it still exports;
 // the module order below is the order the rolled-up `.d.ts` keeps their declarations in.
@@ -1558,7 +1560,9 @@ export class ObjectStackProtocolImplementation implements
      *    ({@link assertRuntimeAuthoringRules}), judged as an `active` write
      *    bound to the row's own package, and told which credentials the
      *    write-only channel holds — the restore keeps them (R2) — as the draft
-     *    promotion tells it;
+     *    promotion tells it; [#29696] a flow version judged in its
+     *    D2-converted spelling (`storedFlowVerdictBody`), as the promotion
+     *    judges a flow draft, and restored as stored;
      *  - the authoring gate a domain plugin registers
      *    ({@link runAuthoringGate}), on the channel the save door asks it on.
      *
@@ -3139,7 +3143,8 @@ export class ObjectStackProtocolImplementation implements
         return listLiveMetadataTypes.call(host);
     }
 
-    async getMetaTypes() {
+    // [#29510] Named return type; the `exact` pin below holds it EQUAL to what this body infers.
+    async getMetaTypes(): Promise<MetaTypesListing> {
         const allTypes = await this.listLiveMetadataTypes();
 
         // Phase 3a-1: enrich response with per-type registry metadata so admin
@@ -3292,7 +3297,11 @@ export class ObjectStackProtocolImplementation implements
             return a.type.localeCompare(b.type);
         });
 
-        return { types: allTypes, entries };
+        const listing = { types: allTypes, entries };
+        // [#29510] Compile-time pin: `false` (a type error) the moment the body and the name drift apart.
+        const exact: Equal<typeof listing, MetaTypesListing> = true;
+        void exact;
+        return listing;
     }
 
     /**
@@ -8764,7 +8773,10 @@ export class ObjectStackProtocolImplementation implements
      *    regime D6 recognises — the package definition wins. Such rows were
      *    written through the `OS_METADATA_WRITABLE` hatch before the seal; they
      *    stay at rest, untouched, and the boot report names them per type with
-     *    the two remedies ({@link reportSealedOverlayRows}).
+     *    the two remedies ({@link reportSealedOverlayRows}). [#29613] Except,
+     *    for a `page`, `app`, `dataset`, `doc` or `book`, the shipping
+     *    package's declared `.custom` override (`row`, below): ADR-0146 D8
+     *    item 2 serves it, as a dashboard's.
      *
      * ⛔ Never a row's, slot's or body's `origin` — the caller sets it.
      *
@@ -10851,11 +10863,11 @@ export class ObjectStackProtocolImplementation implements
      * after, measured for each reader. What changes is the registry-direct
      * read of the name, which answers the shipping package's own item.
      *
-     * ⛔ Those three types only. A row of a package that ships its own artifact
-     * of the name keeps its bare entry (#4624). `page`, `app`, `dataset`, `doc`
-     * and `book` still register: their reads serve a pair's override from the
-     * bare entry, so it can go only once they serve it from the row. `flow`
-     * registers with no artifact envelope (below).
+     * ⛔ Those three types, and [#29613] `page`, `app`, `dataset`, `doc` and
+     * `book`, whose reads serve a pair's declared override from its row since
+     * {@link declinesStoredRow} admits it. A row of a package that ships its own
+     * artifact of the name keeps its bare entry (#4624). `flow` registers with
+     * no artifact envelope (below).
      *
      * ## [#23233] The entry carries the row's package binding
      *
@@ -11015,7 +11027,7 @@ export class ObjectStackProtocolImplementation implements
         // bound to a package that ships no artifact of its name, under a name
         // another package ships, is not registered under the bare name, where
         // it would wear that other package's envelope. Its reads answer it from
-        // its row. ⛔ Those three types only.
+        // its row. ⛔ Those three types, and [#29613] page, app, dataset, doc and book.
         if (declinesBorrowedEnvelope(canonicalType, options.packageId, artifact)) return true;
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a

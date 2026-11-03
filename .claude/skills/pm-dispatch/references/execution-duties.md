@@ -133,6 +133,7 @@
 - ⛔ GitHub MCP 写:`create_pull_request`、`update_pull_request`、`issue_write`、`add_issue_comment` 等。
 - 多仓项目线程不加载仓 `settings.json` deny,此行即唯一防线;两数 = 写预算与 `mcp_calls`。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
+- 建包单:派发令点名目录与 npm 名,dev 动笔前先测同类包先例;命名规则见 AGENTS.md 角色表。
 - 门禁清单取 `dispatch-gates --commands --repo 仓` 逐条跑,退出码先落盘,`--ran` 对账;被拒即手推。
 - 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
 - 派发令里关于代码的危害断言必须有读数(点名 call site / 路径 / 迁移)。
@@ -176,7 +177,6 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
-- 报告或复核见涉 cloud ⇒ 整卡 `Release:`+`pm:retriage` 转 cloud 车道,读点留卡;⛔ 不拆半边。
 - 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。

@@ -23,6 +23,10 @@
  *      verified with a caller-scoped `findOne`, so the parent's own
  *      OWD/sharing, RLS and object-level CRUD all apply. `author_id` is
  *      server-stamped from the session; a client-supplied value never wins.
+ *      So is the display identity beside it: `author_name` and
+ *      `author_avatar_url` are the session user's own name and avatar
+ *      ({@link CommentAuthorIdentityResolver}), never the client's, and both
+ *      are read-only on update (`objects/sys-comment.object.ts`).
  *    * `beforeUpdate` / `beforeDelete`: the caller must be the comment's
  *      AUTHOR, or hold EDIT on the parent record (see "Parent EDIT" below) —
  *      the attachment kit's uploader-or-parent-editor rule. A multi-row write
@@ -220,6 +224,24 @@ export interface CommentAccessLogger {
   warn(msg: string, meta?: unknown): void;
   debug?(msg: string, meta?: unknown): void;
 }
+
+/** A comment author's display identity: the name and avatar URL the platform
+ * holds for that user, each `null` where it cannot be read. */
+export interface CommentAuthorIdentity {
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+/**
+ * Resolves the display identity of the user a comment is stamped with, given
+ * the write's hook context. `AuditPlugin` wires the audit writers' actor
+ * snapshot (`AuditWritersHandle.resolveActorSnapshot`), the resolution the
+ * `sys_activity` actor columns are written with, so a user reads as the same
+ * name in a comment and in the record's history.
+ */
+export type CommentAuthorIdentityResolver = (ctx: any, userId: string) => Promise<CommentAuthorIdentity>;
+
+const NO_AUTHOR_IDENTITY: CommentAuthorIdentity = { name: null, avatarUrl: null };
 
 /** Must match `AuditPlugin.name` — hooks are removable by owning package. */
 const PACKAGE_ID = 'com.objectstack.audit';
@@ -709,6 +731,11 @@ async function callerCanRead(ctx: any, target: CommentThreadTarget): Promise<boo
  * asked on a record-sharing abstention instead; absent too, a
  * `controlled_by_parent` parent meets no master check here, exactly as its own
  * update meets none.
+ *
+ * `resolveAuthorIdentity` answers the display identity (name, avatar) a new
+ * comment is stamped with, for the session's user. Absent, a comment is stored
+ * with neither, never with the client's: the display identity is the server's
+ * or none. That composition is said once, here, at install.
  */
 export function installCommentAccessHooks(
   engine: CommentAccessEngine,
@@ -716,7 +743,33 @@ export function installCommentAccessHooks(
   logger: CommentAccessLogger,
   messageTranslator?: () => ValidationMessageTranslator | undefined,
   getSecurity?: () => CommentSecurityLike | null | undefined,
+  resolveAuthorIdentity?: CommentAuthorIdentityResolver,
 ): void {
+  if (!resolveAuthorIdentity) {
+    logger.warn(
+      '[audit] comment access: no author identity resolver is composed — new comments store no author_name / ' +
+        'author_avatar_url (readers show them as unknown). AuditPlugin wires one; a host calling ' +
+        'installCommentAccessHooks directly passes `resolveAuthorIdentity`.',
+    );
+  }
+
+  /** The display identity of the session's user, the server's own answer: a
+   * session with no user, a resolver that is absent or fails, and a value that
+   * is not a non-blank string all answer `null`, never the client's value. */
+  const authorIdentityOf = async (ctx: any): Promise<CommentAuthorIdentity> => {
+    const userId: unknown = ctx.session.userId;
+    if ((typeof userId !== 'string' && typeof userId !== 'number') || String(userId) === '') return NO_AUTHOR_IDENTITY;
+    if (!resolveAuthorIdentity) return NO_AUTHOR_IDENTITY;
+    let identity: CommentAuthorIdentity | null | undefined;
+    try {
+      identity = await resolveAuthorIdentity(ctx, String(userId));
+    } catch {
+      return NO_AUTHOR_IDENTITY;
+    }
+    const text = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value : null);
+    return { name: text(identity?.name), avatarUrl: text(identity?.avatarUrl) };
+  };
+
   /** May the caller EDIT the parent record behind `target`? The composition
    * "Parent EDIT" in the module header sets out. [#24646] Where the security
    * service serves `explain`, the parent's own by-id update judgement decides
@@ -891,6 +944,16 @@ export function installCommentAccessHooks(
         target.object,
       );
     }
+
+    // The display identity is the server's too, exactly as `author_id`
+    // above: the name and avatar a reader is shown are the session user's
+    // own, assigned over whatever the client sent, and assigned when it sent
+    // nothing. Asked only once the comment is admitted, so a refused write
+    // reads no identity. On update both are read-only
+    // (`objects/sys-comment.object.ts`), so they stay the creator's.
+    const identity = await authorIdentityOf(ctx);
+    data.author_name = identity.name;
+    data.author_avatar_url = identity.avatarUrl;
   };
   engine.registerHook('beforeInsert', onInsert, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
   engine.registerHook('beforeInsert', onInsert, { object: COMMENT_REACTION_OBJECT, packageId: PACKAGE_ID });

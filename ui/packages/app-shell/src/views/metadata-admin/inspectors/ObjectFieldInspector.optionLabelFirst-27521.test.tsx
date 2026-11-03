@@ -28,6 +28,10 @@ vi.mock('../previews/useObjectFields', () => ({
 }));
 
 import { ObjectFieldInspector } from './ObjectFieldInspector';
+// The pinyin dictionary a Chinese label derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690).
+import { loadHanRomanizer } from '../romanizeHan';
+await loadHanRomanizer();
 
 afterEach(cleanup);
 
@@ -139,5 +143,25 @@ describe('ObjectFieldInspector · options read label first (objectstack#27521)',
       size: { type: 'select', label: 'Size', options: [{ value: 'sm', label: 'Small', kind: 'open' }, { value: 'lg', label: 'Large' }] },
     });
     expect(screen.getAllByTestId('option-kind')).toHaveLength(2);
+  });
+});
+
+describe('ObjectFieldInspector · a Chinese option label derives its value by pinyin (objectstack#29690)', () => {
+  it('fills an editable value, and the option is written (it used to derive nothing and never be saved)', () => {
+    const { savedOptions } = renderField('stage', { stage: { type: 'select', label: '阶段' } });
+    const add = screen.getByRole('button', { name: /Add value/ });
+    fireEvent.change(labels()[0], { target: { value: '进行中' } });
+    fireEvent.click(add);
+    fireEvent.change(labels()[1], { target: { value: '已完成' } });
+    expect(values().map((v) => v.value)).toEqual(['jinxing_zhong', 'yi_wancheng']);
+    expect(savedOptions()).toEqual([
+      { value: 'jinxing_zhong', label: '进行中' },
+      { value: 'yi_wancheng', label: '已完成' },
+    ]);
+    expect(FieldSchema.safeParse({ name: 'stage', type: 'select', label: '阶段', options: savedOptions() }).success).toBe(true);
+
+    fireEvent.change(values()[1], { target: { value: 'done' } });
+    fireEvent.change(labels()[1], { target: { value: '已完成了' } });
+    expect(savedOptions()[1]).toEqual({ value: 'done', label: '已完成了' });
   });
 });
