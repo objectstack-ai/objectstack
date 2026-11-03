@@ -46,8 +46,8 @@ function makeSparseDriver(name: string, unechoed: readonly string[] = []) {
   const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
     if (!where) return true;
     for (const [k, v] of Object.entries(where)) {
-      if (k.startsWith('$')) throw new Error(`sparse driver: filter operator ${k} is not implemented`);
-      if (v !== null && typeof v === 'object') throw new Error(`sparse driver: operator on ${k} is not implemented`);
+      if (k.startsWith('$')) throw new Error(`sparse fake: filter operator ${k} is not implemented`);
+      if (v !== null && typeof v === 'object') throw new Error(`sparse fake: operator on ${k} is not implemented`);
       if ((row[k] ?? null) !== (v ?? null)) return false;
     }
     return true;
