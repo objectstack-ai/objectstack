@@ -25,6 +25,13 @@
 //      order, with the same namespace, dependencies, and the same item names
 //      and counts per collection.
 //
+// [#29871] A second describe pins the bundle's "enabled or not" for a
+// DISABLED package: a runtime-authored package (`POST /packages`, an object
+// drafted into it and published) is disabled before the export; the bundle
+// and its per-package export still carry the object, and a fresh runtime that
+// installs the entry serves it (`GET /meta/object/<name>` 200), where before
+// the entry was an empty package and the object came back 404.
+//
 // Boots fixture stacks of its own (the install-local plugin mounted on both),
 // so it stays out of `SHARED_SHOWCASE`. Every credential below is an
 // obviously-fake placeholder, and every assertion on one is its absence.
@@ -226,5 +233,83 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
     expect(targetBundle.packages.map(inventory)).toEqual(sourceBundle.packages.map(inventory));
     const pair = targetBundle.packages.find((p: any) => p.id === PAIR);
     expect((pair?.dashboards ?? []).map((d: any) => [d.name, d.label, d.overrides?.package])).toEqual([[DASHBOARD, EDITED, BASE]]);
+  });
+});
+
+const OFF = 'com.dogfood.exportoff';
+const OFF_OBJECT = 'exportoff_note';
+
+describe('dogfood: a disabled package exports its items, and a fresh runtime that installs the entry serves them', () => {
+  const dirs: string[] = [];
+  const answers: Record<string, Answer> = {};
+  let offEntry: any;
+
+  beforeAll(async () => {
+    const sourceDir = mkdtempSync(join(tmpdir(), 'dogfood-export-disabled-source-'));
+    dirs.push(sourceDir);
+    const source = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: sourceDir })],
+    });
+    try {
+      const token = await source.signIn();
+      answers.created = await call(source, token, 'POST', '/packages', {
+        manifest: { id: OFF, name: 'Export disabled', version: '0.1.0', type: 'app', namespace: 'exportoff' },
+      });
+      answers.saved = await call(source, token, 'PUT', `/meta/object/${OFF_OBJECT}?mode=draft&package=${OFF}`, {
+        name: OFF_OBJECT, label: 'Note', sharingModel: 'private', fields: { body: { type: 'text', label: 'Body' } },
+      });
+      answers.published = await call(source, token, 'POST', `/packages/${OFF}/publish-drafts`, {});
+      answers.enabledExport = await call(source, token, 'GET', `/packages/${OFF}/export`);
+      answers.disabled = await call(source, token, 'PATCH', `/packages/${OFF}/disable`);
+      answers.servedAfterDisable = await call(source, token, 'GET', `/meta/object/${OFF_OBJECT}`);
+      answers.disabledExport = await call(source, token, 'GET', `/packages/${OFF}/export`);
+      answers.bundle = await call(source, token, 'GET', '/packages/export');
+      offEntry = (answers.bundle.body?.data?.packages ?? []).find((p: any) => p?.id === OFF);
+    } finally {
+      await source.stop();
+    }
+
+    const targetDir = mkdtempSync(join(tmpdir(), 'dogfood-export-disabled-target-'));
+    dirs.push(targetDir);
+    const target = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: targetDir })],
+    });
+    try {
+      const token = await target.signIn();
+      answers.installed = await call(target, token, 'POST', ROUTE, { manifest: offEntry });
+      answers.targetServed = await call(target, token, 'GET', `/meta/object/${OFF_OBJECT}`);
+    } finally {
+      await target.stop();
+    }
+  }, 900_000);
+
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const objectsOf = (manifest: any): string[] => (manifest?.objects ?? []).map((o: any) => o?.name);
+
+  it('source: the package is created, its object published, and the disable lands (preconditions)', () => {
+    for (const key of ['created', 'saved', 'published', 'disabled'] as const) {
+      expect(answers[key]?.status, `${key}: ${JSON.stringify(answers[key]?.body)}`).toBeLessThan(300);
+    }
+    expect(answers.disabled.body?.data?.enabled).toBe(false);
+    // CONTROL: enabled, the export carries the object; disabled, the served read hides it.
+    expect(objectsOf(answers.enabledExport.body?.data)).toEqual([OFF_OBJECT]);
+    expect(answers.servedAfterDisable.status).toBe(404);
+  });
+
+  it('source: the disabled package\'s export and its bundle entry still carry its object', () => {
+    expect(answers.disabledExport.status, JSON.stringify(answers.disabledExport.body)).toBe(200);
+    expect(answers.disabledExport.body?.data).toEqual(answers.enabledExport.body?.data);
+    expect(answers.bundle.status, JSON.stringify(answers.bundle.body)).toBe(200);
+    expect(PackageExportBundleSchema.safeParse(answers.bundle.body?.data).success).toBe(true);
+    expect(objectsOf(offEntry), JSON.stringify(offEntry)).toEqual([OFF_OBJECT]);
+  });
+
+  it('target: the entry installs, and the object is served', () => {
+    expect(answers.installed.status, JSON.stringify(answers.installed.body)).toBe(200);
+    expect(answers.installed.body?.data?.manifestId).toBe(OFF);
+    expect(answers.targetServed.status, JSON.stringify(answers.targetServed.body)).toBe(200);
   });
 });
