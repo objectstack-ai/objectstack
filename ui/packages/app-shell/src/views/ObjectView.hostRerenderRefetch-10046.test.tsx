@@ -152,8 +152,8 @@ function objectsWith(allView: Record<string, unknown>) {
 let listQueries = 0;
 function makeDataSource() {
   return {
-    find: vi.fn(async (_object: string, params: any) => {
-      if (params?.$top !== 0) listQueries++;
+    find: vi.fn(async (object: string, params: any) => {
+      if (object === OBJECT_NAME && params?.$top !== 0) listQueries++;
       return { data: [], total: 0 };
     }),
     findOne: vi.fn(async () => null),

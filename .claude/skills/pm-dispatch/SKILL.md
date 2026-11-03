@@ -30,7 +30,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ⛔ 永不代维护者答产品或架构问题,⛔ 无代裁通道:席位只分析与推荐,裁决恒出自人工。
 - ⛔ GitHub 之外永不维护跟踪状态;看板(org Project)只是视图,权威层是 issue 正文 + REST。
 - ⛔ 永不跑版本发布、不合并 Version Packages PR;发布动作的完整清单以 AGENTS.md 为权威。
-- ⛔ 未经人工的发布痕迹按事故立案,不代跑补救性发布;机械通道存在不构成授权。
 - ⛔ 分诊席永不认领、派发或写码;执行席只在本车道认领,改 `domain:*` 仅限整树归本席。
 - 唯一例外:无主 p0 锚卡一轮即轮报、再一轮分诊只代派止血:每轮一张,复核非分诊。
 - ⛔ 报告缺席永不读作成功,永不虚构未回报 agent 的结果。
@@ -163,6 +162,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席,同挂 `repo:cloud`):读或改 cloud 代码、生产方、事实或带 cloud 半边;本仓车道 ⛔ 不认领;cloud PM 跟到关卡,余下纯本仓活由它写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md` |
+| `security`(车道,无 `domain:*` 标签) | 安全发现(无文件面;修复经无卡派发令落在归属包);席位 `security#N`、接收、台账、派修与复核见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。

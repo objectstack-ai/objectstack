@@ -1149,6 +1149,10 @@ const fr = {
       pin: "Épingler : ouvrir cette vue par défaut",
       unpin: "Désépingler : la liste rouvre sa vue par défaut",
       inMenu: "Déjà dans le menu",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Mes vues",
+      saveAsMyView: "Enregistrer comme ma vue",
+      myViewName: "Nom de la vue",
     },
     dragToReorder: "Glisser pour réorganiser",
     defaultView: "Vue par défaut",
