@@ -23,23 +23,20 @@
  * and accessors go as GETTERS, read when the body reads them, as they were on
  * the class.
  *
- * Values that stayed in `sql-driver.ts` are imported from it (lever (a) of
- * ruling 6591753301); every use is inside a function body, so the import
- * cycle is never read at evaluation time. `index.ts` re-exports nothing from
- * this module.
+ * The module imports `sql-driver.ts` for types only, so the two modules form
+ * no evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
 import type { DriverOptions } from '@objectstack/spec/data';
 import { presentAsNumber, temporalStorageForm } from '@objectstack/core';
 import type { Knex } from 'knex';
 import {
-  AUDIT_TIMESTAMP_COLUMNS, SQLITE_TIME_EXPR_REFS, WITHHELD_FILTER_LOGGED, canonicalTimeOfDay, isEmptyFieldConstraint,
-  normalizeSqliteDatetimeOutput, presentAuditTimestampOutput, refusalSubtree, withheldFilterDiagnosticOf,
+  AUDIT_TIMESTAMP_COLUMNS, SQLITE_TIME_EXPR_REFS, WITHHELD_FILTER_LOGGED, assertCompilableComparand,
+  assertDefinedComparands, canonicalTimeOfDay, emptyFieldConstraintError, filterArrayReachedDriverError,
+  isEmptyFieldConstraint, normalizeSqliteDatetimeOutput, presentAuditTimestampOutput, refusalSubtree,
+  withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
-import {
-  assertCompilableComparand, assertDefinedComparands, emptyFieldConstraintError, filterArrayReachedDriverError,
-} from './sql-driver.js';
 import type { SqlDriver } from './sql-driver.js';
 
 /**
