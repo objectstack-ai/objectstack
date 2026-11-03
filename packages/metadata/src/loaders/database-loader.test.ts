@@ -382,7 +382,7 @@ describe('DatabaseLoader', () => {
   // each stale extension and keys the warn-once set by it. Measured on a real
   // store: the two rows read here as `crm_account` and `crm_contact`.
   describe('stored conversion notice names the row (#29596)', () => {
-    const subjects = (warn: ReturnType<typeof vi.spyOn>) => warn.mock.calls
+    const subjects = (warn: { mock: { calls: unknown[][] } }) => warn.mock.calls
       .map((c) => String(c[0]))
       .filter((line) => line.includes('carries a pre-protocol shape'))
       .map((line) => /stored (\S+) carries/.exec(line)?.[1]);

@@ -31,7 +31,7 @@ const staleExtension = (target: string) => ({
     fields: { opens_at__c: { type: 'time', label: 'Opens', defaultValue: '12:00Z' } },
 });
 
-let warn: ReturnType<typeof vi.spyOn>;
+let warn: { mock: { calls: unknown[][] }; mockRestore(): void };
 beforeEach(() => {
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
