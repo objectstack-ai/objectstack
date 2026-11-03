@@ -38,11 +38,12 @@
  * `RollbackToPackageCommitResponseSchema` below is the true contract,
  * authored after that retirement per the ruling's sequencing (3A).
  *
- * One member is not a transcription but DECLARED AHEAD OF ITS PRODUCER
- * (ADR-0049), its describe opening `[PLANNED — not yet served]` until the
- * change that serves it drops the marker:
+ * Two declarations are not transcriptions but DECLARED AHEAD OF THEIR
+ * PRODUCER (ADR-0049), each describe opening `[PLANNED — not yet served]`
+ * until the change that serves it drops the marker:
  * `PackageExportManifestSchema.withheldMaps` (#28640 ruling ③A, served by
- * #29342). Its own docblock says what is not served yet.
+ * #29342) and `PackageExportBundleSchema` (`GET /packages/export`, #28914).
+ * Their own docblocks say what is not served yet.
  */
 
 import { z } from 'zod';
