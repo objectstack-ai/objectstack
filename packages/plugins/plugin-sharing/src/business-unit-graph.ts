@@ -278,6 +278,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
       where: this.orgScope({ id: businessUnitId }),
       fields: ['manager_user_id'],
       subject: `the head of business unit '${businessUnitId}'`,
+      kind: 'lookup',
     });
     const row = rows?.[0];
     const head = row?.manager_user_id ? String(row.manager_user_id) : null;
@@ -302,8 +303,9 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * `sys_user` has no manager on file and answers `null`. The fallback caches
    * nothing, before or after. The organization screen keeps its ruled
    * fail-open posture ({@link managerIsProvablyOutsideOrg}), and the
-   * delegating limb is {@link TeamGraphService.managerOf}'s own answer,
-   * unchanged here.
+   * delegating limb is {@link TeamGraphService.managerOf}'s own answer.
+   * [#29792] That answer now refuses on a failed read too, so both limbs
+   * agree on the failure as well as on the screen.
    */
   async managerOf(userId: string, organizationId?: string): Promise<string | null> {
     if (this.teamGraph) return this.teamGraph.managerOf(userId, organizationId);
@@ -315,6 +317,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
       where: { id: userId },
       fields: ['manager_id'],
       subject: `the manager of user '${userId}'`,
+      kind: 'lookup',
     });
     const row = rows?.[0];
     const managerId = row?.manager_id ? String(row.manager_id) : null;
