@@ -98,10 +98,10 @@ describe("behind the organization wall, a delegated administrator's refused assi
     return idOf(await ql.insert('sys_business_unit', { name, code, organization_id: organizationId }, inOrg(organizationId)));
   };
 
-  /** A position assignment of `organizationId`, written by the system — owned by `owner` when one is named. */
-  const assignment = async (organizationId: string, user: string, position: string, businessUnitId: string, owner?: string): Promise<string> =>
+  /** A position assignment of `organizationId`, written by the system. */
+  const assignment = async (organizationId: string, user: string, position: string, businessUnitId: string): Promise<string> =>
     idOf(await ql.insert('sys_user_position',
-      { user_id: user, position, business_unit_id: businessUnitId, organization_id: organizationId, ...(owner ? { owner_id: owner } : {}) },
+      { user_id: user, position, business_unit_id: businessUnitId, organization_id: organizationId },
       inOrg(organizationId)));
 
   beforeAll(async () => {
@@ -133,9 +133,13 @@ describe("behind the organization wall, a delegated administrator's refused assi
 
     const ownerB = await userId(OWNER_B);
     positionB = await assignment(orgB, ownerB, 'contributor', unitB);
-    // Owned by the delegate, so the record-level write rules after the gate
-    // admit its edit too, and what is measured is the gate's verdict.
-    inScopeA = await assignment(orgA, ownerA, 'contributor', scopeUnitA, delegate);
+    // Inside the scope, written by the delegate itself through the door — so
+    // the record-level write rules after the gate (the creator's own row)
+    // admit its edit too, and the edit measures the gate's verdict.
+    const created = await call(tokens.delegate, 'POST', '/data/sys_user_position',
+      { user_id: ownerA, position: 'contributor', business_unit_id: scopeUnitA });
+    expect(created.status, `delegate assigns inside its scope — ${JSON.stringify(created.body)}`).toBeLessThan(300);
+    inScopeA = idOf(created.body);
     outOfScopeA = await assignment(orgA, delegate, 'contributor', outsideUnitA);
     expect(delegate && ownerA && positionB && inScopeA && outOfScopeA, 'every row carries an id').toBeTruthy();
   }, 300_000);
