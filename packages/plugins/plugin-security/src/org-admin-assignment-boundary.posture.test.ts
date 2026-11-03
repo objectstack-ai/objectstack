@@ -419,6 +419,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] an organization administra
 
 const delegateContext = (userId: string, permissions: string[]) =>
   ({ userId, positions: [] as string[], permissions, tenantId: ORG_A, accessible_org_ids: [ORG_A] });
+type DelegateContext = ReturnType<typeof delegateContext>;
 
 /** Three principal classes the delegated walk judges, each holding the `a_ops` scope of organization A. */
 const DELEGATES = {
@@ -464,9 +465,9 @@ async function seedHolding(h: Harness, table: Table, id: string, organizationId:
 }
 
 /** What `context`'s own by-id read of `id` answers: a row, none, or a refusal. */
-async function readOutcome(h: Harness, table: Table, id: string, context: object): Promise<'row' | 'none' | number> {
+async function readOutcome(h: Harness, table: Table, id: string, context: DelegateContext): Promise<'row' | 'none' | number> {
   try {
-    return (await h.engine.findOne(table, { where: { id }, context: structuredClone(context) } as any)) ? 'row' : 'none';
+    return (await h.engine.findOne(table, { where: { id }, context: structuredClone(context) })) ? 'row' : 'none';
   } catch (e) {
     return resolveThrownHttpError(e).status;
   }
@@ -551,7 +552,7 @@ describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator'
         await h.engine.insert('sys_user_position',
           { id: 'hidden_out', user_id: IN_SCOPE_HOLDERS[holder], position: 'qa_out_pos', business_unit_id: 'bu_a_ops', organization_id: ORG_A },
           { context: { isSystem: true, tenantId: ORG_A } } as any);
-        const seen = await h.engine.findOne('sys_user_position', { where: { id: 'hidden_out' }, context: structuredClone(POSITION_HIDDEN) } as any);
+        const seen = await h.engine.findOne('sys_user_position', { where: { id: 'hidden_out' }, context: structuredClone(POSITION_HIDDEN) });
         expect(seen, 'the holder reads the row').toBeTruthy();
         expect(seen, 'without its position').not.toHaveProperty('position');
         for (const op of ['update', 'delete'] as const) {
