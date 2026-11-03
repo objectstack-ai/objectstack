@@ -793,7 +793,11 @@ function bundledReferencing(items: AppBundleItems, objectName: string): BundledR
     for (const [name, entry] of items.get('object') ?? []) {
       if (name === objectName) continue;
       const fields = (entry.item as { fields?: unknown } | null)?.fields;
-      const defs: any[] = Array.isArray(fields) ? fields : fields && typeof fields === 'object' ? Object.values(fields) : [];
+      const defs: Array<{ type?: unknown; reference?: unknown } | null> = Array.isArray(fields)
+        ? fields
+        : fields && typeof fields === 'object'
+          ? Object.values(fields)
+          : [];
       if (defs.some((f) => (f?.type === 'lookup' || f?.type === 'master_detail') && f.reference === objectName)) {
         names.push(name);
       }

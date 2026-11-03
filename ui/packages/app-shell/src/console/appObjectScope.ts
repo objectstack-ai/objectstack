@@ -629,13 +629,13 @@ function readObjectRouteNames(
  * the order the bundle lists them. One array per (scope objects, names), so a
  * reader's memo on it holds.
  */
-const RELATED_ORDER = new WeakMap<readonly unknown[], WeakMap<readonly string[], any[]>>();
+const RELATED_ORDER = new WeakMap<readonly unknown[], WeakMap<readonly string[], AppObjectScope['objects']>>();
 function inRelatedOrder(scope: AppObjectScope, relatedNames: readonly string[]): AppObjectScope {
   let byNames = RELATED_ORDER.get(scope.objects);
   if (!byNames) RELATED_ORDER.set(scope.objects, (byNames = new WeakMap()));
   let objects = byNames.get(relatedNames);
   if (!objects) {
-    const rank = (o: any) => relatedNames.indexOf(o?.name);
+    const rank = (o: { name?: unknown } | null | undefined) => relatedNames.indexOf(o?.name as string);
     // Stable: the objects outside `relatedNames` keep their places ahead of them.
     objects = [...scope.objects].sort((a, b) => rank(a) - rank(b));
     byNames.set(relatedNames, objects);
