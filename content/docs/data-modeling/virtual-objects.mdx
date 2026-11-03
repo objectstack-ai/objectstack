@@ -466,9 +466,9 @@ What the reference test pins, under `isolated` with two organizations (block (h)
   the first seven blocks of the reference test boot exactly such a stack.
 
 A remote whose organization column has another name is mapped onto the wall's column with
-`external.columnMap: { org_ref: 'organization_id' }` on a built-in SQL driver; on a plugin
-driver, return the column as `organization_id` yourself — the engine does not apply
-`columnMap` there. `tenancy.tenantField` does not do this: the wall keys on `organization_id`
+`external.columnMap: { org_ref: 'organization_id' }` on a built-in SQL driver or the OData
+driver, which apply the map; on a plugin driver, return the column as `organization_id`
+yourself — the engine does not apply `columnMap` there. `tenancy.tenantField` does not do this: the wall keys on `organization_id`
 alone, so on an external object a `tenantField` naming another column is refused at boot
 with the same remedy. An object registered after the boot (a Studio import, a runtime
 datasource) that states nothing is not refused — it is **denied**: every read answers zero

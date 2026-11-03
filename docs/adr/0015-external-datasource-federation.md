@@ -812,8 +812,9 @@ managed Postgres for low-latency joins.
 >   whatever the driver answered, so a driver that ignores `where` stays walled and a row without
 >   the column reads to no one;
 > - `tenancy: { enabled: false }` — the object is shared by every organization;
-> - `systemFields: { tenant: false }` — the same opt-out, spelled on the system fields
->   (`systemFields: false` includes it).
+> - `systemFields: { tenant: false }` — the same opt-out, spelled on the system fields. These two
+>   are the wall's own opt-out clauses and the only ones; the whole-block `systemFields: false` is in
+>   neither (the registry's recorded reading) and states nothing.
 >
 > An external object registered by the time the boot completes that states none is refused BY
 > NAME from `SecurityPlugin`'s `kernel:ready` handler, beside the ADR-0131 D5 refusal, naming the
