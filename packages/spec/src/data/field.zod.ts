@@ -1831,11 +1831,12 @@ export const FieldSchema = lazySchema(() => {
    * it per the #9689 idempotent-materialization ruling). On every other type
    * the key was inert by construction — the engine's referential delete walk
    * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
-   * `reference`, and on a `user` field that AUTHORS one (the family predicate
-   * `statesDeleteSemantics` in `packages/objectql/src/engine.ts`; a `tree`'s
-   * `reference` is its own object, written by the object's parse when the
-   * author leaves it out; a `user` field's target is `sys_user`, fixed by the
-   * type, and #29253 made its authored value take effect) — yet
+   * `reference`, and on a `user` field that declares a `deleteBehavior` (the
+   * family predicate `statesDeleteSemantics` in
+   * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
+   * object, written by the object's parse when the author leaves it out; a
+   * `user` field's target is `sys_user`, fixed by the type, and #29253 made its
+   * authored value take effect) — yet
    * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
