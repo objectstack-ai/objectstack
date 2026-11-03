@@ -3251,7 +3251,8 @@ async function readPackageCustomizations(
  * [#28722, ADR-0029 D7 as amended by ADR-0146 D3] The `contributions` of
  * `GET /packages/:id/customizations`: every field and flow a package other than
  * the base `baseId` and its pair `pairId` contributes to an object the base
- * OWNS (`getObjectOwner`), each entry naming that package. Read from the two
+ * OWNS (`getObjectOwner`), and every navigation item such a package contributes
+ * to an app the base owns, each entry naming that package. Read from the three
  * registries that already record the contributor, never inferred:
  *
  *  - **field** — the object registry's `extend` contributors of the object, as
@@ -3264,27 +3265,40 @@ async function readPackageCustomizations(
  *    already leaves a disabled package's out), whose `start` node's
  *    `config.objectName` is a base-owned object, attributed to the package
  *    stamp the registration put on it (its `_packageId`).
+ *  - **nav** — [#27928, ruling 6566915346 letter E] the navigation-contribution
+ *    registry (`getAppNavContributions`), the one the served app's fold
+ *    (`applyNavContributions`) reads, for every app registered under the base
+ *    (`listItems('app', baseId)`, which already leaves a disabled base's app
+ *    out: nothing is served to contribute to). One entry per item of a
+ *    contribution's `items` that declares an `id`, naming the contribution's
+ *    `group` when it targets one; a contributed group's children ride inside
+ *    it, as the fold folds them. A disabled package's contributions are
+ *    skipped by the fold's own predicate (`isPackageDisabled`, #28117), so the
+ *    list and the served navigation agree. No key is read from or written to
+ *    any nav item.
  *
- * Both kinds ask ONE question of their stamp, {@link codePackageOf}: is it a
+ * Every kind asks ONE question of its stamp, {@link codePackageOf}: is it a
  * code package's ({@link isCodeArtifactBody}: not the package-less
  * `sys_metadata` sentinel, not a tenant-authored body), and neither the base
  * nor its pair? Only where the stamp is read differs: the contributor's
- * `packageId` beside its `definition`, or the flow's own `_packageId`. An item
- * authored in this environment is the environment's, not a package's, and is
- * not listed, whichever kind it is.
+ * `packageId` beside its `definition`, the flow's own `_packageId`, or the
+ * nav contribution's `packageId`. An item authored in this environment is the
+ * environment's, not a package's, and is not listed, whichever kind it is.
  *
- * Ordered by object, kind, name and package.
+ * Ordered as the member declares: the `field` and `flow` entries first, by
+ * object, kind, name and package; then the `nav` entries, by app, group (an
+ * entry with no group first), name and package.
  */
 function readBaseContributions(
     baseId: string,
     pairId: string | undefined,
     registry: any,
 ): GetPackageCustomizationsResponse['contributions'] {
-    // The `field` and `flow` entries: the `nav` kind is declared in the spec
-    // ahead of this producer (#27928) and is not listed here yet (#28722).
-    type Contribution = Exclude<GetPackageCustomizationsResponse['contributions'][number], { kind: 'nav' }>;
-    const contributions: Contribution[] = [];
-    if (typeof registry?.getAllObjects !== 'function') return contributions;
+    type Contribution = GetPackageCustomizationsResponse['contributions'][number];
+    type ObjectContribution = Exclude<Contribution, { kind: 'nav' }>;
+    type NavContribution = Extract<Contribution, { kind: 'nav' }>;
+    const contributions: ObjectContribution[] = [];
+    const navs: NavContribution[] = [];
     // The one stamp reading both kinds share: the package `packageId` names
     // when `body` is a code package's item and the package is neither the base
     // nor its pair; `undefined` otherwise.
@@ -3295,7 +3309,7 @@ function readBaseContributions(
     };
 
     const owned = new Set<string>();
-    for (const object of registry.getAllObjects(baseId) as Array<{ name?: unknown }>) {
+    for (const object of (typeof registry?.getAllObjects === 'function' ? registry.getAllObjects(baseId) : []) as Array<{ name?: unknown }>) {
         const name = object?.name;
         if (typeof name === 'string' && registry.getObjectOwner(name)?.packageId === baseId) owned.add(name);
     }
@@ -3324,11 +3338,39 @@ function readBaseContributions(
         }
     }
 
+    if (typeof registry?.listItems === 'function' && typeof registry.getAppNavContributions === 'function') {
+        const apps = new Set<string>();
+        for (const app of registry.listItems('app', baseId) as Array<{ name?: unknown }>) {
+            if (typeof app?.name === 'string') apps.add(app.name);
+        }
+        for (const app of apps) {
+            for (const contribution of registry.getAppNavContributions(app) as Array<{ packageId?: unknown; group?: unknown; items?: unknown }>) {
+                // [#28117] The fold's own predicate, asked per read as the fold asks it.
+                if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(contribution.packageId)) continue;
+                const packageId = codePackageOf(contribution.packageId, undefined);
+                if (packageId === undefined) continue;
+                // The fold targets a group only when one is named (`if (c.group)`).
+                const group = typeof contribution.group === 'string' && contribution.group !== '' ? contribution.group : undefined;
+                for (const item of Array.isArray(contribution.items) ? contribution.items : []) {
+                    const id = (item as { id?: unknown } | null | undefined)?.id;
+                    if (typeof id !== 'string' || id === '') continue;
+                    navs.push({ kind: 'nav', app, ...(group !== undefined ? { group } : {}), name: id, packageId });
+                }
+            }
+        }
+    }
+
     const kindOrder = { field: 0, flow: 1 } as const;
-    return contributions.sort((a, b) => a.object.localeCompare(b.object)
+    contributions.sort((a, b) => a.object.localeCompare(b.object)
         || kindOrder[a.kind] - kindOrder[b.kind]
         || a.name.localeCompare(b.name)
         || a.packageId.localeCompare(b.packageId));
+    navs.sort((a, b) => a.app.localeCompare(b.app)
+        || Number(a.group !== undefined) - Number(b.group !== undefined)
+        || (a.group ?? '').localeCompare(b.group ?? '')
+        || a.name.localeCompare(b.name)
+        || a.packageId.localeCompare(b.packageId));
+    return [...contributions, ...navs];
 }
 
 /**

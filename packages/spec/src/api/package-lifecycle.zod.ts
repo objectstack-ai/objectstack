@@ -38,12 +38,11 @@
  * `RollbackToPackageCommitResponseSchema` below is the true contract,
  * authored after that retirement per the ruling's sequencing (3A).
  *
- * Two members are not transcriptions but DECLARED AHEAD OF THEIR PRODUCER
- * (ADR-0049), each describe opening `[PLANNED — not yet served]` until the
- * change that serves it drops the marker: the `nav` arm of
- * `GetPackageCustomizationsResponseSchema.contributions` (#27928) and
+ * One member is not a transcription but DECLARED AHEAD OF ITS PRODUCER
+ * (ADR-0049), its describe opening `[PLANNED — not yet served]` until the
+ * change that serves it drops the marker:
  * `PackageExportManifestSchema.withheldMaps` (#28640 ruling ③A, served by
- * #29342). Their own docblocks say what is not served yet.
+ * #29342). Its own docblock says what is not served yet.
  */
 
 import { z } from 'zod';
@@ -509,16 +508,12 @@ export const GetPackageCustomizationsRequestSchema = lazySchema(() => z.object({
  * `overrides`, the pair's extension members are in `extensions`, and any other
  * pair flow is in no list of this answer.
  *
- * [#27928, ruling 6566915346 letter E] DECLARED AHEAD OF ITS PRODUCER
- * (ADR-0049): the `nav` kind is declared before the runtime serves it. Until
- * the server slice of #28722 (Wanted 3) reads the navigation-contribution
- * registry, this read lists no `nav` entry; the `nav` arm's describe opens
- * `[PLANNED — not yet served]`, and that slice drops the marker in the change
- * that serves the kind. When served, a `nav` entry MUST be read from the same
- * `appNavContributions` registry the served app's navigation fold reads
- * (ADR-0029 D7), never joined by name; a disabled package's contributions
- * MUST NOT be listed, as the fold drops them; and the served app's
- * `navigation` stays as declared: no nav item carries a contributor key.
+ * [#27928, ruling 6566915346 letter E; served by #28722] A `nav` entry MUST be
+ * read from the same `appNavContributions` registry the served app's
+ * navigation fold reads (ADR-0029 D7), never joined by name; a disabled
+ * package's contributions MUST NOT be listed, as the fold drops them; and the
+ * served app's `navigation` stays as declared: no nav item carries a
+ * contributor key.
  */
 export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object({
   packageId: z.string().describe('The base package the customizations are of (the request\'s id).'),
@@ -581,9 +576,6 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
         + 'under. Never the base and never its `<base>.custom` pair.',
       ),
     }).strict().describe('A field or flow another package contributes to one of the base\'s objects.'),
-    // Declared ahead of its producer: the server slice of #28722 (Wanted 3)
-    // serves this arm and drops the `[PLANNED — not yet served]` marker in the
-    // same change (the pin is in `package-lifecycle.test.ts`).
     z.object({
       kind: z.literal('nav').describe(
         'What is contributed: `nav`, a navigation item another package\'s `navigationContributions` entry adds '
@@ -601,8 +593,7 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
         + 'the base and never its `<base>.custom` pair.',
       ),
     }).strict().describe(
-      '[PLANNED — not yet served] Declared ahead of its producer (ADR-0049): the read lists no `nav` entry yet. '
-      + 'A navigation item another installed package contributes to an app the base owns, one entry per item of '
+      'A navigation item another installed package contributes to an app the base owns, one entry per item of '
       + 'the contribution\'s `items` (a contributed group\'s children ride inside it and are not entries of their '
       + 'own), read from the same contribution registry the served app\'s navigation fold reads (ADR-0029 D7). '
       + 'An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry. '
@@ -612,8 +603,8 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
     'Every field, flow and navigation item another installed package contributes to the base, one entry per '
     + 'item and contributing package: the fields of every object extension of an object the base owns, from any '
     + 'package but the base and its pair; every flow registered under such a package whose trigger object the '
-    + 'base owns (a flow of a disabled package is not served, so not listed); and, declared ahead of its producer '
-    + 'and not yet served, every navigation item such a package contributes to an app the base owns. The entry '
+    + 'base owns (a flow of a disabled package is not served, so not listed); and every navigation item such a '
+    + 'package contributes to an app the base owns (a disabled package\'s are not listed). The entry '
     + 'shape is per `kind`: `object` for `field` and `flow`, `app` and an optional `group` for `nav`. Ordered: '
     + 'the `field` and `flow` entries first, by object, kind, name and package; then the `nav` entries, by app, '
     + 'group (an entry with no group first), name and package.',
@@ -626,7 +617,7 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
   }).strict().describe('Each list\'s length, derived from the lists in this same answer.'),
 }).strict().describe(
   'Per-package customization read: overrides, extensions and switched-off items of one installed base, and the '
-  + 'fields, flows and (not yet served) navigation items other packages contribute to it.',
+  + 'fields, flows and navigation items other packages contribute to it.',
 ));
 
 /**
