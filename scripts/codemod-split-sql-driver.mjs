@@ -67,8 +67,9 @@
  * and `TOP_STAY_REASONS` every reason for a top-level declaration; the plan
  * prints every one that stayed and why. The reasons that are tables rather
  * than rules are `PATH_READER_PINS` (a name whose text a reader extracts from
- * `sql-driver.ts` by path) and `PATH_READER_NEEDLES` (literal text a reader
- * requires to find there).
+ * `sql-driver.ts` by path), `PATH_READER_NEEDLES` (literal text a reader
+ * requires to find there) and `CLASS_PATH_READER_NEEDLES` (the same, for a
+ * reader that also reads the leaf, so only a method carrying it stays).
  *
  * ## The proof (`--write` runs it on its own output; `--verify` re-runs it)
  *
@@ -190,16 +191,11 @@ const PATH_READER_PINS = Object.freeze({
  * method or a top-level declaration whose text carries one stays, so the
  * reader still finds it where it looks. Each row names the reader.
  *
- * The first three are `sql-driver-compile-refusal-seam.test.ts`'s enumeration:
- * it parses `sql-driver.ts` and three named seam modules and asserts the EXACT
- * set of functions that call `unsupportedFilterError` / `withheldFilterError`
- * or write the `INVALID_FILTER` code, by enclosing name. A builder moved to a
- * module it does not read drops out of that set.
+ * A reader that also reads the leaf (`sql-driver-top-level.ts`) has its rows in
+ * `CLASS_PATH_READER_NEEDLES` below instead: there a top-level declaration
+ * carrying the text may move, and only a method carrying it stays.
  */
 const PATH_READER_NEEDLES = Object.freeze({
-  'unsupportedFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers',
-  'withheldFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers',
-  '.INVALID_FILTER': 'sql-driver-compile-refusal-seam.test.ts enumerates the INVALID_FILTER code writers',
   "table.string('id').primary();": 'packages/cli generate-builtin-id-column and generate-field-type-vocabulary pins',
   'table.timestamp(name).defaultTo(this.knex.fn.now());': 'packages/cli generate-builtin-id-column pin',
   '...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
@@ -216,6 +212,28 @@ const PATH_READER_NEEDLES = Object.freeze({
   // sql-driver.ts, so a moved catch reads as "swallowed, no log" (measured:
   // migrateMysqlDatetimeColumns / migrateMysqlTimeColumns red when moved).
   'this.runWideningAlters(': 'scripts/check-durability-degradation-log-level.mjs resolves the catch\'s log helper in the same file',
+});
+
+/**
+ * Literal text a reader requires to find in `sql-driver.ts` OR the leaf, but
+ * reads in no section module. A method whose text carries one stays on the
+ * class; a top-level declaration carrying one moves as any other, because the
+ * reader reads the leaf it moves to. The same stale-needle refusal applies.
+ *
+ * All three rows are `sql-driver-compile-refusal-seam.test.ts`'s enumeration:
+ * it parses `sql-driver.ts`, the leaf and three named seam modules, and asserts
+ * the EXACT set of functions that call `unsupportedFilterError` /
+ * `withheldFilterError` or write the `INVALID_FILTER` code, by enclosing name.
+ * Its `sources` gained the leaf by ruling 6597555122 (#29520 round 3, the path
+ * reader migrated in the same PR as #25521 ask 3 asks), so these rows left
+ * `PATH_READER_NEEDLES`. A method still stays: its body would move to a section
+ * module the test does not read, and `SqlDriver.resolveWithheldFilterRefusal`,
+ * a name the test pins, would drop out of the set.
+ */
+const CLASS_PATH_READER_NEEDLES = Object.freeze({
+  'unsupportedFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers (it reads the leaf, no section module)',
+  'withheldFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers (it reads the leaf, no section module)',
+  '.INVALID_FILTER': 'sql-driver-compile-refusal-seam.test.ts enumerates the INVALID_FILTER code writers (it reads the leaf, no section module)',
 });
 
 /**
@@ -250,7 +268,7 @@ const STAY_REASONS = Object.freeze({
   'type-parameters': 'a generic method (Function#call does not carry its type parameters)',
   'parameter-shape': 'a destructured, defaulted or `this` parameter (the stub cannot forward it unchanged)',
   'comment-in-parameters': 'a comment inside its parameter list (one-line parameters would drop it)',
-  'path-reader': 'a reader takes its text out of sql-driver.ts by path (PATH_READER_PINS / PATH_READER_NEEDLES)',
+  'path-reader': 'a reader takes its text out of sql-driver.ts by path (PATH_READER_PINS / PATH_READER_NEEDLES / CLASS_PATH_READER_NEEDLES)',
   'arguments': 'its body reads `arguments`',
   'super': 'its body reads `super`',
   'new-target': 'its body reads `new.target`',
@@ -516,6 +534,7 @@ function readMethod(tm, ctx, m) {
 
   const methodText = m.getText();
   for (const needle of Object.keys(ctx.needles)) if (methodText.includes(needle)) add('path-reader', JSON.stringify(needle));
+  for (const needle of Object.keys(ctx.classNeedles)) if (methodText.includes(needle)) add('path-reader', JSON.stringify(needle));
   if (Object.prototype.hasOwnProperty.call(ctx.pins, name)) add('path-reader', name);
 
   const regions = [...m.getTypeParameters(), ...params, m.getReturnTypeNode(), body].filter(Boolean);
@@ -789,7 +808,9 @@ function hostUsesOfMovers(tm, ctx, top, methodRecords) {
  * and per top-level declaration ahead of the class, whether it moves to the
  * leaf. Pure: the same text gives the same plan.
  */
-function plan(tm, text, { sections = SECTION_MODULES, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES } = {}) {
+function plan(tm, text, {
+  sections = SECTION_MODULES, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES, classNeedles = CLASS_PATH_READER_NEEDLES,
+} = {}) {
   const sf = parse(tm, HOST_PATH, text);
   const cls = sf.getClass(CLASS_NAME);
   if (!cls) refuse(`no class ${CLASS_NAME} in ${HOST_BASENAME}`);
@@ -806,12 +827,14 @@ function plan(tm, text, { sections = SECTION_MODULES, pins = PATH_READER_PINS, n
       statics.set(m.getName(), typeof m.getScope === 'function' ? m.getScope() : 'public');
     }
   }
-  const ctx = { text, sf, cls, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf), statics, pins, needles };
+  const ctx = { text, sf, cls, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf), statics, pins, needles, classNeedles };
   const methodNames = new Set(cls.getMethods().map((m) => m.getName()));
   const stalePins = Object.keys(pins).filter((n) => !methodNames.has(n) && !ctx.scope.bindings.has(n));
   if (stalePins.length > 0) refuse(`PATH_READER_PINS names what ${HOST_BASENAME} no longer declares: ${stalePins.join(', ')}`);
   const staleNeedles = Object.keys(needles).filter((n) => !text.includes(n));
   if (staleNeedles.length > 0) refuse(`PATH_READER_NEEDLES names text ${HOST_BASENAME} no longer carries: ${staleNeedles.map((n) => JSON.stringify(n)).join(', ')}`);
+  const staleClassNeedles = Object.keys(classNeedles).filter((n) => !text.includes(n));
+  if (staleClassNeedles.length > 0) refuse(`CLASS_PATH_READER_NEEDLES names text ${HOST_BASENAME} no longer carries: ${staleClassNeedles.map((n) => JSON.stringify(n)).join(', ')}`);
 
   const top = planTopLevel(tm, ctx);
 
@@ -1634,17 +1657,19 @@ let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'declaration bar': 6,
-  'stay rules': 11,
-  'top-level moves': 10,
+  'stay rules': 12,
+  'top-level moves': 11,
   'byte-identity proof': 10,
-  'refusals': 3,
+  'refusals': 4,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
 const FIXTURE_SECTIONS = Object.freeze({ 'Lifecycle': 'sql-driver-lifecycle.ts', 'Kept': null });
 const FIXTURE_NEEDLES = Object.freeze({ 'PINNED_TEXT': 'a fixture reader', 'needleInMethod(': 'a fixture reader' });
+const FIXTURE_CLASS_NEEDLES = Object.freeze({ 'classReaderText(': 'a fixture reader that also reads the leaf' });
 const FIXTURE_PINS = Object.freeze({ pinnedMethod: 'a fixture reader' });
-const fixturePlan = (tm, text) => plan(tm, text, { sections: FIXTURE_SECTIONS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES });
+const fixturePlan = (tm, text) => plan(tm, text,
+  { sections: FIXTURE_SECTIONS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES, classNeedles: FIXTURE_CLASS_NEEDLES });
 
 function fixtureSource(extraMethods = '') {
   const pad = Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n');
@@ -1667,6 +1692,9 @@ function namesClass(d: SqlDriver): SqlDriver {
 }
 const VIA_SEAM = seamHelper();
 export const DERIVED = LOCAL_VALUE + 1;
+function classReaderText(n: number): number {
+  return n;
+}
 
 export class SqlDriver {
   private knex: any = null;
@@ -1749,6 +1777,11 @@ ${pad}
 ${pad}
     return needleInMethod(1);
   }
+
+  protected carriesClassNeedle(): number {
+${pad}
+    return classReaderText(1);
+  }
 ${extraMethods}
   // ===================================
   // Kept
@@ -1814,6 +1847,8 @@ async function selfTest() {
     check('a pinned method and a method carrying a needle stay (path-reader)',
       why('pinnedMethod').startsWith('path-reader') && why('carriesNeedle').startsWith('path-reader'),
       `${why('pinnedMethod')} | ${why('carriesNeedle')}`);
+    check('a method carrying a class-scoped needle stays (path-reader): its reader reads no section module',
+      why('carriesClassNeedle').startsWith('path-reader'), why('carriesClassNeedle'));
   }
 
   open('top-level moves');
@@ -1825,6 +1860,7 @@ async function selfTest() {
     check('a value, a local type and an exported interface move', ['LOCAL_VALUE', 'LocalType', 'ExportedShape', 'DERIVED']
       .every((n) => why(n) === ''), ['LOCAL_VALUE', 'LocalType', 'ExportedShape', 'DERIVED'].map(why).join(' | '));
     check('a declaration carrying a reader\'s needle stays (path-reader)', why('PINNED').startsWith('path-reader'), why('PINNED'));
+    check('a declaration carrying a class-scoped needle moves: its reader reads the leaf', why('classReaderText') === '', why('classReaderText'));
     check('a declaration naming a stayer stays (needs-stayer)', why('dependsOnPinned').startsWith('needs-stayer'), why('dependsOnPinned'));
     check('a declaration naming the class stays (class-reference)', why('namesClass').startsWith('class-reference'), why('namesClass'));
     check('a declaration using a sql-driver-* import stays (seam-import)', why('VIA_SEAM').startsWith('seam-import'), why('VIA_SEAM'));
@@ -1848,7 +1884,7 @@ async function selfTest() {
     const out = generate(tm, input, planned);
     const again = generate(tm, input, fixturePlan(tm, input));
     const v = verify(tm, input, out.host, out.modules);
-    check('the generated split proves against its base', v.failures.length === 0 && v.moved.length === 4 && v.movedTop.length === 4,
+    check('the generated split proves against its base', v.failures.length === 0 && v.moved.length === 4 && v.movedTop.length === 5,
       [...v.failures, `moved: ${v.moved.map((m) => m.name).join()}`, `top: ${v.movedTop.map((m) => m.name).join()}`].join(' | '));
     check('two runs on one input write byte-identical trees',
       treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
@@ -1877,8 +1913,10 @@ async function selfTest() {
   {
     const unknownBanner = fixtureSource('\n  // ── Unnamed section ──────────\n\n  protected z(): number {\n    return 1;\n  }\n');
     check('a banner the section table does not name refuses', refused(() => fixturePlan(tm, unknownBanner)));
-    check('a pin naming what the file lacks refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: { gone: 'x' }, needles: {} })));
-    check('a needle the file no longer carries refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: {}, needles: { 'gone text': 'x' } })));
+    check('a pin naming what the file lacks refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: { gone: 'x' }, needles: {}, classNeedles: {} })));
+    check('a class-scoped needle the file no longer carries refuses',
+      refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: {}, needles: {}, classNeedles: { 'gone text': 'x' } })));
+    check('a needle the file no longer carries refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: {}, needles: { 'gone text': 'x' }, classNeedles: {} })));
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
