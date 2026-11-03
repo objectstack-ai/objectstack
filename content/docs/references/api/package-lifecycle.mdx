@@ -317,7 +317,7 @@ A field or flow another package contributes to one of the base's objects.
 
 ## PackageExportBundle
 
-[PLANNED — not yet served] Whole-deployment export: every installed package the deployment's own code does not register (registry `source` other than `code`), as installable packages in dependency order. Carries no credential value and no enabled state. Declared ahead of its producer (ADR-0049): no runtime serves `GET /packages/export` yet. The server half of the whole-deployment package export mounts it, together with a future CLI command that calls it; until then this is the contract that door must answer, not a read a client can make.
+Whole-deployment export, the answer of `GET /packages/export` (`os package export`): every installed package the deployment's own code does not register (registry `source` other than `code`), as installable packages in dependency order. Carries no credential value and no enabled state. A package whose export cannot be assembled fails the whole read, naming it.
 
 ### Properties
 
