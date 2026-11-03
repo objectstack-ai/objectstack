@@ -40,7 +40,7 @@ import {
     storedRowDocument,
     withItemLockFamily,
 } from './item-lock.js';
-import { type MetadataDiagnostics, computeMetadataDiagnostics } from './metadata-diagnostics.js';
+import { type MetadataDiagnostics, computeMetadataDiagnostics, withFormLayoutWarnings } from './metadata-diagnostics.js';
 import { redactMetadataItem } from './metadata-redaction.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
@@ -507,10 +507,24 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         itemLock,
     );
 
-    const _diagnostics =
+    const schemaDiagnostics =
         effective !== null && effective !== undefined
             ? computeMetadataDiagnostics(request.type, effective)
             : undefined;
+    // [#29435] …plus the form-layout warnings `getMetaItem` serves for the
+    // same effective body ({@link withFormLayoutWarnings}: `form-field-unknown`
+    // and `form-section-group-unknown`, judged against the object the registry
+    // serves for each name the view spells). Warnings only, so `valid` stays
+    // the schema's answer. This door has no execution face: it is the
+    // `?layers=true` authoring read, the one Studio's item editor takes when
+    // no draft is pending, so the pass runs unconditionally here.
+    const _diagnostics = effective !== null && typeof effective === 'object' && !Array.isArray(effective)
+        ? (await withFormLayoutWarnings(
+            request.type,
+            { ...(effective as Record<string, unknown>), _diagnostics: schemaDiagnostics },
+            (name) => host.engine?.registry?.getObject?.(name),
+        ))._diagnostics as MetadataDiagnostics | undefined
+        : schemaDiagnostics;
 
     // ADR-0010 — surface lock/provenance flags so the Studio editor
     // can render the correct affordances without a second round trip.

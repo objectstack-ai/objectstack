@@ -721,6 +721,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "引用对象",
         helpText: "被引用的对象名称"
       },
+      referenceNameVisible: {
+        label: "不可读时显示名称",
+        helpText: "允许此记录的读者看到被引用记录的名称（纯文本，不带链接），即使其无权打开该记录。该记录的其他内容一律不显示；名称字段上的字段级规则仍然生效（此时名称显示为 Record # 加 id）。未设置：此类引用显示为「受限记录」。"
+      },
       deleteBehavior: {
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"

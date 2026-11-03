@@ -181,6 +181,56 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows)', () => {
     });
   });
 
+  // #29554 — a stored `object_extension` row is one `objectExtensions` entry,
+  // and until this the stored pass had no collection to wrap it in: every
+  // conversion that reaches an extension, and every refused-shape detector,
+  // skipped it, so the row read as already on protocol.
+  describe('stored object_extension rows (wrapped as objectExtensions)', () => {
+    const storedExtension = () => ({
+      extend: 'crm_account',
+      fields: { opens_at: { type: 'time', defaultValue: '12:00Z' } },
+      fieldPatches: { industry: { label: 'Sector' } },
+    });
+
+    it('replays a conversion that walks objectExtensions over a stored extension row, loudly', () => {
+      const notices: ConversionNotice[] = [];
+      const row = storedExtension();
+      const out = applyConversionsToStoredItem('object_extension', row, { onNotice: (n) => notices.push(n) });
+      expect(out).toEqual({
+        extend: 'crm_account',
+        fields: { opens_at: { type: 'time', defaultValue: '12:00' } },
+        fieldPatches: { industry: { label: 'Sector' } },
+      });
+      expect(notices.map((n) => [n.conversionId, n.path])).toEqual([
+        ['time-default-utc-suffix-dropped', 'objectExtensions[0].fields.opens_at.defaultValue'],
+      ]);
+      expect(row).toEqual(storedExtension());
+    });
+
+    it('CONTROL — a canonical extension row passes through by reference', () => {
+      const row = { extend: 'crm_account', fields: { opens_at: { type: 'time', defaultValue: '12:00' } } };
+      expect(applyConversionsToStoredItem('object_extension', row)).toBe(row);
+    });
+
+    it('CONTROL — the same body under an object row converts exactly as before', () => {
+      const notices: ConversionNotice[] = [];
+      const row = { name: 'shift', fields: { opens_at: { type: 'time', defaultValue: '12:00Z' } } };
+      const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) });
+      expect(out).toEqual({ name: 'shift', fields: { opens_at: { type: 'time', defaultValue: '12:00' } } });
+      expect(notices.map((n) => [n.conversionId, n.path])).toEqual([
+        ['time-default-utc-suffix-dropped', 'objects[0].fields.opens_at.defaultValue'],
+      ]);
+    });
+
+    // No plural row spelling is mapped: the read fallback finds none for this
+    // type, and the stored-metadata pass skips a row stored under one before
+    // reading its body. So neither spelling manufactures a collection.
+    it.each(['object_extensions', 'objectExtensions'])('CONTROL — a `%s` row type is not mapped and passes through by reference', (type) => {
+      const row = storedExtension();
+      expect(applyConversionsToStoredItem(type, row)).toBe(row);
+    });
+  });
+
   // [#23543 F5-http] A stored flow row written with a retired callout name
   // still loads, as `http`: the rename left the authoring funnel, not this
   // seam. Until 18 a caller's live-name set naming the old token made it a
