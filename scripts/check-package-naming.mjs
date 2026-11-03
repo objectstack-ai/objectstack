@@ -71,6 +71,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 import { WorkspaceEnumerationError, workspacePackages } from './workspace-enumerator.mjs';
 
 const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -285,4 +286,4 @@ function main() {
   process.exit(verdict.exit);
 }
 
-main();
+if (isEntrypoint(import.meta.url)) main();
