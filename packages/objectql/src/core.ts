@@ -102,6 +102,11 @@ export type { EvaluateRulesOptions } from './validation/rule-validator.js';
 // verify its copy still agrees, instead of the two silently drifting behind
 // one doc comment's word.
 export { materializeDeclaredFields } from './declared-fields.js';
+// The column set a read may serve (declared fields plus the platform-provisioned
+// columns), published so a consumer that judges a list of field names — the
+// share-link mint's `redactFields` — asks the same ONE list the read and write
+// doors read instead of keeping a copy of it.
+export { declaredColumnSet } from './declared-read-columns.js';
 export {
   InMemoryHookMetricsRecorder,
   noopHookMetricsRecorder,

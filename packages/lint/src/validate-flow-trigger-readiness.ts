@@ -146,6 +146,11 @@
 //     unjudged under a closure too, exactly as without one. The CLI commands
 //     and a write that names no package state no closure and keep the advisory
 //     unchanged.
+//   - `warning` / `error` — `flow-input-unknown-object` (#29442), on the same
+//     question and the same closure split as `flow-trigger-unknown-object`: a
+//     start input declared a record reference (`variables[].objectName`) names
+//     an object this stack does not define. It is not a never-fire verdict —
+//     a start that omits the input still runs — so it sits with the hedged id.
 //   - `warning` — `flow-draft-status-ambiguous`. Draft flows DO fire, so this is
 //     an ambiguity of intent, not a dead flow. Gating it would refuse a stack
 //     whose flows all work.
@@ -194,6 +199,16 @@ export interface FlowTriggerReadinessFinding {
 
 // Rule ids (registry entries).
 export const FLOW_TRIGGER_UNKNOWN_OBJECT = 'flow-trigger-unknown-object';
+/**
+ * #29442 (#29425 ruling A) — a start input declared a record reference
+ * (`variables[].objectName`) names an object this stack does not define. Once
+ * the start doors enforce the declaration (planned), every door that starts the
+ * flow by name will load such an input from that object, so a wrong name will
+ * refuse every start that supplies the input. The same hedge and
+ * the same closure verdict as `flow-trigger-unknown-object`: advisory with no
+ * package closure, an error under one.
+ */
+export const FLOW_INPUT_UNKNOWN_OBJECT = 'flow-input-unknown-object';
 export const FLOW_DRAFT_STATUS_AMBIGUOUS = 'flow-draft-status-ambiguous';
 export const FLOW_TRIGGER_UNKNOWN_EVENT = 'flow-trigger-unknown-event';
 /**
@@ -475,12 +490,15 @@ export function validateFlowTriggerReadiness(
     objectName: string,
     at: { verb: string; key: string },
     advisory: { message: string; hint: string },
+    // [#29442] The start-input declaration shares this verdict under its own
+    // id and position; the trigger's two halves take the defaults.
+    position: { rule: string; where: string } = { rule: FLOW_TRIGGER_UNKNOWN_OBJECT, where: 'start node' },
   ): FlowTriggerReadinessFinding => {
     if (!closure) {
       return {
         severity: 'warning',
-        rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
-        where: `flow "${flowName}" › start node`,
+        rule: position.rule,
+        where: `flow "${flowName}" › ${position.where}`,
         path,
         ...advisory,
       };
@@ -488,8 +506,8 @@ export function validateFlowTriggerReadiness(
     const pkg = closure.packageId;
     return {
       severity: 'error',
-      rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
-      where: `flow "${flowName}" › start node`,
+      rule: position.rule,
+      where: `flow "${flowName}" › ${position.where}`,
       path,
       message:
         `${at.verb} object '${objectName}', which is outside the closure of package '${pkg}' (its own ` +
@@ -916,6 +934,44 @@ export function validateFlowTriggerReadiness(
     //     entry: at the runtime publish gate it reads the host's
     //     restored-credential positions (#20611), an input nothing else in this
     //     family has a use for.
+
+    // 1i. #29442 (#29425 ruling A) — a start input declared a record reference
+    //     names an object this stack does not define. Once the start doors
+    //     enforce the declaration (planned), every door that starts the flow
+    //     by name will load the input from exactly that name in the caller's
+    //     scope, so a wrong name will refuse every start that supplies the
+    //     input. Judged like the trigger's object (1 and 1b-i): a `sys_`
+    //     name is a platform object and is not judged, and the verdict is the
+    //     closure's when one is stated. The schema owns the declaration's
+    //     shape (input-only, an object name); this rule reads only the name.
+    // Indexed over the authored array itself, so the path names the entry the
+    // author wrote even beside a malformed sibling the schema refuses.
+    (Array.isArray(flow.variables) ? (flow.variables as unknown[]) : []).forEach((entry, variableIndex) => {
+      if (!entry || typeof entry !== 'object') return;
+      const variable = entry as AnyRec;
+      const objectName = typeof variable.objectName === 'string' ? variable.objectName : undefined;
+      if (!objectName || objectNames.has(objectName) || objectName.startsWith('sys_')) return;
+      const variableName = typeof variable.name === 'string' ? variable.name : `#${variableIndex}`;
+      findings.push(
+        unknownTriggerObject(
+          flowName,
+          `flows[${flowIndex}].variables[${variableIndex}].objectName`,
+          objectName,
+          { verb: `declares input '${variableName}' a record of`, key: `the input's objectName` },
+          {
+            message:
+              `declares input '${variableName}' the id of a record of object '${objectName}', which this ` +
+              `stack does not define — if the name is wrong, every start that supplies the input will be ` +
+              `refused once the start doors enforce the declaration.` +
+              suggestName(objectName, objectNames),
+            hint:
+              `Set the input's objectName to the object's exact registered name, or ignore this if another ` +
+              `installed package declares it`,
+          },
+          { rule: FLOW_INPUT_UNKNOWN_OBJECT, where: `input "${variableName}"` },
+        ),
+      );
+    });
 
     // 2. Auto-triggered flow whose status is 'draft' — authored or defaulted
     //    (defineFlow parses at definition time, so the two are the same here).

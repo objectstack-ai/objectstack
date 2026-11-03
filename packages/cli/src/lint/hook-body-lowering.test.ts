@@ -47,13 +47,26 @@ const forbiddenTokenHook = {
 // [#14301] A global the NODE HOST provides and the sandbox does not. Reads as
 // self-contained — `Intl` is standard in every browser and in Node — which is
 // precisely why it is the ACCIDENTAL class and not the structural one.
+// [#28898] Pinned on `Intl.NumberFormat`: the sandbox provides
+// `Intl.DateTimeFormat` now, and nothing else of `Intl`.
 const nodeOnlyGlobalHook = {
   name: 'stamp_due_label',
   object: 'task',
   events: ['beforeInsert'],
   handler: (ctx: any) => {
-    const f = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC' });
-    ctx.input.due_label = f.format(new Date(ctx.input.due_at));
+    const f = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    ctx.input.due_label = f.format(ctx.input.amount);
+  },
+};
+
+// [#28898] The same handler shape on the member the sandbox DOES provide.
+const sandboxDateFormatHook = {
+  name: 'stamp_due_day',
+  object: 'task',
+  events: ['beforeInsert'],
+  handler: (ctx: any) => {
+    const f = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai' });
+    ctx.input.due_day = f.format(new Date(ctx.input.due_at));
   },
 };
 
@@ -117,6 +130,10 @@ describe('checkHookBodyLowering', () => {
       expect(issues[0].message).toContain("hook 'stamp_due_label'");
       expect(issues[0].message).toContain('Intl');
       expect(issues[0].message).toContain('deployment shape');
+    });
+
+    it('reports nothing for Intl.DateTimeFormat, which the sandbox provides (#28898)', () => {
+      expect(checkHookBodyLowering({ hooks: [sandboxDateFormatHook] })).toEqual([]);
     });
 
     it('prints the remedy that is POSSIBLE, not the inline one', () => {

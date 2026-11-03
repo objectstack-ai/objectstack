@@ -509,6 +509,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Advisory: record titles, semantic field pointers (ADR-0085), form-section layout, action placement, seed replay/state safety, capability references, liveness | ✓ | ✓ | ✓ | — |
 | Package docs — flatness, prefixes, links (ADR-0046) | ✓ | ✓ | ✓ | — |
 | Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ | — | — |
+| Collection item owner stamps — an item whose body `_packageId` names a package other than the one that ships it: the stack's `manifest.id` (none without a `manifest`); in a `packages[]` artifact each body's own `id`, and `manifest.id` for a top-level item no body declares, except seed `data`, `datasets` and `jobs`, which the boot never files from the top level. The boot and the install refuse the same stamp when they register the item (ADR-0010, ADR-0130 D4) | ✓ | ✓ | — | — |
 | Declared-unique scope — a bare `unique: true` index, a field-level and index-level double declaration, legacy organization composites (ADR-0120 D5) | ✓ | ✓ | ✓ | — |
 | Naming, labels, the rest of the data-model best-practice sweep, i18n coverage | — | — | ✓ | — |
 | Emits `dist/objectstack.json` | — | ✓ | — | — |
@@ -739,7 +740,8 @@ no package provenance (#9612); a provenance it cannot read narrows nothing at al
 That changes what a rule can **resolve**, never which rules run, and nothing at
 this door walks `packages[]`. Two rules are told the closure is in force. A flow
 whose trigger object is outside it is refused with `flow-trigger-unknown-object`
-instead of advised (#24669), and a list
+instead of advised (#24669), as is a flow with a start input declared a record of
+an object outside it, with `flow-input-unknown-object` (#29442), and a list
 view bound to an object outside it is refused with
 `list-view-object-outside-closure` instead of having its field references
 skipped (#24563). With no closure in force — a write that names no package —
@@ -759,7 +761,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (60)...
+  → Running author-time rules (63)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 

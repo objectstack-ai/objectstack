@@ -530,8 +530,10 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
     item: z.boolean().default(true)
       .describe(
         'Mount the whole per-item face — `GET`, `PUT` and `DELETE /meta/:type/:name`, its '
-        + '`/references` and `/layers` reads, the history family (`/history`, `/audit`, `/diff`, '
-        + '`/published`, `/publish`, `/rollback`) and `GET /meta/book/:name/tree`',
+        + '`/references` and `/layers` reads, the history family (`GET` `/history`, `/audit`, '
+        + '`/diff`, `/published`; `POST` `/publish`, `/rollback`), `GET /meta/book/:name/tree` and the app metadata '
+        + 'bundle `GET /meta/app/:appId/bundle`, which registers through the same per-item registrar '
+        + 'because every member it serves is the item read\'s own answer',
       ),
     maintenance: z.boolean().default(true)
       .describe(

@@ -20,12 +20,24 @@ import React from 'react';
  * fields and primary button, 13 px / 500 labels, one flat `--primary` fill on
  * the button. Radii are the theme's own `rounded-lg`, so a host theme that
  * re-scales `--radius` re-scales these with it.
+ *
+ * Below the `sm` breakpoint (a phone) every control is at least 44 px tall,
+ * the touch-target floor, and the input text is 16 px: WebKit zooms the page
+ * when it focuses a field whose text is smaller.
  */
 export const AUTH_INPUT_CLASS =
-  'flex h-10 w-full rounded-lg border border-input bg-background px-3.5 py-2 text-sm shadow-sm ring-offset-background transition-colors placeholder:text-muted-foreground hover:border-primary/40 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50';
+  'flex h-10 min-h-[44px] w-full rounded-lg border border-input bg-background px-3.5 py-2 text-base shadow-sm sm:min-h-0 sm:text-sm ring-offset-background transition-colors placeholder:text-muted-foreground hover:border-primary/40 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50';
 
 export const AUTH_PRIMARY_BUTTON_CLASS =
-  'inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm ring-offset-background transition-[box-shadow,background-color,transform] hover:bg-primary/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60 motion-reduce:transition-none motion-reduce:active:transform-none';
+  'inline-flex h-10 min-h-[44px] w-full items-center sm:min-h-0 justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm ring-offset-background transition-[box-shadow,background-color,transform] hover:bg-primary/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60 motion-reduce:transition-none motion-reduce:active:transform-none';
+
+/**
+ * The phone touch-target floor for a secondary control (a text button, the
+ * "Get code" button, a standalone link): 44 px tall below `sm`, unchanged
+ * above it. A link also needs `inline-flex items-center` for the height to
+ * apply. Not exported from the package entry.
+ */
+export const AUTH_TOUCH_TARGET_CLASS = 'min-h-[44px] sm:min-h-0';
 
 export const AUTH_FIELD_LABEL_CLASS = 'text-[13px] font-medium leading-none text-foreground';
 

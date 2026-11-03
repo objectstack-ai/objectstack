@@ -124,7 +124,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ flow: object; packageId: string; notice: string }` | ✅ |  |
+| **data** | `{ flow: object; packageId: string; notice: string; noticeCode?: string }` | ✅ |  |
 
 ### Nested Shape: `CloneFlowResponse.error`
 
@@ -156,6 +156,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **flow** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | The copy as stored: switched off, in `packageId`, with no lineage. |
 | **packageId** | `string` | ✅ | The package the copy landed in: the one the request named, else the source's paired customization package `<base>.custom`. |
 | **notice** | `string` | ✅ | One line for the administrator, in the server's words: the copy is switched off until someone switches it on, and its references are not re-pointed. |
+| **noticeCode** | `string` | optional | A stable code naming the `notice` sentence beside it, so a client can show that sentence in its own language: a client maps a code it knows to its own translated sentence, and falls back to `notice` verbatim for a code it does not know or when this key is absent (an older server sends none). The values are the server's; `notice` stays the English fallback. |
 
 
 ---
@@ -199,6 +200,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **isInput** | `boolean` | optional (default: `false`) | Is input parameter |
 | **isOutput** | `boolean` | optional (default: `false`) | Is output parameter |
 | **defaultValue** | `any` | optional | Value bound at run start when no parameter supplies one — this is what makes a declared variable always bound. An explicitly supplied param wins, including `false` and `null`; the boundary is `params[name] !== undefined`. |
+| **objectName** | `string` | optional | [planned] Declares this input a record reference: its value is the id of one record of the named object (the object's snake_case name, e.g. `crm_account`). Only on an input (`isInput: true`). The contract: every door that starts the flow by name (the trigger route, an action of type flow over REST and MCP run_action, a declared endpoint of type flow) loads a declared input from this object in the caller's own scope before the run exists; an id the caller cannot read there is refused 404 RECORD_NOT_FOUND, and a value that is not an id is refused 400 VALIDATION_FAILED naming the input. No door applies it yet: today the key is parsed and checked, and a start with an id the caller cannot read still runs. An input without this declaration is judged as a record only where the flow's own definition reads it as a record id. `type` stays the data type: the variable holds the id the caller sent. |
 
 ### Nested Shape: `CreateFlowRequest.nodes[number]`
 

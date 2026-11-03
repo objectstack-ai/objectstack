@@ -352,8 +352,8 @@ const SYS = { isSystem: true } as const;
 /**
  * `updated_by` / `created_by` / `owner_id` are injected by the registry, as on
  * an app object. `private`, as HotCRM's `crm_opportunity` is: record sharing
- * then owns the write verdict, so the manager's `modifyAllRecords` is what
- * reaches a deal the rep owns (the platform's ownership floor defers to it).
+ * then owns the write verdict, so the manager's org-wide `writeScope` is what
+ * reaches a deal the rep owns.
  */
 const dealObject = {
   name: 'deal',
@@ -376,10 +376,16 @@ const dealRepSet = PermissionSetSchema.parse({
   name: 'deal_rep', label: 'Deal rep',
   objects: { deal: { allowRead: true, allowCreate: true, allowEdit: true } },
 });
-/** The manager edits every deal — but may not edit `restricted_note`. */
+/**
+ * The manager edits every deal — but may not edit `restricted_note`. Every deal
+ * is reached by org-wide read and write DEPTH rather than `viewAllRecords` /
+ * `modifyAllRecords`: a set holding the super-user bypass on an object votes
+ * `editable: true` on every field of it (ADR-0066 D2 ⑧ as amended, ruling of
+ * record 6573563853), so its own `restricted_note` lock could not hold.
+ */
 const dealManagerSet = PermissionSetSchema.parse({
   name: 'deal_manager', label: 'Deal manager',
-  objects: { deal: { allowRead: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true } },
+  objects: { deal: { allowRead: true, allowEdit: true, readScope: 'org', writeScope: 'org' } },
   fields: { 'deal.restricted_note': { readable: true, editable: false } },
 });
 
@@ -458,7 +464,7 @@ describe('on the real stack: attribution after the decision, and the refusal whe
   it("GUARD: the manager's write rests on the manager's own grants — under the rep's sets it is refused", async () => {
     // The fixture would be measuring nothing if any member could write a
     // rep's deal: the default member scope keys writes on `created_by`, so it
-    // is `deal_manager`'s `modifyAllRecords` that admits the manager below.
+    // is `deal_manager`'s org-wide `writeScope` that admits the manager below.
     const created: any = await ql.insert('deal', { title: 'guard' }, { context: await requestContext('usr_rep') });
     const repSets = (await requestContext('usr_rep')).permissions;
     await expect(

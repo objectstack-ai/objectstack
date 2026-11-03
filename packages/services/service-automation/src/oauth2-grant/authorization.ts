@@ -55,6 +55,7 @@
  */
 
 import type { McpAuthorizationClient } from './mcp-authorization.js';
+import type { InstallerClient } from './installer-client.js';
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto';
 import type { IKV } from '@objectstack/spec/contracts';
 
@@ -79,6 +80,13 @@ export interface PendingAuthorization {
      * client.
      */
     readonly client?: McpAuthorizationClient;
+    /**
+     * The client the administrator entered for an instance declaring
+     * `clientSource: 'installer'` (ADR-0143 D2.1, 2026-11-02 amendment): the
+     * code is exchanged as it, and the connection keeps it. Held here only
+     * sealed, like the verifier. Absent for any other instance.
+     */
+    readonly installerClient?: InstallerClient;
 }
 
 /** Where pending authorizations wait for their callback. `take` is single-use. */

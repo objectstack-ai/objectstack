@@ -2,14 +2,14 @@
  * The record pane of the Console `ObjectView` (`./ObjectView.tsx`), and the
  * list it opens records from (objectstack#25992 slice 10; objectstack#27545).
  *
- * One `NavigationOverlay` draws both: the list in the same place whether or
- * not a record is open — and whatever the object declares, so a view switch
- * never remounts it — and the opened record's `RecordDetailView` either
- * beside it (`split`, the default) or in the drawer over it (`drawer`, the
- * reader's preference, and the split face's fallback on a narrow content
- * area) — `utils/recordOpenPreference.ts`, objectstack#26677. An object that
- * declares `page` (or `new_window` / `none`) draws no record here. Every value
- * is passed in as a prop.
+ * One `NavigationOverlay` draws both: the list in the same place and at its
+ * full width whether or not a record is open — and whatever the object
+ * declares, so a view switch never remounts it — and the opened record's
+ * `RecordDetailView` in the drawer over it. The pane beside the list retired
+ * (objectstack#28915); a reader who prefers the full page gets it from a row
+ * click instead (`utils/recordOpenPreference.ts`, objectstack#26677). An
+ * object that declares `page` (or `new_window` / `none`) draws no record
+ * here. Every value is passed in as a prop.
  *
  * Since objectstack#26679 the pane is the in-place stack of
  * `./recordDrawerStack.tsx`: its root is the list row `?recordId=` names, a
@@ -19,8 +19,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { useRecordListFace, type NavigationOverlayMode } from '@object-ui/components';
-import type { useObjectTranslation } from '@object-ui/i18n';
+import type { NavigationOverlayMode } from '@object-ui/components';
 import { RecordDetailView } from './RecordDetailView.js';
 import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
@@ -44,10 +43,7 @@ export function ObjectViewRecordOverlay({
     onEdit,
 }: {
     navOverlay: RecordNavigation['navOverlay'];
-    /**
-     * `split` (beside the list) or `drawer` (over it) for a record that opens
-     * in the pane; the object's own mode otherwise.
-     */
+    /** The object's resolved mode: `drawer` draws the record over the list. */
     mode: NavigationOverlayMode;
     /** The list, drawn whether or not a record is open; pass a stable element. */
     list: ReactNode;
@@ -88,29 +84,5 @@ export function ObjectViewRecordOverlay({
                      />
                  )}
              />
-    );
-}
-
-/**
- * The count under the list while the record pane narrows it (the split face,
- * objectui#10636): drawn inside the list the pane is handed, and only while
- * the pane sits beside it — a full-width list prints its own count in
- * `ListView`'s record-count bar.
- */
-export function RecordPaneListCount({
-    count,
-    t,
-}: {
-    count: number | undefined;
-    t: ReturnType<typeof useObjectTranslation>['t'];
-}) {
-    const face = useRecordListFace();
-    if (face === 'full' || typeof count !== 'number') return null;
-    return (
-        <div data-testid="record-count-footer" className="border-t px-3 sm:px-4 py-1.5 text-xs text-muted-foreground bg-muted/5 shrink-0">
-            {/* One count family, like `ListView`'s record-count bar
-                (objectui#11445): i18next picks the CLDR slot. */}
-            {t('console.objectView.recordCount', { count })}
-        </div>
     );
 }

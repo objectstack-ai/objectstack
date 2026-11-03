@@ -95,11 +95,13 @@ ADR-0068 — spec field docs write predicates like `current_user.positions`.
 `null`. To check for "value present and non-blank" use the stdlib helper
 `isBlank()` or compare to `null` explicitly.
 
-Every predicate reads a `record` — and, where §5 binds it, a `previous` — that
-is **total over the object's declared fields**: a declared column the driver
-never returned reads as `null`, not as a fault. So `has(record.<declared_field>)`
-and `has(previous.<declared_field>)` are uniformly `true` and tell you nothing at
-all. The idiom that reads like a guard is not one:
+Every server-evaluated predicate — validation rules, `requiredWhen`, option
+`visibleWhen`, `readonlyWhen`, hook `condition`, the flow trigger record —
+reads a `record` (and, where §5 binds it, a `previous`) that is **total over
+the object's declared fields**: a declared column the driver never returned
+reads as `null`, not as a fault. There `has(record.<declared_field>)` and
+`has(previous.<declared_field>)` are uniformly `true`, and `!= null` is the
+whole guard. The idiom that reads like a guard is not one:
 
 ```text
 # WRONG — both has() calls are true on a NULL row, so this reaches `null < null`,
@@ -117,7 +119,23 @@ or hook predicate that applies an ordering (`< <= > >=`) or arithmetic
 no `defaultValue`, no default option — unless an explicit `!= null` / `== null` /
 `!isBlank()` test dominates it in the same boolean branch. `has()` deliberately
 does not satisfy that gate. `has()` over an **undeclared** key stays legal: that
-is its real use — telling "absent from this PATCH" apart from "explicitly null".
+is its use there — telling "absent from this PATCH" apart from "explicitly null".
+
+**The exception: action `visible` / `disabled` are client-side and sparse.**
+They bind the row the client already holds, and that row — a `list_item` row
+above all — lacks a key when the column is outside the view's projection, when
+field-level security refuses it, or when it was never written (the mongo and
+memory drivers).
+Reading an absent key faults `No such key`: a `visible` predicate hides the
+action, a `disabled` one leaves it refused, silently either way.
+There the guard is `has(record.x) && record.x != null`; `has()` alone is enough
+beside a literal `==` / `!=`; a nested path takes one `has()` per segment:
+
+```text
+has(record.status) && record.status != 'resolved'
+has(record.amount) && record.amount != null && record.amount > 1000
+has(record.viewer) && has(record.viewer.can_approve) && record.viewer.can_approve == true
+```
 
 ### Null + string throws
 
@@ -148,9 +166,9 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `date(s)` / `datetime(s)` | timestamp | Parse an ISO date / date-time string to a timestamp |
 | `isoDate(t)` / `isoDatetime(t)` | string | Timestamp to UTC ISO text, `2026-10-08` / `2026-10-08T17:55:06.123Z`. Text in? `isoDate(date(s))` |
 
-> **No date arithmetic.** A date mixed with a number faults and the build
-> rejects it; `end - start` does not fault — it yields a `duration` stored as
-> `{}`.
+> **No date arithmetic.** The build refuses `date + n` and `end - start`: a
+> date or date-time mixed with a number, or minus another, reads `null`, and
+> `today()` / `now()` minus a date field reads `{}`. Use `daysBetween(a, b)`.
 
 | Want | Write — never `end - start`, `date + n`, `today() + 30` |
 |:---|:---|
@@ -407,7 +425,7 @@ to the envelope.
 | `View` / `Page` | `visibleWhen` (form section/field, page component) | cel |
 | `Field` | `defaultValue` (envelope only; bare string = literal) | cel |
 | `ConditionalValidation` | `when` | cel |
-| `Action` | `disabled` | cel (or boolean) |
+| `Action` | `visible` / `disabled` — client-side, sparse | cel (or boolean) |
 | `Hook` | `condition` | cel |
 | `SharingRule` | `condition` | cel |
 | `Flow.decision` | `expression` / edge `condition` | cel (use `vars.<step>.<key>`) |

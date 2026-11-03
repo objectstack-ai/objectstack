@@ -12,8 +12,9 @@
  * with extra `<Route>` children.
  */
 
-import { lazy, Suspense, useMemo } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useNativeHostRouting } from '@object-ui/mobile';
 import { AuthProvider, useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { UploadProvider, createObjectStackUploadAdapter } from '@object-ui/providers';
 import { DevMasterDetail } from './dev/DevMasterDetail';
@@ -39,7 +40,7 @@ import {
   RedirectWithSplash,
 } from '@object-ui/app-shell';
 
-import { AppContent, ConsolePermissionsScope } from './AppContent';
+import { AppContent, ConsolePermissionsRequest, ConsolePermissionsScope } from './AppContent';
 import { publishAuthState } from './i18nSession';
 import { FaviconSync } from './components/FaviconSync';
 import { RootLandingRedirect } from './components/RootLandingRedirect';
@@ -135,6 +136,35 @@ function resolveBasename(): string {
 
 const BASENAME = resolveBasename();
 
+/**
+ * Native shell mode: wires the router to the ObjectStack mobile shell when it
+ * hosts this Console (`window.ObjectStackNative`, see `@object-ui/mobile`).
+ *
+ * Rendered beside `<Routes>`, inside `ConsoleShell`'s Suspense boundary, so
+ * its first effect runs once the first route has committed, which is when
+ * `ready()` is posted. Every navigation posts `routeChanged` with the router's
+ * path, query and hash (the basename is already stripped), and the shell's
+ * `objectstack-native:navigate` event moves this router instead of reloading
+ * the page. `data-os-native-shell` on the root element names the platform, so
+ * a stylesheet can tell shell mode apart. Without the bridge this renders
+ * nothing and installs nothing.
+ */
+function NativeShellRouting() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const host = useNativeHostRouting({
+    route: `${location.pathname}${location.search}${location.hash}`,
+    navigate,
+  });
+  const platform = host?.platform;
+  useEffect(() => {
+    if (!platform) return undefined;
+    document.documentElement.setAttribute('data-os-native-shell', platform);
+    return () => document.documentElement.removeAttribute('data-os-native-shell');
+  }, [platform]);
+  return null;
+}
+
 /** Wraps `DefaultHomeLayout` so the FAB gets the signed-in user id. */
 function HomeRoute() {
   const { user } = useAuth();
@@ -211,6 +241,7 @@ export function App() {
         <FaviconSync />
         <UploadProvider adapter={uploadAdapter}>
         <ConsoleShell>
+          <NativeShellRouting />
           <Routes>
             {/*
               * Public auth surfaces — render OUTSIDE ProtectedRoute so
@@ -280,19 +311,6 @@ export function App() {
               * layer too late for a capability whose declared meaning is
               * "Enter the Studio metadata-design surfaces". */}
             {studioRoutes}
-            {/* Internal authed form — same renderer as `/f/:slug`, different
-              * submit path, and (objectui#4109) rendered INSIDE the console
-              * shell instead of as a bare page. The route stays exactly where
-              * it is: per the 2026-08-10 ruling on objectstack#7245 the missing
-              * chrome was the defect, not the navigation, so deep links keep
-              * working. `InternalFormRoute` owns the chrome + the "land on the
-              * created record" target; the public path above stays chrome-less
-              * on purpose (an anonymous visitor has no console to be in). */}
-            <Route path="/forms/:name" element={
-              <ProtectedRoute>
-                <InternalFormRoute />
-              </ProtectedRoute>
-            } />
             {/* Package documentation (ADR-0046): a platform-level portal
               * lists every installed `doc` (grouped by package), and one
               * viewer route renders any item; cross-references between docs
@@ -320,16 +338,41 @@ export function App() {
               * `/apps/…`, so the answer is fetched once per session load and
               * Home's navigation gates (the bell's and the activity card's
               * roster) answer `current_user.can(...)` from it.
-              * ⛔ `/studio/*` stays outside it (`components/studioEntry.ts`). */}
+              * ⛔ `/studio/*` stays outside it (`components/studioEntry.ts`).
+              * `ConsolePermissionsRequest` asks for that answer as soon as the
+              * session names the organization, in the `organization/list`
+              * wave; the scope takes it (objectstack#29114). */}
             <Route element={
-              <ProtectedRoute>
-                <ConsolePermissionsScope>
-                  <Outlet />
-                </ConsolePermissionsScope>
-              </ProtectedRoute>
+              <>
+                <ConsolePermissionsRequest />
+                <ProtectedRoute>
+                  <ConsolePermissionsScope>
+                    <Outlet />
+                  </ConsolePermissionsScope>
+                </ProtectedRoute>
+              </>
             }>
               <Route path="/home" element={<HomeRoute />} />
               <Route path="/apps/:appName/*" element={<AppContent />} />
+              {/* Internal authed form — same renderer as `/f/:slug`, different
+                * submit path, and (objectui#4109) rendered INSIDE the console
+                * shell instead of as a bare page. The URL is unchanged: per the
+                * 2026-08-10 ruling on objectstack#7245 the missing chrome was
+                * the defect, not the navigation, so deep links keep working.
+                * `InternalFormRoute` owns the chrome + the "land on the created
+                * record" target; the public `/f/:slug` above stays chrome-less
+                * and outside this layout on purpose (an anonymous visitor has
+                * no console to be in, and no permissions to ask about).
+                *
+                * Under this layout rather than beside it (objectstack#29187):
+                * `FormPage` refuses a form whose write the caller holds no
+                * grant for BEFORE drawing a field, and it reads that grant
+                * from this layout's `/auth/me/permissions` answer — the one
+                * its in-app twin `/apps/:appName/forms/:name` already reads.
+                * One answer for both URLs, so one form never behaves
+                * differently by URL; a hop from `/home` or an app keeps the
+                * layout, so the answer is not asked again. */}
+              <Route path="/forms/:name" element={<InternalFormRoute />} />
             </Route>
             {/* Dev-only: ADR-0001 master-detail subform verification harness. */}
             <Route path="/dev/master-detail" element={

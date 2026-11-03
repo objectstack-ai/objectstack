@@ -13,8 +13,9 @@
  * same bodies (`500 DATABASE_ERROR`; `failed` rows with `INTERNAL_ERROR` on the
  * batch doors). The door now stores the typed blank, `null`, on every door.
  *
- * Controls: a text / lookup / select `''` is stored as `''` (the spec's
- * `str_empty` — an empty string must not become null); a valid value on every
+ * Controls: a text `''` is stored as `''` (the spec's `str_empty` — an empty
+ * string must not become null), while an optional lookup / select `''` is
+ * `null` since #29277 (`rest-data-single-value-blank.test.ts`); a valid value on every
  * typed column is stored unchanged; a required field's blank is refused as
  * `400 VALIDATION_FAILED` / `required`; and a non-numeric string on `progress`
  * is refused as `invalid_number`.
@@ -152,12 +153,12 @@ describe('REST write doors on SQLite: a cleared typed column stores null (#20308
 
   const seed = (id: string) => ctx.engine.insert('blank_rest', { id, ...VALID });
 
-  it('POST create: the typed blanks store null; the string-stored blanks store ""', async () => {
+  it('POST create: the typed blanks store null; a text blank stores "", a lookup / select blank null (#29277)', async () => {
     const res = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rest' }, { id: 'c1', ...blankTyped(), ...STR_BLANK });
     expect(res.status).toBe(201);
     const raw = await ctx.stored('blank_rest', 'c1');
     expectTypedNull(raw, 'stored');
-    expect([raw!.c_text, raw!.c_lookup, raw!.c_select]).toEqual(['', '', '']);
+    expect([raw!.c_text, raw!.c_lookup, raw!.c_select]).toEqual(['', null, null]);
     const read = await ctx.engine.findOne('blank_rest', { where: { id: 'c1' } });
     expectTypedNull(read as any, 'read');
     // The before-state's worst cell: a stored '' on a boolean read back as `false`.

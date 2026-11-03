@@ -42,7 +42,6 @@ import { useCanvasPanZoom } from './hooks/useCanvasPanZoom';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { PropertyEditor, type PropertyField } from './components/PropertyEditor';
 import { Minimap, type MinimapItem } from './components/Minimap';
-import { useCollaboration } from './CollaborationProvider';
 import { CANVAS_BACKGROUND_CLASS, canvasBackgroundStyle } from './canvasBackground';
 
 function cn(...inputs: (string | undefined | false)[]) {
@@ -165,17 +164,6 @@ export function PageDesigner({
   // -- Confirm dialog -------------------------------------------------------
   const confirmDialog = useConfirmDialog();
 
-  // -- Collaboration (optional) ---------------------------------------------
-  const collaboration = useCollaboration();
-
-  const broadcastOp = useCallback(
-    (op: { type: 'insert' | 'update' | 'delete' | 'move' | 'resize'; elementId: string; data: Record<string, unknown> }) => {
-      if (!collaboration) return;
-      collaboration.sendOperation({ ...op, userId: collaboration.currentUserId ?? '' });
-    },
-    [collaboration],
-  );
-
   // -- Collapsible panels ---------------------------------------------------
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
@@ -218,9 +206,8 @@ export function PageDesigner({
       const updated = [...components, newComponent];
       pushComponents(updated);
       multiSelect.selectOne(newComponent.id);
-      broadcastOp({ type: 'insert', elementId: newComponent.id, data: { component: newComponent } });
     },
-    [components, readOnly, palette, pushComponents, multiSelect, broadcastOp],
+    [components, readOnly, palette, pushComponents, multiSelect],
   );
 
   const handleDeleteComponent = useCallback(
@@ -231,9 +218,8 @@ export function PageDesigner({
       const updated = filterTree(components, (c) => c.id !== id);
       pushComponents(updated);
       if (multiSelect.isSelected(id)) multiSelect.clearSelection();
-      broadcastOp({ type: 'delete', elementId: id, data: {} });
     },
-    [components, readOnly, pushComponents, multiSelect, broadcastOp],
+    [components, readOnly, pushComponents, multiSelect],
   );
 
   const handleDeleteSelected = useCallback(async () => {
@@ -255,10 +241,7 @@ export function PageDesigner({
     const updated = filterTree(components, (c) => !ids.has(c.id));
     pushComponents(updated);
     multiSelect.clearSelection();
-    ids.forEach((id) => {
-      broadcastOp({ type: 'delete', elementId: id, data: {} });
-    });
-  }, [readOnly, multiSelect, confirmDialog, components, pushComponents, broadcastOp]);
+  }, [readOnly, multiSelect, confirmDialog, components, pushComponents]);
 
   const handleUpdateProperty = useCallback(
     (name: string, value: unknown) => {
@@ -275,9 +258,8 @@ export function PageDesigner({
         return { ...c, props: { ...c.props, [name]: value } };
       });
       pushComponents(updated);
-      broadcastOp({ type: 'update', elementId: selectedId, data: { [name]: value } });
     },
-    [readOnly, selectedId, components, pushComponents, broadcastOp],
+    [readOnly, selectedId, components, pushComponents],
   );
 
   // -- Copy / Paste ---------------------------------------------------------
@@ -303,10 +285,7 @@ export function PageDesigner({
     const updated = [...components, ...pasted];
     pushComponents(updated);
     multiSelect.selectMany(pasted.map((p) => p.id));
-    pasted.forEach((p) => {
-      broadcastOp({ type: 'insert', elementId: p.id, data: { component: p } });
-    });
-  }, [readOnly, clipboard, components, pushComponents, multiSelect, broadcastOp]);
+  }, [readOnly, clipboard, components, pushComponents, multiSelect]);
 
   // -- Drag-and-drop handlers -----------------------------------------------
   const handleDragStart = useCallback(
@@ -343,10 +322,9 @@ export function PageDesigner({
         };
       });
       pushComponents(updated);
-      broadcastOp({ type: 'move', elementId: drag.id, data: {} });
       dragRef.current = null;
     },
-    [readOnly, zoom, components, pushComponents, snapToGrid, broadcastOp],
+    [readOnly, zoom, components, pushComponents, snapToGrid],
   );
 
   // -- Property fields for PropertyEditor -----------------------------------

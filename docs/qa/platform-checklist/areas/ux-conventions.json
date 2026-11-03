@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -41,7 +41,7 @@
         "import — Tasks → Import a two-row CSV → the result screen",
         "Studio autosave — rename a field label in the scratch package",
         "Studio publish — Publish the scratch package",
-        "Studio discard — on the metadata designer (/_console/apps/setup/metadata/object/OBJ for a scratch-package object with a pending draft), click 'Discard draft' and accept the in-app confirm dialog (it is no longer the browser's native confirm); the Studio pillars offer no discard. A scratch object's name carries its package's namespace prefix, so read it off the package before building the URL",
+        "Studio discard — on the All metadata area's item page, /_console/studio/~all/metadata/object/OBJ (where Setup's /_console/apps/setup/metadata/object/OBJ now redirects, ADR-0146 D1, #28818), for a scratch-package object with a pending draft, click 'Discard draft' and accept the in-app confirm dialog (it is no longer the browser's native confirm). Open it on the ~all leg: the per-package /_console/studio/PKG/metadata/object/OBJ opens the object's Data pillar instead (areaItemPillarPath, metadataArea.ts), which offers no discard. A scratch object's name carries its package's namespace prefix, so read it off the package before building the URL",
         "settings save — Settings → Localization → save a value"
       ],
       "steps": [
@@ -159,6 +159,12 @@
           "date": "2026-11-01",
           "change": "acceptance[0].verify and acceptance[1].verify say the Studio top bar's save status ('Saved' / 「已保存」) is not write feedback: it names no item, so a Studio row passes only on a toast or inline text naming the item or package, and a row with only that status scores FAIL. This is ruling 6545938831 item ② on #28345, which keeps the convention's wording (success names its subject) and settles how a runner scores that indicator, in both clauses; neither clause's wording changed. Held from slice S5 (revision 8). Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-02",
+          "change": "variants[10] re-pointed to the Studio door: the Setup designer URL it named, /_console/apps/setup/metadata/object/OBJ, now redirects to /_console/studio/~all/metadata/object/OBJ (ADR-0146 D1, #28818), the All metadata area's item page, where 'Discard draft' lives (ResourceEditPage.tsx), so the row is driven there directly; the per-package /_console/studio/PKG/metadata/object/OBJ opens the Data pillar, which has no discard (areaItemPillarPath, metadataArea.ts). Measured input: QA run #28981 (18.3.0 wave 4, 7fa9873f; card note 6571282495). Re-read at base dfbe34d887. The 'Studio pillars offer no discard' half is narrowed to the Data pillar, since the Access pillar offers one (access-discard-draft). No clause changed",
+          "ref": "#28579"
         }
       ]
     },

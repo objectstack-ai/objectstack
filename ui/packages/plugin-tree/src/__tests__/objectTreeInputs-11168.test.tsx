@@ -317,7 +317,7 @@ describe('`object-tree.data` — the members are the `{ provider, … }` configu
     expect(specRow.safeParse({ data }).success, 'the spec row accepts the configuration').toBe(true);
     const ds = mount({ tree: TREE, data });
     expect(await drawn()).toEqual([]);
-    expect(screen.getByText('No records')).toBeInTheDocument();
+    expect(screen.getByText('No data')).toBeInTheDocument();
     expect(ds.find).not.toHaveBeenCalled();
   });
 
@@ -329,7 +329,7 @@ describe('`object-tree.data` — the members are the `{ provider, … }` configu
     expect(specRow.safeParse({ data }).success, 'the spec row refuses the retired provider').toBe(false);
     const ds = mount({ tree: TREE, data });
     expect(await drawn()).toEqual([]);
-    expect(screen.getByText('No records')).toBeInTheDocument();
+    expect(screen.getByText('No data')).toBeInTheDocument();
     expect(ds.find).not.toHaveBeenCalled();
   });
 

@@ -702,7 +702,10 @@ describe('the timeline, comments, attachments and user list wait for their panel
     const table = waveTable(held);
     expect(screen.queryByRole('tab', { name: /^Timeline/ }), table).toBeNull();
     expect(document.querySelector('[data-record-timeline-panel]'), table).not.toBeNull();
-    expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 200 });
+    // objectstack#28737 — the panel draws its newest rows, and the page
+    // payload serves the stream's count, so the activity part asks the
+    // panel's rows only.
+    expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 5 });
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
       expect(held.filter(isRead), table).toEqual([]);
     }

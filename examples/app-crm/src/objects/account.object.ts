@@ -13,6 +13,8 @@ export const Account = ObjectSchema.create({
   pluralLabel: 'Accounts',
   icon: 'building',
   description: 'A company that the org sells to or supports.',
+  // What the record page shows at a glance, under the title.
+  highlightFields: ['industry', 'annual_revenue', 'website'],
 
   fields: {
     name: Field.text({

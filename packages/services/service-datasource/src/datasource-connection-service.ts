@@ -727,7 +727,21 @@ export class DatasourceConnectionService {
       } catch (err) {
         return this.handleFailure(record, 'failed-credentials', `resolving credential '${credentialsRef}' threw: ${errMsg(err)}`, opts.context, opts.objects, opts.mappedObjects, err);
       }
-      if (secret == null || secret === '') {
+      // [#28928] An empty credential is told apart from one that is gone: the
+      // admin doors refuse an empty `secret` now, but a row sealed before that
+      // decrypts to '' and its datasource still reaches this branch. Blaming a
+      // missing row or a changed key would send the operator after the wrong
+      // fault; the fix is to set the credential again.
+      if (secret === '') {
+        return this.handleFailure(
+          record,
+          'failed-credentials',
+          `credential '${credentialsRef}' is empty (its sys_secret row holds an empty value); set the datasource's secret again`,
+          opts.context,
+          opts.objects,
+        );
+      }
+      if (secret == null) {
         return this.handleFailure(
           record,
           'failed-credentials',

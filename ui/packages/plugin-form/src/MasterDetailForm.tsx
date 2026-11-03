@@ -2215,7 +2215,14 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           <UploadInFlightNotice gate={uploadGate} />
           <div className="flex items-center justify-end gap-2">
             {schema.onCancel && (
-              <Button type="button" variant="outline" onClick={schema.onCancel} disabled={saving} data-testid="md-form-cancel">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={schema.onCancel}
+                disabled={saving}
+                className="min-h-[44px] sm:min-h-0"
+                data-testid="md-form-cancel"
+              >
                 {cancelText}
               </Button>
             )}
@@ -2223,6 +2230,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               type="button"
               onClick={handleSave}
               disabled={saving || (needsDerive && !resolvedEntries) || uploadGate.uploading}
+              className="min-h-[44px] sm:min-h-0"
               data-testid="md-form-submit"
             >
               {uploadGate.uploading ? uploadGate.busyLabel : saving ? t('detail.saving') : submitText}

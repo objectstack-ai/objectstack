@@ -35,7 +35,8 @@ export function earnedWriteDespiteStaleSummary(error: unknown, res: any, object:
 
 /**
  * [#28782] The same reading for a door whose success path sets no
- * dropped-fields header (public form submit, `createMany`, clone): the answer
+ * dropped-fields header (public form submit, whose answer carries no
+ * `droppedFields`): the answer
  * the write `error` earned, logged once per stale field; `undefined` for every
  * other error. The door relays it as its own success path relays the
  * protocol's result.

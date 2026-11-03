@@ -286,6 +286,177 @@ describe('crud nodes — refuse a filter whose operand evaluated to nothing (#38
     });
 });
 
+/**
+ * A computed filter operand is a VALUE, never filter structure.
+ *
+ * The filter's structure (its fields, operators and conditions) is what the
+ * author wrote; an operand envelope supplies only what a condition compares
+ * against. So an envelope must evaluate to a value: a string, number, boolean
+ * or date, and at the comparand of a list operator (`$in`, `$nin`,
+ * `$between`) a list of them. Anything else refuses the node, as a guard,
+ * before the data engine is asked, at every operand position and whatever the
+ * key. An operand the author wrote as a literal is not judged here.
+ *
+ * Directions decided before running: every refused case leaves the engine
+ * uncalled (`seen[verb]` undefined); every passing case hands the engine the
+ * filter with only the operand's value substituted.
+ */
+describe('a computed filter operand is a value, never filter structure', () => {
+    let engine: AutomationEngine;
+    let data: ReturnType<typeof fakeData>;
+
+    /** A record whose fields are values of each kind an expression may hand a filter. */
+    const RECORD = {
+        id: 'r1',
+        owner: 'usr_7',
+        amount: 50,
+        active: true,
+        due: new Date('2026-03-14T00:00:00.000Z'),
+        ref: { id: 'r1' },
+        ids: ['r1', 'r2'],
+        stages: ['lost', 'won'],
+        range: [10, 90],
+        mixed: ['r1', { id: 'r2' }],
+        holes: ['r1', null],
+        conds: [{ status: 'open' }],
+    };
+
+    /** The bulk declaration a predicate write needs, so each fixture is one the real engine accepts. */
+    const bulk = (nodeType: string) => (nodeType === 'get_record' ? {} : { multi: true });
+
+    beforeEach(() => {
+        data = fakeData();
+        engine = new AutomationEngine(createTestLogger());
+        registerCrudNodes(engine, ctxWith(data.service));
+    });
+
+    async function run(nodeType: string, config: Record<string, unknown>) {
+        engine.registerFlow('crud_flow', crudFlow(nodeType, config));
+        const result = await engine.execute('crud_flow', { record: RECORD } as any);
+        const runs = await engine.listRuns('crud_flow');
+        const step = runs[0]?.steps.find((s) => s.nodeId === 'op');
+        return { result, step };
+    }
+
+    it.each(NODES)('%s: an evaluated non-scalar operand is refused before the query, naming the node and the operand', async (nodeType, verb, extra) => {
+        const { result, step } = await run(nodeType, { objectName: 'deal', filter: { id: CEL('record.ref') }, ...extra });
+
+        expect(result.success).toBe(false);
+        expect(step?.error?.code).toBe('NODE_FAILURE');
+        expect(result.error).toContain(`${nodeType}: refusing to run — 1 filter operand(s) evaluated to something other than a value`);
+        expect(result.error).toContain('`record.ref` (at filter.id) evaluated to an object');
+        expect(data.seen[verb], 'the data engine was asked').toBeUndefined();
+    });
+
+    it.each([
+        ['a field\'s value under any key', { owner: CEL('record.ref') }, 'filter.owner', 'an object'],
+        ['an operator\'s comparand', { owner: { $ne: CEL('record.ref') } }, 'filter.owner.$ne', 'an object'],
+        ['a list operator\'s single element', { id: { $in: ['r0', CEL('record.ref')] } }, 'filter.id.$in[1]', 'an object'],
+        ['a nested relation\'s value', { account: { region: CEL('record.ref') } }, 'filter.account.region', 'an object'],
+        ['a combinator member\'s value', { $or: [{ status: 'open' }, { owner: CEL('record.ref') }] }, 'filter.$or[1].owner', 'an object'],
+        ['a combinator member', { $or: [{ status: 'open' }, CEL('record.ref')] }, 'filter.$or[1]', 'an object'],
+        ['a combinator\'s list', { $and: CEL('record.conds') }, 'filter.$and', 'a list'],
+        ['a negated condition', { $not: CEL('record.ref') }, 'filter.$not', 'an object'],
+        ['a list where one value belongs', { id: CEL('record.ids') }, 'filter.id', 'a list'],
+        ['a list at a list operator\'s element', { id: { $in: [CEL('record.ids')] } }, 'filter.id.$in[0]', 'a list'],
+        ['a list operator\'s list holding a non-value', { id: { $in: CEL('record.mixed') } }, 'filter.id.$in', 'a list whose entry [1] is an object'],
+        ['a list operator\'s list holding an empty entry', { id: { $nin: CEL('record.holes') } }, 'filter.id.$nin', 'a list whose entry [1] is nothing'],
+    ])('delete_record: an evaluated non-scalar at %s is refused, located at the operand', async (_label, filter, at, kind) => {
+        const { result } = await run('delete_record', { objectName: 'deal', filter, multi: true });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(`(at ${at}) evaluated to ${kind}`);
+        expect(data.seen.delete, 'the data engine was asked').toBeUndefined();
+    });
+
+    it('every refused operand is named in the one refusal', async () => {
+        const { result } = await run('get_record', {
+            objectName: 'deal',
+            filter: { owner: CEL('record.ref'), status: 'open', id: { $in: CEL('record.mixed') } },
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('2 filter operand(s) evaluated to something other than a value');
+        expect(result.error).toContain('`record.ref` (at filter.owner) evaluated to an object');
+        expect(result.error).toContain('`record.mixed` (at filter.id.$in) evaluated to a list whose entry [1] is an object');
+        expect(data.seen.find).toBeUndefined();
+    });
+
+    it.each(NODES)('%s: an evaluated list at a list operator\'s comparand passes, each member a value', async (nodeType, verb, extra) => {
+        const { result } = await run(nodeType, {
+            objectName: 'deal',
+            filter: { id: { $in: CEL('record.ids') }, stage: { $nin: CEL('record.stages') }, amount: { $between: CEL('record.range') } },
+            ...extra,
+            ...bulk(nodeType),
+        });
+
+        expect(result.success, `run failed: ${JSON.stringify(result.error)}`).toBe(true);
+        expect(data.seen[verb]).toEqual({ id: { $in: ['r1', 'r2'] }, stage: { $nin: ['lost', 'won'] }, amount: { $between: [10, 90] } });
+    });
+
+    it.each(NODES)('%s: an evaluated scalar passes — a string, a number, a boolean and a date', async (nodeType, verb, extra) => {
+        const { result } = await run(nodeType, {
+            objectName: 'deal',
+            filter: {
+                owner: CEL('record.owner'),
+                amount: { $gt: CEL('record.amount') },
+                active: CEL('record.active'),
+                due: { $lt: CEL('record.due') },
+            },
+            ...extra,
+            ...bulk(nodeType),
+        });
+
+        expect(result.success, `run failed: ${JSON.stringify(result.error)}`).toBe(true);
+        expect(data.seen[verb]).toEqual({ owner: 'usr_7', amount: { $gt: 50 }, active: true, due: { $lt: RECORD.due } });
+    });
+
+    it.each(NODES)('%s: the structure the author wrote is unchanged — only the evaluated operand is judged', async (nodeType, verb, extra) => {
+        const { result } = await run(nodeType, {
+            objectName: 'deal',
+            filter: {
+                owner: { $ne: CEL('record.owner') },
+                status: { $in: ['open', 'won'] },
+                closed_at: { $null: true },
+                account: { region: 'emea' },
+                $or: [{ stage: 'legal' }, { stage: { $nin: ['lost'] } }],
+            },
+            ...extra,
+            ...bulk(nodeType),
+        });
+
+        expect(result.success, `run failed: ${JSON.stringify(result.error)}`).toBe(true);
+        expect(data.seen[verb]).toEqual({
+            owner: { $ne: 'usr_7' },
+            status: { $in: ['open', 'won'] },
+            closed_at: { $null: true },
+            account: { region: 'emea' },
+            $or: [{ stage: 'legal' }, { stage: { $nin: ['lost'] } }],
+        });
+    });
+
+    it.each(NODES)('%s: the executor\'s refusal of a non-scalar operand is a guard, and nothing is queried', async (nodeType, verb, extra) => {
+        const executors = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
+        const recorder = new Proxy(new AutomationEngine(createTestLogger()), {
+            get(target, key, receiver) {
+                if (key === 'registerNodeExecutor') return (e: any) => { executors.set(e.type, e); };
+                return Reflect.get(target, key, receiver);
+            },
+        });
+        registerCrudNodes(recorder as AutomationEngine, ctxWith(data.service));
+
+        const result = await executors.get(nodeType)!.execute(
+            { id: 'op', type: nodeType, label: 'Op', config: { objectName: 'deal', filter: { id: CEL('record.ref') }, ...extra } },
+            new Map<string, unknown>([['record', RECORD]]),
+            {},
+        );
+        expect(result.success).toBe(false);
+        expect(result.errorClass).toBe('guard');
+        expect(result.error).toContain('evaluated to something other than a value');
+        expect(data.seen[verb]).toBeUndefined();
+    });
+});
+
 describe('a flow `{…}` token at a filter operand is refused at every door (#19939)', () => {
     /** The builtin CRUD executor itself — the run-time door, reached without `registerFlow`. */
     function executorOf(nodeType: string, data: ReturnType<typeof fakeData>) {

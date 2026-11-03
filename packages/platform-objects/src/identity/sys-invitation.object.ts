@@ -49,18 +49,18 @@ export const SysInvitation = ObjectSchema.create({
   },
   description: 'Organization invitations for user onboarding',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // columns `titleFormat` names. With no pointer declared, the registry's
+  // columns `titleFormat` named. With no pointer declared, the registry's
   // designate-only pass stamped `nameField: 'id'` (the first title-eligible
   // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
-  // wins over `titleFormat`) drew the raw id as the record page's H1.
-  // `titleFormat` stays for renderers that still read it first;
-  // `identity-display-title.test.ts` holds the two to the same text.
+  // wins over `titleFormat`) drew the raw id as the record page's H1. The
+  // retired `titleFormat` template beside it is gone (refused at save and by
+  // `os validate`); `identity-display-title.test.ts` holds the formula to the
+  // text that template drew.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   // Title by invitee email rather than organization_id: the latter is null in
   // single-org mode (renders "Invitation to null"), and the recipient email is
   // the more useful identifier in both modes anyway.
-  titleFormat: 'Invitation for {email}',
   highlightFields: ['email', 'organization_id', 'status'],
 
   // Custom actions — generic CRUD is suppressed (better-auth-managed).
@@ -126,6 +126,9 @@ export const SysInvitation = ObjectSchema.create({
       requiresFeature: 'organization',
       requiresMembershipReach: 'cancel_invitation',
       confirmText: 'Cancel this invitation? The recipient will no longer be able to accept it.',
+      // The dismiss button names what dismissing keeps: beside a "Cancel
+      // Invitation" confirm button, a bare "Cancel" reads as the same verb.
+      cancelText: 'Keep invitation',
       successMessage: 'Invitation canceled',
       refreshAfter: true,
       // ADR-0011 identity-actions note, bucket C: exposed, and the

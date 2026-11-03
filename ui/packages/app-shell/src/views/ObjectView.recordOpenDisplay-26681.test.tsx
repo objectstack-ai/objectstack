@@ -14,13 +14,12 @@
  * End to end through `ObjectView`, the host that resolves the mode and keeps
  * the preference (`utils/recordOpenPreference.ts`):
  *
- *   - a drawer object: the Open records section draws Split | Drawer | Full
- *     page (objectstack#27545); choosing Split keeps `split` under
- *     `os:record-open-mode`, and the next row click draws the record BESIDE
- *     the list (the split face: the list's record-count footer and the pane's
- *     close control) — no reload, no remount. With no choice made the row
- *     opens beside the list too (the default since objectstack#27545), and
- *     choosing Full page makes the next row click land on the record page;
+ *   - a drawer object: the Open records section draws Drawer | Full page
+ *     only (objectstack#28915: the split pane retired); with no choice made
+ *     the row opens the drawer over the list, choosing Full page keeps `page`
+ *     under `os:record-open-mode` and makes the next row click land on the
+ *     record page, and choosing Drawer again keeps `drawer` — no reload, no
+ *     remount;
  *   - a view that declares `page`: the read-only line, no segments, and no ↗
  *     (its rows already open the page);
  *   - the ↗ beside a drawer row's record link is a real anchor to the record route,
@@ -173,41 +172,52 @@ function openDisplay() {
 }
 
 describe('objectstack#26681 — Open records in the Display menu', () => {
-  it('a drawer object: choosing Split keeps the preference, and the next row click opens the record beside the list', async () => {
-    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'drawer');
+  it('objectstack#28915 — a drawer object: the section offers Drawer and Full page only', async () => {
     await openList(objectsWith());
     openDisplay();
     const drawerSegment = await screen.findByRole('radio', { name: 'Drawer' });
     expect(drawerSegment.getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(screen.getByRole('radio', { name: 'Split' }));
+    const segments = within(screen.getByTestId('display-record-open')).getAllByRole('radio');
+    expect(segments.map((el) => el.textContent)).toEqual(['Drawer', 'Full page']);
+    expect(screen.queryByRole('radio', { name: 'Split' })).toBeNull();
+  });
 
-    expect(window.localStorage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('split');
+  it('objectstack#28915 — a drawer object with no choice made: the row opens the drawer over the list', async () => {
+    await openList(objectsWith());
+    fireEvent.click(screen.getByTestId('primary-field-link'));
+    expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+    expect(screen.queryByTestId('record-split-pane')).toBeNull();
+    expect(screen.queryByTestId('record-count-footer')).toBeNull();
+  });
+
+  it('objectstack#28915 — a stored `split`: the section reads Drawer, and the row opens the drawer', async () => {
+    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
+    await openList(objectsWith());
+    openDisplay();
+    expect((await screen.findByRole('radio', { name: 'Drawer' })).getAttribute('aria-checked')).toBe('true');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('primary-field-link'));
+    expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+  });
+
+  it('a reader who prefers the page chooses Drawer: the preference is kept, and the next row click opens the drawer', async () => {
+    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'page');
+    await openList(objectsWith());
+    openDisplay();
+    const pageSegment = await screen.findByRole('radio', { name: 'Full page' });
+    expect(pageSegment.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('radio', { name: 'Drawer' }));
+
+    expect(window.localStorage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('drawer');
     // The section reads the live value back: no reload, no remount.
     await waitFor(() =>
-      expect(screen.getByRole('radio', { name: 'Split' }).getAttribute('aria-checked')).toBe('true'),
+      expect(screen.getByRole('radio', { name: 'Drawer' }).getAttribute('aria-checked')).toBe('true'),
     );
 
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     fireEvent.click(screen.getByTestId('primary-field-link'));
-    expect(await screen.findByTestId('record-count-footer', undefined, { timeout: 5000 })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Close panel' })).toBeTruthy();
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('objectstack#27545 — a drawer object with no choice made: the row opens the record beside the list', async () => {
-    await openList(objectsWith());
-    fireEvent.click(screen.getByTestId('primary-field-link'));
-    expect(await screen.findByTestId('record-split-pane', undefined, { timeout: 5000 })).toBeTruthy();
-    expect(screen.getByTestId('record-count-footer')).toBeTruthy();
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('objectstack#27545 — a reader who prefers the drawer: the row opens the drawer', async () => {
-    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'drawer');
-    await openList(objectsWith());
-    fireEvent.click(screen.getByTestId('primary-field-link'));
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
-    expect(screen.queryByTestId('record-count-footer')).toBeNull();
+    expect(screen.queryByTestId('record-page-route')).toBeNull();
   });
 
   it('objectstack#27545 — choosing Full page: the next row click lands on the record page', async () => {
@@ -222,7 +232,7 @@ describe('objectstack#26681 — Open records in the Display menu', () => {
   });
 
   it('a view that declares `page`: the read-only line, no segments, and no ↗', async () => {
-    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
+    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'drawer');
     await openList(objectsWith({ mode: 'page' }));
     expect(screen.queryByTestId('record-open-as-page')).toBeNull();
     openDisplay();

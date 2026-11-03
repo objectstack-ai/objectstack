@@ -8,7 +8,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { DataModelEntity, DataModelField, DataModelRelationship, DesignerCanvasConfig } from '@object-ui/types';
-import { Database, Plus, Trash2, Link2, Undo2, Redo2, Grid3X3, ZoomIn, ZoomOut, RotateCcw, ChevronDown, ChevronRight, Copy, Clipboard, Users } from 'lucide-react';
+import { Database, Plus, Trash2, Link2, Undo2, Redo2, Grid3X3, ZoomIn, ZoomOut, RotateCcw, ChevronDown, ChevronRight, Copy, Clipboard } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -20,7 +20,6 @@ import { useCanvasPanZoom } from './hooks/useCanvasPanZoom';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { PropertyEditor, type PropertyField } from './components/PropertyEditor';
 import { Minimap } from './components/Minimap';
-import { useCollaboration } from './CollaborationProvider';
 import { CANVAS_BACKGROUND_CLASS, canvasBackgroundStyle } from './canvasBackground';
 
 function cn(...inputs: (string | undefined | false)[]) {
@@ -253,7 +252,7 @@ export interface DataModelDesignerProps {
  * rows of its `sourceField` and `targetField`, with its `deleteBehavior` beside
  * the label (objectui#11434).
  * Supports undo/redo, multi-select, copy/paste, pan/zoom, drag-to-reposition,
- * inline field editing, property editor, minimap, auto-layout, and collaboration.
+ * inline field editing, property editor, minimap and auto-layout.
  */
 export function DataModelDesigner({
   entities: initialEntities = [],
@@ -300,9 +299,6 @@ export function DataModelDesigner({
   // --- Pan/Zoom ---
   const panZoom = useCanvasPanZoom({ minZoom: 0.25, maxZoom: 3, zoomStep: 0.1 });
 
-  // --- Collaboration ---
-  const collaboration = useCollaboration();
-
   // --- Collapsible panels ---
   const [showProperties, setShowProperties] = useState(true);
   const [showMinimap, setShowMinimap] = useState(true);
@@ -343,8 +339,7 @@ export function DataModelDesigner({
     };
     pushState(next);
     multiSelect.selectOne(newEntity.id);
-    collaboration?.sendOperation({ type: 'insert', userId: collaboration?.currentUserId ?? '', elementId: newEntity.id, data: { name: newEntity.name, label: newEntity.label } });
-  }, [readOnly, undoRedo, pushState, multiSelect, collaboration]);
+  }, [readOnly, undoRedo, pushState, multiSelect]);
 
   const handleDeleteEntity = useCallback(
     async (id: string) => {
@@ -367,9 +362,8 @@ export function DataModelDesigner({
       if (multiSelect.isSelected(id)) {
         multiSelect.clearSelection();
       }
-      collaboration?.sendOperation({ type: 'delete', userId: collaboration?.currentUserId ?? '', elementId: id, data: {} });
     },
-    [readOnly, entities, confirmDialog, undoRedo, pushState, multiSelect, collaboration],
+    [readOnly, entities, confirmDialog, undoRedo, pushState, multiSelect],
   );
 
   const handleDeleteSelected = useCallback(async () => {
@@ -787,14 +781,6 @@ export function DataModelDesigner({
           )}
 
           <div className="flex-1" />
-
-          {/* Collaboration status */}
-          {collaboration?.isConnected && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground" role="status" aria-label="Collaboration active">
-              <Users className="h-3 w-3" />
-              <span>{collaboration.users.length} user{collaboration.users.length !== 1 ? 's' : ''}</span>
-            </div>
-          )}
 
           {/* Multi-select count */}
           {multiSelect.count > 1 && (

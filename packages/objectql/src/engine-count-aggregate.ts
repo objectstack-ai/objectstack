@@ -40,8 +40,9 @@
  * this module imports `engine.ts`). Nothing here runs at module evaluation,
  * only declarations, and the helpers are read only when a body runs, after
  * both modules have evaluated. `engine.ts` imports this module right after
- * `./secret-fields.js`, and the two other modules this one imports
- * (`./secret-fields.js`, `./credential-evaluation-guard.js`) import nothing
+ * `./secret-fields.js`, and the three other modules this one imports
+ * (`./secret-fields.js`, `./credential-evaluation-guard.js`,
+ * `./internal-field-evaluation-guard.js`) import nothing
  * from `engine.ts`, so the evaluation order of every module is what it was; the
  * `@objectstack/spec/api` import that left `engine.ts` with
  * `rejectCredentialAggregation` was not that package's first load. The
@@ -58,6 +59,7 @@ import {
   collectCredentialFields,
 } from './secret-fields.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
+import { rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
 import {
   ENGINE_COUNT_OPTION_KEYS,
   ENGINE_WHERE_SLOTS,
@@ -103,7 +105,8 @@ export async function count(
    query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
    rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
    query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
-   // [ADR-0100] Same credential-column refusal as `find`, same position.
+   // [ADR-0100] Same internal-field and credential-column refusals as `find`, same position.
+   rejectInternalFieldEvaluation(object, query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
    rejectCredentialEvaluation(object, 'count', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
    // [#22790] ADR-0061 `search` → the rows are searched before they are
    // counted, by the one expander `find` runs, at the same point in the

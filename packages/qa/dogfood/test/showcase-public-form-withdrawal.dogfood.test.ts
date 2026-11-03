@@ -24,13 +24,19 @@
 // admin WITH an active organization is environment-wide too: the doors carry
 // no organization into a metadata write. The intake row still lands in the
 // organization the anonymous form door resolves (the Default Organization).
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the editor's save goes into the showcase's `.custom` pair, declaring the
+// form it overrides; the anonymous doors serve the pair's override.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 const VIEW = '/meta/view/showcase_inquiry.contact';
+const SHOWCASE = 'com.example.showcase';
 const SYS = { isSystem: true } as const;
 
 interface Probe {
@@ -74,7 +80,7 @@ describe('showcase: withdrawing the public contact form closes every intake door
       if (v === undefined) delete body.config.sharing[k];
       else body.config.sharing[k] = v;
     }
-    const res = await stack.apiAs(admin, 'PUT', VIEW, body);
+    const res = await stack.apiAs(admin, 'PUT', inPair(VIEW, SHOWCASE), declaredOverride(body, SHOWCASE, '0.1.0'));
     const json = (await res.json()) as { message?: string };
     expect(res.status, JSON.stringify(json)).toBe(200);
     return String(json.message ?? '');
@@ -86,6 +92,7 @@ describe('showcase: withdrawing the public contact form closes every intake door
       security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }),
     });
     admin = await stack.signIn();
+    await ensurePair(stack, admin, SHOWCASE);
     ql = await stack.kernel.getServiceAsync('objectql');
     const res = await stack.apiAs(admin, 'GET', VIEW);
     expect(res.status).toBe(200);

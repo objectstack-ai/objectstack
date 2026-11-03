@@ -119,6 +119,10 @@ export const actionForm = defineForm({
         // Not gated on `params`: the parse refuses the key beside an empty
         // `params` by name, so a misplaced label is refused, never kept unshown.
         { field: 'submitText', label: 'Submit button label', helpText: 'Label of the submit button in this action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"). Only for an action that collects params. Leave empty to show "Confirm".' },
+        // `cancelText` is the dismiss twin of the row above, the same I18nLabel
+        // node. Not gated on `confirmText` / `params` either: the parse refuses
+        // the key on an action that opens neither dialog, by name.
+        { field: 'cancelText', label: 'Cancel button label', helpText: 'Label of the dismiss button on the dialog this action opens before it runs, its confirm dialog or its param dialog. Name what dismissing keeps where the action\'s own verb is "Cancel …" (e.g. "Keep invitation"). Only for an action that asks for confirmation or collects params. Leave empty to show "Cancel".' },
         { field: 'confirmText', helpText: 'Confirmation message (e.g., "Are you sure?")' },
         { field: 'successMessage', helpText: 'Success message after completion' },
         // `errorMessage` is the twin of the row above: same node (I18nLabel), same

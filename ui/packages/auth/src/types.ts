@@ -161,6 +161,37 @@ export interface SignInCredentials {
   password: string;
 }
 
+/**
+ * A second factor the server offers for a pending sign-in, as better-auth's
+ * `twoFactor()` plugin names it in `twoFactorMethods`: `totp` is an
+ * authenticator app the user enrolled, `otp` a code the server sends.
+ */
+export type TwoFactorMethod = 'totp' | 'otp';
+
+/**
+ * objectstack#29105 — a password sign-in the server accepted but did not
+ * complete: the account has two-factor sign-in on, so no session exists yet.
+ * The server holds the pending sign-in in a short-lived signed cookie; it is
+ * finished by `verifySignInTwoFactor` with a code, or abandoned by signing in
+ * again.
+ */
+export interface TwoFactorChallenge {
+  /** The factors the server offers for this sign-in (may be empty: backup codes only). */
+  methods: TwoFactorMethod[];
+}
+
+/** What `AuthClient.signIn` answers: a session, or a pending two-factor challenge. */
+export type SignInResult =
+  | { user: AuthUser; session: AuthClientSession; twoFactor?: undefined }
+  | { twoFactor: TwoFactorChallenge; user?: undefined; session?: undefined };
+
+/**
+ * The code a user enters to finish a pending two-factor sign-in: one from
+ * their authenticator app (`totp`), or one of the one-time backup codes they
+ * saved at enrollment (`backup-code`).
+ */
+export type SignInTwoFactorCodeKind = 'totp' | 'backup-code';
+
 /** Sign up data */
 export interface SignUpData {
   name: string;
@@ -370,8 +401,20 @@ export interface SignInWithProviderOptions {
 
 /** Auth client interface - abstracts the underlying auth library */
 export interface AuthClient {
-  /** Sign in with email/password */
-  signIn: (credentials: SignInCredentials) => Promise<{ user: AuthUser; session: AuthClientSession }>;
+  /**
+   * Sign in with email/password. For an account with two-factor sign-in on,
+   * the answer is a `twoFactor` challenge instead of a session
+   * (objectstack#29105): finish it with `verifySignInTwoFactor`.
+   */
+  signIn: (credentials: SignInCredentials) => Promise<SignInResult>;
+  /**
+   * objectstack#29105 — finish a pending two-factor sign-in with an
+   * authenticator code or a backup code; answers the session it installs.
+   */
+  verifySignInTwoFactor: (
+    code: string,
+    kind: SignInTwoFactorCodeKind,
+  ) => Promise<{ user: AuthUser; session: AuthClientSession }>;
   /** Sign up with email/password. `session` is null when email verification is required. */
   signUp: (data: SignUpData) => Promise<{ user: AuthUser; session: AuthClientSession | null; requiresVerification: boolean }>;
   /** Sign out */

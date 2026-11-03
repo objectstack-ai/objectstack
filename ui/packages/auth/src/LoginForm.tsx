@@ -10,12 +10,14 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from './useAuth.js';
 import { SocialSignInButtons } from './SocialSignInButtons.js';
 import { looksLikePhoneIdentifier, normalizePhoneIdentifier } from './phone-identifier.js';
+import { TwoFactorChallengeForm } from './TwoFactorChallengeForm.js';
 import type { AuthLinkComponentProps } from './types.js';
 import {
   AUTH_FIELD_LABEL_CLASS,
   AUTH_INPUT_CLASS,
   AUTH_LINK_CLASS,
   AUTH_PRIMARY_BUTTON_CLASS,
+  AUTH_TOUCH_TARGET_CLASS,
   AuthErrorBanner,
   AuthFormHeader,
   AuthSpinner,
@@ -39,8 +41,9 @@ export interface LoginFormLabels {
   /**
    * Divider label between the social provider buttons and the email/password
    * form (defaults to "or continue with email"). Rendered only when the server
-   * reports at least one social provider, and only while that form is shown:
-   * under SSO-only mode it appears once "Use a password instead" reveals it.
+   * reports at least one social provider, and only while an email field is
+   * shown: under SSO-only mode, the SSO email field (when the server also
+   * advertises SSO) or the form "Use a password instead" reveals.
    */
   orText?: string;
   /**
@@ -76,10 +79,37 @@ export interface LoginFormLabels {
   usePasswordSignInText?: string;
   /** Description shown above the form in SSO-only mode (defaults to "Sign in with your organization's single sign-on"). */
   ssoOnlyDescription?: string;
+  /**
+   * Shown in place of the form when the server offers no way to sign in:
+   * email+password sign-in is off and it advertises no SSO, no social or OIDC
+   * provider and no phone sign-in (defaults to "No sign-in method is
+   * available. Contact your administrator.").
+   */
+  noSignInMethodText?: string;
   /** Accessible name of the password field's reveal toggle while the password is hidden (defaults to "Show password"). */
   showPasswordText?: string;
   /** Accessible name of the password field's reveal toggle while the password is shown (defaults to "Hide password"). */
   hidePasswordText?: string;
+  /** objectstack#29105 — Title of the two-factor step (defaults to "Two-factor authentication"). */
+  twoFactorTitle?: string;
+  /** objectstack#29105 — What the two-factor step asks for, authenticator mode. */
+  twoFactorDescription?: string;
+  /** objectstack#29105 — What the two-factor step asks for, backup-code mode. */
+  twoFactorBackupDescription?: string;
+  /** objectstack#29105 — Label of the authenticator code field (defaults to "Authentication code"). */
+  twoFactorCodeLabel?: string;
+  /** objectstack#29105 — Label of the backup code field (defaults to "Backup code"). */
+  twoFactorBackupCodeLabel?: string;
+  /** objectstack#29105 — The two-factor step's submit button (defaults to "Verify"). */
+  twoFactorVerifyButton?: string;
+  /** objectstack#29105 — The submit button while the code is checked (defaults to "Verifying…"). */
+  twoFactorVerifyingButton?: string;
+  /** objectstack#29105 — Link that switches the step to a backup code. */
+  twoFactorUseBackupCodeText?: string;
+  /** objectstack#29105 — Link that switches the step back to the authenticator code. */
+  twoFactorUseAuthenticatorText?: string;
+  /** objectstack#29105 — Link that abandons the two-factor step for the password step. */
+  twoFactorBackText?: string;
 }
 
 export interface LoginFormProps {
@@ -211,7 +241,15 @@ export function LoginForm({
   labels = {},
   errorMessages,
 }: LoginFormProps) {
-  const { signIn, isLoading, getAuthConfig, sendPhoneOtp, signInWithPhoneOtp, signInWithPhonePassword } = useAuth();
+  const {
+    signIn,
+    isLoading,
+    getAuthConfig,
+    sendPhoneOtp,
+    signInWithPhoneOtp,
+    signInWithPhonePassword,
+    twoFactorChallenge,
+  } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   // The password field's reveal toggle. Local and ephemeral on purpose: a
@@ -245,10 +283,16 @@ export function LoginForm({
   const [ssoEnabled, setSsoEnabled] = useState(false);
   // SSO-only ("enforced") mode: the server locks the team login to the IdP.
   // Hide the local password form + sign-up; show the federated button(s) plus
-  // an understated break-glass link. `emailPassword.enabled === false` is a
-  // belt-and-suspenders fallback for older servers that signal the lock that
-  // way. Defaults to false (a failed config fetch never hides the form).
+  // an understated break-glass link. Only the server's own declaration,
+  // `features.ssoEnforced`, turns it on: it keeps `emailPassword.enabled` true
+  // for break-glass, so `enabled === false` means the password door is shut,
+  // not that an IdP is in front of it. Defaults to false (a failed config
+  // fetch never hides the form).
   const [ssoEnforced, setSsoEnforced] = useState(false);
+  // The server turned email+password sign-in off (`emailPassword.enabled ===
+  // false`) and refuses that form. Defaults to false: a failed config fetch
+  // still shows the password form (break-glass beats lock-out).
+  const [passwordSignInOff, setPasswordSignInOff] = useState(false);
   // Break-glass: reveal the password form for the env owner / local admin even
   // under enforced mode (e.g. during an IdP outage).
   const [showPasswordFallback, setShowPasswordFallback] = useState(false);
@@ -273,10 +317,12 @@ export function LoginForm({
         setSsoEnabled(config?.features?.sso === true);
         setPhoneOtpEnabled(config?.features?.phoneNumberOtp === true);
         setPhonePasswordEnabled(config?.features?.phoneNumber === true);
-        setSsoEnforced(
-          config?.features?.ssoEnforced === true ||
-            config?.emailPassword?.enabled === false,
-        );
+        setSsoEnforced(config?.features?.ssoEnforced === true);
+        setPasswordSignInOff(config?.emailPassword?.enabled === false);
+        // Read here as well as from `SocialSignInButtons`' callback, so the
+        // no-method state below is decided with the config, never painted
+        // before the provider list lands.
+        setHasSocialProviders((config?.socialProviders ?? []).some((p) => p.enabled));
       })
       .catch(() => {
         // SSO is an enhancement, not required — leave the buttons/form hidden
@@ -290,9 +336,20 @@ export function LoginForm({
     };
   }, [getAuthConfig]);
 
-  // Under enforced mode the password form is collapsed until the user opts into
-  // the break-glass path; otherwise it's always shown.
-  const passwordFormVisible = !ssoEnforced || showPasswordFallback;
+  // Under enforced mode, and when the server has turned the password door off,
+  // the password form is collapsed until the user opts into the break-glass
+  // path; otherwise it's always shown.
+  const passwordFormCollapsed = ssoEnforced || passwordSignInOff;
+  const passwordFormVisible = !passwordFormCollapsed || showPasswordFallback;
+  // The break-glass link reveals the password form, so it is offered only
+  // while that form holds a password door the server accepts: email+password
+  // itself, or phone+password sign-in. The SSO button needs no link: the
+  // SSO-only view draws it on first paint (`ssoEmailFormVisible` below).
+  const breakGlassOffered = !passwordSignInOff || phonePasswordEnabled;
+  // Nothing the server advertises lets anyone in: say so, instead of SSO copy
+  // with no SSO affordance and a password link the server refuses.
+  const noSignInMethod =
+    passwordSignInOff && !ssoEnabled && !hasSocialProviders && !phonePasswordEnabled && !phoneOtpEnabled;
 
   const l = {
     emailLabel: labels.emailLabel ?? 'Email',
@@ -311,6 +368,8 @@ export function LoginForm({
     backToSsoText: labels.backToSsoText ?? 'Back to single sign-on',
     ssoOnlyDescription:
       labels.ssoOnlyDescription ?? "Sign in with your organization's single sign-on",
+    noSignInMethodText:
+      labels.noSignInMethodText ?? 'No sign-in method is available. Contact your administrator.',
     phoneLabel: labels.phoneLabel ?? 'Phone number',
     phonePlaceholder: labels.phonePlaceholder ?? '+1 555 000 0000',
     otpCodeLabel: labels.otpCodeLabel ?? 'Verification code',
@@ -321,6 +380,16 @@ export function LoginForm({
     usePasswordSignInText: labels.usePasswordSignInText ?? 'Sign in with password instead',
     showPasswordText: labels.showPasswordText ?? 'Show password',
     hidePasswordText: labels.hidePasswordText ?? 'Hide password',
+    twoFactorTitle: labels.twoFactorTitle ?? 'Two-factor authentication',
+    twoFactorDescription: labels.twoFactorDescription ?? 'Enter the 6-digit code from your authenticator app.',
+    twoFactorBackupDescription: labels.twoFactorBackupDescription ?? 'Enter one of the backup codes you saved when you set up two-factor authentication.',
+    twoFactorCodeLabel: labels.twoFactorCodeLabel ?? 'Authentication code',
+    twoFactorBackupCodeLabel: labels.twoFactorBackupCodeLabel ?? 'Backup code',
+    twoFactorVerifyButton: labels.twoFactorVerifyButton ?? 'Verify',
+    twoFactorVerifyingButton: labels.twoFactorVerifyingButton ?? 'Verifying…',
+    twoFactorUseBackupCodeText: labels.twoFactorUseBackupCodeText ?? 'Use a backup code instead',
+    twoFactorUseAuthenticatorText: labels.twoFactorUseAuthenticatorText ?? 'Use your authenticator app instead',
+    twoFactorBackText: labels.twoFactorBackText ?? 'Back to sign in',
   };
 
   // Tick the resend cooldown down once per second while it's armed.
@@ -346,7 +415,16 @@ export function LoginForm({
         // code) or the phoneNumber lookup fails.
         await signInWithPhonePassword(normalizePhoneIdentifier(identifier) ?? identifier, password);
       } else {
-        await signIn(identifier, password);
+        const { twoFactorRequired } = await signIn(identifier, password);
+        if (twoFactorRequired) {
+          // Password accepted; the account has two-factor sign-in on. The
+          // provider now holds the challenge and this form draws the code
+          // step (objectstack#29105). Nothing is signed in yet, so the host
+          // hears `onSuccess` only once the code is verified.
+          setPassword('');
+          setPasswordVisible(false);
+          return;
+        }
       }
       onSuccess?.();
     } catch (err) {
@@ -423,8 +501,47 @@ export function LoginForm({
     }
   };
 
-  // The SSO-only view: enforced mode with the break-glass form still closed.
-  const ssoOnlyView = ssoEnforced && !showPasswordFallback;
+  // The collapsed view: enforced mode, or the password door shut, with the
+  // break-glass form still closed.
+  const ssoOnlyView = passwordFormCollapsed && !showPasswordFallback;
+  // Its SSO copy is drawn only when single sign-on is what the server offers:
+  // its own enforcement declaration, or the SSO button. Never while the
+  // server answers `features.sso: false` with no enforcement.
+  const ssoOnlyCopy = ssoOnlyView && !noSignInMethod && (ssoEnforced || ssoEnabled);
+  // When the password form is collapsed (declared enforcement, or the password
+  // door shut) and the server advertises SSO, the SSO button IS the way in, so
+  // the SSO-only view draws it on first paint with the email field it routes,
+  // and no password field. It used to live only inside the password form,
+  // reachable solely through the break-glass link.
+  const ssoEmailFormVisible = ssoOnlyView && ssoEnabled;
+
+  // objectstack#29105 — a password sign-in waiting for its second factor,
+  // whoever started it (this form, or another `signIn` caller on the page).
+  if (twoFactorChallenge) {
+    return (
+      <TwoFactorChallengeForm
+        challenge={twoFactorChallenge}
+        hideHeader={hideHeader}
+        hideIcon={hideIcon}
+        errorMessages={errorMessages}
+        onSuccess={onSuccess}
+        onError={onError}
+        onChallengeEnded={setError}
+        strings={{
+          title: l.twoFactorTitle,
+          description: l.twoFactorDescription,
+          backupDescription: l.twoFactorBackupDescription,
+          codeLabel: l.twoFactorCodeLabel,
+          backupCodeLabel: l.twoFactorBackupCodeLabel,
+          verifyButton: l.twoFactorVerifyButton,
+          verifyingButton: l.twoFactorVerifyingButton,
+          useBackupCodeText: l.twoFactorUseBackupCodeText,
+          useAuthenticatorText: l.twoFactorUseAuthenticatorText,
+          backText: l.twoFactorBackText,
+        }}
+      />
+    );
+  }
 
   return (
     // `sm:max-w-[400px]`, not a fixed `sm:w-[400px]`: identical wherever the
@@ -436,7 +553,7 @@ export function LoginForm({
       }`}
     >
       {hideHeader ? (
-        ssoOnlyView ? (
+        ssoOnlyCopy ? (
           <p className="text-[13px] leading-relaxed text-muted-foreground">{l.ssoOnlyDescription}</p>
         ) : null
       ) : (
@@ -447,7 +564,13 @@ export function LoginForm({
           // known yet, and the password form's copy would greet an SSO-only
           // deployment (objectui#12682).
           description={
-            configPending ? undefined : ssoOnlyView ? l.ssoOnlyDescription : description
+            configPending || noSignInMethod
+              ? undefined
+              : ssoOnlyView
+                ? ssoOnlyCopy
+                  ? l.ssoOnlyDescription
+                  : undefined
+                : description
           }
         />
       )}
@@ -459,6 +582,16 @@ export function LoginForm({
           <div className="flex justify-center py-10" role="status" aria-live="polite" data-testid="login-config-loading">
             <AuthSpinner />
           </div>
+        ) : noSignInMethod ? (
+          /* No door the server accepts: a plain statement, and nothing to
+             click that the server would refuse. */
+          <p
+            role="status"
+            data-testid="login-no-sign-in-method"
+            className="py-6 text-center text-sm leading-relaxed text-muted-foreground"
+          >
+            {l.noSignInMethodText}
+          </p>
         ) : (
         <>
         {/* Unset labels stay `undefined` here, so the component's own English
@@ -468,7 +601,7 @@ export function LoginForm({
         <SocialSignInButtons
           mode="sign-in"
           dividerText={labels.orText}
-          hideDivider={!passwordFormVisible}
+          hideDivider={!passwordFormVisible && !ssoEmailFormVisible}
           buttonText={labels.socialButton}
           onProvidersResolved={(hasProviders) => setHasSocialProviders(hasProviders)}
         />
@@ -522,7 +655,7 @@ export function LoginForm({
                 type="button"
                 onClick={handleSendOtp}
                 disabled={otpSending || otpCooldown > 0 || !phone.trim() || isLoading}
-                className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50"
+                className={`shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50 ${AUTH_TOUCH_TARGET_CLASS}`}
               >
                 {otpSending && <AuthSpinner />}
                 {otpCooldown > 0
@@ -544,7 +677,7 @@ export function LoginForm({
           <button
             type="button"
             onClick={() => switchMode('password')}
-            className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+            className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
           >
             {l.usePasswordSignInText}
           </button>
@@ -584,7 +717,7 @@ export function LoginForm({
               {forgotPasswordUrl && (
                 <LinkComp
                   href={forgotPasswordUrl}
-                  className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+                  className={`inline-flex items-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
                 >
                   {l.forgotPasswordText}
                 </LinkComp>
@@ -600,7 +733,7 @@ export function LoginForm({
                 required
                 autoComplete="current-password"
                 disabled={isLoading}
-                className={`${AUTH_INPUT_CLASS} pr-10`}
+                className={`${AUTH_INPUT_CLASS} pr-12 sm:pr-10`}
               />
               <button
                 type="button"
@@ -611,7 +744,7 @@ export function LoginForm({
                 aria-label={passwordVisible ? l.hidePasswordText : l.showPasswordText}
                 aria-controls="login-password"
                 disabled={isLoading}
-                className="absolute right-1.5 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-50"
+                className="absolute right-0 top-1/2 inline-flex size-11 -translate-y-1/2 sm:right-1.5 sm:size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-50"
               >
                 {passwordVisible ? <EyeOffIcon /> : <EyeIcon />}
               </button>
@@ -633,7 +766,7 @@ export function LoginForm({
               onClick={handleSso}
               disabled={isLoading || ssoSubmitting}
               aria-busy={ssoSubmitting}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50"
+              className={`flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50 ${AUTH_TOUCH_TARGET_CLASS}`}
             >
               {ssoSubmitting && <AuthSpinner />}
               {l.ssoButton}
@@ -644,7 +777,7 @@ export function LoginForm({
             <button
               type="button"
               onClick={() => switchMode('phone-otp')}
-              className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+              className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
             >
               {l.usePhoneOtpText}
             </button>
@@ -652,11 +785,11 @@ export function LoginForm({
 
           {/* Break-glass form was opened under enforced mode — let the user
               collapse back to the SSO-only view. */}
-          {ssoEnforced && showPasswordFallback && (
+          {passwordFormCollapsed && showPasswordFallback && (
             <button
               type="button"
               onClick={() => setShowPasswordFallback(false)}
-              className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+              className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
             >
               {l.backToSsoText}
             </button>
@@ -669,20 +802,59 @@ export function LoginForm({
              link to the password form for the env owner / local admin. */
           <div className="space-y-4">
             {error && <AuthErrorBanner message={error} />}
-            <button
-              type="button"
-              onClick={() => setShowPasswordFallback(true)}
-              className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
-            >
-              {l.usePasswordText}
-            </button>
+            {ssoEmailFormVisible && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleSso();
+                }}
+                className="space-y-4"
+                data-testid="login-sso-email-form"
+              >
+                <div className="space-y-2">
+                  <label htmlFor="login-sso-email" className={AUTH_FIELD_LABEL_CLASS}>
+                    {l.emailLabel}
+                  </label>
+                  <input
+                    id="login-sso-email"
+                    type="email"
+                    inputMode="email"
+                    placeholder={l.emailPlaceholder}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="username"
+                    disabled={ssoSubmitting}
+                    className={AUTH_INPUT_CLASS}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={ssoSubmitting}
+                  aria-busy={ssoSubmitting}
+                  className={AUTH_PRIMARY_BUTTON_CLASS}
+                >
+                  {ssoSubmitting && <AuthSpinner />}
+                  {l.ssoButton}
+                </button>
+              </form>
+            )}
+            {breakGlassOffered && (
+              <button
+                type="button"
+                onClick={() => setShowPasswordFallback(true)}
+                className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
+              >
+                {l.usePasswordText}
+              </button>
+            )}
           </div>
         )}
         </>
         )}
       </div>
 
-      {registerUrl && !ssoEnforced && (
+      {registerUrl && !passwordFormCollapsed && (
         <p className="px-8 text-center text-[13px] text-muted-foreground">
           {l.noAccountText}{' '}
           <LinkComp href={registerUrl} className={AUTH_LINK_CLASS}>

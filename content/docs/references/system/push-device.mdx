@@ -1,0 +1,48 @@
+---
+title: Push Device schema — System Protocol reference
+navTitle: Push Device
+description: "Push Device schemas of the ObjectStack System Protocol: UserDevice — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/system/push-device.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { UserDeviceSchema } from '@objectstack/spec/system';
+import type { UserDevice } from '@objectstack/spec/system';
+
+// Validate data
+const result = UserDeviceSchema.parse(data);
+```
+
+---
+
+## UserDevice
+
+A push device of one user: one row per app install
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **deviceId** | `string` | ✅ | Client-held device id, stable per app install: the one the registration carried or the server minted. Unique per user |
+| **userId** | `string` | ✅ | The user the device belongs to: the session user who registered it. No organization member |
+| **vendor** | `Enum<'apns' \| 'fcm'>` | ✅ | Push vendor the token belongs to: the registration's vendor, or the one derived from platform |
+| **token** | `string` | ✅ | Vendor push token. Held by one live device at a time: a second user's registration moves it |
+| **platform** | `Enum<'ios' \| 'android' \| 'web'>` | ✅ | Device platform, as the registration named it |
+| **appId** | `string` | optional | App the token was issued to: the iOS bundle ID or the Android application ID |
+| **locale** | `string` | optional | Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in |
+| **name** | `string` | optional | Device friendly name, as the registration named it |
+| **origin** | `string` | optional | [PLANNED — not yet stored] The origin the Console was loaded from, as the registration named it (for example https://crm.example.com). The device registry keeps it on the row and the push channel copies it into every push to this device, where the mobile shell picks the saved server by it. Absent on a device registered without one |
+| **enabled** | `boolean` | ✅ | False once the vendor reported the token dead; nothing is delivered to a disabled device |
+| **invalidatedAt** | `string` | optional | When the vendor reported the token dead. Present exactly while enabled is false: absent on an enabled device, and cleared by the registration that re-enables it |
+| **lastSeenAt** | `string` | optional | When the device last registered or refreshed. Every registration and refresh sets it, so it is absent only on a row no registration wrote; listDevices answers such a device last |
+
+
+---
+

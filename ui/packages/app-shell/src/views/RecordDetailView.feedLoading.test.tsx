@@ -37,9 +37,13 @@
  *   1. during the fetch → loading row, no empty copy;
  *   2. after BOTH parallel reads settle with nothing → empty copy, no
  *      spinner (one settled read is not an answer);
- *   3. after a read REJECTS → still the empty copy. A rejected fetch is an
- *      answer too; the alternative is a panel that spins forever, which is
- *      strictly worse than the bug being fixed.
+ *   3. after a read REJECTS → no spinner. A rejected fetch is an answer too;
+ *      the alternative is a panel that spins forever, which is strictly worse
+ *      than the bug being fixed. A 404 settles on the empty copy; a refused
+ *      read (403) on its no-permission line (objectui#11195). Each rejection
+ *      carries the status the ObjectStack client puts on it: a rejection with
+ *      no status is a network failure, which shows the load-failure notice
+ *      (objectstack#29188).
  */
 
 import * as React from 'react';
@@ -106,6 +110,12 @@ const OBJECTS = [
 
 /** A promise that never settles — "the fetch is still in flight". */
 const pending = () => new Promise(() => {});
+/**
+ * A rejected read in the shape the ObjectStack client throws it: the HTTP
+ * status on `httpStatus` and the ADR-0112 code on `code`.
+ */
+const rejection = (httpStatus: number, code: string) =>
+  Object.assign(new Error(`${httpStatus} ${code}`), { httpStatus, code });
 
 interface FeedResponses {
   sys_comment: () => Promise<any>;
@@ -294,20 +304,23 @@ describe('RecordDetailView — the feed fetch produces a loading signal (#3209)'
     // this fix would trade "wrongly says empty" for "spins forever", which is
     // the worse bug.
     const dataSource = makeDataSource({
-      sys_comment: () => Promise.reject(new Error('403 FEEDS_DISABLED')),
-      sys_activity: () => Promise.reject(new Error('404 sys_activity')),
+      sys_comment: () => Promise.reject(rejection(403, 'FEEDS_DISABLED')),
+      sys_activity: () => Promise.reject(rejection(404, 'OBJECT_NOT_FOUND')),
     });
 
     renderDetail(dataSource);
 
-    expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
+    // The refused comment read settles on its no-permission line, the 404 on
+    // nothing: an answer either way, never a spinner.
+    const notice = await screen.findByTestId('activity-access-denied');
+    expect(notice.querySelector('[data-denied-source="comments"]')).not.toBeNull();
     expect(screen.queryByTestId('activity-loading')).toBeNull();
   });
 
   it('leaves the loading state when only one read rejects and the other resolves empty', async () => {
     const dataSource = makeDataSource({
       sys_comment: () => Promise.resolve({ data: [] }),
-      sys_activity: () => Promise.reject(new Error('404 sys_activity')),
+      sys_activity: () => Promise.reject(rejection(404, 'OBJECT_NOT_FOUND')),
     });
 
     renderDetail(dataSource);
@@ -329,7 +342,7 @@ describe('RecordDetailView — the feed fetch produces a loading signal (#3209)'
             },
           ],
         }),
-      sys_activity: () => Promise.reject(new Error('404 sys_activity')),
+      sys_activity: () => Promise.reject(rejection(404, 'OBJECT_NOT_FOUND')),
     });
 
     renderDetail(dataSource);
@@ -368,13 +381,14 @@ describe('RecordDetailView — an AUTHORED discussion node is on the same chain 
 
   it('leaves the loading state when both reads reject', async () => {
     const dataSource = makeDataSource({
-      sys_comment: () => Promise.reject(new Error('403 FEEDS_DISABLED')),
-      sys_activity: () => Promise.reject(new Error('404 sys_activity')),
+      sys_comment: () => Promise.reject(rejection(403, 'FEEDS_DISABLED')),
+      sys_activity: () => Promise.reject(rejection(404, 'OBJECT_NOT_FOUND')),
     });
 
     renderDetail(dataSource, [AUTHORED_PAGE_WITH_DISCUSSION]);
 
-    expect(await screen.findByText(AUTHORED_EMPTY_COMMENTS)).toBeTruthy();
+    const notice = await screen.findByTestId('activity-access-denied');
+    expect(notice.querySelector('[data-denied-source="comments"]')).not.toBeNull();
     expect(screen.queryByTestId('activity-loading')).toBeNull();
   });
 });

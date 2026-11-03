@@ -109,6 +109,7 @@ import {
   structuralConditionRefusal,
   closedScopeTemplateRefusal,
   templateSlotSource,
+  resolveFlowTriggerKind,
 } from '@objectstack/spec/automation';
 // [#24798] A bulk action's `confirmText` is a `template` slot over the closed
 // scope the spec declares for it — judged below by the same template judge.
@@ -150,8 +151,8 @@ import {
 } from './flow-cel-root-scope.js';
 import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
-import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
-import type { NullGuardOutcome } from './validate-null-guards.js';
+import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
+import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
 import { recordsOf } from './object-graph.js';
 export interface ExprIssue {
   where: string;
@@ -455,8 +456,9 @@ function fieldEntries(obj: AnyRec): Array<[string, AnyRec]> {
  * Deliberately conservative — this feeds a **build-breaking** verdict, so every
  * uncertainty resolves to "not nullable" (no finding). A field is treated as
  * always-valued when it is `required`, carries a `defaultValue`, declares a
- * default option (`options: [{ …, default: true }]` — the select idiom), or is
- * an autonumber the platform populates.
+ * default option (`options: [{ …, default: true }]` — the select idiom), is
+ * an autonumber the platform populates, or is a `count` / `sum` roll-up
+ * summary ({@link isAlwaysValuedSummary}).
  *
  * The select-idiom branch is grounded, not assumed (#7246). It was the only
  * consumer of `SelectOption.default` anywhere in the repo while the insert path
@@ -474,6 +476,7 @@ function isNullableField(def: AnyRec): boolean {
   if (def.required === true) return false;
   if (def.defaultValue !== undefined && def.defaultValue !== null) return false;
   if (def.type === 'autonumber') return false;
+  if (isAlwaysValuedSummary(def)) return false;
   const options = def.options;
   if (Array.isArray(options) && options.some((o) => !!o && typeof o === 'object' && (o as AnyRec).default === true)) {
     return false;
@@ -493,6 +496,40 @@ function isNullableField(def: AnyRec): boolean {
  * needs the registry's column definitions, not this module's guesses. Leaving
  * them out costs coverage, never a false error.
  */
+/**
+ * [#29026] A `count` / `sum` roll-up summary is always valued: zero children is
+ * zero. `@objectstack/objectql`'s `summaryEmptySetValue` is the authority — the
+ * engine seeds a new parent row with it at create time
+ * (`initializeSummaryFields`) and falls back to it when a child write's
+ * recompute over no rows answers `null` — and this package may not import a
+ * runtime, so the two functions are named here. A `min` / `max` / `avg` over
+ * no rows IS `null`, and stays nullable.
+ *
+ * This judgment PRESUMES the one-off `os migrate summary-nulls` ran. Nothing
+ * backfills a stored `NULL` automatically: a parent row stored before the
+ * create-time seed shipped, and never visited by a child write since, keeps
+ * its `NULL` until that migration (`summary-backfill.ts`) recomputes it. On a
+ * database upgraded in place without it, such a row reads `null`, and a
+ * predicate this gate passed faults on it — a validation rule then refuses the
+ * write. Measured on
+ * a record-triggered run: `showcase_expense_report.total_amount` (a `sum`)
+ * reads `0` on a report with no lines
+ * (`examples/app-showcase/test/notify-recipient-optional-fields.test.ts`).
+ */
+function isAlwaysValuedSummary(def: AnyRec): boolean {
+  if (def.type !== 'summary' || !def.summaryOperations || typeof def.summaryOperations !== 'object') return false;
+  const summaryOperations = def.summaryOperations as AnyRec;
+  return summaryOperations.function === 'count' || summaryOperations.function === 'sum';
+}
+
+/**
+ * [#29026] The names a flow run binds OVER the flattened record fields, so a
+ * bare read of one is never the field: `record` is set before the flattening
+ * (`seedRunVariables`), `previous` after it, and `vars` / `current_user` win in
+ * `celScope`. Subtracted from the null-guard gate's bare-name set.
+ */
+const FLOW_ENGINE_BOUND_NAMES: ReadonlySet<string> = new Set(['record', 'previous', 'vars', 'current_user']);
+
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
   const idx = new Map<string, Set<string>>();
   for (const obj of objects) {
@@ -2273,16 +2310,16 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * CEL evaluates over a record made **total** for every declared field
    * (`materializeDeclaredFields`, #1871/#4649) — today: object validation rules
    * (`rule-validator.ts`, fail-closed since #4761), lifecycle hook `condition`s,
-   * and field `requiredWhen` (#4811).
+   * field `requiredWhen` (#4811), and a record-triggered flow's start, edge and
+   * `decision` branch conditions (#29026, outcome `run-fails`).
    *
    * Totality is the criterion that can DISQUALIFY a surface: on a total binding
    * `has()` is uniformly true and `!= null` is the fix, while on a SPARSE one
    * `has()` is a genuine guard and `!= null` faults with `No such key` — so
    * pointing this gate at a sparse-bound surface would reject correct metadata
    * and prescribe a fix that breaks it. It is not by itself a licence to cover:
-   * since #6454 field `readonlyWhen` is total and still excluded, by clause 3 of
-   * the #4953 ruling (the gate widens only once BOTH server-side seams are
-   * total, and the flow trigger-record half is not wired yet).
+   * since #6454 field `readonlyWhen` is total and still excluded — its widening
+   * is a card of its own that nobody has taken (clause 3 of the #4953 ruling).
    * `validate-null-guards.ts` carries the measured evidence table and the
    * per-surface ledger (action predicates, flow conditions, field
    * `readonlyWhen`, sharing rules and `Field.formula` are each excluded there
@@ -2298,13 +2335,15 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // explicitly rather than inferred, because the two possibilities are
     // opposite failures and the message has to name the right one (#4811).
     outcome: NullGuardOutcome = 'fail-closed',
+    // [#29026] A flow's flattened bare names and its start condition's proofs.
+    scope: Pick<NullGuardOptions, 'bareFields' | 'presumed'> = {},
   ): void => {
     if (!objectName) return;
     const nullableFields = nullableIndex.get(objectName);
     if (!nullableFields || nullableFields.size === 0) return;
     const source = celSourceOf(raw);
     if (!source) return;
-    for (const finding of findUnguardedNullableOperands(source, { nullableFields })) {
+    for (const finding of findUnguardedNullableOperands(source, { nullableFields, ...scope })) {
       issues.push({
         where,
         message: nullGuardMessage(subject, objectName, finding, outcome),
@@ -2641,6 +2680,44 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     };
 
     /**
+     * [#29026] The null-guard gate on this flow's start, edge and `decision`
+     * branch conditions — on a RECORD-TRIGGERED flow only, the one entrance
+     * that makes the run's `record` / `previous` total
+     * (`record-change-trigger.ts` `buildContext`); `validate-null-guards.ts`'s
+     * ledger, flow row, carries the measurements behind each choice here.
+     *
+     *  - Bare names: the run flattens the record's fields, nulls included, to
+     *    top level wherever no variable holds the name, so a bare `budget` IS
+     *    `record.budget` — judged only while the flow's bound set is provable
+     *    (`rootScope`: no node can bind a name the reader cannot see) and the
+     *    name is not a declared variable or node id, which win. The names the
+     *    engine binds over the flattening (`previous`, and `vars` /
+     *    `current_user` in `celScope`) are never the field.
+     *  - The start condition gates every run before any node, so what it
+     *    proves non-null is presumed at every edge and branch downstream.
+     *  - Outcome `run-fails`: the condition throws, the run fails, and the
+     *    trigger isolates the write that fired it.
+     */
+    const nullGuardObject = resolveFlowTriggerKind(flow) === 'record_change' ? objectName : undefined;
+    const nullGuardBare = new Set<string>();
+    if (nullGuardObject && rootScope.provable) {
+      for (const name of nullableIndex.get(nullGuardObject) ?? []) {
+        if (!declaredVariables.has(name) && !FLOW_ENGINE_BOUND_NAMES.has(name)) nullGuardBare.add(name);
+      }
+    }
+    const startConditionSource = nullGuardObject ? celSourceOf(startCfg.condition) : undefined;
+    const nullGuardPresumed = startConditionSource
+      ? provenNonNullKeys(startConditionSource, { bareFields: nullGuardBare })
+      : new Set<string>();
+    const checkFlowNullGuards = (where: string, raw: unknown, afterStart: boolean): void => {
+      if (!nullGuardObject) return;
+      checkNullGuards(where, where, raw, nullGuardObject, 'run-fails', {
+        bareFields: nullGuardBare,
+        ...(afterStart ? { presumed: nullGuardPresumed } : {}),
+      });
+    };
+
+    /**
      * [#14089] The one bare-identifier case a flattened flow scope may not stay
      * silent about: a name bound as BOTH a declared flow variable and a field on
      * the bound object. The variable wins at runtime and nothing says so, which
@@ -2758,6 +2835,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           check(nodeCondWhere, cfg.condition, objectName);
           warnShadowedFieldReads(nodeCondWhere, cfg.condition);
           refuseUnboundRoots(nodeCondWhere, cfg.condition, from, 'predicate');
+          // [#29026] The start node's is the trigger gate; on any other node
+          // the key is inert (`flow-inert-node-condition` says so) and judging
+          // it would only add a second finding about a predicate nothing runs.
+          if (node.type === 'start' && graph.path.length === 0) checkFlowNullGuards(nodeCondWhere, cfg.condition, false);
         }
 
         // Descriptor-declared expression slots (#4027). Before this, the traversal
@@ -2855,6 +2936,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           warnShadowedFieldReads(slotWhere, found.value);
           // [#22565] The same scope again, judged for roots the run cannot bind.
           refuseUnboundRoots(slotWhere, found.value, slotFrom, 'predicate');
+          // [#29026] A `decision` branch is evaluated by the engine's
+          // `evaluateCondition`, like an edge. The other `predicate` slots
+          // (a screen field's `visibleWhen`) fault into another outcome, which
+          // nobody has measured, so they are not judged here.
+          if (nodeType === 'decision') checkFlowNullGuards(slotWhere, found.value, true);
         }
         // [#19939] The `{…}` template dialect is retired from the value slots
         // (the C half of #11182 ruling D, which this replaced: until then a
@@ -2981,6 +3067,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           check(edgeCondWhere, edge.condition, objectName);
           warnShadowedFieldReads(edgeCondWhere, edge.condition);
           refuseUnboundRoots(edgeCondWhere, edge.condition, from, 'predicate');
+          checkFlowNullGuards(edgeCondWhere, edge.condition, true);
         }
         // [#26858] A top-level edge's findings also carry the slot's key path,
         // indexed over the list the author wrote (the coerced one drops `null`
@@ -2993,29 +3080,6 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           for (let k = first; k < issues.length; k++) issues[k] = { ...issues[k]!, path };
         }
       }
-      // No `checkNullGuards` on node/edge conditions — and NOT for the reason
-      // #4811 first recorded (#4811 re-measured it). The stated blocker was the
-      // flattened scope: a bare identifier like `budget > 100000` might be a flow
-      // variable rather than a field. That is true of a bare-identifier checker,
-      // but this gate never resolves a bare identifier — it matches only
-      // `record.<f>` / `previous.<f>`, and the engine binds both roots
-      // unconditionally, so it is immune to that ambiguity.
-      //
-      // The real blocker is totality. `record-change-trigger.ts` seeds the flow's
-      // record as `{ ...(inputData ?? {}), ...after }` (spelled `inputDoc` until
-      // #5671 dropped that alias read) with no `materializeDeclaredFields`,
-      // so a declared column the write never mentioned is an ABSENT key, not a
-      // null one — and there `record.x != null` faults (`No such key`) exactly
-      // like the comparison it was meant to guard. The gate's prescription is
-      // unsound on this surface until the trigger's record is made total the way
-      // #4649 made the validation-rule and hook bindings total.
-      //
-      // (For the record, the flattened-scope ambiguity is separately real and
-      // would need its own criterion: flow inputs shadow record fields —
-      // `if (!variables.has(k))` in `AutomationEngine.execute` — and a node's
-      // `outputVariable` can overwrite either, so a sound bare-identifier pass
-      // must subtract flow inputs, every `outputVariable`, screen-collected
-      // variable names and node ids.)
     }
   }
 
@@ -3219,9 +3283,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // formulas are `value` role (any return type), still CEL. They are
         // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
         //
-        // No `checkNullGuards` here, and unlike the action / flow surfaces this
-        // is NOT a totality verdict (#4811). A formula is `value`-role and
-        // natively nullable, and `guard ? value : null` is the blessed shape
+        // No `checkNullGuards` here, and unlike the action surface (and a flow
+        // with no record trigger) this is NOT a totality verdict (#4811). A
+        // formula is `value`-role and natively nullable, and
+        // `guard ? value : null` is the blessed shape
         // (#3306 rewrites it through `dyn(...)`). Whether unguarded arithmetic
         // such as `record.budget - record.spent` should be *forbidden* here is a
         // question about what authors are allowed to write — a product decision

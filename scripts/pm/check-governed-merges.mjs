@@ -3,7 +3,7 @@
 
 /**
  * check-governed-merges — report-only post-merge audit of the governed
- * surfaces (#9495), across the five governed repos (#9619, #14867), plus the
+ * surfaces (#9495), across the six governed repos (#9619, #14867, mobile), plus the
  * pre-arm `--test` predicate every seat runs before flipping ready (#9550).
  * Enumerates the PRs that MERGED into `main` since a given date/ref whose diff
  * touched a governed surface — and, since #19036, every landing over
@@ -13,7 +13,7 @@
  * completed sweep exits 0 whether it found 0 or 40 entries; non-zero exits
  * classify the ENVIRONMENT, not the tree).
  *
- *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all five repos
+ *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all six repos
  *   node scripts/pm/check-governed-merges.mjs --since 7d       # or 36h, or ISO date
  *   node scripts/pm/check-governed-merges.mjs --since-ref v5.0.0-rc.3       # topological, exact
  *   node scripts/pm/check-governed-merges.mjs --since-ref objectstack=<tip> --since-ref objectui=<tip>
@@ -550,16 +550,16 @@
  * The same day, asked whether the rule reaches the sibling repos — 「任何对
  * agents.md 等文件的修改…包括 objectui cloud仓库」 — the maintainer answered
  * 「同意」. So the surface register above reaches every governed repository:
- * by default each row governs all five — `objectstack`, `objectui`, `cloud`,
- * `objectos` and `hotcrm` — and since the B2 ruling of 2026-10-13 (header
+ * by default each row governs all six — `objectstack`, `objectui`, `cloud`,
+ * `objectos`, `hotcrm` and `mobile` — and since the B2 ruling of 2026-10-13 (header
  * section "The register is scoped per row") a row may be scoped to a subset:
  * the `workflows` row names `objectstack`, `objectui` and `cloud`. This sweep
- * still covers all five repos in one invocation, judging each against the
+ * still covers all six repos in one invocation, judging each against the
  * rows that govern it; `--test` and `--branch` answer for ONE repository, the
  * checkout at `--root` (`checkoutRepoFor`), and say which one on stderr.
  *
  * ⚠️ The 2026-08-18 quotation above names two sibling repos and the register
- * below holds five, so read that quote as the repos IN VIEW that day — an
+ * below holds six, so read that quote as the repos IN VIEW that day — an
  * enumeration, never an exclusion, and never the register. The definition it
  * states (agent instruction files, judged the same across repos — still true
  * of every row that declares no `repos` scope) already covered `hotcrm`, a
@@ -617,7 +617,7 @@
  * asks whether the floor predates the window rather than whether the clone is
  * shallow, so a shallow container with enough depth — the common case, since
  * the default window is 24h — still sweeps exactly as before, with no fetch.
- * Deepening is never done here: this sweep reads five checkouts it does not
+ * Deepening is never done here: this sweep reads six checkouts it does not
  * own, so the remedy is printed as a command for the operator to run.
  *
  * ## And a DEAD MIRROR is the same fact again, in the direction that reads as
@@ -642,7 +642,7 @@
  * 2026-08-30 `hotcrm` was probed BY HAND, as a control this sweep had no row
  * for — it was not configured here until the 2026-09-03 ruling above. The
  * reading stands as measured; what changed is that those four names are now
- * four of the five repos this sweep audits itself.) Wherever that clone
+ * four of the six repos this sweep audits itself.) Wherever that clone
  * survives, this sweep
  * printed `✓ audited objectstack-ai/cloud — tip 15f55df2d ... 0 mainline
  * commit(s) in window` and exited 0 — and would have printed it FOREVER, since
@@ -1400,9 +1400,13 @@ export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) 
 }
 
 /**
- * The five governed repos: the four the 2026-08-18 cross-repo extension named,
+ * The six governed repos: the four the 2026-08-18 cross-repo extension named,
  * plus `hotcrm`, added by the 2026-09-03 ruling on #14867 (「其他同意」 → 纳入)
- * because the definition's own terms already covered it. `id` doubles as
+ * because the definition's own terms already covered it, plus `mobile`, the
+ * native shell that hosts the Console, registered as an on-demand repo lane
+ * by the maintainer's 2026-11-02 choice "Register, seat on demand
+ * (Recommended)". Its workflows stay outside the scoped `workflows` row, as
+ * hotcrm's do. `id` doubles as
  * the sibling directory name beside this checkout — the layout every session
  * container uses — and `--repo-root <id>=<path>` overrides it for any other
  * layout. A checkout whose `origin` remote is not `slug` is treated as ABSENT
@@ -1414,6 +1418,7 @@ export const GOVERNED_REPOS = Object.freeze([
   Object.freeze({ id: 'cloud', slug: 'objectstack-ai/cloud', what: 'the cloud repo' }),
   Object.freeze({ id: 'objectos', slug: 'objectstack-ai/objectos', what: 'the objectos repo' }),
   Object.freeze({ id: 'hotcrm', slug: 'objectstack-ai/hotcrm', what: 'the hotcrm exemplar app repo (#14867, ruled 2026-09-03)' }),
+  Object.freeze({ id: 'mobile', slug: 'objectstack-ai/mobile', what: 'the mobile native shell repo that hosts the Console (on-demand repo lane, 2026-11-02)' }),
 ]);
 
 export const SELF_REPO_ID = 'objectstack';
@@ -1992,7 +1997,7 @@ export const CALLER_DERIVED_NOTE =
 /**
  * `--pr`'s argument, as data. `16997` means this checkout's own repo; the
  * qualified spelling names any of the governed repos, because the PM audits
- * five of them from one checkout — and since the register is scoped per row,
+ * six of them from one checkout — and since the register is scoped per row,
  * the repository named here is also the one the verdict answers for. Pure.
  */
 export function parsePullTarget(value, selfSlug = null) {
@@ -4827,7 +4832,7 @@ async function selfTest() {
 
   // ── multi-repo scope (#9619) ──────────────────────────────────────────────
   battery('multi-repo scope (#9619)');
-  assert('five-governed-repos-declared', GOVERNED_REPOS.map((r) => r.id).join(',') === 'objectstack,objectui,cloud,objectos,hotcrm', GOVERNED_REPOS.map((r) => r.id).join(','));
+  assert('six-governed-repos-declared', GOVERNED_REPOS.map((r) => r.id).join(',') === 'objectstack,objectui,cloud,objectos,hotcrm,mobile', GOVERNED_REPOS.map((r) => r.id).join(','));
   // #14867: hotcrm pinned by SLUG as well as id. The defect this closes is not
   // a wrong row — it is NO row: an unconfigured repo prints nothing at all, so
   // a later removal would restore a silence indistinguishable from a clean
@@ -4849,7 +4854,7 @@ async function selfTest() {
   };
   const resolved = resolveRepoCheckouts({ selfRoot: '/w/objectstack', siblingDir: '/w', probe: (p) => layout[p] ?? { exists: false, slug: null } });
   const byId = Object.fromEntries(resolved.map((r) => [r.id, r]));
-  assert('all-five-repos-are-resolved-not-just-the-self-repo', resolved.length === 5);
+  assert('all-six-repos-are-resolved-not-just-the-self-repo', resolved.length === 6);
   // /w/hotcrm is absent from the layout too, so this fixture also pins the
   // property #14867 bought: a governed repo with no checkout is UNAUDITED and
   // says so, where an unconfigured repo said nothing.

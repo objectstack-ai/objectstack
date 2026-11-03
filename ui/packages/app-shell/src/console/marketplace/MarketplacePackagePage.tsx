@@ -1441,7 +1441,7 @@ export function MarketplacePackagePage() {
                         </span>
                       </div>
                       {v.release_notes && v.release_notes.trim() && (
-                        <p className="whitespace-pre-line pl-5 text-xs text-muted-foreground">{v.release_notes.trim()}</p>
+                        <MarkdownText source={v.release_notes.trim()} size="compact" className="pl-5" />
                       )}
                     </li>
                   ))}

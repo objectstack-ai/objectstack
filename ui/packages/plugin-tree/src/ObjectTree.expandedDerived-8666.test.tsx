@@ -156,7 +156,7 @@ function snapshot(container: HTMLElement): string {
   if (!container.querySelector('[data-testid="object-tree"]')) {
     const text = container.textContent ?? '';
     if (text.includes('Loading')) return 'loading';
-    if (text.includes('No records')) return 'empty';
+    if (text.includes('No data')) return 'empty';
     return 'nothing';
   }
   return `table:${drawnRows(container).length}rows`;

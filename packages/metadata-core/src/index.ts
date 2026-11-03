@@ -150,3 +150,9 @@ export * from './resolved-picklist-options.js';
 // and the registry fold's boot log, so the three cannot disagree about which
 // patch names a field or option its target lacks.
 export * from './extension-field-patch-targets.js';
+
+// [#29025] The judge of an undeclared cycle in a flow's top-level graph
+// (ADR-0044) — one judge for the engine's registration and the runtime
+// authoring gate the draft verdict and the publish doors run, so a flow the
+// engine refuses to register no longer reads valid and publishes.
+export * from './flow-cycle.js';

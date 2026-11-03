@@ -293,8 +293,12 @@ describe('MCPServerRuntime', () => {
 
     it('survives a metadata service that cannot list skills', async () => {
       const metadataService = createMockMetadataService();
+      const agents = await metadataService.list('agent');
       metadataService.list = vi.fn(async (type: string) => {
         if (type === 'skill') throw new Error('unknown metadata type');
+        // [#28940] The agents stay listed: `agent_prompt` is advertised only on
+        // a boot that holds one, and this case is about the skill read alone.
+        if (type === 'agent') return agents;
         return [];
       }) as any;
 

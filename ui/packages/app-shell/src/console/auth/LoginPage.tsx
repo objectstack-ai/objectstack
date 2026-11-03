@@ -203,6 +203,19 @@ export function LoginPage() {
           ssoOnlyDescription: t('auth.login.ssoOnlyDescription'),
           usePasswordText: t('auth.login.usePasswordText'),
           backToSsoText: t('auth.login.backToSsoText'),
+          noSignInMethodText: t('auth.login.noSignInMethodText'),
+          // The two-factor step a password sign-in leads to when the account
+          // has two-factor sign-in on (objectstack#29105).
+          twoFactorTitle: t('auth.login.twoFactorTitle'),
+          twoFactorDescription: t('auth.login.twoFactorDescription'),
+          twoFactorBackupDescription: t('auth.login.twoFactorBackupDescription'),
+          twoFactorCodeLabel: t('auth.login.twoFactorCodeLabel'),
+          twoFactorBackupCodeLabel: t('auth.login.twoFactorBackupCodeLabel'),
+          twoFactorVerifyButton: t('auth.login.twoFactorVerifyButton'),
+          twoFactorVerifyingButton: t('auth.login.twoFactorVerifyingButton'),
+          twoFactorUseBackupCodeText: t('auth.login.twoFactorUseBackupCodeText'),
+          twoFactorUseAuthenticatorText: t('auth.login.twoFactorUseAuthenticatorText'),
+          twoFactorBackText: t('auth.login.twoFactorBackText'),
         }}
       />
   );

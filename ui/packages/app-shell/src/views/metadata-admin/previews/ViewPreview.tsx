@@ -37,8 +37,9 @@ import { toInlineFormType } from './form-preview.js';
 import type { MetadataPreviewProps } from '../preview-registry.js';
 import { PreviewShell, PreviewErrorBoundary, PreviewMessage } from './PreviewShell.js';
 import { primaryVariantBinding } from '../view-variant-model.js';
-import { t as tr } from '../i18n.js';
+import { t as tr, tFormat } from '../i18n.js';
 import { withNodes } from './row-nodes.js';
+import { resolveFormViewChrome, type FormViewDefinition } from '../../../utils/recordFormNavigation.js';
 
 /**
  * The object a stored `view` draft is bound to, read under the spellings the
@@ -79,9 +80,15 @@ function toFormFieldEntry(f: unknown): string | Record<string, unknown> {
   return String(f);
 }
 
-function buildFormPreviewSchema(
+/**
+ * The `object-form` schema the form view canvas renders from a form view's
+ * `config` body: Studio Design and Run both draw through it. Exported for its
+ * pin (objectstack#29676); no other module reads it.
+ */
+export function buildFormPreviewSchema(
   objectName: string,
   body: Record<string, unknown>,
+  locale: string | undefined,
 ): Record<string, unknown> {
   const rawType = typeof body.type === 'string' ? body.type : 'simple';
   const formType = toInlineFormType(rawType);
@@ -100,9 +107,88 @@ function buildFormPreviewSchema(
     formType,
     sections,
     fields: Array.isArray(body.fields) ? body.fields : undefined,
+    // objectstack#29676 — the form view's keys `ObjectForm` and its layouts
+    // read, which this canvas dropped, so Studio Design and Run drew a view
+    // otherwise than the console does. `layout` (the label above or beside its
+    // control) goes through the console form hosts' own mapping,
+    // `resolveFormViewChrome`, so the canvas and the runtime read it one way;
+    // only its layout is taken, as the canvas draws no submit / cancel and
+    // seeds no create values. The rest are read as the record page reads
+    // them: `columns` by the field grid, `defaultTab` / `tabPosition` by the
+    // tabbed layout, `allowSkip` / `showStepIndicator` by the wizard.
+    layout: resolveFormViewChrome(body as FormViewDefinition, {
+      flow: 'create',
+      language: locale ?? 'en',
+      submitText: '',
+      cancelText: '',
+    }).layout,
+    columns: body.columns,
+    defaultTab: body.defaultTab,
+    tabPosition: body.tabPosition,
+    allowSkip: body.allowSkip,
+    showStepIndicator: body.showStepIndicator,
     showSubmit: false,
     showCancel: false,
   };
+}
+
+/**
+ * objectstack#29311 — where a served warning on a form view points, said with
+ * the section's own authored text: the section's `label` (resolved in the
+ * designer `locale`), else its `name`. The path is the item-relative one the
+ * server writes (`config.sections.0.fields.1`); `body` is the item's `config`.
+ * A path into no section is shown as the server wrote it, and an absent one
+ * names nothing.
+ */
+function warningPlace(path: string | undefined, body: Record<string, unknown>, locale: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const at = /^config\.sections\.(\d+)(?:\.|$)/.exec(path);
+  const section = at && Array.isArray(body.sections) ? (body.sections as unknown[])[Number(at[1])] : undefined;
+  if (!section || typeof section !== 'object') return path;
+  const s = section as { label?: Parameters<typeof resolveI18nLabel>[0]; name?: unknown };
+  const label = resolveI18nLabel(s.label, locale);
+  if (label && label.trim()) return label;
+  return typeof s.name === 'string' && s.name ? s.name : path;
+}
+
+/**
+ * objectstack#29311 — a form view's served warnings (a section naming a field
+ * its object lacks: the server's `form-field-unknown`), each at the section it
+ * points into, in the canvas's existing warn block. The message is the
+ * server's, as served. Errors are not this block's: the editor that holds the
+ * verdict says those. Nothing is drawn when there are none.
+ */
+function FormViewWarnings({
+  diagnostics,
+  body,
+  locale,
+}: {
+  diagnostics: MetadataPreviewProps['diagnostics'];
+  body: Record<string, unknown>;
+  locale: string | undefined;
+}) {
+  const warnings = (diagnostics ?? []).filter((d) => d.severity === 'warning');
+  if (warnings.length === 0) return null;
+  return (
+    <PreviewMessage tone="warn">
+      <div data-testid="view-form-warnings">
+        <div className="font-medium">
+          {tFormat('engine.edit.diagnostics.warnTitle', locale, { count: warnings.length })}
+        </div>
+        <ul className="mt-1 space-y-0.5 text-xs">
+          {warnings.map((w, i) => {
+            const place = warningPlace(w.path, body, locale);
+            return (
+              <li key={i} data-testid="view-form-warning" data-path={w.path} className="whitespace-normal break-words">
+                {place && <span className="font-medium">{place}: </span>}
+                {w.message}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </PreviewMessage>
+  );
 }
 
 /** The view's authored `label` as the preview heading; nothing when it is unauthored or empty. */
@@ -111,7 +197,7 @@ function ViewLabelHeading({ label }: { label: string | undefined }) {
   return <h3 className="border-b px-3 py-2 text-sm font-medium text-foreground truncate">{label}</h3>;
 }
 
-export function ViewPreview({ name, draft, editing, locale }: MetadataPreviewProps) {
+export function ViewPreview({ name, draft, editing, locale, diagnostics }: MetadataPreviewProps) {
   // The single ViewItem body (`draft.config`), or undefined for a raw schema.
   const body = React.useMemo(
     () => primaryVariantBinding(draft)?.schema,
@@ -208,10 +294,11 @@ export function ViewPreview({ name, draft, editing, locale }: MetadataPreviewPro
   // -------------------------------------------------------------------------
   if ((draft as any).viewKind === 'form' && body) {
     const rawType = String((body as any).type ?? 'simple');
-    const formSchema = buildFormPreviewSchema(objectName, body as Record<string, unknown>);
+    const formSchema = buildFormPreviewSchema(objectName, body as Record<string, unknown>, locale);
     return (
       <PreviewShell hint={`view · ${rawType} · form${designMode ? ' · design' : ''}`}>
         <ViewLabelHeading label={viewLabel} />
+        <FormViewWarnings diagnostics={diagnostics} body={body as Record<string, unknown>} locale={locale} />
         <PreviewErrorBoundary fallbackHint={tr('engine.viewPreview.formFailed', locale)}>
           <div className="min-h-[300px] max-h-[75vh] overflow-auto">
             <PreviewModeProvider><SchemaRenderer schema={formSchema as any} /></PreviewModeProvider>

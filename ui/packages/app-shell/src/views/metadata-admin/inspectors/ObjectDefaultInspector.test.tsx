@@ -9,6 +9,10 @@ import { ObjectDefaultInspector } from './ObjectDefaultInspector';
 // Resident before any case, so the zh rows below read synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
+// The pinyin dictionary a Chinese label derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690).
+import { loadHanRomanizer } from '../romanizeHan';
+await loadHanRomanizer();
 
 afterEach(cleanup);
 
@@ -285,5 +289,28 @@ describe('ObjectDefaultInspector — access section (ADR-0066 D2/D3/④/⑤)', (
     // to appear instead of racing a fixed timeout — a hardcoded 20ms sometimes
     // fired before the detect settled under CI load, yielding a flaky null.
     expect(await screen.findByTestId('object-reqperms-perop')).toBeInTheDocument();
+  });
+});
+
+describe('ObjectDefaultInspector — a Chinese label derives the name by pinyin (objectstack#29690)', () => {
+  it('fills weixiu_zhongxin from 维修中心, editable, until the name is typed', () => {
+    function Host() {
+      const [draft, setDraft] = React.useState<Record<string, unknown>>({ name: '' });
+      return (
+        <ObjectDefaultInspector
+          {...baseProps}
+          name=""
+          draft={draft}
+          onPatch={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+          readOnly={false}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(labelledInput('Label'), { target: { value: '维修中心' } });
+    expect(labelledInput('Name').value).toBe('weixiu_zhongxin');
+    fireEvent.change(labelledInput('Name'), { target: { value: 'repair_center' } });
+    fireEvent.change(labelledInput('Label'), { target: { value: '维修中心二' } });
+    expect(labelledInput('Name').value).toBe('repair_center');
   });
 });

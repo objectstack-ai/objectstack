@@ -1,7 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
+import { objectPermissionGrants, resolveObjectPermissionVerb } from '@objectstack/spec/security';
 import { MetadataTypeSchema } from '@objectstack/spec/kernel';
 import { SchemaRegistry } from './registry.js';
 // [#4550 / #5480] The producer's OWN write-verb dispatch decisions, so the
@@ -755,5 +759,57 @@ describe('#7557 (A) — isObjectPackageDisabled resolves names the way the READ 
     h.registry.disablePackage(PKG);
 
     expect(h.registry.isObjectPackageDisabled('never_existed')).toBe(false);
+  });
+});
+
+describe('[#28877] the effective permission map leaves out a disabled package\'s objects, as the data plane refuses them', () => {
+  // A plain wildcard (covers every registered public object), an explicit
+  // grant, and a super-user wildcard (seeds every registered object): the three
+  // ways an entry reaches the map, each asked of the disabled object.
+  const SETS = [
+    { objects: { '*': { allowRead: true, allowCreate: true } } },
+    { objects: { demo_widget: { allowRead: true, allowCreate: true, allowEdit: true } } },
+    { objects: { '*': { allowRead: true, viewAllRecords: true, modifyAllRecords: true } } },
+  ];
+  /** What `current_user.can(object, verb)` answers from the map (`@objectstack/formula`'s binding). */
+  const can = (map: Record<string, any>, object: string, verb: string) =>
+    objectPermissionGrants(Object.prototype.hasOwnProperty.call(map, object) ? map[object] : undefined, resolveObjectPermissionVerb(verb)!);
+  const mapOf = (registry: SchemaRegistry) =>
+    buildEffectiveObjectPermissions(SETS, {
+      allSchemas: () => registry.getAllObjects() as any,
+      schemaOf: (name) => registry.getObject(name) as any,
+      isObjectPackageDisabled: registryObjectPackageDisabled(registry),
+    });
+
+  it('control: enabled, the object is granted', async () => {
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    const map = mapOf(h.registry);
+    expect(can(map, 'demo_widget', 'create')).toBe(true);
+    expect(can(map, 'healthy_widget', 'create')).toBe(true);
+  });
+
+  it('disabled: the object leaves the map, so can(object, verb) answers false; the other package is untouched', async () => {
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    h.registry.disablePackage(PKG);
+    const map = mapOf(h.registry);
+    expect(Object.keys(map)).not.toContain('demo_widget');
+    for (const verb of ['read', 'create', 'edit', 'delete']) {
+      expect(can(map, 'demo_widget', verb), verb).toBe(false);
+    }
+    expect(can(map, 'healthy_widget', 'create')).toBe(true);
+    // The wildcard itself is not an object and stays.
+    expect(map['*']).toBeDefined();
+    // The same predicate the data plane's refusal reads.
+    expect(() => (h.protocol as any).assertObjectRegistered('demo_widget')).toThrow(expect.objectContaining({ code: 'OBJECT_PACKAGE_DISABLED' }));
+  });
+
+  it('re-enabled: the grant is back on the next build, with no restart', async () => {
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    h.registry.disablePackage(PKG);
+    h.registry.enablePackage(PKG);
+    expect(can(mapOf(h.registry), 'demo_widget', 'create')).toBe(true);
   });
 });

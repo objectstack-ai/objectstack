@@ -15,6 +15,14 @@
 # logic of its own: validate → mint → execute, with the checkout the scripts
 # need in front.
 #
+# ⛔ The payload never rides a step's `env:`. GitHub prints a step's
+# environment into the run log, this repository is public, and a payload may
+# carry a security report's text (the advisory rows of
+# `scripts/pm/fleet-write/ops.mjs`). Both scripts read `client_payload` from
+# the event file the runner writes (`$GITHUB_EVENT_PATH`), for every op; the
+# run name reads the request id alone. `validate.mjs --self-test` pins that no
+# `env:` here names `client_payload`.
+#
 # ⛔ The token this run WRITES with is the App installation token step 3
 # mints — narrowed to the payload's repository (and, for a `transfer` stroke
 # alone, that transfer's one target too: `transferIssue` needs issues write on
@@ -22,9 +30,11 @@
 # `pull-requests: write`, the `contents: write` GitHub's auto-merge mutations
 # require, the `workflows: write` that arming auto-merge on a pull changing a
 # workflow file requires, and the `metadata: read` the sender gate's permission read needs;
-# plus, for a `workflow_dispatch` stroke ALONE, the `actions: write` the
-# dispatch endpoint needs — minted from the validator's per-stroke output, so
-# every other run's token is exactly the five grants above)
+# plus, for a `workflow_dispatch` stroke ALONE (and the one other row that
+# spends it), the `actions: write` the dispatch endpoint needs, and for an
+# advisory stroke alone the `repository-advisories: write` its row spends —
+# each minted from the validator's per-stroke output, so every other run's
+# token is exactly the five grants above)
 # — and revoked by that action's post step. The workflow's own `GITHUB_TOKEN` gets nothing
 # (`permissions: {}` below); the job grants it `contents: read` for the
 # checkout and nothing else, so the run's ONLY write path is the App token,
@@ -80,22 +90,22 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      # Everything reaches the scripts through `env:`, never through `${{ }}`
-      # inside a `run:` line. A payload is seat-authored text, and an
-      # expression interpolated into a shell line is substituted before bash
-      # sees it; through `env:` it is inert data. The validator refuses an
+      # The payload reaches the scripts through the event file, never through
+      # `${{ }}` inside a `run:` line or through `env:`. A payload is
+      # seat-authored text: an expression interpolated into a shell line is
+      # substituted before bash sees it, and a step's `env:` is printed into
+      # the public log. `$GITHUB_EVENT_PATH` is set by the runner and read as
+      # inert JSON (`readEventPayload` in the validator). The validator refuses an
       # unknown key, an unknown op, a target outside the organization, a
       # non-integer number, an over-cap string or an over-cap payload with
       # every reason in the step summary and zero writes; on success it hands
       # the mint below the repository NAMES its token must reach through
       # `$GITHUB_OUTPUT` — one for every stroke, two for a transfer stroke —
-      # and `permission_actions`: `write` for a stroke carrying the one
-      # `workflow_dispatch` action, EMPTY for every other stroke.
+      # and one `permission_*` line per stroke-scoped grant: `write` for a
+      # stroke whose one action spends it, EMPTY for every other stroke.
       - name: Validate the payload (closed schema, zero writes on refusal)
         id: validate
-        env:
-          FLEET_WRITE_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
-        run: node scripts/pm/fleet-write/validate.mjs --from-env --github-output
+        run: node scripts/pm/fleet-write/validate.mjs --from-event --github-output
 
       # The fleet identity, minted on the runner and never held by a seat:
       # `OS_FLEET_APP_ID` is an organization variable, `OS_FLEET_PRIVATE_KEY`
@@ -141,6 +151,21 @@ jobs:
           # also reaches cancel, re-run, delete, cache and artifact endpoints; the op table has no
           # row for any of them, and `validate.mjs --self-test` pins that none is reachable.
           permission-actions: ${{ steps.validate.outputs.permission_actions }}
+          # FOUR write consumers, one at a time: the advisory rows — `advisory_report` (one private report),
+          # `advisory_create` (one draft advisory), `advisory_collaborators_add` and `advisory_state` (one
+          # advisory's PATCH). Minted ONLY for a stroke carrying one of them, which travels alone, the same
+          # way as `permission-actions`: the validator writes `permission_repository_advisories=write` for it
+          # and an EMPTY value for every other stroke. Separately, `advisory_read` (one advisory's GET, also
+          # alone) gets a READ-ONLY mint through this same input: the validator writes
+          # `permission_repository_advisories=read` for its stroke, never `write`. Measured 2026-11-02 with
+          # this action and a control token minted without the grant
+          # (run 41415522766): the narrowed mint succeeds, and the grant opens an advisory's read and PATCH.
+          # ⚠️ EXPECTED: such a run warns "Unexpected input(s) 'permission-repository-advisories'", because
+          # the action's `action.yml` does not declare the input; its `lib/get-permissions-from-inputs.js`
+          # still reads every `INPUT_PERMISSION-*` and passes this one to the mint. Do not "fix" the
+          # warning by removing the input. ⛔ A refused mint fails this step with zero writes; no step here
+          # ever mints an un-narrowed token instead.
+          permission-repository-advisories: ${{ steps.validate.outputs.permission_repository_advisories }}
 
       # The sender gate, then the actions in order, then the step summary —
       # request id · sender and role · session · target · one row per request.
@@ -148,7 +173,6 @@ jobs:
       # actions were NOT attempted. Exit codes: `scripts/pm/fleet-write/execute.mjs`.
       - name: Execute the actions as the fleet (sender gate first, stop at the first failure)
         env:
-          FLEET_WRITE_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
           FLEET_WRITE_SENDER: ${{ github.event.sender.login }}
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: node scripts/pm/fleet-write/execute.mjs

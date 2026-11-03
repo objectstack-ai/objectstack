@@ -13,10 +13,10 @@
  * highlights, at most four, in the strip's two columns. The rest of the
  * fields are in the sections anyway. It narrows the default page's header by
  * width, the record page v4 header's highlight rule (#27524 item 12); an
- * authored page draws its own header.
+ * authored page draws its own header. An object that declares no highlights
+ * has no strip and no subtitle here either, as on any width: nothing is
+ * guessed (objectstack#28868).
  */
-
-import { deriveHighlightFields, detectStatusField } from '@object-ui/plugin-detail';
 
 /** The highlights a phone's header strip shows after its subtitle. */
 export const PHONE_HIGHLIGHTS_MAX = 4;
@@ -46,8 +46,8 @@ export interface PhoneRecordHeader {
  * The phone header of a default record page.
  *
  * `declared` is the object's declared `highlightFields`, the record's title
- * field already dropped (`undefined` when it declares none: the strip is then
- * derived, as on any width, and there is no subtitle). The subtitle reads the
+ * field already dropped (`undefined` when it declares none: there is then no
+ * strip and no subtitle, as on any width). The subtitle reads the
  * values the reader may see (`record` is the row the page reads), so a field
  * the server masked adds nothing; the separator joins only the values that
  * are there.
@@ -65,8 +65,7 @@ export function phoneRecordHeader(
     .filter((value): value is string => typeof value === 'string' && value.trim() !== '')
     .map((value) => value.trim())
     .join(' · ');
-  const objectDef = def as Parameters<typeof deriveHighlightFields>[0];
-  const strip = declared ?? deriveHighlightFields(objectDef, detectStatusField(objectDef));
+  const strip = declared ?? [];
   return {
     subtitle,
     highlightFields: strip.filter((name) => !subtitleFields.includes(name)).slice(0, PHONE_HIGHLIGHTS_MAX),

@@ -13,7 +13,11 @@ import { DEFAULT_MAX_IDLE_INTERVAL_MS, NotificationDispatcher, type DispatchClus
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
-import { NotificationTemplateStore } from './template-renderer.js';
+import {
+    NotificationTemplateStore,
+    TEMPLATE_DECLARED_FALLBACK_LOCALE,
+    type NotificationTemplateStoreWiring,
+} from './template-renderer.js';
 import {
     bindTemplateHolePlacement,
     unbindTemplateHolePlacement,
@@ -28,6 +32,7 @@ import {
     NotificationPreference,
     NotificationTemplate,
     HttpDelivery,
+    UserDevice,
 } from './objects/index.js';
 // The L2 event this service writes on every `emit()`. It is OWNED by
 // platform-objects (it is in `PLATFORM_OBJECTS_BY_PACKAGE`), and — like
@@ -80,7 +85,7 @@ function lostWithoutStorage(objectName: string): string {
  * durability degradation: ① the consequence, and that the deployment keeps
  * looking healthy; ② the fix. Both remedies are measured: this provisioning
  * runs on every boot that runs DDL, and `os migrate apply` creates all eight
- * of these tables.
+ * of these tables (measured before `sys_user_device` joined them as the ninth).
  */
 function provisionFailureLine(objectName: string): string {
     return (
@@ -348,6 +353,9 @@ export class MessagingServicePlugin implements Plugin {
                 NotificationPreference,
                 NotificationTemplate,
                 HttpDelivery,
+                // The push device registry (ADR-0012 §6): the
+                // `notification` slot's device members write it.
+                UserDevice,
             ],
             navigationContributions: [
                 {
@@ -456,7 +464,24 @@ export class MessagingServicePlugin implements Plugin {
         // Whether a MOUNTED channel can send is the separate question
         // `isAvailable` answers.
         if (typeof ctx.hook === 'function') {
-            const templateStore = new NotificationTemplateStore({ getData });
+            // [#28919] The store's ladder reads the stack's declared fallback
+            // locale (`i18n.fallbackLocale`, else `defaultLocale`) before
+            // `DEFAULT_LOCALE`, as the email template ladder does since
+            // #28880. Probed at each resolve like `getDefaultTemplateLocale`:
+            // both hops may be missing, and either leaves the rung out.
+            const getDeclaredFallbackLocale = (): string | undefined => {
+                try {
+                    const i18n = ctx.getService<{ getFallbackLocale?: () => string | undefined }>('i18n');
+                    return typeof i18n?.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+                } catch {
+                    return undefined;
+                }
+            };
+            const templateStoreWiring: NotificationTemplateStoreWiring = {
+                getData,
+                [TEMPLATE_DECLARED_FALLBACK_LOCALE]: getDeclaredFallbackLocale,
+            };
+            const templateStore = new NotificationTemplateStore(templateStoreWiring);
             ctx.hook('kernel:ready', async () => {
                 service.registerChannelProvider('email', lazyChannelMount({
                     resolveTransport: getEmail,
@@ -588,7 +613,7 @@ export class MessagingServicePlugin implements Plugin {
      * cold-start budget) and says once, at `info`, what it did not provision and
      * why. Not `warn`: nothing is degraded, because the operator declared this.
      * `os migrate apply`, the documented path, was measured to create all eight
-     * tables. `syncObjectSchema` itself stays ungated, because it is also how a
+     * tables (before `sys_user_device` joined them as the ninth). `syncObjectSchema` itself stays ungated, because it is also how a
      * runtime publish gives a new object its table.
      */
     private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
@@ -605,6 +630,7 @@ export class MessagingServicePlugin implements Plugin {
             NotificationPreference,
             NotificationTemplate,
             HttpDelivery,
+            UserDevice,
         ];
         // [#22984] FIRST: see the docblock. One line, naming every skipped object.
         if (bootSchemaSyncSkipped(engine)) {

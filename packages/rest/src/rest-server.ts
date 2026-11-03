@@ -430,7 +430,8 @@ import {
     thrownAnswerIsBareNotFound,
     // `logUnexpectedRouteError` and `applyDroppedFieldsHeader`, read only by the CRUD doors' catches
     // and their two write answers, moved with `registerCrudEndpoints`' body to `crud-routes.ts`
-    // (#23050 slice 12).
+    // (#23050 slice 12); the header is now also set by the batch, createMany, updateMany, clone
+    // and import doors, in their own modules.
     // `isExpectedRouteError`, read only by the public form submit door's catch, moved with
     // `registerFormEndpoints`' body to `form-routes.ts` (#23050 slice 11).
 } from './error-response.js';
@@ -5407,21 +5408,24 @@ export class RestServer {
         /**
          * [#15542 / #15854] Register a route only when the per-item switch —
          * `metadata.endpoints.item` — is on. Its radius is the WHOLE per-item
-         * face: `GET` / `PUT` / `DELETE {metaPath}/:type/:name`, the
-         * `/references` and `/layers` reads, the history family (`/history`,
-         * `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) and the
-         * book tree. The first four of those are inside the `if` block that
+         * face, thirteen mounts: `GET` / `PUT` / `DELETE {metaPath}/:type/:name`,
+         * the `/references` and `/layers` reads, the history family (`GET`
+         * `/history`, `/audit`, `/diff`, `/published`; `POST` `/publish`,
+         * `/rollback`), the book tree and the app metadata bundle
+         * `GET {metaPath}/app/:appId/bundle` (#27627). The four reads are inside the `if` block that
          * moved with them to `meta-item-read-routes.ts`; every later member
-         * goes through this call, which reaches `meta-item-write-routes.ts` and
-         * `meta-item-history-routes.ts` in `scope` (#23050 slices 13b–13e).
+         * goes through this call, which reaches `meta-item-write-routes.ts`,
+         * `meta-item-history-routes.ts` and `meta-app-bundle-routes.ts` in
+         * `scope` (#23050 slices 13b–13e; nine calls: two writes, six history,
+         * one bundle). Count pinned by `rest-config-mount-table.pin.test.ts`.
          *
          * A call rather than one more `if` block, for two reasons that are not
          * cosmetic:
          *  1. **No single brace pair contains exactly the right set.** The
-         *     later members are registered by three calls below, in two
-         *     modules, with `GET {metaPath}/object/:name/state/:field` —
-         *     deliberately NOT part of this face — registered between the last
-         *     two of them.
+         *     later members are registered by nine calls, in three
+         *     modules, and `GET {metaPath}/object/:name/state/:field` —
+         *     deliberately NOT part of this face — is registered after all
+         *     nine.
          *  2. **A gate that travels with its registration cannot be inherited
          *     or shed by moving a route past a brace**, which is exactly how
          *     this switch came to gate four reads and none of its own writes:

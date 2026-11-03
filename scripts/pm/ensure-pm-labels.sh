@@ -183,7 +183,14 @@ gh() {
 # board unless one is later ruled). Those absences are deliberate, not oversights.
 # Actually RUNNING this against hotcrm is a PM landing step, same as objectos
 # (needs label-write credentials on that repo).
-for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos objectstack-ai/hotcrm; do
+#
+# mobile enrolled on the same terms when its on-demand repo lane was registered
+# (maintainer choice 2026-11-02, verbatim: "Register, seat on demand
+# (Recommended)"): the native shell that hosts the Console. Full pm vocabulary,
+# OUT of the domain-lane loop and OUT of the target:<major> loop, and no
+# repo:mobile seam row until a seam card gives one a reader. Running this
+# against mobile is a PM landing step, same as hotcrm.
+for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos objectstack-ai/hotcrm objectstack-ai/mobile; do
   gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" 2>/dev/null || true
   gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" 2>/dev/null || true
   # needs-user-decision on a PR means awaiting the maintainer's review (SKILL.md 复核, 终局四件套); on a card it is the ruling inbox.
@@ -207,9 +214,9 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # no machine exit ages out of sight unless a human is re-asked), H13's
   # PM_STATE_LABELS (a card in this state HAS a state, so it must not read as
   # the half-annotated shape) and H22's PM_RESIDUE_LABELS (a claim that an act
-  # is still owed is residue on a closed card). Five-repo loop for the same
+  # is still owed is residue on a closed card). Per-repo loop for the same
   # reason priority:p0 and pm:retriage are in it: the sweep is repo-parameterized
-  # (PM_SWEEP_REPO) and the state-model row requires the label in all five.
+  # (PM_SWEEP_REPO) and the state-model row requires the label in every repo of the loop.
   # Colour: needs-user-decision's family (a HUMAN owes something), one shade
   # lighter because the ruling here is already given.
   gh label create pm:awaiting-maintainer -R "$R" -c e99695 -d "Awaiting a manual maintainer action — ruling already given; no dispatch, no machine exit" 2>/dev/null || true
@@ -220,8 +227,8 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # consumers: the lane pull order below (p0 > pm:blocking > target board > Bug
   # > the rest) and the half-state sweep's H10 (stale unclaimed p0) and H11
   # (important card parked) in scripts/pm/check-half-states.mjs. It is in this
-  # five-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO) and
-  # grading is a five-repo triage duty — the same reasoning as pm:retriage
+  # per-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO) and
+  # grading is a per-repo triage duty — the same reasoning as pm:retriage
   # below. Measured 2026-08-20: objectui carries a live priority:p0 card whose
   # label OBJECT was auto-created by that first application, so it has GitHub's
   # default colour and an EMPTY description — exactly the drift this row closes
@@ -238,15 +245,15 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # anchor by in whichever repo it is installed in, and it is an
   # H13_EXEMPT_LABELS member in scripts/pm/check-half-states.mjs, so it is
   # what stops the anchor itself from appearing as a finding in the very
-  # sweep it hosts. Same five-repo loop as priority:p0 above, on the rule
+  # sweep it hosts. Same per-repo loop as priority:p0 above, on the rule
   # stated beside it, quoted rather than paraphrased: "It is in this
-  # five-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO)
-  # and grading is a five-repo triage duty — the same reasoning as
+  # per-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO)
+  # and grading is a per-repo triage duty — the same reasoning as
   # pm:retriage below." For tracking the repo-parameterized sweep is
   # check-half-states.mjs's H13 check rather than triage grading, but the
   # test it applies is the same one: a label belongs in this loop when the
   # sweep reads it in every repo the sweep itself runs in, and H13 runs in
-  # all five. Measured 2026-09-03: objectstack and objectui both carry a
+  # every repo of the loop. Measured 2026-09-03: objectstack and objectui both carry a
   # live `tracking` object with GitHub's default colour `ededed` and an
   # empty description — the same drift the priority:p0 comment above
   # records for objectui.
@@ -270,8 +277,8 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # question is unanswered, no dispatch) and the triage round's answer pass,
   # which answers what the objection comment asks each fire and drops the label
   # in the same write (SKILL.md 「`pm:retriage` 每 fire 先答异议评论所求,答后同笔
-  # 摘标;须维护者答的进收件箱,标照摘」). It is in this five-repo loop because the
-  # state-model row requires the label to exist in all five; where a first
+  # 摘标;须维护者答的进收件箱,标照摘」). It is in this per-repo loop because the
+  # state-model row requires the label to exist in every repo of the loop; where a first
   # application already auto-created the object, creation here is a no-op and
   # `--reconcile` is what gives it this colour and description (measured
   # 2026-08-20: grey with an empty description in objectstack, and absent
@@ -289,9 +296,9 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # first-touch close; and the census / half-state patrol, for which a tooling
   # card open in pm:queue with neither line is a half-state. (No fleet-wide
   # in-flight count: the take-order alone sequences tooling cards.) It is in this
-  # five-repo loop on the rule stated
+  # per-repo loop on the rule stated
   # beside priority:p0 above — the sweep that reads it is repo-parameterized
-  # (PM_SWEEP_REPO) and first-touch grading is a five-repo triage duty. Measured
+  # (PM_SWEEP_REPO) and first-touch grading is a per-repo triage duty. Measured
   # 2026-09-21 in objectstack, where the label is live on 44 queue cards: the
   # object is GitHub's default `ededed` with an EMPTY description, because until
   # this row nothing here named it — the exact drift the header describes, and
@@ -306,7 +313,7 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # never merged and closed on account handover. Named consumers: every query
   # that enumerates open PRs for landing appends `-label:pm:mailbox`
   # (LEDGER_EXCLUSION, scripts/pm/mailbox-open.mjs, the one opener and closer),
-  # and a subscribed thread reads it as "owes no CI". In this five-repo loop
+  # and a subscribed thread reads it as "owes no CI". In this per-repo loop
   # because a lane project may keep its mailbox on any board it works.
   gh label create pm:mailbox          -R "$R" -c c5def5 -d "A project's cross-account mailbox PR — never merged, owes no CI, excluded from every ledger" 2>/dev/null || true
 done
@@ -476,7 +483,16 @@ gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam c
 # object keeps its current colour and description until `--reconcile` runs
 # (measured 2026-08-20: the colour already matches; the description had drifted
 # to an older wording).
-gh label create pm:seat -R objectstack-ai/objectstack -c 1d76db -d "Seat registry post — protocol carrier, not dispatchable work; the label page is the fleet board" 2>/dev/null || true
+# A sister-repo seat keeps its post in its own repository — hotcrm's posts
+# live in hotcrm and fleet-roster.mjs reads that repo by default — so the
+# "main repo only" sentence above holds for the domain:* lanes, not for repo
+# lanes. mobile's charter (lanes/mobile.md) puts its seat post in mobile, so
+# the label is created there too (one invocation per repo, one parsed line —
+# check-label-desc-cap measures distinct descriptions per line); fleet-roster's
+# DEFAULT_REPOS lists mobile.
+for R in objectstack-ai/objectstack objectstack-ai/mobile; do
+  gh label create pm:seat -R "$R" -c 1d76db -d "Seat registry post — protocol carrier, not dispatchable work; the label page is the fleet board" 2>/dev/null || true
+done
 
 # Domain lanes — the roster lives in SKILL.md's domain table; keep both in sync
 # BY PR whenever a lane is added or retired.
@@ -568,7 +584,7 @@ gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui l
 # The FEATURE AXIS — `area:*`, one per card, eleven values. It is the PLANNING
 # axis: priority is judged on it, and `domain:*` beside it decides only which
 # seat may claim which files. The eleven values are the North Star definition
-# line (「做出来的是什么」) plus the road it measures, so the axis and the
+# line ("What gets built") plus the road it measures, so the axis and the
 # product definition cannot drift apart without one of them being edited.
 # The eleven were put to the maintainer on the charter card and confirmed there
 # (2026-09-21) with ONE amendment: the API/integration value was shortened to
@@ -590,9 +606,9 @@ gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui l
 # docs/qa/platform-checklist/areas/*.json carries a top-level `axis` naming one
 # of these eleven values.
 #
-# TWO repos, deliberately, and not the five-repo loop above: a feature point
+# TWO repos, deliberately, and not the per-repo loop above: a feature point
 # spans 协议 → 运行时 → 前端, which is objectstack plus objectui. cloud is
-# parked (北极星「现在不做」), objectos is the docs/site repo, and hotcrm is the
+# parked (North Star "Not now"), objectos is the docs/site repo, and hotcrm is the
 # exemplar APP — its cards are app cards, and a platform gap found there is
 # filed in the platform repo, where it gets its area. Widening the loop is a
 # vocabulary decision, not a maintenance edit.

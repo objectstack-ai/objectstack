@@ -241,6 +241,7 @@
     "automation/FlowVariable:isInput",
     "automation/FlowVariable:isOutput",
     "automation/FlowVariable:name",
+    "automation/FlowVariable:objectName",
     "automation/FlowVariable:type",
     "automation/FlowVersionHistory:changeNote",
     "automation/FlowVersionHistory:createdAt",

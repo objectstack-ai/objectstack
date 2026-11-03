@@ -16,16 +16,13 @@ import {
 import { useObjectTranslation } from '@object-ui/i18n';
 import { ObjectGantt, type ObjectGanttProps } from './ObjectGantt';
 
+// The entry publishes what a host composes with: the two gantt components, the
+// renderer, the timeline's task/marker vocabulary and the two helpers read
+// outside this package. The quick-filter bar, the resource-workload grid, the
+// workload math and the shift-band helpers are ObjectGantt's internals, read by
+// nothing outside it, so they stay module-local (each module keeps its tests).
 export { ObjectGantt };
-export type { ObjectGanttProps, QuickFilterDef } from './ObjectGantt';
-
-export { QuickFilterBar } from './QuickFilterBar';
-export type {
-  QuickFilterBarProps,
-  QuickFilterField,
-  QuickFilterOption,
-  QuickFilterLabels,
-} from './QuickFilterBar';
+export type { ObjectGanttProps } from './ObjectGantt';
 
 export { GanttView } from './GanttView';
 export type {
@@ -38,25 +35,12 @@ export type {
   GanttLinkType,
   GanttMarker,
 } from './GanttView';
-export { normalizeDependencies, normalizeTaskType } from './ObjectGantt';
+export { normalizeTaskType } from './ObjectGantt';
 
-export { normalizeShiftSegments, parseHHMM, shiftDayStart, bandAt } from './shifts';
-export type {
-  ShiftSegmentsConfig,
-  ShiftBandConfig,
-  NormShiftSegments,
-  NormShiftBand,
-} from './shifts';
-
-export { ResourceWorkload } from './ResourceWorkload';
-export type { ResourceWorkloadProps } from './ResourceWorkload';
-export { computeWorkload } from './workload';
-export type {
-  WorkloadColumn,
-  WorkloadOptions,
-  ResourceCell,
-  ResourceLoad,
-} from './workload';
+export { parseHHMM } from './shifts';
+// `GanttViewProps.shiftSegments` is typed by these two, so they stay public
+// with `GanttView`.
+export type { NormShiftSegments, NormShiftBand } from './shifts';
 
 /**
  * What `ObjectGantt` reads for its own query: `objectName` (via `getDataConfig`,

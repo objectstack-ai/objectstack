@@ -38,7 +38,7 @@ const result = DashboardSchema.parse(data);
 | **refreshIntervalSeconds** | `number` | optional | Auto-refresh interval in seconds |
 | **refreshInterval** | `never` | optional | [REMOVED] `dashboard.refreshInterval` was renamed to `refreshIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `refreshIntervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **dateRange** | `{ field?: string; defaultRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>; allowCustomRange?: boolean }` | optional | Global dashboard date range filter configuration |
-| **globalFilters** | `{ name?: string; field: string; object?: string; label?: string \| Record<string, string>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
+| **globalFilters** | `{ name?: string; field: string; object?: string; label?: string \| Record<string, string>; … }[]` | optional | Global filters that apply to all widgets in the dashboard. Each filter name (its field when it has no name) is declared once, and is not dateRange when the dashboard declares dateRange |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066] Capabilities a user must ALL hold for this list view or dashboard to be served to them — names that permission sets grant through `systemPermissions`, the same list as `requiredPermissions` on an app, a navigation item or an action. Absent or empty: no audience gate. There is no any-of form: to serve one item to several audiences (legal OR admin), declare one capability and grant it to each of their permission sets. The server enforces it: a user who does not hold them all is not listed the item and is refused it by name; a view container's list views are pruned the same way, and so are an object's own list views for a user who may not edit the object. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this dashboard. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -92,7 +92,7 @@ const result = DashboardSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | optional | Stable filter name (variable key); defaults to field |
+| **name** | `string` | optional | Stable filter name (variable key); defaults to field. Refused as dateRange when the dashboard declares dateRange (the built-in date range's reserved name) |
 | **field** | `string` | ✅ | Field name to filter on — at the authoring layer it resolves against the object behind each bound widget's dataset (`dataset.object`), not against that dataset's declared `dimensions`; enforced by the lint rule `dashboard-filter-field-unknown` (severity error) |
 | **object** | `string` | optional | Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter's field label and option labels |
 | **label** | `string \| Record<string, string>` | optional | Display label for the filter |
@@ -317,7 +317,7 @@ Widget configuration — declared query keys + open renderer extras
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | optional | Stable filter name (variable key); defaults to field |
+| **name** | `string` | optional | Stable filter name (variable key); defaults to field. Refused as dateRange when the dashboard declares dateRange (the built-in date range's reserved name) |
 | **field** | `string` | ✅ | Field name to filter on — at the authoring layer it resolves against the object behind each bound widget's dataset (`dataset.object`), not against that dataset's declared `dimensions`; enforced by the lint rule `dashboard-filter-field-unknown` (severity error) |
 | **object** | `string` | optional | Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter's field label and option labels |
 | **label** | `string \| Record<string, string>` | optional | Display label for the filter |

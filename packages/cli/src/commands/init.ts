@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
-import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
+import { MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH, PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
@@ -67,18 +67,26 @@ function pkgVersion(): string {
  *
  * npm names allow hyphens/dots/scopes (e.g. `@acme/my-app`); identifiers don't.
  * We strip the scope, replace separators with `_`, lowercase, prefix a leading
- * digit, truncate to 20, and pad short names so the result always satisfies
- * the regex. Reserved names get a `_app` suffix.
+ * digit, truncate, and pad short names so the result always satisfies the
+ * regex. Reserved names get a `_app` suffix.
+ *
+ * The cap is `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH` (13), not the grammar's
+ * 20: a longer namespace has no paired customization namespace (ADR-0146 D3),
+ * so `os validate` on the fresh project would warn
+ * `namespace-no-customization-pair` about objects its author never wrote.
+ * `create-objectstack`'s `sanitizeNamespace()` restates the same rule, pinned
+ * to the same constant, so both scaffolders agree.
  */
 export function sanitizeNamespace(name: string): string {
+  const max = MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH;
   let s = name.replace(/^@[^/]+\//, '');           // drop npm scope
   s = s.toLowerCase().replace(/[^a-z0-9]+/g, '_'); // separators → _
   s = s.replace(/^_+|_+$/g, '');                   // trim underscores
   if (!s) s = 'app';
   if (/^[0-9]/.test(s)) s = 'a' + s;               // must start with a letter
-  if (s.length < 2) s = (s + '_app').slice(0, 20);
-  if (s.length > 20) s = s.slice(0, 20).replace(/_+$/, '');
-  if (['base', 'system', 'sys'].includes(s)) s = (s + '_app').slice(0, 20);
+  if (s.length < 2) s = (s + '_app').slice(0, max);
+  if (s.length > max) s = s.slice(0, max).replace(/_+$/, '');
+  if (['base', 'system', 'sys'].includes(s)) s = (s + '_app').slice(0, max);
   return s;
 }
 

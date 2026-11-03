@@ -621,8 +621,44 @@ function singularize(key: string): string {
 const MAX_REGION_DEPTH = 32;
 
 /**
- * Validate every structured control-flow construct in a flow, throwing on the
- * first malformed region (ADR-0031 — "reject the malformed before run"). Covers
+ * The refusal {@link validateControlFlow} throws: a malformed ADR-0031 region,
+ * or a `parallel` block with fewer than two branches.
+ *
+ * `message` is the engine's sentence, unchanged — the registration log, the
+ * `registerFlow` answer and every pinned copy of it read the same text they
+ * always did. What the class adds is the location as data, so a reader can
+ * anchor the fault without parsing that sentence (which would be a second
+ * spelling of this judge, and could not place a nested `parallel` at all —
+ * its sentence names no enclosing scope):
+ *
+ *  - `path` — the key path from the flow root to the faulty CONTAINER node,
+ *    spelled as {@link FlowGraph.path} is plus `['nodes', i]`:
+ *    `['nodes', 1]` for a top-level container,
+ *    `['nodes', 1, 'config', 'try', 'nodes', 0]` for one inside a `try` region.
+ *  - `nodeId` — that container's `id`.
+ *
+ * Both name the container that owns the faulty region (or, for the branch
+ * count, the `parallel` block itself); which of its slots is at fault stays in
+ * the sentence, as before. Carries no `status`: `registerFlow`'s HTTP doors
+ * class every refusal of the definition as the author's fault on their own,
+ * and a declared status would overrule that.
+ */
+export class FlowRegionShapeError extends Error {
+  readonly path: readonly (string | number)[];
+  readonly nodeId: string;
+
+  constructor(path: readonly (string | number)[], nodeId: string, message: string) {
+    super(message);
+    this.name = 'FlowRegionShapeError';
+    this.path = path;
+    this.nodeId = nodeId;
+  }
+}
+
+/**
+ * Validate every structured control-flow construct in a flow, throwing a
+ * {@link FlowRegionShapeError} on the first malformed region (ADR-0031 —
+ * "reject the malformed before run"). Covers
  * `loop` bodies, `parallel` branches, and `try_catch` try/catch regions —
  * **at every depth** (#4389), so a container nested inside another container's
  * region is checked too. Only validates the *nested structure* when present, so
@@ -648,13 +684,19 @@ export function validateControlFlow(flow: { nodes: FlowNodeParsed[] }): void {
       const cfg = node.config as Record<string, unknown> | undefined;
       if (!cfg) continue;
       if (node.type === PARALLEL_NODE_TYPE && Array.isArray(cfg.branches) && cfg.branches.length < 2) {
-        throw new Error(`parallel '${node.id}': a parallel block needs at least 2 branches`);
+        throw new FlowRegionShapeError(
+          containerPathOf(flow, graph, node),
+          node.id,
+          `parallel '${node.id}': a parallel block needs at least 2 branches`,
+        );
       }
       for (const slot of regionSlotsOf(node)) {
         const where = graph.scope ? `${graph.scope} → ${slot.label}` : slot.label;
         const parsed = slot.schema.safeParse(slot.raw);
         if (!parsed.success) {
-          throw new Error(
+          throw new FlowRegionShapeError(
+            containerPathOf(flow, graph, node),
+            node.id,
             `${where}: invalid region — ${parsed.error.issues.map(i => i.message).join('; ')}`,
           );
         }
@@ -662,11 +704,40 @@ export function validateControlFlow(flow: { nodes: FlowNodeParsed[] }): void {
         // `name` — a superset); `z.ZodTypeAny` just cannot say so.
         const analysis = analyzeRegion(parsed.data as { nodes: FlowNodeParsed[]; edges?: FlowEdgeParsed[] });
         if (analysis.errors.length > 0) {
-          throw new Error(`${where}: ${analysis.errors.join('; ')}`);
+          throw new FlowRegionShapeError(
+            containerPathOf(flow, graph, node),
+            node.id,
+            `${where}: ${analysis.errors.join('; ')}`,
+          );
         }
       }
     }
   }
+}
+
+/**
+ * The key path from the flow root to `node`, a member of `graph`: `graph.path`
+ * plus `['nodes', i]` — the spelling {@link FlowGraph.path} uses, so a reader
+ * can hand a {@link FlowRegionShapeError} straight to whatever already anchors
+ * on a graph's path.
+ *
+ * `i` is the node's index in the RAW list, read back through `graph.path`, not
+ * its position in `graph.nodes`: the walk drops a non-record member from what
+ * it hands out while `path` keeps indexing the raw list (the reason
+ * {@link FlowGraph.nodes} states), so a position in the handed-out array would
+ * renumber the siblings after a dropped member. A handed-out member is the raw
+ * member itself (the walk filters, it never copies), so identity finds it.
+ * Reached only on a refusal, so the happy path pays nothing for it.
+ */
+function containerPathOf(
+  flow: { nodes: FlowNodeParsed[] },
+  graph: FlowGraph,
+  node: FlowNodeParsed,
+): readonly (string | number)[] {
+  let holder: unknown = flow;
+  for (const key of graph.path) holder = (holder as Record<string | number, unknown>)[key];
+  const raw = (holder as { nodes: readonly unknown[] }).nodes;
+  return [...graph.path, 'nodes', raw.indexOf(node)];
 }
 
 

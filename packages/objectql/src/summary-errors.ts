@@ -72,3 +72,175 @@ export class SummaryRecomputeError extends Error {
     this.name = 'SummaryRecomputeError';
   }
 }
+
+/**
+ * The refusal a unit answers when a write NESTED in it raised
+ * {@link SummaryRecomputeError} and the unit itself then did not land.
+ *
+ * That refusal says "this write is stored, only a roll-up recompute failed",
+ * and every answering surface turns it into the write's own success. It is
+ * true for the write that raised it, and only while that write stands. Three
+ * engine seams carry a nested write's refusal past the point where it stops
+ * being true:
+ *
+ *  - a delete's cascade walk deletes (or clears) each dependent through the
+ *    public write path, before the parent's own row is removed. A dependent's
+ *    refusal stops the walk, so the parent's row is never removed — and under
+ *    the `'atomic'` plan the transaction then rolls the dependent back too;
+ *  - a `transaction()` whose callback lets the refusal escape rolls back every
+ *    write in it, the refusing one included;
+ *  - a hook that writes through `ctx.api` and lets that write's refusal escape
+ *    stops the write it is hooked to, whose caller would otherwise read the
+ *    hook's write as its own.
+ *
+ * Either way the caller's own write did not land, so it is told so: an
+ * internal failure, which is what an unrecomputable roll-up is
+ * ({@link UnlandedWriteRefusal}), the original refusal kept as `cause` for the
+ * operator. Every other error
+ * passes through unchanged, and so does the refusal anywhere it is still true:
+ * the dependent's own delete, a write outside any unit, a transaction that
+ * catches it and commits, a joined transaction whose owner decides.
+ *
+ * Matched by `code`, as every reader of the refusal matches it.
+ *
+ * [#29421] A conversion that meets an EARLIER conversion re-leads it when
+ * `relead` is set: a nested cascade (a grandchild refuses, the child's walk
+ * converts naming the child, then the parent's walk receives that) or a hook
+ * whose own write was such a delete. The caller of the outer write is told
+ * about the outer write, and `cause` stays the original refusal, so the
+ * summaries named are the same at every level. A transaction whose rollback
+ * ran does not re-lead: a conversion that escapes it already names the write
+ * that did not complete, and its "under a transaction that rolls back" clause
+ * holds. [#29527] One whose rollback threw does ({@link rollbackFailedRefusal}).
+ */
+function unlandedWriteRefusal(e: unknown, lead: string, relead = false): unknown {
+  const original = relead && isUnlandedWriteRefusal(e) ? (e as UnlandedWriteRefusal).cause : e;
+  if (!(original instanceof Error) || (original as { code?: unknown }).code !== SUMMARY_RECOMPUTE_CODE) return e;
+  const failures = (original as { failures?: unknown }).failures;
+  const named = Array.isArray(failures)
+    ? [...new Set((failures as SummaryRecomputeFailure[]).map((f) => `${f?.parentObject}.${f?.field}`))]
+    : [];
+  const summaries = named.length > 0 ? `the roll-up summary ${named.join(', ')}` : 'a parent roll-up summary';
+  return new UnlandedWriteRefusal(
+    `${lead} A write inside it was stored, then ${summaries} could not be recomputed after it, and that ` +
+    "refusal stopped it. Fix the summary field's `summaryOperations` (the engine's warning names why the " +
+    'recompute was refused), then retry.',
+    original,
+  );
+}
+
+/**
+ * [#29421] What {@link unlandedWriteRefusal} answers: an internal failure, the
+ * original refusal as `cause`.
+ *
+ * It DECLARES that it is one, `status: 500` and the generic ADR-0112
+ * `INTERNAL_ERROR`, so every door reads it structurally. Before, it declared
+ * nothing. The data door then reached its 500 only because the sentence
+ * missed every message heuristic in `classifyDataError` (the double quotes in
+ * the leads dodge the unknown-object one), and the action door answered it as
+ * a 400 refusal. Measured: the data door's body is byte-identical (`500
+ * { error, code: 'INTERNAL_ERROR' }`), and the action door now answers `500
+ * INTERNAL_ERROR` with the same sentence. `status` alone would not do: a
+ * declared 5xx with no code drops `code` from the data door's body.
+ *
+ * A class so a later conversion can tell an earlier one apart (the re-lead
+ * above). The class itself stays module-private, and `name` stays `'Error'`;
+ * a reader outside this file asks {@link isUnlandedWriteRefusal}.
+ */
+class UnlandedWriteRefusal extends Error {
+  readonly status = 500;
+  readonly code = 'INTERNAL_ERROR';
+  declare readonly cause: Error;
+  constructor(message: string, original: Error) {
+    super(message);
+    (this as { cause?: unknown }).cause = original;
+    Object.defineProperty(this, UNLANDED_WRITE_REFUSAL_BRAND, { value: true });
+  }
+}
+
+/**
+ * [#29527] The brand {@link isUnlandedWriteRefusal} reads. A registered symbol,
+ * not `instanceof`: this package ships two realms (ESM and CJS) and a reader
+ * holding the other realm's copy of the class would get `false`, silently.
+ * Not enumerable, so no serialiser and no `{ ...err }` spread carries it.
+ */
+const UNLANDED_WRITE_REFUSAL_BRAND = Symbol.for('@objectstack/objectql.unlanded-write-refusal');
+
+/**
+ * [#29527] Is `e` the refusal {@link unlandedWriteRefusal} built: a write that
+ * did not land because a nested write's stale-roll-up refusal stopped it?
+ *
+ * Exported for the one host-side reader that has to tell it apart: the QuickJS
+ * runner, which hands this refusal back out of a sandboxed body unchanged when
+ * the body let it leave (as it does the engine's duplicate-record refusal), so
+ * the hook-dispatch seam that converts next still re-leads it and keeps its
+ * `cause`. Matched on the HOST-side error a host call rejected with, never on
+ * anything a body wrote.
+ */
+export function isUnlandedWriteRefusal(e: unknown): boolean {
+  return e instanceof Error && (e as unknown as Record<symbol, unknown>)[UNLANDED_WRITE_REFUSAL_BRAND] === true;
+}
+
+/** {@link unlandedWriteRefusal} for a delete whose cascade walk the refusal stopped. */
+export function cascadeStoppedRefusal(e: unknown, object: string): unknown {
+  return unlandedWriteRefusal(
+    e,
+    // Double quotes: a quoted `'object'` beside a "not" reads as an unknown
+    // object to the data door's message heuristic, which answers it 404.
+    `The delete of "${object}" did not complete: its cascade stopped before the record was removed. ` +
+      'Under a transaction that rolls back nothing was written; otherwise the dependents written before ' +
+      'that point stay written.',
+    true,
+  );
+}
+
+/**
+ * {@link unlandedWriteRefusal} for a write whose hook a nested write's refusal
+ * stopped.
+ *
+ * A hook that writes through `ctx.api` makes a write of its own. When that
+ * write raises {@link SummaryRecomputeError}, the refusal leaves the handler
+ * carrying the HOOK's write as `written`. Let through, it reached the outer
+ * write's caller as that caller's own refusal, so a door answered the hook's
+ * record as the result of the write it was asked for. The outer write did not
+ * complete either: the rest of its chain, its own roll-ups and its events never
+ * ran. An `after*` hook's unit (`inAfterAbortUnit`) now rolls back both rows,
+ * as `HookSchema.onError` `abort` says.
+ *
+ * Only the refusal is converted; every other error a hook throws passes
+ * through unchanged. And only one a handler let escape: a hook whose `onError`
+ * is `log` swallows it before it gets here.
+ */
+export function hookStoppedRefusal(e: unknown, event: string, object: string | undefined, hook: string | undefined): unknown {
+  const verb = event.replace(/^(before|after)/, '').toLowerCase() || event;
+  return unlandedWriteRefusal(
+    e,
+    // Double quotes, as in `cascadeStoppedRefusal`.
+    `The ${verb} of "${object ?? '?'}" did not complete: its ${event} hook${hook ? ` "${hook}"` : ''} stopped. ` +
+      'Under a transaction that rolls back nothing was written; otherwise what was written before that point ' +
+      'stays written.',
+    true,
+  );
+}
+
+/** {@link unlandedWriteRefusal} for a transaction the refusal rolled back. */
+export function rolledBackRefusal(e: unknown): unknown {
+  return unlandedWriteRefusal(e, 'The transaction rolled back, so nothing written inside it was stored.');
+}
+
+/**
+ * [#29421] {@link unlandedWriteRefusal} for a transaction whose rollback itself
+ * failed. Nothing is known about what is stored then, so the lead does not say
+ * "rolled back", and the refusal is still not answered as a success.
+ */
+export function rollbackFailedRefusal(e: unknown): unknown {
+  return unlandedWriteRefusal(
+    e,
+    'The transaction did not complete, and its rollback failed too, so what was written inside it may or may ' +
+      'not be stored.',
+    // [#29527] Re-lead an earlier conversion too. A cascade- or hook-stopped
+    // refusal that escapes this transaction says "under a transaction that
+    // rolls back nothing was written", which the failed rollback made unknown.
+    true,
+  );
+}

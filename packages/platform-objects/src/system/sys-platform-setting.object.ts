@@ -58,7 +58,6 @@ export const SysPlatformSetting = ObjectSchema.create({
   description: 'Deployment-wide settings values: the global rung of the settings cascade.',
   displayNameField: 'key',
   nameField: 'key', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{namespace}.{key}',
   highlightFields: ['namespace', 'key', 'updated_at'],
 
   fields: {

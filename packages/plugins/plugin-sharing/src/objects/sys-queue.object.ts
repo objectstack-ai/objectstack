@@ -32,7 +32,6 @@ export const SysQueue = ObjectSchema.create({
   description: 'A named group of people that unassigned records can wait in until one of them takes the record.',
   displayNameField: 'name',
   nameField: 'name',
-  titleFormat: '{label}',
   highlightFields: ['name', 'label'],
 
   listViews: {

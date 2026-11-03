@@ -42,6 +42,8 @@ import {
     runtimeViewToInspectorDraft,
     storedViewToRuntimeView,
 } from './view-config-adapter';
+import { answerObjectViewRead } from './__tests__/objectViewRoute';
+import { publishRuntimeMetadata } from './runtime-metadata-persistence';
 
 const OBJECT_NAME = 'crm_lead';
 const VIEW_ID = 'crm_lead.all';
@@ -144,15 +146,18 @@ function makePlatformStore() {
 function makeAdapter(meta: any) {
     const ds: any = new ObjectStackAdapter({
         baseUrl: 'http://test.local',
-        fetch: vi.fn(async () =>
-            new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+        // objectstack#29550: the adapter reads one object's views on
+        // `GET /meta/view?object=`, answered here from the same store.
+        fetch: vi.fn(async (input: RequestInfo | URL) =>
+            (await answerObjectViewRead(input, () => meta.getItems('view')))
+            ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' },
             })),
     });
     ds.connected = true;
     ds.connectionState = 'connected';
-    ds.client = { meta };
+    ds.client = { meta, getLocale: () => undefined };
     return ds;
 }
 
@@ -199,8 +204,19 @@ describe('objectui#10210 — the view-config save persists a ViewItem envelope',
         expect(isSavedViewId(before, VIEW_ID)).toBe(true);
         expect(isSavedViewId(before, CONTROL_ID)).toBe(true);
 
-        // The draft's publish lands the same body on the row — whole-document.
-        await meta.saveItem('view', VIEW_ID, buildViewConfigSaveBody(OBJECT_NAME, PANEL_DRAFT));
+        // The draft's publish lands the same body on the row — whole-document —
+        // through the console's publish seam, which drops the object's view
+        // keys after the write (objectui#4373; objectstack#29550: the stored
+        // one-object answer with them).
+        await publishRuntimeMetadata('view', VIEW_ID, {
+            metadataClient: {
+                publish: async () => {
+                    await meta.saveItem('view', VIEW_ID, buildViewConfigSaveBody(OBJECT_NAME, PANEL_DRAFT));
+                },
+            } as any,
+            dataSource: ds,
+            objectName: OBJECT_NAME,
+        });
         expect(rows.get(VIEW_ID).viewKind).toBe('list');
 
         const after = await readSavedViews(ds);

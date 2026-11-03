@@ -128,7 +128,7 @@ export interface CustomizationPackageHost {
 }
 
 /** The registry slice the door and the predicate read. */
-interface PairRegistry {
+export interface PairRegistry {
     getPackage(id: string): PairPackageRow | undefined;
     getNamespaceOwners?(namespace: string): string[];
 }
@@ -289,34 +289,41 @@ export async function ensureCustomizationPackage(
     }
 }
 
-/** One judgement of the registry, and the create when the pair is absent. */
-async function ensurePairOnce(
-    this: CustomizationPackageHost,
+/**
+ * [ADR-0146 D11, #28576] Why the ensure door would refuse to ensure `baseId`'s
+ * pair on this registry now, or `undefined` when it would answer the existing
+ * pair or create it. ONE reading of the door's registry-decidable refusals:
+ * {@link ensurePairOnce} throws the error this answers, and the close of the
+ * package-less write (`packagelessOverlayWriteRefusal`) leaves a name's
+ * package-less write open where it answers one — `os migrate
+ * packageless-overlays` could not move such a row (its step 1 fails). Pure
+ * over the registry; it writes nothing.
+ */
+export function customizationPairEnsureRefusal(
+    engine: ObjectStackProtocolImplementation['engine'],
     registry: PairRegistry,
     baseId: string,
     pairId: string,
-): Promise<EnsureCustomizationPackageResponse> {
+): Error | undefined {
     const base = registry.getPackage(baseId);
     if (!base) {
-        throw refusal(404, `Package '${baseId}' not found: a paired customization package is ensured for an installed `
+        return refusal(404, `Package '${baseId}' not found: a paired customization package is ensured for an installed `
             + 'base.');
     }
     // ADR-0070 D2's one predicate. A writable base is the customer's own and
     // takes their changes directly; the pair exists for a base the customer
     // cannot author into.
-    if (isWritablePackage(this.engine, baseId)) {
-        throw refusal(409, `Package '${baseId}' is writable: customize it directly. A paired customization package `
+    if (isWritablePackage(engine, baseId)) {
+        return refusal(409, `Package '${baseId}' is writable: customize it directly. A paired customization package `
             + `('${pairId}') holds the changes to a read-only base — one provided by code or an installed app `
             + '(ADR-0146 D3).');
     }
     const namespace = customizationNamespace(base.manifest?.namespace);
     if (!namespace.ok) {
-        throw refusal(409, `Cannot ensure '${pairId}': ${noPairNamespaceClause(baseId, base.manifest?.namespace, namespace.reason)} `
+        return refusal(409, `Cannot ensure '${pairId}': ${noPairNamespaceClause(baseId, base.manifest?.namespace, namespace.reason)} `
             + '(ADR-0146 D3).');
     }
-
-    // Idempotent: an existing pair is returned unchanged, or refused naming
-    // what it lacks — ⛔ never adopted, never rewritten.
+    // An existing pair is returned unchanged, or refused naming what it lacks.
     const existing = registry.getPackage(pairId);
     if (existing) {
         const lacks: string[] = [];
@@ -326,24 +333,16 @@ async function ensurePairOnce(
         }
         const declaredRange = declaredRangeOn(existing.manifest, baseId);
         if (declaredRange === undefined) lacks.push(`a dependency on '${baseId}' in manifest.dependencies`);
-        if (lacks.length > 0 || declaredRange === undefined) {
-            throw refusal(409, `Package '${pairId}' is installed but is not the paired customization package of `
+        if (lacks.length > 0) {
+            return refusal(409, `Package '${pairId}' is installed but is not the paired customization package of `
                 + `'${baseId}': it lacks ${lacks.join(', and ')}. It is not adopted or rewritten — delete it, or `
                 + 'install a manifest over it that declares both, then ensure the pair again (ADR-0146 D3).');
         }
-        return {
-            basePackageId: baseId,
-            packageId: pairId,
-            namespace: namespace.value,
-            dependencyRange: declaredRange,
-            created: false,
-            writable: isWritablePackage(this.engine, pairId),
-        };
+        return undefined;
     }
-
     const range = customizationDependencyRange(base.manifest?.version);
     if (!range.ok) {
-        throw refusal(409, `Cannot ensure '${pairId}': package '${baseId}' is at version `
+        return refusal(409, `Cannot ensure '${pairId}': package '${baseId}' is at version `
             + `'${String(base.manifest?.version)}', which is not a SemVer 2.0.0 version, so the pair's dependency `
             + 'range — the major of the base\'s version — cannot be declared (ADR-0146 D3).');
     }
@@ -352,12 +351,44 @@ async function ensurePairOnce(
     // would read.
     const owner = registry.getNamespaceOwners?.(namespace.value)?.find((id) => id !== pairId);
     if (owner !== undefined) {
-        throw refusal(422, `Cannot ensure '${pairId}': its namespace '${namespace.value}' is already owned by package `
+        return refusal(422, `Cannot ensure '${pairId}': its namespace '${namespace.value}' is already owned by package `
             + `'${owner}'. The pair's namespace is the base's followed by '_custom' and has no alternative; uninstall `
             + `'${owner}' or move it off that namespace, then ensure the pair again (ADR-0146 D3).`,
         'NAMESPACE_CONFLICT');
     }
+    return undefined;
+}
 
+/** One judgement of the registry, and the create when the pair is absent. */
+async function ensurePairOnce(
+    this: CustomizationPackageHost,
+    registry: PairRegistry,
+    baseId: string,
+    pairId: string,
+): Promise<EnsureCustomizationPackageResponse> {
+    // Every refusal the registry decides, read once ({@link customizationPairEnsureRefusal}).
+    const refused = customizationPairEnsureRefusal(this.engine, registry, baseId, pairId);
+    if (refused) throw refused;
+    const base = registry.getPackage(baseId)!;
+    const namespace = customizationNamespace(base.manifest?.namespace);
+    if (!namespace.ok) throw new Error('unreachable: the namespace was judged above');
+
+    // Idempotent: an existing pair is returned unchanged — ⛔ never adopted,
+    // never rewritten (its refusal is above).
+    const existing = registry.getPackage(pairId);
+    if (existing) {
+        return {
+            basePackageId: baseId,
+            packageId: pairId,
+            namespace: namespace.value,
+            dependencyRange: declaredRangeOn(existing.manifest, baseId)!,
+            created: false,
+            writable: isWritablePackage(this.engine, pairId),
+        };
+    }
+
+    const range = customizationDependencyRange(base.manifest?.version);
+    if (!range.ok) throw new Error('unreachable: the version was judged above');
     const baseName = typeof base.manifest?.name === 'string' && base.manifest.name !== '' ? base.manifest.name : baseId;
     const manifest = {
         id: pairId,

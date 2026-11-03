@@ -67,8 +67,8 @@ describe('createAuthClient', () => {
     expect(calls[0].url).toContain('/api/auth/sign-in/email');
     expect(calls[0].method).toBe('POST');
     expect(JSON.parse(calls[0].body!)).toMatchObject({ email: 'test@test.com', password: 'pass123' });
-    expect(result.user.email).toBe('test@test.com');
-    expect(result.session.token).toBe('tok123');
+    expect(result.user?.email).toBe('test@test.com');
+    expect(result.session?.token).toBe('tok123');
   });
 
   it('signUp sends POST to /sign-up/email and returns the session when verification is off', async () => {

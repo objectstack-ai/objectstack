@@ -38,10 +38,25 @@
 // unchanged — what the CHILD's data nodes run as — and a separate case pins the
 // door's half: the member's DIRECT start of either system flow is refused
 // `403 PERMISSION_DENIED`, the note is untouched and no run is recorded.
+//
+// Flow start admission's third question (#29365): a start input the definition
+// reads as a record id is judged as the caller, for every runAs, before the run
+// exists. A member's start that hands any of these flows (or a user-mode parent
+// that hands it on through `subflow`) the id of a note the member cannot read is
+// refused `404 RECORD_NOT_FOUND`, the note is untouched, no run is recorded and
+// no field of the note comes back — pinned for both directions below. So the
+// identity proofs use rows that rule admits: the WRITE legs hand the flows an
+// admin note the member may read but not write (`SHARED_STATUS`), and the READ
+// legs use flows whose definition fixes the row itself (`SEALED_NOTE_NAME`).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
-import { runasFixtureStack, runasFixtureSecurity } from './fixtures/flow-runas-fixture.js';
+import {
+  runasFixtureStack,
+  runasFixtureSecurity,
+  SEALED_NOTE_NAME,
+  SHARED_STATUS,
+} from './fixtures/flow-runas-fixture.js';
 
 describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', () => {
   let stack: VerifyStack;
@@ -61,8 +76,8 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
   });
 
   /** Admin creates a note it owns; returns the new id. */
-  async function adminCreateNote(name: string): Promise<string> {
-    const res = await stack.apiAs(adminToken, 'POST', '/data/runas_note', { name, status: 'new' });
+  async function adminCreateNote(name: string, status = 'new'): Promise<string> {
+    const res = await stack.apiAs(adminToken, 'POST', '/data/runas_note', { name, status });
     expect(res.status, `admin create ${name} failed: ${res.status} ${await res.clone().text()}`).toBeLessThan(300);
     const j = (await res.json()) as { id?: string; record?: { id?: string } };
     const id = j.id ?? j.record?.id;
@@ -124,7 +139,12 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
     const body = (await res.json()) as {
       success?: boolean;
       data?: unknown;
-      error?: { code?: string; message?: string; httpStatus?: number; details?: { summary?: { nodes?: any[] } } };
+      error?: {
+        code?: string;
+        message?: string;
+        httpStatus?: number;
+        details?: { summary?: { nodes?: any[] }; innerRefusal?: { code?: string } };
+      };
     };
     expect(body.success).toBe(false);
     expect(body.error?.code, `expected FLOW_FAILED: ${text}`).toBe('FLOW_FAILED');
@@ -135,9 +155,12 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
     // The failure is the RLS refusal on the note, named node-first — not a
     // generic "flow failed", which would pass while the run died of anything.
     expect(body.error?.message).toContain(`Node '${failingNodeId}' failed`);
-    // The member cannot READ the note, so the by-id write answers the read
-    // door's not-found (the write doors' ruling A), named node-first.
-    expect(body.error?.message).toMatch(/not found in runas_note/i);
+    // The member can READ the note (flow start admission admitted the start),
+    // so the by-id write answers the record layer's access refusal rather than
+    // the read door's not-found (the write doors' ruling A), named node-first
+    // and carried as the refusal the node's data call met.
+    expect(body.error?.message).toContain(`update_record(runas_note) failed`);
+    expect(body.error?.details?.innerRefusal?.code, `expected the node's PERMISSION_DENIED: ${text}`).toBe('PERMISSION_DENIED');
     // Which node failed survives the envelope change — the reason `summary`
     // rides in `details` at all.
     const failed = body.error?.details?.summary?.nodes?.find((n) => n?.nodeId === failingNodeId);
@@ -173,6 +196,35 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
     expect(await runCount(flow), `a refused start of ${flow} still recorded a run`).toBe(runsBefore);
   }
 
+  /**
+   * Start `flow` as the restricted member with `noteId` naming a note the
+   * member cannot read, and require flow start admission to refuse it (#29365):
+   * `404 RECORD_NOT_FOUND` in the ADR-0112 envelope, no inner `data`, no field
+   * of the note in the body, and no run recorded for the flow or for any flow
+   * it would have called (`alsoNoRunOf`) — the start is refused before the run
+   * exists. The id in the message is the caller's own input, echoed.
+   */
+  async function memberTriggerExpectingRecordRefusal(flow: string, noteId: string, noteName: string, alsoNoRunOf: string[] = []) {
+    const watched = [flow, ...alsoNoRunOf];
+    const runsBefore = await Promise.all(watched.map(runCount));
+    const res = await stack.apiAs(memberToken, 'POST', `/automation/${flow}/trigger`, { params: { noteId } });
+    const text = await res.clone().text();
+    expect(res.status, `start of ${flow} on an unreadable note should be refused 404: ${res.status} ${text}`).toBe(404);
+    const body = (await res.json()) as {
+      success?: boolean;
+      data?: unknown;
+      error?: { code?: string; httpStatus?: number; message?: string };
+    };
+    expect(body.success).toBe(false);
+    expect(body.error?.code, `expected RECORD_NOT_FOUND: ${text}`).toBe('RECORD_NOT_FOUND');
+    expect(body.error?.httpStatus).toBe(404);
+    expect(body.error?.message).toMatch(/not found in runas_note/i);
+    expect(body.data).toBeUndefined();
+    expect(text, 'the refusal disclosed a field of the unreadable note').not.toContain(noteName);
+    const runsAfter = await Promise.all(watched.map(runCount));
+    expect(runsAfter, `a refused start of ${flow} still recorded a run (${watched.join(', ')})`).toEqual(runsBefore);
+  }
+
   it('precondition: the automation service is wired and a flow is registered', async () => {
     const res = await stack.apiAs(memberToken, 'GET', '/automation/runas_system_touch');
     expect(res.status, `automation service not wired: ${res.status}`).toBe(200);
@@ -193,10 +245,21 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
     }
   });
 
+  it('precondition: an admin note marked shared is READABLE to the member and still not WRITABLE', async () => {
+    const id = await adminCreateNote('shared-check', SHARED_STATUS);
+    const read = await stack.apiAs(memberToken, 'GET', `/data/runas_note/${id}`);
+    expect(read.status, `member could not read a shared note: ${read.status} ${await read.clone().text()}`).toBe(200);
+    const j = (await read.json()) as { record?: Record<string, unknown> } & Record<string, unknown>;
+    expect((j.record ?? j).id).toBe(id);
+    const write = await stack.apiAs(memberToken, 'PATCH', `/data/runas_note/${id}`, { status: 'member-wrote' });
+    expect(write.status, `member wrote a shared note directly: ${write.status} ${await write.clone().text()}`).toBeGreaterThanOrEqual(400);
+    expect(await adminStatusOf(id)).toBe(SHARED_STATUS);
+  });
+
   // ── WRITE direction ───────────────────────────────────────────────────────
 
-  it("runAs:'system' ELEVATES — member-triggered system flow WRITES a record the member cannot", async () => {
-    const id = await adminCreateNote('sys-touch');
+  it("runAs:'system' ELEVATES — member-triggered system flow WRITES a record the member can read but not write", async () => {
+    const id = await adminCreateNote('sys-touch', SHARED_STATUS);
     // Through the user-mode parent: the parent itself is RLS-bound as the
     // member, so the write landing is the elevated CHILD's doing.
     const result = await memberTrigger('runas_system_touch_via_parent', id);
@@ -206,18 +269,18 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
   });
 
   it("the trigger door refuses the member a DIRECT start of either runAs:'system' flow — 403, nothing written, no run", async () => {
-    const id = await adminCreateNote('sys-direct');
+    const id = await adminCreateNote('sys-direct', SHARED_STATUS);
     await memberDirectTriggerExpectingDoorRefusal('runas_system_touch', id);
     // Refused before dispatch: the elevated write never happened.
-    expect(await adminStatusOf(id)).toBe('new');
+    expect(await adminStatusOf(id)).toBe(SHARED_STATUS);
     await memberDirectTriggerExpectingDoorRefusal('runas_system_read', id);
   });
 
-  it("runAs:'user' DE-ELEVATES — member-triggered user flow is RLS-DENIED on the same record", async () => {
-    const id = await adminCreateNote('user-touch');
-    // The de-elevated run reaches the record layer as the MEMBER and the write
-    // is refused there, so the run fails on its `touch` node — surfaced since
-    // #9378 as 400 `FLOW_FAILED` instead of a 200 wrapping the inner failure.
+  it("runAs:'user' DE-ELEVATES — member-triggered user flow is RLS-DENIED writing the same record", async () => {
+    const id = await adminCreateNote('user-touch', SHARED_STATUS);
+    // The member can read the note, so the start is admitted; the de-elevated
+    // run then reaches the record layer as the MEMBER and the write is refused
+    // there, so the run fails on its `touch` node — 400 `FLOW_FAILED` (#9378).
     // The refusal text is asserted in the helper: this leg proves the identity
     // switch is real, so "denied because of WHO ran it" is the load-bearing
     // part, not merely "something went wrong".
@@ -226,29 +289,52 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
     // RLS-denied, so the record is unchanged. (Before the fix it would read
     // 'touched-user' — the privilege-boundary surprise this gate pins.)
     const after = await adminStatusOf(id);
-    expect(after, 'user-mode flow wrote a record the triggering member cannot access (#1888 regression)').not.toBe(
+    expect(after, 'user-mode flow wrote a record the triggering member cannot write (#1888 regression)').not.toBe(
       'touched-user',
     );
-    expect(after).toBe('new');
+    expect(after).toBe(SHARED_STATUS);
+  });
+
+  it('a write flow handed a note the member cannot READ is refused at the door for every runAs — 404, nothing written, no run', async () => {
+    const id = await adminCreateNote('unreadable-touch');
+    // runAs:'system', handed on by the user-mode parent through `subflow`.
+    await memberTriggerExpectingRecordRefusal('runas_system_touch_via_parent', id, 'unreadable-touch', ['runas_system_touch']);
+    // runAs:'user'.
+    await memberTriggerExpectingRecordRefusal('runas_user_touch', id, 'unreadable-touch');
+    expect(await adminStatusOf(id)).toBe('new');
   });
 
   // ── READ direction ────────────────────────────────────────────────────────
 
-  it("runAs:'system' READS a record the member cannot; runAs:'user' cannot", async () => {
-    const id = await adminCreateNote('read-check');
+  it("runAs:'system' READS a record the member cannot; runAs:'user' cannot (the definition picks the row)", async () => {
+    const id = await adminCreateNote(SEALED_NOTE_NAME);
 
     // Through the user-mode parent, whose `found` output carries the elevated
     // child's outputs — so the child's own `found` is `output.found.found`.
-    const sys = await memberTrigger('runas_system_read_via_parent', id);
+    const sys = await memberTrigger('runas_system_read_sealed_via_parent', id);
     const sysFound = (sys.output?.found as { found?: { id?: unknown } } | undefined)?.found;
     expect(sysFound, 'system flow could not read the record it should see (elevation broken)').toBeTruthy();
     expect(sysFound?.id, 'the elevated read returned some row, not the admin note it was asked for').toBe(id);
 
-    const usr = await memberTrigger('runas_user_read', id);
+    const usr = await memberTrigger('runas_user_read_sealed', id);
     const found = usr.output?.found;
     expect(
       found && typeof found === 'object' ? (found as any).id : found,
       'user-mode flow READ a record the triggering member cannot access (#1888 regression)',
     ).toBeFalsy();
+  });
+
+  it('a read flow handed a note the member CAN read reads it, under either runAs', async () => {
+    const id = await adminCreateNote('shared-read', SHARED_STATUS);
+    const sys = await memberTrigger('runas_system_read_via_parent', id);
+    expect((sys.output?.found as { found?: { id?: unknown } } | undefined)?.found?.id).toBe(id);
+    const usr = await memberTrigger('runas_user_read', id);
+    expect((usr.output?.found as { id?: unknown } | undefined)?.id).toBe(id);
+  });
+
+  it('a read flow handed a note the member cannot READ is refused at the door for every runAs — 404, nothing disclosed, no run', async () => {
+    const id = await adminCreateNote('unreadable-read');
+    await memberTriggerExpectingRecordRefusal('runas_system_read_via_parent', id, 'unreadable-read', ['runas_system_read']);
+    await memberTriggerExpectingRecordRefusal('runas_user_read', id, 'unreadable-read');
   });
 });

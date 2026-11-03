@@ -167,12 +167,30 @@ describe('ADR-0070 D4 — duplicatePackage refuses a renamed reference that meet
         await save(type, item);
     }
 
+    /**
+     * A permission set stored before the save door refused a grant on an
+     * object that does not exist: the door now refuses `dupdst_customer`
+     * (no package registers it, none is saved), so the set is saved with its
+     * one known grant and its stored row is then given the full `objects` map,
+     * in the given key order — the at-rest shape this D4 branch still guards.
+     */
+    async function seedStoredPermission(name: string, objects: Record<string, unknown>): Promise<void> {
+        await seed('permission', { name, label: 'Objects', objects: { dupsrc_customer: NARROW } } as { name: string });
+        const row = Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .find((r) => r.type === 'permission' && r.name === name && r.package_id === P);
+        expect(row).toBeDefined();
+        const body = typeof row!.metadata === 'string' ? JSON.parse(row!.metadata) : row!.metadata;
+        const stored = { ...body, objects };
+        row!.metadata = typeof row!.metadata === 'string' ? JSON.stringify(stored) : stored;
+        expect(storedBody('permission', name, P).objects).toEqual(objects);
+    }
+
     for (const [order, objects] of [
         ['the renamed key first', { dupsrc_customer: NARROW, dupdst_customer: WIDE }],
         ['the key it meets first', { dupdst_customer: WIDE, dupsrc_customer: NARROW }],
     ] as const) {
         it(`a permission set whose renamed \`objects\` key meets one it holds is refused, never merged (${order})`, async () => {
-            await seed('permission', { name: 'dupsrc_objs', label: 'Objects', objects } as { name: string });
+            await seedStoredPermission('dupsrc_objs', objects);
 
             const res = await protocol.duplicatePackage({ sourcePackageId: P, targetPackageId: Q });
 

@@ -18,7 +18,7 @@ import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/ide
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
 import { FilterConditionSchema } from './filter.zod';
-import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
+import { fieldKeyGuidanceAsStrictOptions, fieldSchemaAliases, SELECT_OPTION_ALIASES } from './field-key-aliases';
 import { DEFAULT_AUTONUMBER_FORMAT } from './autonumber-format';
 // #7127 — the `defaultValue` authoring gate: shape discrimination (literal /
 // runtime token / CEL envelope), the per-token × per-type table, and the
@@ -363,11 +363,13 @@ const FIELD_HISTORY =
 export const SelectOptionSchema = lazySchema(() => strictObject({
   surface: 'this select option',
   history: FIELD_HISTORY,
-  aliases: { text: 'label', name: 'label', title: 'label', key: 'value', id: 'value', isDefault: 'default', selected: 'default', colour: 'color', visible: 'visibleWhen', showWhen: 'visibleWhen' },
+  // The table lives in `field-key-aliases.ts`: an extension's option patch
+  // carries the rows whose target it admits (ADR-0146 D10).
+  aliases: SELECT_OPTION_ALIASES,
   // #8201. No alias row for the editability family, per the same red line the
   // mother ruling drew: an alias names a key the shape must then accept, and
   // this shape accepts none of them. The set consumes those spellings before
-  // the rename channel runs, and none of the alias keys above is a member, so
+  // the rename channel runs, and none of the table's alias keys is a member, so
   // no existing pointer is shadowed (`alias-integrity.test.ts`, #7889).
   guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
 }, {
@@ -1010,39 +1012,6 @@ export const FieldMaskingRuleSchema = lazySchema(() => z.union([
 export type FieldMaskingRule = FieldMaskingPreset | { keepHead: number; keepTail: number };
 
 /**
- * `FIELD_KEY_GUIDANCE`, re-expressed as `strictObject` options.
- *
- * That table is the curated list of near-misses and retirements on this exact
- * surface — twenty-odd entries, every one found in the wild, and already held
- * honest by `authoring-key-lint.test.ts` (every `to` must name a key this schema
- * really declares; no entry may exist for a key that is still live). Copying it
- * here would have made a second copy of the truth, which is the thing this
- * campaign keeps finding rotted.
- *
- * It also carries knowledge the fallback cannot rederive, and the proof is in
- * that file: `pii` is three edits from `min`, so an edit-distance suggester
- * offers "did you mean `min`?" — confident, wrong, and about an unrelated
- * concept. The lint suppressed that years ago. Closing this shape without
- * reusing the table reintroduced it verbatim, which is how this wiring got
- * written.
- *
- * `to` becomes an alias (the concept survives under another key); `why` becomes
- * guidance (a retirement with no successor, which also suppresses the rename).
- * The table's consumer changes here — the lint no longer reaches `field` now
- * that the parse rejects first — but the table itself is unchanged and still
- * tested.
- */
-function fieldKeyGuidanceAsStrictOptions() {
-  const aliases: Record<string, string> = {};
-  const guidance: Record<string, string> = {};
-  for (const [key, hint] of Object.entries(FIELD_KEY_GUIDANCE)) {
-    if (hint.to) aliases[key] = hint.to;
-    else if (hint.why) guidance[key] = hint.why;
-  }
-  return { aliases, guidance };
-}
-
-/**
  * The platform ceiling on decimal places — why a spec-valid `scale` may not
  * exceed 100 (#18972, the objectstack half of objectui#9808).
  *
@@ -1275,46 +1244,10 @@ export const FieldSchema = lazySchema(() => {
   const base = strictObject({
   surface: 'this field',
   history: FIELD_HISTORY,
-  aliases: {
-    ...fieldKeyGuidanceAsStrictOptions().aliases,
-    fieldName: 'name', key: 'name', column: 'name',
-    dataType: 'type', fieldType: 'type',
-    title: 'label', displayName: 'label',
-    help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
-    default: 'defaultValue', initialValue: 'defaultValue',
-    // `notNull` is NOT here, deliberately — see COLUMN_CONSTRAINT_FLAT_KEYS
-    // below. `isRequired` / `mandatory` stay: both are genuine spellings of the
-    // WRITE contract, and ADR-0113 moved neither.
-    isRequired: 'required', mandatory: 'required',
-    isUnique: 'unique',
-    // `picklist` is not here: it is a declared key — the reference to a shared
-    // option list, mutually exclusive with `options` (see the key below).
-    values: 'options', choices: 'options', selectOptions: 'options',
-    valueSet: 'picklist', globalValueSet: 'picklist', optionSet: 'picklist',
-    relatedTo: 'reference', referenceTo: 'reference', target: 'reference', targetObject: 'reference', lookupObject: 'reference',
-    onDelete: 'deleteBehavior', deleteRule: 'deleteBehavior', cascade: 'deleteBehavior',
-    formula: 'expression', calculation: 'expression', compute: 'expression',
-    // `rollup` alone covers `rollUp` / `roll_up` / `Roll-Up` — `aliasProbe`
-    // folds case and separators, so a second spelling was never reachable
-    // (#5481).
-    rollup: 'summaryOperations', summary: 'summaryOperations', aggregate: 'summaryOperations',
-    length: 'maxLength', size: 'maxLength',
-    decimals: 'scale', decimalPlaces: 'scale', digits: 'precision',
-    isReadonly: 'readonly', disabled: 'readonly',
-    isHidden: 'hidden', invisible: 'hidden',
-    // `showWhen` has only one reading — a predicate — so it renames. Its
-    // sibling `visible` has two on this surface and is answered in prose
-    // below; `disabled` already renames onto `readonly` above, which is the
-    // right target here because a field has `readonlyWhen`, not `disabledWhen`
-    // (#7832).
-    showWhen: 'visibleWhen',
-    section: 'group', category: 'group', fieldset: 'group',
-    component: 'widget', renderer: 'widget', control: 'widget',
-    mimeTypes: 'accept', allowedTypes: 'accept', fileTypes: 'accept',
-    maxFileSize: 'maxSize', maxBytes: 'maxSize',
-    trackChanges: 'trackHistory', feedTracked: 'trackHistory',
-    permissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
-  },
+  // `FIELD_KEY_GUIDANCE`'s renames and the field's own rows, in
+  // `field-key-aliases.ts`: an extension's field patch carries the rows whose
+  // target it admits (ADR-0146 D10).
+  aliases: fieldSchemaAliases(),
   guidance: {
     ...fieldKeyGuidanceAsStrictOptions().guidance,
     // Entries the lint's table does not carry, because the lint never had to:
@@ -1380,11 +1313,12 @@ export const FieldSchema = lazySchema(() => {
    *
    * On a multi-value lookup (`multiple: true`), `required` means NON-EMPTY
    * array: an emptied required set fails validation loudly — `[]` does not
-   * satisfy `required` (#9447, maintainer ruling 2026-08-18). The empty set is
-   * always representable (it reads back as `[]`, never `null` — see
-   * `multiple`), so the required check judges emptiness, not absence. The
-   * describe is form help in Studio and carries the rule, not the ruling date
-   * (#22093).
+   * satisfy `required` (#9447, maintainer ruling 2026-08-18; this half stands
+   * under ruling A on #29343, record 6591577985). An emptied OPTIONAL
+   * multi-value field is stored as `null`, the same as one never set (see
+   * `multiple`), so the required check judges emptiness: `null` and `[]` both
+   * fail it. The describe is form help in Studio and carries the rule, not the
+   * ruling date (#22093).
    */
   required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
@@ -1403,23 +1337,47 @@ export const FieldSchema = lazySchema(() => {
     notNull: z.boolean().optional().describe('Emit a physical NOT NULL on the column (ADR-0113). Absent = the column stays nullable even under `required: true` — the write contract is enforced at the engine, the only sanctioned write path, not by the database. Declaring this over existing null rows is a destructive migration gated by the schema-drift ceremony. Incompatible with `requiredWhen` (a conditional contract cannot be an unconditional column constraint).'),
   }).strict().optional().describe('Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested.'),
 
-  searchable: z.boolean().default(false).describe('Is searchable'),
   /**
-   * Multi-value empty representation (#9447, maintainer ruling 2026-08-18):
-   * an emptied multi-value lookup reads back as `[]`, never `null`. This
-   * binds the field's empty representation for EVERY writer — cascade repair
-   * (`set_null` member removal), form clears, API writes — not as a
-   * cascade-only convention: an array field always reads as an array, so
-   * readers (generated code, formula/filter predicates) never need a null
-   * branch. Same ruling: `required` on a multi-value lookup means non-empty
-   * array (see `required` above).
+   * The field's own search opt-in, read by `resolveSearchFieldResolution`
+   * (`search-fields.ts`) on its auto branch only — ruling record 6573569376,
+   * letter A: honoured, not retired (ADR-0049). The `$searchFields`
+   * ingress allow-list is the same resolved set, so it admits what this key
+   * admits.
+   */
+  searchable: z.boolean().default(false).describe(
+    'Search this field when its object declares no `searchableFields`. The set `search` scans, and the '
+    + 'set a `$searchFields` override may name, is then the type-based default (the text-like and '
+    + 'select columns) plus every field marked `searchable: true`, of any type except '
+    + '`secret`, `password` and `vector`, which stay excluded (a virtual `formula` field has no stored '
+    + 'column, so it is never scanned either). `false`, the default, does not remove a field the '
+    + 'type-based default already scans; to choose the set, declare `searchableFields`. '
+    + 'When the object declares `searchableFields`, that list '
+    + 'is the whole search set and this flag is not read (ADR-0061).',
+  ),
+  /**
+   * Multi-value empty representation (ruling A on #29343, record 6591577985,
+   * amending #9447, maintainer ruling 2026-08-18): a cleared OPTIONAL
+   * multi-value field — every type `isMultiValueField` answers true for:
+   * multiselect, checkboxes, tags, and select / lookup / user / file / image
+   * with `multiple: true` — is stored as `null` by the write door, the same as
+   * one never set, unique-covered or not: `[]` and `''` written to it store
+   * `null`. This binds the field's empty representation for EVERY writer —
+   * cascade repair (`set_null` member removal), form clears, API writes — not
+   * as a cascade-only convention. It reverses #9447's "an emptied multi-value
+   * lookup reads back as `[]`, never `null`" for optional columns: readers
+   * (generated code, formula/filter predicates) meet `null` for an empty set,
+   * and read `null` and `[]` alike as empty, since a row stored before the
+   * rule can still hold `[]`. The `$empty` table's `multi_value` row
+   * (`filter-empty-operator.ts`) is unchanged: `null` and `[]` both read as
+   * empty. #9447's other half stands: `required` on a multi-value field means
+   * non-empty list (see `required` above).
    *
    * Declarability: `multiple: true` outside the multi-capable types is refused
    * at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower
    * 2026-08-22 ruling. The rulings and their dates live in these comments; the
    * describe is form help in Studio and carries only the rule (#22093).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair.'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. A cleared optional multi-value field is stored as `null`, the same as one never set: an empty list `[]` or an empty string written to it stores `null`, and the rule binds every writer (cascade repair, form clears, API writes). Read `null` and `[]` alike as empty, as the `is_empty` filter (`$empty`) does, since a row stored before this rule can still hold `[]`. On a `required` multi-value field the empty list is refused: `required` means a non-empty list.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
@@ -1769,6 +1727,69 @@ export const FieldSchema = lazySchema(() => {
     + 'same object declaring inline `options`, and `value` one of its option values — any other shape is '
     + 'refused at parse.'
   ),
+  // #29171 (director ruling 6574398310, letter B): `referenceNameVisible`.
+  // Served by objectql's `$expand` (#29460, `engine-reference-name-visible.ts`);
+  // its text-only rendering is the ui lane's card (#29462).
+  /**
+   * Declared name exposure for a relationship whose target the reader may not
+   * be able to read. SERVED on the expanded read (ADR-0049: declared =
+   * served): `$expand` on the field answers a target the reader is refused —
+   * by the object's read gate or its row scope — as
+   * `{ id, name, readRefused: true }`, per element on a `multiple: true`
+   * field. An unexpanded read answers the stored id, as it does for every
+   * reader (ADR-0104 D1).
+   *
+   * Declared per referencing field by the application author, never on the
+   * target object: the application decides whose names its own pages reveal.
+   * `true` declares that a principal who can read the record carrying this
+   * field MAY see, for the record this field points at, its display name and
+   * its id, even when that principal cannot read the target record. The name
+   * is the ADR-0079 D4 display name `resolveRecordDisplayName` answers: the
+   * target object's `nameField`, else its `displayNameField`, else the derived
+   * title field. The served value is `ReferenceNameOnlyValueSchema`
+   * (`field-value.zod.ts`). Nothing else of the target:
+   * `$expand` on this field MUST return the same name and id only, the field's
+   * own `displayField` MUST NOT widen what is shown, and the renderer shows the
+   * name as text with no link to the target record. A principal who can read
+   * the target is served exactly what it is served without the key.
+   *
+   * The key lifts the RECORD-level refusal only. A field-level rule on the
+   * name field itself still holds, and the engine reads that field only where
+   * it computes nothing the security layer owns. The name served is the
+   * ADR-0079 floor (`Record #` and the id) in five cases (objectql's
+   * `servableNameField`): the reader's field-level security keeps
+   * that field from it; the field declares a `maskingRule`; it is a formula
+   * reading through another reference; an explicit `nameField` (or
+   * `displayNameField`) points at a column that is neither title-typed nor
+   * `autonumber`; or no field-level answer can be had for the reader. A
+   * target with no resolvable or no non-empty name reads as the same floor,
+   * as it does for every reader.
+   *
+   * Absent or `false` keeps the restricted-reference posture: a lookup whose
+   * target the reader cannot read shows no name. Valid on `lookup` and on
+   * `user` (the `sys_user` reference, which the same key covers); refused at
+   * parse on every other type (this schema's superRefine), `false` included.
+   */
+  referenceNameVisible: z.boolean().optional().describe(
+    'Declared name exposure (`lookup` and `user` fields only). TRUE declares that a principal who can '
+    + 'read the record carrying this field may see the referenced record\'s display name (the target '
+    + 'object\'s `nameField`, else its `displayNameField`, else the derived title field) and id even when '
+    + 'that principal cannot read the referenced record. Served on `$expand`: a target the reader is refused '
+    + '(the object\'s read gate or its row scope) answers `{ id, name, readRefused: true }` '
+    + '(`ReferenceNameOnlyValueSchema`), per element on a multi-value field; an unexpanded read '
+    + 'answers the stored id, as for every reader. Nothing else of the target: `$expand` on this field '
+    + 'returns the same name and id only, the field\'s `displayField` does not widen it, and the name '
+    + 'renders as text with no link to the target. A field-level rule on the name field still holds, and '
+    + 'the name field is read only where nothing the security layer owns must be computed: the name is the '
+    + '`Record #` floor with the id when the reader may not read that field, it declares a `maskingRule`, '
+    + 'it is a formula reading through another reference, an explicit `nameField` (or its `displayNameField` '
+    + 'alias) points at a column that is neither title-typed nor autonumber, or no field-level answer can be '
+    + 'had for the reader. A target '
+    + 'with no resolvable or no non-empty name reads as the same floor. A principal who can read the target is '
+    + 'served exactly what it is served without the key. Absent or false keeps the restricted-reference '
+    + 'posture for a target the reader cannot read. Declared on the referencing field only; there is no '
+    + 'target-object switch. Refused on any other type.'
+  ),
   /**
    * Inbound mail association — `email` fields only (#22870; ruling
    * `6116489638`, Q1 → A, under the inbound-mail design record on #8998).
@@ -1833,9 +1854,12 @@ export const FieldSchema = lazySchema(() => {
    * it per the #9689 idempotent-materialization ruling). On every other type
    * the key was inert by construction — the engine's referential delete walk
    * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
-   * `reference` (the family predicate `statesDeleteSemantics` in
+   * `reference`, and on a `user` field that declares a `deleteBehavior` (the
+   * family predicate `statesDeleteSemantics` in
    * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
-   * object, written by the object's parse when the author leaves it out) — yet
+   * object, written by the object's parse when the author leaves it out; a
+   * `user` field's target is `sys_user`, fixed by the type, and #29253 made its
+   * authored value take effect) — yet
    * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
@@ -2620,6 +2644,29 @@ export const FieldSchema = lazySchema(() => {
         'half of a pointer pair, or drop the key.',
     });
   }
+  // [#29171, ruling 6574398310 letter B] `referenceNameVisible` exposes the
+  // name of the record a relationship points at. Only a `lookup` or a `user`
+  // field (the `sys_user` reference the ruling covers) points at one record
+  // of a fixed target whose name the engine can read; on any other type the
+  // flag would parse and expose nothing. `master_detail` is refused too: the
+  // ruling places the key on the referencing lookup. An authored `false`
+  // off-type is refused as well, the `mailAssociation` precedent below.
+  if (
+    field.referenceNameVisible !== undefined
+    && field.type !== 'lookup'
+    && field.type !== 'user'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['referenceNameVisible'],
+      message:
+        "`referenceNameVisible` is only valid on `type: 'lookup'` or `type: 'user'` (this field is " +
+        `\`${field.type}\`): it lets a reader of this record see the name of the record a lookup points ` +
+        'at when that reader cannot read the target, and only a lookup (or a `user` field, the lookup to ' +
+        '`sys_user`) points at such a record. Declare it on the lookup field whose target name should ' +
+        'show, or drop the key.',
+    });
+  }
   // [#22870] `mailAssociation` marks a field as holding a correspondent's
   // address, matched against the participant addresses of inbound mail — and
   // only an `email` column stores an address to match. On any other type the
@@ -2725,8 +2772,10 @@ export const FieldSchema = lazySchema(() => {
   // No ADR-0087 conversion carries it (the D3 entry
   // `user-field-foreign-reference-refused` says why): rewriting the field to a
   // `lookup` would add it to the referential delete walk with
-  // `deleteBehavior: 'set_null'`, which a `user` field never joined, and
-  // `deleteBehavior` has no value meaning "leave it", so the author decides.
+  // `deleteBehavior: 'set_null'`, while a `user` field that declares no
+  // `deleteBehavior` stays out of that walk (#29253: one that declares a value
+  // joins it), and `deleteBehavior` has no value meaning "leave it", so the
+  // author decides.
   if (
     field.type === 'user'
     && field.reference !== undefined
@@ -2741,7 +2790,8 @@ export const FieldSchema = lazySchema(() => {
         `\`reference: '${field.reference}'\`. To link records of \`${field.reference}\`, declare a ` +
         `\`lookup\`: \`{ type: 'lookup', reference: '${field.reference}' }\` (\`Field.lookup('${field.reference}', …)\`), ` +
         "and choose its `deleteBehavior` (a `lookup` defaults to `'set_null'` when the target record is " +
-        'deleted; a `user` field never did). If a person was meant, drop `reference`.',
+        'deleted; a `user` field has no default and keeps the id unless it declares one). If a person was ' +
+        'meant, drop `reference`.',
     });
   }
 
@@ -3289,9 +3339,12 @@ export const FieldSchema = lazySchema(() => {
     // stay legal. `tree` (hierarchical reference) keeps materializing with
     // `lookup`: it is in the relational family, where the key states delete
     // semantics, and the delete walk reads it there (#22957). `user` is
-    // stored identically to `lookup` but sits outside the delete walk's family
-    // (`master_detail`, `lookup`, `tree`) exactly like `text` does, so it takes
-    // the non-reference side; an authored value there still round-trips.
+    // stored identically to `lookup` but takes the non-reference side: it
+    // joins the delete walk only when its author DECLARES a `deleteBehavior`
+    // (#29253, `statesDeleteSemantics`), so a materialized value here would be
+    // a delete outcome nobody chose. A bare `user` field therefore parses with
+    // no key and keeps the deleted user's id; an authored value round-trips
+    // and takes effect.
     if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
       patch.deleteBehavior = 'set_null';
     }

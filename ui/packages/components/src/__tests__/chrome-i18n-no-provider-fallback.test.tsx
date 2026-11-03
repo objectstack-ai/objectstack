@@ -12,8 +12,8 @@
  *
  * This is not a nice-to-have: consumers outside this package address exactly
  * these controls by their English accessible names with no provider in the
- * tree — `packages/plugin-view/src/__tests__/ObjectView.test.tsx`
- * (`getByLabelText('Close panel')`) and `e2e/live/inline-edit-polish-2572.spec.ts`
+ * tree — `packages/plugin-view/src/__tests__/ObjectView.splitPopoverCreate-10975.test.tsx`
+ * (`getByLabelText(...)`) and `e2e/live/inline-edit-polish-2572.spec.ts`
  * (the header toolbar by English name). Routing a literal through `t()` without
  * a working default is exactly how that breaks, and it breaks in another
  * package's suite, not this one's.
@@ -82,7 +82,7 @@ describe('NavigationOverlay chrome — English fallback with no provider (object
         isOpen
         isOverlay
         selectedRecord={record}
-        mode="split"
+        mode="drawer"
         close={() => {}}
         setIsOpen={() => {}}
         title="Acme Corp"
@@ -92,8 +92,9 @@ describe('NavigationOverlay chrome — English fallback with no provider (object
       </NavigationOverlay>,
     );
 
-    // The exact query `plugin-view`'s ObjectView.test.tsx uses.
-    expect(screen.getByLabelText('Close panel')).toBeTruthy();
+    // The drawer over a list is closed by `Close` (the split pane's
+    // `Close panel` retired with it, objectstack#28915).
+    expect(screen.getByTitle('Close').getAttribute('aria-label')).toBe('Close');
   });
 });
 

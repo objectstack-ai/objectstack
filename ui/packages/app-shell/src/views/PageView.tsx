@@ -17,6 +17,7 @@ import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'r
 import {
   ElementDataSourceGate,
   SchemaRenderer,
+  answeredLoadFailure,
   classifyLoadError,
   noDataSourceMessage,
   notifyDataChanged,
@@ -24,6 +25,7 @@ import {
   useDataInvalidation,
   useFilterScope,
   useResolvedFilter,
+  type AnsweredLoadFailure,
   type ElementDataSourceMapping,
   type RelatedRecordActionsValue,
 } from '@object-ui/react';
@@ -36,7 +38,7 @@ import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledItem } from '../providers/bundledReads.js';
 import { PageRecordScope, useExpressionContext } from '../providers/ExpressionProvider.js';
-import { preferLocal } from '../utils/preferLocal.js';
+import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { appStudioRoutePath } from '../utils/appRoute.js';
 import { ConsoleActionRuntimeProvider } from '../hooks/useConsoleActionRuntime.js';
 import { useStudioDesignGate } from '../hooks/useStudioDesignGate.js';
@@ -101,7 +103,8 @@ type PageRow = Record<string, unknown>;
 /** One settled read of the page row, tagged with the query it answered. */
 type PageRowRead =
   | { key: string; status: 'loaded'; row: PageRow | null }
-  | { key: string; status: 'failed' };
+  // `answer`: the server's code and sentence when it answered (objectstack#29704).
+  | { key: string; status: 'failed'; answer: AnsweredLoadFailure | null };
 
 /** The first row of a `find` answer: `QueryResult.data`, or a bare array. */
 const firstRow = (result: unknown): PageRow | null => {
@@ -248,7 +251,7 @@ function AppPageRecordRead({
           setRead(
             classifyLoadError(err) === 'forbidden'
               ? { key: readKey, status: 'loaded', row: null }
-              : { key: readKey, status: 'failed' },
+              : { key: readKey, status: 'failed', answer: answeredLoadFailure(err) },
           );
         },
       );
@@ -274,10 +277,20 @@ function AppPageRecordRead({
         <DataErrorState
           data-testid="page-record-load-failed"
           title={t('empty.recordLoadFailed', { defaultValue: 'Couldn’t load this record' })}
-          message={t('empty.recordLoadFailedDescription', {
+          // The server's sentence when it answered — the record page's rule; the
+          // network sentence only for a read that got no answer (objectstack#29704).
+          message={current.answer?.message ?? t('empty.recordLoadFailedDescription', {
             defaultValue: 'Something went wrong while loading it. Check your connection and try again.',
           })}
         >
+          {current.answer?.code ? (
+            <code
+              data-testid="page-record-load-failed-code"
+              className="mb-3 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+            >
+              {current.answer.code}
+            </code>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
@@ -323,12 +336,14 @@ export function PageView() {
   // this app's package owns; else the `/meta/page` list, prefer-local, as
   // before. While the bundle is on the wire the page is not yet known.
   const bundledPage = useBundledItem('page', pageName, (activeApp as any)?._packageId);
-  const page =
-    bundledPage.state === 'hit'
-      ? bundledPage.value
-      : bundledPage.state === 'miss'
-        ? preferLocal(metadata.pages as any[], pageName, (activeApp as any)?._packageId)
-        : undefined;
+  // objectstack#29416 — a page the bundle does not hold is read by name, and
+  // from the list only when that answer cannot be the prefer-local pick.
+  const readItemsByName = useReadItemsByName(metadata);
+  const pageRead =
+    bundledPage.state === 'miss' && pageName
+      ? readItemPreferLocal(readItemsByName, 'page', pageName, (activeApp as any)?._packageId, () => metadata.pages, getTypeStatus?.('page'))
+      : undefined;
+  const page = bundledPage.state === 'hit' ? bundledPage.value : pageRead?.item;
 
   // Where "Edit in studio" goes: the page's surface in Studio's Interfaces
   // pillar, through the one derivation the app bar's pencil, the app
@@ -355,8 +370,7 @@ export function PageView() {
     // race where the app's home page is the first thing rendered. Show a
     // loading state until the `page` type is actually resolved, then trust the
     // not-found. (getTypeStatus absent = hand-rolled context = always ready.)
-    const pageStatus = bundledPage.state === 'pending' ? 'loading' : getTypeStatus?.('page');
-    if (pageStatus === 'idle' || pageStatus === 'loading') {
+    if (bundledPage.state === 'pending' || (pageRead && !pageRead.settled)) {
       return (
         <div className="h-full flex items-center justify-center p-8" data-testid="page-loading">
           <Spinner className="h-5 w-5 text-muted-foreground" />

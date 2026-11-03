@@ -65,15 +65,18 @@ Run `npm run build` when you need the compiled `dist/objectstack.json` artifact.
 ├── src/
 │   ├── objects/              # Business object definitions (snake_case names)
 │   ├── views/                # UI view definitions (list, form, kanban, calendar)
-│   ├── apps/                 # App navigation & page structure
-│   ├── flows/                # Automation flows & workflows
 │   ├── actions/              # Custom actions (buttons, bulk ops)
+│   ├── flows/                # Automation flows & workflows
 │   ├── dashboards/           # BI dashboards
-│   ├── reports/              # Analytics reports
-│   ├── agents/               # AI agent definitions
-│   ├── i18n/                 # Translation bundles
-│   └── handlers/             # Runtime hook handlers
+│   ├── apps/                 # App navigation & page structure
+│   ├── skills/               # AI skills
+│   └── picklists/            # Shared option sets that select fields reuse
 ```
+
+These are exactly the directories `objectstack.config.ts` wires. A new directory
+under `src/` is never loaded, and `npm run validate` neither counts nor checks
+what it holds, until its `index.ts` barrel is imported in `objectstack.config.ts`
+and handed to its stack key there.
 
 ## AI Skills
 

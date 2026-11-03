@@ -144,29 +144,17 @@ declare *that* field searchable. A task list searched by project name:
 ```
 
 `?search=apollo` expands to `name $contains 'apollo' OR project_name $contains
-'apollo'` — one single-table scan, every driver, no traversal. (A `text` mirror
-also lands in the auto-default set when the object declares no
-`searchableFields`.)
+'apollo'` — one single-table scan, every driver, no traversal.
 
-❌ **Never mirror onto a `formula` field.** A formula field is *virtual* — no
-driver materializes a column for it, so a `$contains` predicate against one has
-nothing to scan (the SQL driver would emit a `WHERE` over a column that does not
-exist). CEL also only reads this record's own fields (`record.<field>`), so a
-formula cannot fetch the related title in the first place. The
-mistake is **refused, not silent**: a `formula` entry in any `searchableFields`
-— the object's own set included — is an `os validate` error
-(`searchable-field-unsearchable`), and a request naming one is `400
-INVALID_FIELD`.
+❌ **Never mirror onto a `formula` field.** It is *virtual* (no column to scan)
+and CEL reads only this record's own fields, so it cannot hold the related title;
+a `formula` entry in any `searchableFields` is refused — `os validate`
+`searchable-field-unsearchable`, a request `400 INVALID_FIELD`.
 
-**Mirror maintenance is the trade-off** — a mirror is denormalized data, only as
-fresh as whatever writes it. Cover both write paths:
-
-| When | What maintains the mirror |
-|:-----|:--------------------------|
-| A task is created, or re-pointed at another project | `beforeInsert` / `beforeUpdate` hook on `task` — read the parent's `name` for the incoming `project_id`, stamp `project_name` |
-| A project is renamed | `afterUpdate` hook on `project` — re-stamp `project_name` on that project's tasks |
-
-Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
+**Mirror maintenance is the trade-off** — a mirror is only as fresh as whatever
+writes it. Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
+stamps `project_name` from the incoming `project_id`'s parent; an `afterUpdate`
+hook on `project` re-stamps its tasks when it is renamed. Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
 one-off backfill. See [Lifecycle Hooks](./references/data-hooks.md).
 
 ---
@@ -375,6 +363,16 @@ text; between two extensions the higher `priority` wins. A patch naming a field
 or option value the target lacks is refused at install and by `os validate`, and
 a `picklist`-bound field's options are never patchable. Example:
 `defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } } })`.
+
+**An object an installed package ships** (ADR-0146 D10) is extended from the
+base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**
+§ Customizing an installed package), never replaced: it takes no `overrides`
+declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix is
+reserved to the pair, so a `__c` field in any other package, or an unsuffixed
+field in a `.custom` extension, is refused at save, publish and install and by
+`os validate` / `os build`; a base field changes only through `fieldPatches`.
+Studio's **Add field** on a base object writes the same extension, as an
+`object_extension` item of the pair.
 
 ---
 

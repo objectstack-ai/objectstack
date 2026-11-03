@@ -721,6 +721,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "引用对象",
         helpText: "被引用的对象名称"
       },
+      referenceNameVisible: {
+        label: "不可读时显示名称",
+        helpText: "允许此记录的读者看到被引用记录的名称（纯文本，不带链接），即使其无权打开该记录。该记录的其他内容一律不显示；名称字段上的字段级规则仍然生效（此时名称显示为 Record # 加 id）。未设置：此类引用显示为「受限记录」。"
+      },
       deleteBehavior: {
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"
@@ -1815,6 +1819,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "提交按钮文字",
         helpText: "此动作参数对话框中提交按钮的文字，即按钮执行的动作（例如“发送”“记录通话”）。仅用于需要收集参数的动作。留空则显示“确认”。"
       },
+      cancelText: {
+        label: "取消按钮文字",
+        helpText: "此动作执行前弹出的对话框（确认框或参数对话框）中取消按钮的文字。动作本身就是“取消……”时，写明取消后保留的是什么（例如“保留邀请”）。仅用于需要确认或收集参数的动作。留空则显示“取消”。"
+      },
       confirmText: {
         label: "确认文本",
         helpText: "执行前的确认提示（如 \"确定要执行吗？\"）"
@@ -2248,6 +2256,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "variables.defaultValue": {
         label: "默认值"
+      },
+      "variables.objectName": {
+        label: "记录对象"
       },
       status: {
         label: "状态",

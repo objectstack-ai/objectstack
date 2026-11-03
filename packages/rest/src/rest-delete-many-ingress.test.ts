@@ -10,6 +10,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 const DELETE_MANY = '/api/v1/data/:object/deleteMany';
 
@@ -126,5 +127,46 @@ describe('POST /data/:object/deleteMany — ingress validation (#3897)', () => {
 
     expect(res.statusCode).toBe(400);
     expect(deleteManyData).not.toHaveBeenCalled();
+  });
+});
+
+// The ingress lets a well-typed `[""]` through (it is an array of strings), so
+// the protocol's own scalar-id check is the layer that refuses it. Measured
+// here through the real protocol so the wire answer is the one a client reads:
+// the entry at fault is named in `fields[]`, in the pair the ingress itself
+// gives `[null]`.
+describe('POST /data/:object/deleteMany — a refused entry is named on the wire', () => {
+  function setupReal() {
+    const del = vi.fn(async () => true);
+    const engine: any = {
+      registry: { getObject: (n: string) => (n === 'invoice' ? { name: 'invoice', fields: {} } : undefined) },
+      delete: del,
+    };
+    const protocol: any = new ObjectStackProtocolImplementation(engine);
+    protocol.getDiscovery = vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } });
+    protocol.getMetaItems = vi.fn().mockResolvedValue([{ name: 'invoice' }]);
+    const rest = new RestServer(createMockServer() as any, protocol, { api: { requireAuth: false } } as any);
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    rest.registerRoutes();
+    return { rest, del };
+  }
+
+  it('an empty-string id answers 400 naming ids.1 as required', async () => {
+    const { rest, del } = setupReal();
+    const res = await post(rest, { ids: ['a', ''] });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_FAILED');
+    expect(res.body.fields.map((f: any) => [f.field, f.code])).toEqual([['ids.1', 'required']]);
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it('a null id keeps the ingress answer naming ids.0 as invalid_type', async () => {
+    const { rest, del } = setupReal();
+    const res = await post(rest, { ids: [null] });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.fields.map((f: any) => [f.field, f.code])).toEqual([['ids.0', 'invalid_type']]);
+    expect(del).not.toHaveBeenCalled();
   });
 });

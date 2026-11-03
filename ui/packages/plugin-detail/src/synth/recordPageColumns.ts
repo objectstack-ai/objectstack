@@ -52,8 +52,13 @@
  * The console sidebar's width when it is expanded: `SIDEBAR_WIDTH` (16rem) of
  * the sidebar primitive in `@object-ui/components`. Measured on the console
  * (HotCRM contact record page, sidebar expanded, objectstack#27241): the
- * record page root is the window minus this — 1184 px in a 1440 px window,
- * 1024 px in 1280, 768 px in 1024.
+ * record page root is the window minus this — 1184 px in a 1440 px window.
+ * Below 1416 px the console folds the sidebar to its 48 px icon rail
+ * (`CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` in `@object-ui/app-shell`,
+ * objectstack#27593), so a 1280 px window gives the root 1232 px and a 1024 px
+ * one 976 px; only a reader who keeps the sidebar open gets 1024 px in 1280
+ * and 768 px in 1024. The floors below are derived for the expanded sidebar,
+ * so the rail only ever gives the page more room than they assume.
  */
 const EXPANDED_SIDEBAR_WIDTH = 256;
 

@@ -229,7 +229,7 @@ const actionTranslationSchema = (surface: string) => strictObject({
   // dialog the action opens, its confirm dialog or its param dialog; overlaid
   // by `translateAction` like `submitText`, for an action that declares
   // `confirmText` or `params`.
-  cancelText: z.string().optional().describe('Translated label of the dismiss button on the action\'s confirm or param dialog (the action must declare `confirmText` or `params`; no renderer shows it yet)'),
+  cancelText: z.string().optional().describe('Translated label of the dismiss button on the action\'s confirm or param dialog (the action must declare `confirmText` or `params`)'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather

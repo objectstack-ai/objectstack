@@ -30,6 +30,7 @@ import {
   isPlatformArtifact,
   isNavigationSyncableApp,
   isNavigationTargetType,
+  isNavigablePage,
   navigationReferences,
 } from '../useNavigationSync';
 import { MemoryRouter } from 'react-router-dom';
@@ -85,6 +86,20 @@ describe('isNavigationSyncableApp', () => {
     expect(isNavigationSyncableApp({ name: 'crm', _lock: 'no-delete' })).toBe(true);
   });
 
+  it('rejects an app a managed package ships, which the server seals (objectstack#29182)', () => {
+    // The artifact loader's ADR-0010 stamp, as the stock showcase serves `showcase_app`.
+    expect(isNavigationSyncableApp({ name: 'showcase_app', _provenance: 'package', _packageId: 'com.example.showcase' })).toBe(false);
+    expect(isNavigationSyncableApp({ name: 'showcase_app', _provenance: 'package' })).toBe(false);
+  });
+
+  it('accepts a stored app, a package-bound one included: provenance decides, not _packageId', () => {
+    // As the stock showcase serves them: an app of a package authored at
+    // runtime carries `_packageId` alone, a package-less app no stamp at all.
+    expect(isNavigationSyncableApp({ name: 'rthree_app', _packageId: 'com.probe.rthree' })).toBe(true);
+    expect(isNavigationSyncableApp({ name: 'probe_app' })).toBe(true);
+    expect(isNavigationSyncableApp({ name: 'mine', _provenance: 'org' })).toBe(true);
+  });
+
   it('rejects non-objects', () => {
     expect(isNavigationSyncableApp(null)).toBe(false);
     expect(isNavigationSyncableApp('crm')).toBe(false);
@@ -98,6 +113,25 @@ describe('isNavigationTargetType', () => {
     expect(isNavigationTargetType('view')).toBe(false);
     expect(isNavigationTargetType('report')).toBe(false);
     expect(isNavigationTargetType(undefined)).toBe(false);
+  });
+});
+
+describe('isNavigablePage (objectstack#29182)', () => {
+  it('rejects a page that needs a record, and a body that leaves type out (PageSchema defaults it to record)', () => {
+    expect(isNavigablePage({ name: 'p', type: 'record', object: 'task' })).toBe(false);
+    expect(isNavigablePage({ name: 'p' })).toBe(false);
+  });
+
+  it('accepts every page kind that renders without a record', () => {
+    for (const type of ['home', 'app', 'utility', 'list']) {
+      expect(isNavigablePage({ name: 'p', type })).toBe(true);
+    }
+  });
+
+  it('rejects a body it cannot read', () => {
+    expect(isNavigablePage(undefined)).toBe(false);
+    expect(isNavigablePage(null)).toBe(false);
+    expect(isNavigablePage({ name: 'p', type: 7 })).toBe(false);
   });
 });
 
@@ -155,13 +189,15 @@ function metaValue(world: World, read: Set<string> = new Set()): MetadataContext
   } as unknown as MetadataContextValue;
 }
 
-function makeAdapter(saveItem: ReturnType<typeof vi.fn>) {
-  return { getClient: () => ({ meta: { saveItem } }) } as any;
+function makeAdapter(saveItem: ReturnType<typeof vi.fn>, getItem?: ReturnType<typeof vi.fn>) {
+  return { getClient: () => ({ meta: { saveItem, ...(getItem ? { getItem } : {}) } }) } as any;
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 const crm = { name: 'crm', label: 'CRM', navigation: [] };
+/** A published page body that renders without a record. */
+const appPage = { name: 'my_page', type: 'app' };
 
 // ---------------------------------------------------------------------------
 // useNavigationWrites — the create / delete sites' door
@@ -176,9 +212,12 @@ type Writes = ReturnType<typeof useNavigationWrites>;
 async function withWrites(
   world: World,
   act: (writes: Writes) => Promise<void>,
-  { preview = false }: { preview?: boolean } = {},
+  {
+    preview = false,
+    saveItem = vi.fn().mockResolvedValue({}),
+    getItem,
+  }: { preview?: boolean; saveItem?: ReturnType<typeof vi.fn>; getItem?: ReturnType<typeof vi.fn> } = {},
 ) {
-  const saveItem = vi.fn().mockResolvedValue({});
   const read = new Set<string>();
   let done = false;
   function Caller() {
@@ -195,7 +234,7 @@ async function withWrites(
   render(
     <MemoryRouter>
       <PreviewModeProvider force={preview}>
-        <AdapterCtx.Provider value={makeAdapter(saveItem)}>
+        <AdapterCtx.Provider value={makeAdapter(saveItem, getItem)}>
           <MetadataCtx.Provider value={metaValue(world, read)}>
             <Caller />
           </MetadataCtx.Provider>
@@ -216,7 +255,7 @@ describe('useNavigationWrites keeps the diff\'s rules at the site (objectstack#2
   it('a created page and dashboard land label-less in every writable app, and no list is read', async () => {
     const sales = { name: 'sales', label: 'Sales', navigation: [] };
     const { saveItem, read } = await withWrites({ apps: [crm, sales] }, async (w) => {
-      await w.created('page', 'my_page', { name: 'my_page', label: 'My Page' });
+      await w.created('page', 'my_page', { name: 'my_page', label: 'My Page', type: 'app' });
       await w.created('dashboard', 'my_dash');
     });
 
@@ -279,7 +318,7 @@ describe('useNavigationWrites keeps the diff\'s rules at the site (objectstack#2
       { name: 'setup', label: 'Setup', navigation: [], _lock: 'full' },
       { name: 'studio', label: 'Studio', navigation: [], protection: { lock: 'no-overlay' } },
     ];
-    const { saveItem } = await withWrites({ apps }, (w) => w.created('page', 'my_page'));
+    const { saveItem } = await withWrites({ apps }, (w) => w.created('page', 'my_page', appPage));
 
     expect(saveItem).toHaveBeenCalledTimes(1);
     expect(saveItem.mock.calls[0][1]).toBe('crm');
@@ -294,7 +333,7 @@ describe('useNavigationWrites keeps the diff\'s rules at the site (objectstack#2
     };
     const withDash = { name: 'ops', navigation: [{ id: 'n2', type: 'dashboard', dashboardName: 'my_dash' }] };
     const { saveItem } = await withWrites({ apps: [withPage, withDash] }, async (w) => {
-      await w.created('page', 'my_page');
+      await w.created('page', 'my_page', appPage);
       await w.created('dashboard', 'my_dash');
     });
 
@@ -304,5 +343,102 @@ describe('useNavigationWrites keeps the diff\'s rules at the site (objectstack#2
       ['ops', 'page'],
       ['crm', 'dashboard'],
     ]);
+  });
+});
+
+describe('useNavigationWrites writes no record page and no sealed app (objectstack#29182)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const sales = { name: 'sales', label: 'Sales', navigation: [] };
+
+  it('creating a record page writes no app', async () => {
+    const { saveItem } = await withWrites({ apps: [crm, sales] }, async (w) => {
+      await w.created('page', 'task_record', { name: 'task_record', type: 'record', object: 'task' });
+      await w.created('page', 'untyped', { name: 'untyped' });
+    });
+    expect(saveItem).not.toHaveBeenCalled();
+    const { toast } = await import('sonner');
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('creating a navigable page still writes each syncable app', async () => {
+    const { saveItem } = await withWrites({ apps: [crm, sales] }, async (w) => {
+      await w.created('page', 'landing', { name: 'landing', type: 'home' });
+      await w.created('page', 'tasks', { name: 'tasks', type: 'list', object: 'task' });
+    });
+    expect(saveItem.mock.calls.map((c) => [c[1], c[2].navigation.at(-1).pageName])).toEqual([
+      ['crm', 'landing'],
+      ['sales', 'landing'],
+      ['crm', 'tasks'],
+      ['sales', 'tasks'],
+    ]);
+  });
+
+  it('a caller holding no body has the page read by name, and its type decides', async () => {
+    const getItem = vi.fn(async (_type: string, name: string) => ({
+      type: 'page',
+      name,
+      item: { name, type: name === 'rec' ? 'record' : 'app' },
+    }));
+    const { saveItem } = await withWrites(
+      { apps: [crm] },
+      async (w) => {
+        await w.created('page', 'rec');
+        await w.created('page', 'nav');
+      },
+      { getItem },
+    );
+    expect(getItem.mock.calls).toEqual([
+      ['page', 'rec'],
+      ['page', 'nav'],
+    ]);
+    expect(saveItem.mock.calls.map((c) => c[2].navigation.at(-1).pageName)).toEqual(['nav']);
+  });
+
+  it('a page read that fails writes no app and says navigation was not updated', async () => {
+    const getItem = vi.fn().mockRejectedValue(new Error('down'));
+    const { saveItem } = await withWrites({ apps: [crm] }, (w) => w.created('page', 'nav'), { getItem });
+    expect(saveItem).not.toHaveBeenCalled();
+    const { toast } = await import('sonner');
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('navigationSync.updateFailed');
+  });
+
+  it('a sealed managed app gets no write and no red toast, in every direction', async () => {
+    const sealed = {
+      name: 'showcase_app',
+      _provenance: 'package',
+      _packageId: 'com.example.showcase',
+      navigation: [{ id: 'n1', type: 'page', pageName: 'gone' }],
+    };
+    const runtimePkgApp = { name: 'rthree_app', _packageId: 'com.probe.rthree', navigation: [] };
+    const { saveItem } = await withWrites({ apps: [sealed, runtimePkgApp] }, async (w) => {
+      await w.created('page', 'landing', { name: 'landing', type: 'app' });
+      await w.created('dashboard', 'kpis');
+      await w.deleted('page', 'gone');
+    });
+    expect(saveItem.mock.calls.map((c) => c[1])).toEqual(['rthree_app', 'rthree_app']);
+    const { toast } = await import('sonner');
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('any other app write failure still shows the error toast', async () => {
+    const saveItem = vi.fn(async (_t: string, app: string) => {
+      if (app === 'sales') throw Object.assign(new Error('boom'), { status: 500 });
+      return {};
+    });
+    await withWrites(
+      { apps: [crm, sales] },
+      (w) => w.created('page', 'landing', { name: 'landing', type: 'app' }),
+      { saveItem },
+    );
+    expect(saveItem.mock.calls.map((c) => c[1])).toEqual(['crm', 'sales']);
+    const { toast } = await import('sonner');
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('navigationSync.updateFailed');
   });
 });

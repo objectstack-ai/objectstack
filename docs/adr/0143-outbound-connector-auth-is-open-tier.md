@@ -207,6 +207,78 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
 >   `credentialRef`" this decision names. It resolves through the same chain as `credentialRef`, and
 >   an instance whose public key does not resolve is degraded, not served unverified.
 
+> **Amended (2026-11-02, #28864) — D2.1: the installing administrator may supply the OAuth client.** The
+> maintainer ruled on 2026-11-02, verbatim: 「同意」, accepting letter B of director record 6566728470 on
+> #28702: an open-edition OAuth connector app ships no client of its publisher's, and the administrator of
+> each deployment registers their own client with the vendor and enters it on the connection.
+>
+> - **Why.** D5 fixes the redirect URI per deployment, and a vendor accepts a client only at the callbacks
+>   that client's owner registered. A `clientId` written into the definition is the publisher's client, so
+>   an app installed on a deployment its publisher never sees cannot connect there.
+> - **What the variant carries.** An `authorization_code` instance may declare `clientSource: 'installer'`.
+>   The administrator of each deployment then registers their own client with the vendor, against that
+>   deployment's callback, and enters its id and secret on the instance's connection. The definition names
+>   no client on any provider: a `clientId` beside `clientSource` is refused at publish, located at
+>   `auth.clientId`, and a `credentialRef` without its `clientId` already was. The endpoints do not move.
+>   They are declared, or discovered on `provider: 'mcp'` over http: the installer owns the client, not the
+>   vendor's authorization server. The shape is
+>   `packages/spec/src/shared/connector-auth.zod.ts#ConnectorInstanceOAuth2AuthorizationCodeAuthSchema`,
+>   and the client-key rule is on `packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema`.
+> - **Where the installer's client lives.** In the instance's connection record (D3, Q2), in the same
+>   per-connection client record that keeps a dynamically registered client, encrypted at rest through the
+>   `secret` channel and masked on every read. D3's list of what is persisted therefore reads: the
+>   refresh token, a dynamically registered or installer-supplied client, and the grant's status, scopes
+>   and expiry. The client secret entered there is not a `credentialRef`, and D3's first bullet still
+>   holds: the administrator names it, not the author. A connection belongs to one organization (Q1), so
+>   each organization's connection carries its own client, and replacing it is a reconnect.
+> - **A packaged `clientId` is kept, for private apps.** An instance that names its `clientId` works as
+>   D2.1 states, because its author registers the callback of every deployment that installs it: an
+>   organization's own app, or a vendor MCP server without dynamic registration whose client the author
+>   registered (HubSpot, Q3). Refusing it would narrow what such an app may write today, and the schema
+>   cannot tell a private app from a listing. The ruling's rule for an official listing, that it ships no
+>   ObjectStack-owned client id or secret, is held where listings are reviewed, not by the schema.
+> - **`client_credentials` is unchanged.** It keeps no connection record (D3), so there is nowhere to
+>   enter a client. Its client stays `clientId` with the `credentialRef` of its secret, which the
+>   installing administrator sets in the secrets layer, and `clientSource` is refused on it.
+> - **Not decided here: an API host per account.** Some vendors split sandbox and production
+>   authorization hosts and give each production account its own API host, learned after the grant
+>   (DocuSign, per its documentation; not measured here). The endpoints stay in the definition, so an app
+>   targets one host set, sandbox first. Discovering an API host per connection is a follow-up.
+> - **Slices.** The server slice keeps the installer's client on the connection and sends it: the connect
+>   door takes it, and the grant handle uses it in place of a declared one. The ui slice asks for it on
+>   the connection form and shows the deployment's redirect URI. Until the server slice lands, the key is
+>   declared and not served, and its schema description says so: off `provider: 'mcp'` over http an
+>   instance that declares it is held degraded for a missing `clientId`, and on MCP over http the
+>   provider registers a client dynamically instead of taking the installer's.
+>
+>   > **Amended (2026-11-02, #29256) — the server slice landed (PR #29097).** The sentence above that
+>   > begins "Until the server slice lands" records the state before PR #29097, merged on 2026-11-02 as
+>   > `ec0316ea44`. The key names are the maintainer's ruling of record `6580268872`, letter A.
+>   >
+>   > - **The connect door takes the installer's client.** `POST
+>   >   /api/v1/automation/connectors/:name/connection` reads the closed body `{ clientId, clientSecret? }`
+>   >   and hands it to the service as `client`. An instance declaring `clientSource: 'installer'` begun
+>   >   without one, a client offered to an instance that declares its own or registers one dynamically,
+>   >   and any other body key are refused `400 VALIDATION_ERROR`. The read and revoke legs take no client.
+>   >   The rule is `packages/services/service-automation/src/plugin.ts#installerClientOfBegin`.
+>   > - **The grant handle uses it for authorize, exchange and refresh.** The authorization URL carries its
+>   >   id, the code is exchanged as it, and every refresh sends it. It is kept in the connection's client
+>   >   record, its secret encrypted at rest through the `secret` channel as D3 states, and read back by
+>   >   `packages/services/service-automation/src/oauth2-grant/installer-client.ts#parseKeptConnectionClient`.
+>   >   A kept client whose kind no longer matches the declaration is a reconnect, never used:
+>   >   `packages/services/service-automation/src/oauth2-grant/grant-handle.ts#endpointOf`.
+>   > - **The state never reads the secret.** The connection state answers
+>   >   `client { source: 'installer', clientId, hasSecret }`, and never the secret:
+>   >   `packages/spec/src/contracts/automation-service.ts#ConnectorConnectionState`.
+>   > - **The instance is served.** An instance declaring `clientSource: 'installer'` is no longer held
+>   >   degraded for a missing `clientId`, and on MCP over http discovery finds the endpoints and registers
+>   >   no client. The schema description no longer says the key is not served.
+>   > - **The ui slice is #28869, still open.** Until it lands, the Console begins a connect with no
+>   >   client, so such an instance is refused there with the 400 that names the vendor registration step;
+>   >   the door above connects it. The pins are
+>   >   `packages/services/service-automation/src/connector-connection-door.test.ts` and
+>   >   `packages/qa/dogfood/test/connector-installer-oauth-client.dogfood.test.ts`.
+
 ### D3 — Secrets are references; tokens are runtime state in a connection record
 
 - Every secret an author names is a `credentialRef`, resolved through `CredentialResolver` (ADR-0097 §3,
@@ -217,6 +289,9 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
   client a dynamic registration created, and the grant's status, scopes and expiry. These live in a
   dedicated connection record bound to the instance (Q2), their secrets encrypted at rest through the
   `secret` channel (ADR-0100).
+  > **Amended (2026-11-02, #28864).** This list also holds a client the installing administrator supplies,
+  > kept in the same per-connection client record as a dynamically registered one. See the 2026-11-02
+  > D2.1 note under D2.
 - Access tokens are never persisted. They live in an in-process cache. This includes every
   `client_credentials` and `app-credential` token, which the configured secret re-derives at any time.
 

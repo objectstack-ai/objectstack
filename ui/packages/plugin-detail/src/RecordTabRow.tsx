@@ -78,7 +78,7 @@ const TabFace: React.FC<{ tab: RecordTab; muted?: boolean }> = ({ tab, muted }) 
 );
 
 const TAB_CLASS =
-  '-mb-px inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 text-[13px] transition-colors';
+  '-mb-px inline-flex h-11 sm:h-9 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 text-[13px] transition-colors';
 
 /**
  * The record page's tab row (objectstack#27524, Target 8): at the bottom
@@ -226,7 +226,7 @@ export const RecordTabRow: React.FC<RecordTabRowProps> = ({
               type="button"
               className={cn(
                 TAB_CLASS,
-                'gap-0.5 rounded-t-sm border-transparent text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'min-w-11 justify-center gap-0.5 rounded-t-sm border-transparent text-muted-foreground hover:text-foreground focus-visible:outline-none sm:min-w-0 focus-visible:ring-2 focus-visible:ring-ring',
               )}
               aria-label={t('detail.recordTabsMore', { count: moreCount, defaultValue: '{{count}} more tabs' })}
               data-record-tab-more={moreCount}
@@ -293,7 +293,7 @@ export const RecordTabRow: React.FC<RecordTabRowProps> = ({
               <TabFace tab={tab} />
             </span>
           ))}
-          <span className={cn(TAB_CLASS, 'gap-0.5 border-transparent')} data-record-tab-measure-more="">
+          <span className={cn(TAB_CLASS, 'min-w-11 justify-center gap-0.5 border-transparent sm:min-w-0')} data-record-tab-measure-more="">
             <span>+{tabs.length + emptyTabs.length + hiddenTabs.length}</span>
             <ChevronDown className="h-3.5 w-3.5" />
           </span>

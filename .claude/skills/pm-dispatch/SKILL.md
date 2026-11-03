@@ -30,7 +30,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ⛔ 永不代维护者答产品或架构问题,⛔ 无代裁通道:席位只分析与推荐,裁决恒出自人工。
 - ⛔ GitHub 之外永不维护跟踪状态;看板(org Project)只是视图,权威层是 issue 正文 + REST。
 - ⛔ 永不跑版本发布、不合并 Version Packages PR;发布动作的完整清单以 AGENTS.md 为权威。
-- ⛔ 未经人工的发布痕迹按事故立案,不代跑补救性发布;机械通道存在不构成授权。
 - ⛔ 分诊席永不认领、派发或写码;执行席只在本车道认领,改 `domain:*` 仅限整树归本席。
 - 唯一例外:无主 p0 锚卡一轮即轮报、再一轮分诊只代派止血:每轮一张,复核非分诊。
 - ⛔ 报告缺席永不读作成功,永不虚构未回报 agent 的结果。
@@ -69,10 +68,10 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 批 = 一个上下文里读完的 ≤5 张同族卡,是质量单位,⛔ 不是预算。
 - 班 = 一个会话的任期,只以交接或惰性回收结束。
 - 席位两形:Routine 席与项目席(会话是车队项目的线程);细则见 `references/seat-lifecycle.md`。
-- 项目席唤醒 = PR 订阅 + 每席一个自建自绑巡查 routine(总监席除外);⛔ 无 `send_later` 链。
+- 项目席唤醒 = PR 订阅 + 自建自绑巡查 routine(总监席与按需席除外);⛔ 无 `send_later` 链。
 - 探针先行:fire 的第一动作是一次最便宜的车道盘点查询,⛔ 在它之前不读任何长文本。
 - 队列空(逐卡表见 `references/seat-lifecycle.md`)+ 无在飞 + 无待复核 + 决策箱无新答复 ⇒ 自退。
-- 分诊席与车道席常驻,断粮即换账号重开该席与信箱;分诊席默认判断档;裁决归总监席。
+- 分诊席与车道席常驻(按需席除外),断粮换号重开席与信箱;分诊默认判断档;裁决归总监。
 - 子代理裁决逐份过转录核验采信。
 
 ## 阶段细则索引
@@ -117,7 +116,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
 | `priority:p0` | 插队:同轮立即派发,越过 `batch`、深度等待(`LOCK_DEPTH_HOLD`)与一切并发上限;无槽即暂停低级在飞 dev 腾位(机制 `references/execution-duties.md`);⛔ 不豁免同文件串行与认领协议 |
-| `area:*` | 功能轴:每卡恰一个;分诊首触打,与 `domain:*` 同笔;工具卡打它所护的轴;⛔ 不回填存量。四读者:维护者按轴看板;定级继承该轴清单项;父单分组;候选顺序,即「功能点位次」= 父单在「路上的功能点」上的次序;同轴至多一个在飞,除非文件面不相交 |
+| `area:*` | 功能轴:每卡恰一个;分诊首触打,与 `domain:*` 同笔;工具卡打它所护的轴;⛔ 不回填存量。四读者:维护者按轴看板;定级继承该轴清单项;父单分组;候选顺序,即「功能点位次」= 父单在「Features on the road」上的次序;同轴至多一个在飞,除非文件面不相交 |
 | open PR 引用该单 | 已实现,复核中 |
 | merged PR 带 `Fixes #n` | 完成(GitHub 关单) |
 
@@ -163,6 +162,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席,同挂 `repo:cloud`):读或改 cloud 代码、生产方、事实或带 cloud 半边;本仓车道 ⛔ 不认领;cloud PM 跟到关卡,余下纯本仓活由它写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md` |
+| `security`(车道,无 `domain:*` 标签) | 安全发现(无文件面;修复经无卡派发令落在归属包);席位 `security#N`、接收、台账、派修与复核见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。

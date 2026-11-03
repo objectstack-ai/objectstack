@@ -920,6 +920,25 @@ export function buildUpdateManyResponse(
     } as BatchUpdateResponse;
 }
 
+/**
+ * The `fields[]` row naming one `deleteMany` id entry that is not a record id.
+ * `field` is the dotted index path (`ids.N`) the REST ingress's
+ * `zodIssuesToFields` uses for the same position; `code` is a member of the
+ * ADR-0114 field-level catalog — `required` for an empty string, `invalid_type`
+ * for anything that is not a string or number (null, an object, a boolean).
+ */
+function deleteManyIdEntryField(
+    id: unknown,
+    index: number,
+): { field: string; code: 'required' | 'invalid_type'; message: string } {
+    const field = `ids.${index}`;
+    if (id === '') {
+        return { field, code: 'required', message: `${field}: the entry is empty, and a record id is required for delete` };
+    }
+    const received = id === null ? 'null' : Array.isArray(id) ? 'array' : typeof id;
+    return { field, code: 'invalid_type', message: `${field}: expected a record id (a non-empty string or a number), received ${received}` };
+}
+
 /** The body of `ObjectStackProtocolImplementation#deleteManyData`; the method's docblock there is its contract. */
 export async function deleteManyData(
     this: Pick<BatchDataHost, 'assertObjectRegistered' | 'buildDeleteManyResponse' | 'buildRolledBackBatchResponse' | 'runAtomicBatch' | 'runDeleteManyLoop'>,
@@ -934,12 +953,28 @@ export async function deleteManyData(
     const isScalarId = (v: unknown) =>
         (typeof v === 'string' && v.length > 0) || typeof v === 'number' || typeof v === 'bigint';
     const ids = request.ids as unknown;
-    if (!Array.isArray(ids) || ids.some((id) => !isScalarId(id))) {
+    if (!Array.isArray(ids)) {
         const err: any = new Error(
             `deleteMany on '${object}' requires 'ids' to be an array of record ids`,
         );
         err.code = 'VALIDATION_FAILED';
         err.status = 400;
+        throw err;
+    }
+    // An ARRAY with a bad entry is a different fault from "not an array", and
+    // the answer names the entry: one `fields[]` row per offending index,
+    // spelled the way the REST ingress already answers `[null]`
+    // (`{field: 'ids.0', code: 'invalid_type'}` from `zodIssuesToFields`), so
+    // a client keying on `fields` reads one shape whichever layer refused. An
+    // empty string is not a wrong TYPE — it is a missing id, the same fault
+    // the batch door's `rowRequiredIdError` names — so it answers `required`.
+    const idFields = ids.flatMap((id, index) => (isScalarId(id) ? [] : [deleteManyIdEntryField(id, index)]));
+    if (idFields.length > 0) {
+        const more = idFields.length > 1 ? ` (${idFields.length} entries refused, each named in fields)` : '';
+        const err: any = new Error(`deleteMany on '${object}' refuses ${idFields[0].message}${more}`);
+        err.code = 'VALIDATION_FAILED';
+        err.status = 400;
+        err.fields = idFields;
         throw err;
     }
 

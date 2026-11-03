@@ -1678,7 +1678,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 11,
+      "revision": 13,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1710,9 +1710,9 @@
       ],
       "acceptance": [
         {
-          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence, written for the end user: it says the action is turned off for this deployment and that an administrator can turn it on again under Setup › Packaged automation, and names no system table and no ADR (the engine's log line carries those) — and no side effect lands (mark_done's declared done/progress write never ran)",
+          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence, written for the end user: it says the action is turned off for this deployment and that an administrator can turn it on again under Setup › Packaged Actions, and names no system table and no ADR (the engine's log line carries those) — and no side effect lands (mark_done's declared done/progress write never ran)",
           "oracle": "api",
-          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated. packaged-action-disabled-dispatch-live.dogfood.test.ts scores it over HTTP: the exact code, the sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged automation remedy, and no ledger table or ADR in it), and the real task re-read with done, progress and updated_at unchanged. packaged-activation-ledger-reach.dogfood.test.ts still asserts 409 and the code ACTION_DISABLED only",
+          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated. packaged-action-disabled-dispatch-live.dogfood.test.ts scores it over HTTP: the exact code, the sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged Actions remedy, and no ledger table or ADR in it), and the real task re-read with done, progress and updated_at unchanged. packaged-activation-ledger-reach.dogfood.test.ts still asserts 409 and the code ACTION_DISABLED only",
           "evidence": "the trace + the control re-reads"
         },
         {
@@ -1748,7 +1748,7 @@
         {
           "clause": "a disabled `type: flow` action is refused by its OWN switch, ahead of the type branch — the refusal is 409 ACTION_DISABLED on the action's own route (POST /api/v1/actions/showcase_task/showcase_bulk_reassign) with the turned-off sentence of acceptance[0], which names no action (describeDisabled ignores the name, packages/objectql/src/action-activation.ts), independent of anything the target flow's own ledger row says, and the target flow is left untouched",
           "oracle": "api",
-          "verify": "step-8 on /actions/showcase_task/showcase_bulk_reassign: status 409, body.error.code ACTION_DISABLED and body.error.message the turned-off sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged automation remedy). Do not look for the action's name in it: the sentence names none, and the live pin's expectDisabledSentence ignores the name too. The automation service is never consulted for the run, so showcase_reassign_wizard records no run from it",
+          "verify": "step-8 on /actions/showcase_task/showcase_bulk_reassign: status 409, body.error.code ACTION_DISABLED and body.error.message the turned-off sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged Actions remedy). Do not look for the action's name in it: the sentence names none, and the live pin's expectDisabledSentence ignores the name too. The automation service is never consulted for the run, so showcase_reassign_wizard records no run from it",
           "evidence": "the trace"
         }
       ],
@@ -1849,6 +1849,18 @@
           "date": "2026-11-01",
           "change": "QA run #28545 (W3-C1R) finding: acceptance[6] (clause and verify) expected ACTION_DISABLED 'naming showcase_bulk_reassign', but since #27842 the sentence names no action (action-activation.ts describeDisabled returns describeTurnedOffPackagedItem('action'), and packaged-action-disabled-dispatch-live.dogfood.test.ts expectDisabledSentence ignores its action argument). The clause now asks 409 ACTION_DISABLED with the turned-off sentence on the /actions/showcase_task/showcase_bulk_reassign route, and the target flow untouched. The status, the code and the own-switch ordering are kept; only the expectation that could never hold is replaced. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-02",
+          "change": "Re-measured against main after N-28/N-30 (#28818, #29264), at base dfbe34d887: the REST and MCP doors, the 409 ACTION_DISABLED, the D4 → activation → params → record order and the restart leg are all unchanged, so steps and clauses stand. fixtures.knownGaps[2] (new) marks the remedy half of acceptance[0] and [6] TRANSITIONAL: the served sentence (describeTurnedOffPackagedItem('action'), @objectstack/types) still names 'Setup › Packaged automation', which ADR-0146 D4/D11 retired; the action switch is Setup › Packaged actions. No clause is weakened: the sentence is still pinned as served. The wrong place is reported as a product defect for its own card, not fixed here",
+          "ref": "#28579"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-02",
+          "change": "The producer now names the live page: describeTurnedOffPackagedItem('action') (@objectstack/types) tells the reader an administrator can turn the action on again under Setup › Packaged Actions (nav_packaged_actions), not the retired Setup › Packaged automation page. acceptance[0] (clause and verify) and acceptance[6] (verify) re-point their remedy phrase to Setup › Packaged Actions, as fixtures.knownGaps[2] said they would, and that TRANSITIONAL entry is retired. The doors, the 409, the code and every ordering leg are unchanged; only the quoted remedy moved, and the live pin (packaged-action-disabled-dispatch-live.dogfood.test.ts expectDisabledSentence) asserts the same phrase",
+          "ref": "#29374"
         }
       ]
     },
@@ -2707,10 +2719,10 @@
     },
     {
       "id": "api-backend.rest-metadata-config-contract",
-      "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
+      "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves every metadata mount and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2738,7 +2750,7 @@
         "harness: construct with { metadata: { endpoints: { types: false } } } — GET {prefix} and GET {prefix}/types both disappear (one handler, two paths)",
         "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type and NOTHING else — exactly the one mount its describe() names (#15542 moved the whole-store family off this switch; a run that still sees /diagnostics, /_drafts or POST /_migrate-stored leave with it is the old radius returning)",
         "harness: construct with { metadata: { endpoints: { maintenance: false } } } and enumerate: GET {prefix}/diagnostics, GET {prefix}/_drafts and the POST {prefix}/_migrate-stored write door — three whole-store operations, the key #15542 created so that closing a listing read stops disarming a migration door",
-        "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: the WHOLE per-item face — GET, PUT and DELETE {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers, the history family (/history, /audit, /diff, /published, /publish, /rollback) and {prefix}/book/:name/tree; twelve mounts, writes included (#15854)",
+        "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: the WHOLE per-item face — GET, PUT and DELETE {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers, the history family (/history, /audit, /diff, /published, /publish, /rollback), {prefix}/book/:name/tree and the app metadata bundle GET {prefix}/app/:appId/bundle; thirteen mounts, writes included (#15854; the bundle since #27627, which registers it through the same per-item registrar because every bundle member is the item read's own answer)",
         "harness: construct with { metadata: { enableCache: false } } and confirm the item read takes the uncached branch; then with enableCache true against an app-type, a dashboard-type, a draft read, a preview-drafts read, a package-scoped read, a member-addressed read (?member=, #22877) and an audience-gated type — each is a carve-out that bypasses the cached path even when the switch is on",
         "harness: construct with { metadata: { maskObjectFields: false } }; separately construct with the default and metaType != 'object'",
         "harness: construct with { metadata: { cacheTtl: 3600 } }, then 0, then -1, then { metadata: { endpoints: { schema: false } } }; capture each refusal text"
@@ -2757,7 +2769,7 @@
           "evidence": "route table + discovery body at the non-default prefix"
         },
         {
-          "clause": "each of the FOUR endpoint switches gates exactly the face its name states, and the run must ENUMERATE what each removes rather than trust the describe(): `types` takes two paths (one handler at {prefix} and {prefix}/types), `items` takes exactly one ({prefix}/:type), `maintenance` takes the three whole-store operations INCLUDING the POST {prefix}/_migrate-stored write door, `item` takes the whole per-item face (twelve mounts, PUT and DELETE and the history family included)",
+          "clause": "each of the FOUR endpoint switches gates exactly the face its name states, and the run must ENUMERATE what each removes rather than trust the describe(): `types` takes two paths (one handler at {prefix} and {prefix}/types), `items` takes exactly one ({prefix}/:type), `maintenance` takes the three whole-store operations INCLUDING the POST {prefix}/_migrate-stored write door, `item` takes the whole per-item face (thirteen mounts, PUT and DELETE, the history family and GET {prefix}/app/:appId/bundle included)",
           "oracle": "test",
           "verify": "per-switch route-table diffs against the all-true baseline; the diff sets must be exactly the routes enumerated in the steps, in both directions — a switch that GROWS a route is as much a FAIL as one that loses one. ⛔ The run records the real radius whatever it finds: the describe() strings now claim to be exhaustive (#15542/#15854), so a diff that disagrees with them is a defect in the code or in the declaration, never a reason to relax this clause",
           "evidence": "the four route-table diffs"
@@ -2790,7 +2802,7 @@
         "knob:prefix",
         "switch:endpoints.types (2 mounts)",
         "switch:endpoints.items (1 mount)",
-        "switch:endpoints.item (12 mounts)",
+        "switch:endpoints.item (13 mounts)",
         "switch:endpoints.maintenance (3 mounts)",
         "switch:enableCache (+6 carve-outs)",
         "switch:maskObjectFields",
@@ -2862,6 +2874,12 @@
           "date": "2026-10-27",
           "change": "acceptance[0], [1], [3], [4] and [5] and negative[0] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a0 and a4 unpinned, a1 and a5 half-asserted, a3 and n0 below the HTTP layer). The new rest-config-contract-live.dogfood.test.ts fires the default mounts and the client_liaison schema diff on a booted showcase, and rest-config-contract-harness.test.ts reads the re-based table, the cache branch per carve-out and the refusal texts off a real RestServer. automated.kind is dogfood; automated.ref and acceptance[5].verify name what they assert. Measured at base c8583f80. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-02",
+          "change": "the `item` radius is thirteen mounts, not twelve: #27627 registered GET {prefix}/app/:appId/bundle through the per-item registrar, and packages/rest/src/rest-config-mount-table.pin.test.ts moved to thirteen with it, but steps[7], acceptance[2].clause and the variants row still enumerated twelve, so the 18.3.0 release-candidate run #28929 scored the describe() drift as a FAIL. Triage ruled the radius intended and the declaration wrong (6569524266): steps[7], acceptance[2].clause and the variant now name the bundle, and the title's stale 'prefix moves eleven mounts' (the default table has twenty) says 'every metadata mount', which is what acceptance[1] asserts. Measured at base 135054eb",
+          "ref": "#28934"
         }
       ]
     },
@@ -3277,7 +3295,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3304,9 +3322,9 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the hook refusal answers 400 carrying the hook's own sentence — not 500. On a /data door (the live leg) the envelope carries no `code` when the hook declared none, by pinned design; the hand-built nested-envelope rows (sharing rules, suggested bindings, approvals, package publish) re-dress the same refusal as 400 VALIDATION_ERROR — pin-only, since no package-authorable hook reaches their objects",
+          "clause": "the hook refusal answers 400 carrying the hook's own sentence — not 500. On a /data door (the live leg) a hook that declared no code is answered with the ledgered ADR-0112 code `HOOK_ABORTED` (UNDECLARED_HOOK_REFUSAL_CODE in @objectstack/types, #27597) — never a code-less 400 and never the status-derived VALIDATION_ERROR; the hand-built nested-envelope rows (sharing rules, suggested bindings, approvals, package publish) re-dress the same refusal as 400 HOOK_ABORTED with the hook's sentence (package publish through resolveThrownHttpError, #27672) — pin-only, since no package-authorable hook reaches their objects",
           "oracle": "api",
-          "verify": "status + message on the live /data door, and the absence of error.code when the hook declared none, read on the live door's body: error-sentences-live.dogfood.test.ts drives POST /data/OBJECT and /createMany on a scratch app whose sandboxed beforeInsert hook throws a sentence, over HTTP, and asserts 400, the sentence verbatim, no `code` key and no row written (rest-hook-script-fault-envelope.test.ts pins the same design at unit through mapDataError); the VALIDATION_ERROR rows of the hand-built nested-envelope routes from rest-write-route-hook-refusal-sentence.ledger.test.ts (REFUSED_400) — both in automated.ref",
+          "verify": "status + message + code on the live /data door, read on the live door's body: error-sentences-live.dogfood.test.ts drives POST /data/OBJECT and /createMany on a scratch app whose sandboxed beforeInsert hook throws a sentence and declares no code, over HTTP, and asserts 400, the sentence verbatim as `error`, `code` equal to HOOK_ABORTED and no row written (rest-hook-script-fault-envelope.test.ts pins the same answer at unit through mapDataError: `code` HOOK_ABORTED and no `declaredCode`); the hand-built nested-envelope rows from rest-write-route-hook-refusal-sentence.ledger.test.ts §2, each answering 400 HOOK_ABORTED (HOOK_ABORTED_400) with the hook's sentence after its named downstream was called — both in automated.ref",
           "evidence": "the body"
         },
         {
@@ -3324,7 +3342,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts (acceptance[0], unit and engine) + packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts (acceptance[1]–[3] over HTTP on the scratch app packages/qa/dogfood/test/fixtures/error-sentences-fixture.ts: the hook's sentence at 400 with no code on the /data doors, 409 UNIQUE_VIOLATION with details exactly developerMessage + object at the action door, and a storage route's 500 INTERNAL withholding the caught text)"
+        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts (acceptance[0], unit and engine; the first two also hold acceptance[1]'s HOOK_ABORTED below HTTP — the nested-envelope rows at 400 HOOK_ABORTED, and mapDataError's HOOK_ABORTED with no declaredCode) + packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts (acceptance[1]–[3] over HTTP on the scratch app packages/qa/dogfood/test/fixtures/error-sentences-fixture.ts: the hook's sentence at 400 with code HOOK_ABORTED on the /data doors, 409 UNIQUE_VIOLATION with details exactly developerMessage + object at the action door, and a storage route's 500 INTERNAL withholding the caught text)"
       },
       "source": [
         "packages/types/src/sandbox-business-message.ts#sandboxBusinessMessage",
@@ -3363,6 +3381,12 @@
           "date": "2026-10-27",
           "change": "acceptance[1]–[3] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1–a3 partial: mapDataError called directly, HttpDispatcher with no Hono adapter, storage handlers over a fake request). The new error-sentences-live.dogfood.test.ts boots the scratch app the fixtures name (fixtures/error-sentences-fixture.ts: a sandboxed refusing hook, a unique email with a declarative update action, a storage root under a regular file) and drives each clause over HTTP; automated.ref and the three verify texts name it. Measured at base 74db43ef. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-02",
+          "change": "acceptance[1] (clause, verify) and the automated.ref prose re-pointed to HOOK_ABORTED — stale spec from QA run #28929 (release-18.3.0-w4-c2a, at 7fa9873f), api-backend.error-sentences-and-unique-violation-wire-code acceptance[1], re-point card #28936. r5 asserted the pre-ruling shape: no `code` on the /data doors and 400 VALIDATION_ERROR (REFUSED_400) on the nested-envelope rows. #27597 gave an undeclared hook abort the ledgered ADR-0112 code HOOK_ABORTED (UNDECLARED_HOOK_REFUSAL_CODE in packages/types/src/thrown-http-error.ts, stamped by mapDataError) and #27672 carried it to the doors that resolve through resolveThrownHttpError (package publish). Re-read at base 135054ebaa: error-sentences-live.dogfood.test.ts asserts code HOOK_ABORTED on both /data doors, rest-hook-script-fault-envelope.test.ts asserts HOOK_ABORTED and no declaredCode through mapDataError, and rest-write-route-hook-refusal-sentence.ledger.test.ts answers HOOK_ABORTED_400 on every sharing-rule, suggested-binding, approval and package-publish row (no REFUSED_400 remains). Status and sentence unchanged; the clause now names the code instead of its absence, so it is narrower, not weaker. No other clause changed",
+          "ref": "#28936"
         }
       ]
     }

@@ -267,7 +267,25 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
             // verbatim. "Batch answer ≡ N singular answers" is therefore a
             // property of the construction, and the agreement test pins it
             // from staying that way by accident.
-            const decision = await svc.explain(singularRequest, context);
+            //
+            // [#29112] The service is handed the batch itself, so it settles
+            // what no record id reaches — the caller's admission, the
+            // explained context, the object-level pass — once, not once per
+            // id. It answers the spec's batch decision (`records[i]` for
+            // `recordIds[i]`, `ExplainDecisionSchema.records`). A service
+            // that predates the batch ignores `recordIds` and answers the
+            // object-level decision with no `records`; each id is then asked
+            // singularly, as before.
+            const answer = await svc.explain({ ...singularRequest, recordIds }, context);
+            if (Array.isArray(answer?.records) && answer.records.length === recordIds.length) {
+                // A position the service left without a verdict fails CLOSED,
+                // as the per-id path below does.
+                return res.json({
+                    ...answer,
+                    records: recordIds.map((id, i) => answer.records[i] ?? { recordId: id, visible: false }),
+                });
+            }
+            const decision = answer;
             const verdictById = new Map<string, unknown>();
             for (const id of new Set(recordIds)) {
                 const single = await svc.explain({ ...singularRequest, recordId: id }, context);

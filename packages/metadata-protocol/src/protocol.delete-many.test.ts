@@ -108,6 +108,61 @@ describe('deleteManyData — the id set is the contract (#3897)', () => {
     expect(del).not.toHaveBeenCalled();
   });
 
+  // A refusal of an ARRAY names the entry at fault in `fields[]`, in the
+  // `{field: 'ids.N', code}` shape the REST ingress gives `[null]`. A non-array
+  // keeps the array sentence and names no entry, because there is none.
+  async function refusal(ids: unknown) {
+    const { p, del } = makeProtocol();
+    const err: any = await p.deleteManyData({ object: 'invoice', ids } as any).then(
+      () => { throw new Error('expected a refusal'); },
+      (e: unknown) => e,
+    );
+    expect(del).not.toHaveBeenCalled();
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+    return err;
+  }
+
+  it('an empty-string entry is refused as a missing id, named by index', async () => {
+    const err = await refusal(['']);
+    expect(err.fields).toEqual([
+      { field: 'ids.0', code: 'required', message: expect.stringContaining('empty') },
+    ]);
+    expect(err.message).toContain('ids.0');
+    expect(err.message).toContain('empty');
+  });
+
+  it('names the empty entry after a good one, not the first index', async () => {
+    const err = await refusal(['a', '']);
+    expect(err.fields.map((f: any) => [f.field, f.code])).toEqual([['ids.1', 'required']]);
+  });
+
+  it('an operator object is still refused, and now named as the wrong type', async () => {
+    const err = await refusal([{ $ne: null }]);
+    expect(err.fields.map((f: any) => [f.field, f.code])).toEqual([['ids.0', 'invalid_type']]);
+  });
+
+  it('a null entry answers the same pair the REST ingress gives it', async () => {
+    const err = await refusal([null]);
+    expect(err.fields.map((f: any) => [f.field, f.code])).toEqual([['ids.0', 'invalid_type']]);
+  });
+
+  it('names every offending entry', async () => {
+    const err = await refusal(['', 'a', null]);
+    expect(err.fields.map((f: any) => [f.field, f.code])).toEqual([['ids.0', 'required'], ['ids.2', 'invalid_type']]);
+  });
+
+  it('a non-array keeps the array sentence and names no entry', async () => {
+    const err = await refusal('a');
+    expect(err.message).toBe("deleteMany on 'invoice' requires 'ids' to be an array of record ids");
+    expect(err.fields).toBeUndefined();
+  });
+
+  it('a whitespace-only id is not refused here: it reaches the row loop', async () => {
+    const { p, del } = makeProtocol();
+    await p.deleteManyData({ object: 'invoice', ids: ['  '] } as any);
+    expect(del).toHaveBeenCalledTimes(1);
+  });
+
   it('an empty id list deletes nothing', async () => {
     const { p, del } = makeProtocol();
     const res: any = await p.deleteManyData({ object: 'invoice', ids: [] } as any);

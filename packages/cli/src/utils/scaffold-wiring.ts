@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import path from 'node:path';
-import type { ts as TS } from 'ts-morph';
+import type TS from 'typescript';
 import { isAggregatedViewContainer } from '@objectstack/spec';
 // The LEAF subpath: the registry-key derivation alone, not the metadata plugin.
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
@@ -250,6 +250,6 @@ export function barrelExportNames(ts: typeof TS, source: string): Set<string> {
  * counts.
  */
 export async function barrelExportsBinding(source: string, binding: string): Promise<boolean> {
-  const { ts } = await import('ts-morph');
+  const { default: ts } = await import('typescript');
   return barrelExportNames(ts, source).has(binding);
 }

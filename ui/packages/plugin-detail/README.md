@@ -71,7 +71,11 @@ hidden draws nothing. The console's record page (`RecordDetailView` in
 
 A host that mounts `RecordContextProvider` itself renders `RecordMetaFooter`
 once, where its page ends, with the record as `data` and the object definition
-as `objectSchema`. A `record:details` node with a `dataSource` binding (below)
+as `objectSchema`. A host that draws a highlight strip also passes
+`drawnHighlightFields`, the fields that strip actually draws: the meta line
+leaves the owner out only when that list carries `owner_id`, so a shorter strip
+(a phone's record header) never hides the owner from both places. Without it,
+the footer takes the object's declared `highlightFields` as the strip. A `record:details` node with a `dataSource` binding (below)
 shows a record the page does not, so it keeps its own footer.
 
 ### Record blocks without a record page (`dataSource`)

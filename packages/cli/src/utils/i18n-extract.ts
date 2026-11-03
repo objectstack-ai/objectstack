@@ -88,6 +88,7 @@
  *   objects.<name>._actions.<action>.successMessage
  *   objects.<name>._actions.<action>.disabledReason
  *   objects.<name>._actions.<action>.submitText      (only beside a non-empty `params`)
+ *   objects.<name>._actions.<action>.cancelText      (only beside `confirmText` or a non-empty `params`)
  *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
@@ -95,6 +96,7 @@
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
  *                          / .disabledReason / .submitText (beside a non-empty `params`)
+ *                          / .cancelText (beside `confirmText` or a non-empty `params`)
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
@@ -769,6 +771,29 @@ function pushActionSubmitText(
 ): void {
   if (!Array.isArray(action?.params) || action.params.length === 0) return;
   pushOptional(out, [...actionRoot, 'submitText'], action.submitText, source, { objectName });
+}
+
+/**
+ * Emit `cancelText`, the dismiss button label of the dialog an action opens
+ * before it runs, under the action's translation root — OPTIONAL-not-derived
+ * like `submitText` (an action that names no label shows the console's own
+ * "Cancel"), and only for an action that opens one of the two dialogs carrying
+ * that button: the confirm dialog of a declared `confirmText`, or the param
+ * dialog of a non-empty `params`. Those are the actions `translateAction`
+ * overlays the key onto; any other action gets no slot, so a translation filed
+ * there stays dangling.
+ */
+function pushActionCancelText(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  source: ExpectedEntry['source'],
+  objectName: string | undefined,
+): void {
+  const opensDialog = action?.confirmText != null
+    || (Array.isArray(action?.params) && action.params.length > 0);
+  if (!opensDialog) return;
+  pushOptional(out, [...actionRoot, 'cancelText'], action.cancelText, source, { objectName });
 }
 
 /**
@@ -1458,10 +1483,20 @@ export function collectExpectedEntries(
         // `inlineHelpText` is the key `FieldSchema` spells help text with, so it
         // is the authored default-locale text of `help` — after `help`, before
         // `description` — exactly as the authored label is for `label` (#15711).
+        //
+        // The FIRST AUTHORED link wins, not the first defined one: the console
+        // draws `inlineHelpText || description` (`fieldHelpText` in
+        // `@object-ui/fields`), so an empty `inlineHelpText` reads as absent
+        // there and the description is the line people see. A `??` chain
+        // stopped at that `''` and scaffolded no seed, leaving the drawn
+        // description out of the bundle (#29221). `asAuthoredLabel` is the one
+        // "authored" test this file uses (a non-empty string or a non-empty
+        // inline locale map); whitespace-only text stays authored, as it does
+        // for the console's `||` and the resolver's non-empty check.
         pushOptional(
           out,
           ['objects', objectName, 'fields', fieldName, 'help'],
-          field.help ?? field.inlineHelpText ?? field.description,
+          asAuthoredLabel(field.help) ?? asAuthoredLabel(field.inlineHelpText) ?? asAuthoredLabel(field.description),
           'field',
           { objectName },
         );
@@ -1530,6 +1565,7 @@ export function collectExpectedEntries(
         pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
         pushOptional(out, [...aroot, 'disabledReason'], action.disabledReason, 'action', { objectName });
         pushActionSubmitText(out, aroot, action, 'action', objectName);
+        pushActionCancelText(out, aroot, action, 'action', objectName);
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -1628,6 +1664,7 @@ export function collectExpectedEntries(
     // seed for it.
     pushOptional(out, [...root, 'disabledReason'], action.disabledReason, kind, { objectName });
     pushActionSubmitText(out, root, action, kind, objectName);
+    pushActionCancelText(out, root, action, kind, objectName);
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);

@@ -26,11 +26,11 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.posture.private': '私有',
   'perm.posture.private.tip': '默认安全对象（access.default = private）：权限集的 “*” 通配授权不覆盖它，访问需要对此对象的显式授权（或查看/修改所有记录）。在此编辑的显式授权正常生效。',
   'perm.owd.tip': '组织级默认（sharingModel）：内部用户的记录级可见性基线，先于岗位与共享规则生效。此处的对象 CRUD 决定能否执行操作，OWD 决定操作触达哪些记录（自己的还是全组织的）。',
-  'perm.owd.defaultPrivate': 'Private（默认）',
+  'perm.owd.defaultPrivate': '私有（默认）',
   'perm.owd.editLink': '在本包的“记录共享基线（OWD）”总览中编辑',
-  'perm.owd.private': 'Private 私有',
-  'perm.owd.public_read': 'Public read 公共只读',
-  'perm.owd.public_read_write': 'Public read/write 公共读写',
+  'perm.owd.private': '私有',
+  'perm.owd.public_read': '公共只读',
+  'perm.owd.public_read_write': '公共读写',
   'perm.owd.controlled_by_parent': '受父级控制',
   'perm.bulk.read': '读',
   'perm.bulk.crud': '增改删',
@@ -344,6 +344,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.lookup.searchHostFields': '搜索本对象的字段…',
   'designer.field.lookup.pageSize': '选择器分页大小',
   'designer.field.lookup.allowCreate': '允许快速创建',
+  'designer.field.lookup.referenceNameVisible': '不可读时显示名称',
+  'designer.field.lookup.referenceNameVisible.help': '允许此记录的读者看到被引用记录的名称（纯文本，不带链接），即使其无权打开该记录。该记录的其他内容一律不显示；名称字段上的字段级规则仍然生效（此时名称显示为 Record # 加 id）。未设置：此类引用显示为「受限记录」。',
   'designer.field.relatedList.heading': '父记录上的关联列表',
   'designer.field.relatedList.shown': '显示',
   'designer.field.relatedList.hidden': '不显示',
@@ -936,6 +938,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.action.scriptLanguage': '脚本语言',
   'engine.inspector.action.scriptBody': '脚本主体',
   'engine.inspector.action.scriptBodyHint': '在沙箱中以 {signature} 的形式运行。',
+  'engine.inspector.action.capabilitiesHint': '此函数体可调用的 ctx API。调用未授权的 API 会在动作运行时被拒绝。',
   'engine.inspector.action.method': '请求方法',
   // objectstack#26736 — 请求体形态，对应规范的两种形态。
   'engine.inspector.action.bodyShape': '请求体形态',
@@ -996,6 +999,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.refusal.publishWhere': '未发布。请检查{where}：详情中说明了需要修改的内容。',
   'engine.studio.refusal.publishUnlocated': '未发布：服务端拒绝了此草稿。详情中说明了原因。',
   'engine.studio.refusal.publishPlain': '未发布：{reason}',
+  'engine.studio.refusal.draftUnreadable': '此项有一份您无权读取的未发布草稿，因此 Studio 没有打开它：在这里编辑已发布版本会覆盖那份草稿。持有该草稿所需权限的人可以编辑或发布它。详情中有服务器的答复。',
   'engine.studio.publishRefused': '未发布：{count} 项需要修改。「待发布的变更」会保留每项原因，直到修复为止。',
   'engine.studio.publishRefusedOne': '未发布：{count} 项需要修改。「待发布的变更」会保留原因，直到修复为止。',
   'engine.studio.publishRefusedBatch': '没有内容生效：软件包作为一个整体发布，其余草稿会等待这项修复。',
@@ -1889,6 +1893,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.nameLabel': '名称',
   'engine.studio.access.idLabel': '标识',
   'engine.studio.data.savedDraft': '对象「{label}」已存为草稿',
+  'engine.studio.draftSaved': '已保存 {item} 的草稿',
   'engine.studio.data.lastSaved': '已于 {time} 保存',
   // Pillar tab labels
   'engine.fieldType.text': '单行文本',
@@ -2031,12 +2036,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.sharingHint': '在岗位与共享规则之前生效的记录可见性基线(ADR-0056/0090)',
   'engine.studio.settings.sharingModel': '共享模型(sharingModel)—— 谁能查看和编辑他人拥有的记录',
   'engine.studio.settings.sharingUnset': '(未设置 —— 发布会被拒绝)',
-  'engine.studio.settings.sharingPrivate': 'Private 私有 —— 仅记录所有者',
-  'engine.studio.settings.sharingPublicRead': 'Public read 公共只读 —— 所有人可读,仅所有者可写',
-  'engine.studio.settings.sharingPublicReadWrite': 'Public read/write 公共读写 —— 所有人可读可写',
-  'engine.studio.settings.sharingControlledByParent': 'Controlled by parent 受父级控制 —— 继承自主记录',
+  'engine.studio.settings.sharingPrivate': '私有 —— 仅记录所有者',
+  'engine.studio.settings.sharingPublicRead': '公共只读 —— 所有人可读,仅所有者可写',
+  'engine.studio.settings.sharingPublicReadWrite': '公共读写 —— 所有人可读可写',
+  'engine.studio.settings.sharingControlledByParent': '受父级控制 —— 继承自主记录',
   'engine.studio.settings.sharingDescUnset':
-    '未设置 —— 该对象无法发布(security-owd-unset)。运行时确实会回落为 Private(ADR-0090 D1),但这条基线必须是显式作出的决定,而不是疏漏。请选择一个模型 —— 选 Private 的行为完全相同,区别在于它是有意选定的。',
+    '未设置 —— 该对象无法发布(security-owd-unset)。运行时确实会回落为私有(ADR-0090 D1),但这条基线必须是显式作出的决定,而不是疏漏。请选择一个模型 —— 选私有的行为完全相同,区别在于它是有意选定的。',
   'engine.studio.settings.sharingDescPrivate':
     '只有所有者(以及经岗位或共享规则授予的用户)能访问记录。此时读取 / 编辑权限仅作用于自己拥有的记录。',
   'engine.studio.settings.sharingDescPublicRead':
@@ -2148,7 +2153,7 @@ const STUDIO_ZH: Record<string, string> = {
   // [`7a90afdf9`] 新建对象对话框的第三项。此前只问两项,产出的对象会被发布门拒绝。
   'engine.studio.data.owdLabel': '记录共享模型(OWD)—— 谁能看到他人拥有的记录',
   'engine.studio.data.owdHint':
-    '发布必填,之后可在“设置 → 记录共享模型”中修改。Private 与未设置时运行时的实际行为一致。',
+    '发布必填,之后可在“设置 → 记录共享模型”中修改。「私有」与未设置时运行时的实际行为一致。',
   'engine.studio.data.newObject': '新建对象',
   'engine.studio.data.readOnlyPackage': '此包为只读——请切换到或新建一个可写的包后再添加对象',
   'engine.studio.data.firstObjectTitle': '从第一个对象开始',
@@ -2266,6 +2271,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.bannerTitle':
     '此矩阵仅列出本包声明的对象,「Save」只合并本包切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效(与数据、界面一致)。',
   'engine.studio.access.banner': '仅本包对象 · 保存为草稿',
+  // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
+  'engine.studio.access.bannerPair': '本包及 {package} 的对象 · 保存为草稿',
+  'engine.studio.access.bannerTitlePair':
+    '此权限集位于 {package} 的定制包中，因此矩阵除本包声明的对象外，也列出 {package} 的对象；「Save」只合并这一切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效。',
   'engine.studio.access.bannerTitleReadOnly':
     '此矩阵仅列出本包声明的对象。本软件包为只读:其权限集可在此查看,但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)
@@ -2305,7 +2314,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.objectCountOther': '{count} 个对象',
   'engine.studio.access.objectCountFiltered': '{count} 个对象中的 {shown} 个',
   'engine.studio.access.more': '更多操作',
-  'engine.studio.access.colOwd': 'OWD',
+  'engine.studio.access.colOwd': '记录共享模型',
   'engine.studio.access.legend.create': '创建',
   'engine.studio.access.legend.read': '读取',
   'engine.studio.access.legend.edit': '编辑',
@@ -2396,7 +2405,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.explain.noMatch': '记录不匹配',
   'engine.studio.access.explain.effectiveRowFilter': '有效行过滤',
   'engine.studio.access.explain.ruleKind.tenant_filter': '租户过滤',
-  'engine.studio.access.explain.ruleKind.owd_baseline': 'OWD 基线',
+  'engine.studio.access.explain.ruleKind.owd_baseline': '记录共享基线（OWD）',
   'engine.studio.access.explain.ruleKind.ownership': '归属',
   'engine.studio.access.explain.ruleKind.record_share': '记录共享',
   'engine.studio.access.explain.ruleKind.sharing_rule': '共享规则',
@@ -2770,6 +2779,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.listItemNeedsInput': '「{list}」第 {n} 项的「{input}」需要填写',
   // objectstack#27785 — a report's chart held until its axes are picked.
   'engine.studio.held.reportChartNeedsInput': '报表图表的「{input}」需要填写',
+  'engine.studio.held.reportJoinedNeedsBlock': '联合报表需要在「{list}」中至少添加一个块',
   // objectstack#27895 — a list view held until a required setting of its type's own block is picked again.
   'engine.studio.held.listViewTypeNeedsInput': '视图{type}设置中的「{input}」需要填写',
   'engine.studio.held.fieldNeedsInput': '字段「{field}」的「{input}」需要填写',
@@ -2855,12 +2865,16 @@ const STUDIO_ZH: Record<string, string> = {
   // objectstack#28572 — 只读基础包与其定制包合为一个界面。
   'engine.studio.customize.addedIn': '位于 {pair}',
   'engine.studio.customize.addedInTitle': '此项由本部署的定制包 {pair} 新增，并保存在其中。',
+  'engine.studio.customize.available': '可定制',
+  'engine.studio.customize.availableTitle': '此软件包为只读。对其中这些项的修改会保存到本部署的定制包中，软件包本身保持安装时的样子。',
+  'engine.studio.customize.addable': '可新增',
+  'engine.studio.customize.addableTitle': '可以新增此类型的项。代码包提供的项保持只读。',
   'engine.studio.pkg.withPair': '含 {pair}',
   'engine.studio.if.addInPairTitle': '新建到 {baseName} 的定制',
   'engine.studio.interfaces.create.descriptionInPair': '存为本部署对 {baseName} 定制的草稿，并在画布上打开。{baseName} 的导航保持安装时的样子。',
   'engine.studio.app.scaffoldNav': '将本包的对象添加为菜单项',
   'engine.studio.landing.title': '应用构建',
-  'engine.studio.landing.description': '在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用环境覆盖进行定制。',
+  'engine.studio.landing.description': '在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用「自定义」或「新建类似」修改其条目，修改保存在该软件包的 .custom 定制包中。',
   'engine.studio.landing.mineHeading': '我的软件包(可写)',
   'engine.studio.landing.noneWritable': '还没有可写软件包 — 新建一个开始。',
   'engine.studio.landing.dup': '复制',
@@ -2872,7 +2886,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.dupCreated': '已复制为可写软件包「{name}」',
   'engine.studio.landing.installedHeading': '已安装(只读 · 可浏览)',
   // objectui#11808 — the routes a read-only package does have.
-  'engine.studio.landing.readonlyHint': '源码与已安装的软件包为只读，不能在此编辑或复制。对于接受环境覆盖的元数据类型，可用环境覆盖（overlay）进行定制。',
+  'engine.studio.landing.readonlyHint': '源码与已安装的软件包为只读，不能在此编辑或复制。要修改其中一个，请打开条目并选择「自定义」或「新建类似」：修改保存在该软件包的 .custom 定制包中，升级仍会到达已安装的软件包。',
   'engine.studio.landing.marketplace': '或从应用市场安装一个模板应用',
   'engine.studio.landing.customizations.customized': '已定制 {customized} 项',
   'engine.studio.landing.customizations.separator': '，',
@@ -3149,9 +3163,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.package.writableRequired': '请先选择或新建一个可写的基座（package）——只读的代码包中无法新建该项。',
   'engine.directory.title': '元数据',
   'engine.directory.description':
-    '平台协议共暴露 {count} 个元数据类型（其中 {writable} 个支持运行时覆盖）。点击任意卡片即可浏览、覆盖或创建实例。',
+    '打开一个类型即可查看其中的项。每个类型都标明你在这里能做什么：只读、可定制、可新增或可写。',
   'engine.directory.search': '搜索元数据类型…',
-  'engine.directory.writableOnly': '仅显示可写',
+  'engine.directory.hideReadOnly': '隐藏只读',
   'engine.directory.quickFind': '快速查找',
   'engine.directory.noMatches': '没有匹配项',
   'engine.directory.noMatchesHint': '调整搜索或筛选条件以查看更多元数据类型。',
@@ -3216,6 +3230,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.col.label': '标签',
   'engine.list.col.source': '来源',
   'engine.list.col.object': '对象',
+  // objectstack#29569 — an object_extension lists by the object it extends.
+  'engine.list.col.extend': '对象',
   'engine.list.col.type': '类型',
   'engine.list.col.description': '描述',
   'engine.list.col.sharedWith': '共享给',
@@ -3718,10 +3734,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowProblems.connectRefused.missingTarget': '无法连线：此流程中没有节点 “{target}”。',
   'engine.flowProblems.connectRefused.self': '无法将 “{source}” 连到它自身。',
   'engine.flowProblems.connectRefused.repeat': '“{source}” 已经连到 “{target}”。请选中那条连线再修改。',
-  'engine.badge.createOnly': '仅可新建',
   'engine.repeater.empty': '暂无条目。点击 + 添加。',
-  'engine.badge.writable': '可写',
-  'engine.badge.readOnly': '只读',
   'engine.cancel': '取消',
   'engine.close': '关闭',
   'engine.validation.invalid': '输入无效',

@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { buildEffectiveObjectPermissions } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
 import { ExpressionEngine, toEvalPermissions } from '@objectstack/formula';
 import { SysAttachment, SysMember, SysSecret, SysUser, SysUserPreference } from '@objectstack/platform-objects';
 import type { ISecurityService } from '@objectstack/spec/contracts';
@@ -104,7 +104,11 @@ const SCHEMAS: Record<string, any> = {
 };
 
 function bootPlugin(
-  opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?: boolean; schemas?: Record<string, any> } = {},
+  opts: {
+    dbRows?: Array<Record<string, unknown>>; engineSeam?: boolean; schemas?: Record<string, any>;
+    /** [#28877] Objects whose owning package the registry reports disabled. */
+    disabledObjects?: string[];
+  } = {},
 ) {
   const dbRows = opts.dbRows ?? [];
   const schemas = opts.schemas ?? SCHEMAS;
@@ -133,6 +137,7 @@ function bootPlugin(
       },
       listItems: (type: string) => (type === 'permission' ? dbRows.map(definitionOf) : []),
       isPackageDisabled: () => false,
+      isObjectPackageDisabled: (name: string) => (opts.disabledObjects ?? []).includes(name),
     },
     getSchema: (name: string) => schemas[name] ?? null,
     // No table answers here: every set is the catalog's (above).
@@ -171,6 +176,7 @@ function endpointObjects(sets: unknown, ql: any) {
   return buildEffectiveObjectPermissions(sets as any, {
     allSchemas: () => ql.registry.getAllObjects(),
     schemaOf: (name) => ql.getSchema(name),
+    isObjectPackageDisabled: registryObjectPackageDisabled(ql.registry),
   });
 }
 
@@ -210,6 +216,26 @@ describe('[#18783] getEffectiveObjectPermissions — reachable, and the endpoint
     expect(map.sys_member).toMatchObject({ allowRead: true, allowEdit: false, allowCreate: false, allowDelete: false });
     // The wildcard itself is carried, as the endpoint serves it.
     expect(map['*']).toMatchObject({ modifyAllRecords: true });
+  });
+
+  it('[#28877] leaves out an object of a disabled package — the same bytes as the endpoint, and can() answers false', async () => {
+    const { svc, ql } = await locate({ dbRows: [OPS_ADMIN_ROW, SALES_ROW], disabledObjects: ['report', 'deal'] });
+    for (const context of [ADMIN, REP]) {
+      const sets = await svc.resolvePermissionSetsForContext!(context);
+      const map: any = await svc.getEffectiveObjectPermissions!(context);
+      expect(JSON.stringify(map), context.userId).toBe(JSON.stringify(endpointObjects(sets, ql)));
+      // `report` reached the admin's map by the super-user seed, `deal` by an explicit grant.
+      expect(Object.keys(map), context.userId).not.toContain('report');
+      expect(Object.keys(map), context.userId).not.toContain('deal');
+      const answer = ExpressionEngine.evaluate<boolean>(
+        { dialect: 'cel', source: "current_user.can('deal', 'read')" },
+        { user: { id: context.userId }, permissions: toEvalPermissions(map) } as any,
+      );
+      expect(answer, context.userId).toMatchObject({ ok: true, value: false });
+    }
+    // The admin keeps every other object.
+    const admin: any = await svc.getEffectiveObjectPermissions!(ADMIN);
+    expect(admin.sys_member).toMatchObject({ allowRead: true });
   });
 
   it('is frozen at the top level and aliases no permission set', async () => {

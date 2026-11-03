@@ -30,6 +30,7 @@ export interface ImportTargetField {
   label: string;
   type: string;
   required?: boolean;
+  defaultValue?: unknown;
   matchOnly?: boolean;
   options?: unknown;
   multiple?: boolean;
@@ -65,6 +66,10 @@ export function importTargetFields(
       // A non-writable target can never be a required WRITE column —
       // `required` only steers the mapping step's completeness hint.
       required: writable && !!def?.required,
+      // Passed through as declared: the wizard reads only that a default is
+      // there (the create fills it), so a defaulted required field is not
+      // demanded from the file. Never evaluated client-side.
+      ...(def?.defaultValue != null ? { defaultValue: def.defaultValue } : {}),
       ...(matchOnly ? { matchOnly: true } : {}),
       // Enum options seed the downloadable template's example row.
       ...(def?.options ? { options: def.options } : {}),

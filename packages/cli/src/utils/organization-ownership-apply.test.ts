@@ -39,6 +39,7 @@ import {
   type CeremonyCheckpoint,
   type CeremonyLedgerPort,
   type ColumnDropPort,
+  type CustomizationPairPort,
   type DefaultOrganizationPort,
   type MetadataDoorPort,
   type MetadataLockPort,
@@ -465,6 +466,8 @@ const apply = (
     securityPlugin?: SchemaMigrationComposition['securityPlugin'];
     defaultOrganization?: DefaultOrganizationPort;
     declaredSharingRules?: readonly string[];
+    pairs?: CustomizationPairPort;
+    onProgress?: (message: string) => void;
   } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
@@ -487,6 +490,8 @@ const apply = (
     ...(opts.metadataChoices ? { metadataChoices: opts.metadataChoices } : {}),
     ...(opts.securityPlugin ? { securityPlugin: opts.securityPlugin } : {}),
     ...(opts.defaultOrganization ? { defaultOrganization: opts.defaultOrganization } : {}),
+    ...(opts.pairs ? { pairs: opts.pairs } : {}),
+    ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
     ...(opts.declaredSharingRules
       ? { declaredSharingRules: { rules: async () => opts.declaredSharingRules!.map((name) => ({ name, refused: null })) } }
       : {}),
@@ -1270,6 +1275,118 @@ describe('ADR-0131 D10 --apply — organization customizations and form withdraw
     const report = await apply(refusing, ledger(), { views: servedViews(c) });
     expect(step(report).status).toBe('blocked');
     expect(step(report).blockers.join('\n')).toMatch(/lead-intake of the view crm_lead\.intake \(package pkg_a\).*NOT_OVERRIDABLE.*sharing\.enabled false/);
+  });
+
+  describe('[ADR-0146 D1, D2, D3] a read-only package\'s view takes the withdrawal in its .custom pair', () => {
+    /** The pair doors: `readOnly` names the read-only packages; the ensure door answers `<base>.custom` at version 2.1.0. */
+    const pairsOf = (readOnly: readonly string[], refuseEnsure?: string): CustomizationPairPort & { ensured: string[] } => {
+      const ensured: string[] = [];
+      return {
+        ensured,
+        readOnly: async (packageId) => readOnly.includes(packageId),
+        ensure: async (base) => {
+          if (refuseEnsure) throw new Error(refuseEnsure);
+          ensured.push(base);
+          return { packageId: `${base}.custom`, basedOn: '2.1.0' };
+        },
+      };
+    };
+    /**
+     * The env-wide list as the reads serve it (ADR-0146 D8 item 2): a pair's
+     * save declaring the override of its base is served at the base's slot,
+     * over the base's own document.
+     */
+    const servedOverPairs = (c: ReturnType<typeof catalog>): ServedViewsPort => {
+      const plain = servedViews(c);
+      return {
+        async list() {
+          const slots = new Map((await plain.list()).map((v) => [`${String(v.name)}|${String(v._packageId ?? '')}`, v]));
+          for (const [key, v] of [...slots]) {
+            const declared = (v.overrides as { package?: unknown } | undefined)?.package;
+            if (typeof declared !== 'string' || v._packageId !== `${declared}.custom`) continue;
+            slots.delete(key);
+            slots.set(`${String(v.name)}|${declared}`, { ...v, _packageId: declared });
+          }
+          return [...slots.values()];
+        },
+      };
+    };
+    const saved = (c: ReturnType<typeof catalog>) =>
+      c.viewSaves.map((v) => [v.name, v.packageId, (v.body.config as any).sharing.enabled, v.body.overrides]);
+
+    it('⭐ carried into the pair, declared at the base\'s version; the doors serve it withdrawn; a re-run carries nothing', async () => {
+      metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false, 'Org copy')));
+      const c = catalog();
+      const views = servedOverPairs(c);
+      const pairs = pairsOf(['pkg_a']);
+      const progress: string[] = [];
+      expect(await doorsServe(views, 'lead-intake')).toEqual(['crm_lead.intake|pkg_a']);
+
+      const report = await apply(c, ledger(), { views, pairs, onProgress: (m) => progress.push(m) });
+
+      expect(step(report)).toMatchObject({ status: 'done', summary: { withdrawalsCarried: 1 } });
+      expect(pairs.ensured).toEqual(['pkg_a']);
+      // ⛔ Nothing saved naming the read-only base itself.
+      expect(saved(c)).toEqual([['crm_lead.intake', 'pkg_a.custom', false, { package: 'pkg_a', basedOn: '2.1.0' }]]);
+      expect(progress.filter((m) => m.includes('pkg_a.custom'))).toHaveLength(1);
+      expect(await doorsServe(views, 'lead-intake')).toEqual([]);
+
+      const again = await apply(c, ledger(), { views, pairs });
+      expect(step(again).summary.withdrawalsCarried).toBe(0);
+      expect(c.viewSaves).toHaveLength(1);
+    });
+
+    it('a writable package\'s view is saved in place, as before; no pair is ensured', async () => {
+      metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false, 'Org copy')));
+      const c = catalog();
+      const pairs = pairsOf([]);
+      const report = await apply(c, ledger(), { views: servedViews(c), pairs });
+      expect(step(report)).toMatchObject({ status: 'done', summary: { withdrawalsCarried: 1 } });
+      expect(saved(c)).toEqual([['crm_lead.intake', 'pkg_a', false, undefined]]);
+      expect(pairs.ensured).toEqual([]);
+    });
+
+    it('a pair that cannot be ensured keeps the blocker, the pair\'s refusal named beside the door\'s; nothing is written', async () => {
+      metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false)));
+      const c = catalog();
+      const refusing: ReturnType<typeof catalog> = {
+        ...c,
+        async save(type, name, body, target) {
+          if (type === 'view') throw new Error('NOT_OVERRIDABLE: the read-only base takes no customization');
+          return c.save(type, name, body, target);
+        },
+      };
+      const report = await apply(refusing, ledger(), { views: servedViews(c), pairs: pairsOf(['pkg_a'], 'NAMESPACE_CONFLICT: the pair namespace is held') });
+      expect(step(report).status).toBe('blocked');
+      const blocker = step(report).blockers.join('\n');
+      expect(blocker).toMatch(/lead-intake of the view crm_lead\.intake \(package pkg_a\).*NOT_OVERRIDABLE/);
+      expect(blocker).toMatch(/customization package of pkg_a could not be ensured: NAMESPACE_CONFLICT/);
+      expect(c.viewSaves).toEqual([]);
+    });
+
+    it('a door that refuses the declared save into the pair keeps the blocker too, naming that refusal', async () => {
+      metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false)));
+      const c = catalog();
+      const refusing: ReturnType<typeof catalog> = {
+        ...c,
+        async save(type, name, body, target) {
+          if (type === 'view') throw new Error(`NOT_OVERRIDABLE: refused in ${String(target?.packageId)}`);
+          return c.save(type, name, body, target);
+        },
+      };
+      const report = await apply(refusing, ledger(), { views: servedViews(c), pairs: pairsOf(['pkg_a']) });
+      expect(step(report).status).toBe('blocked');
+      expect(step(report).blockers.join('\n')).toMatch(/refused in pkg_a\. Nor could its customization package take it: the metadata door refused the save into pkg_a\.custom: NOT_OVERRIDABLE: refused in pkg_a\.custom/);
+      expect(c.viewSaves).toEqual([]);
+    });
+
+    it('control: where the pair cannot take it and the door admits the save naming the package, that save carries it, as before', async () => {
+      metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false)));
+      const c = catalog();
+      const report = await apply(c, ledger(), { views: servedViews(c), pairs: pairsOf(['pkg_a'], 'the base declares no namespace') });
+      expect(step(report)).toMatchObject({ status: 'done', summary: { withdrawalsCarried: 1 } });
+      expect(saved(c)).toEqual([['crm_lead.intake', 'pkg_a', false, undefined]]);
+    });
   });
 });
 

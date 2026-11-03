@@ -11,7 +11,8 @@ import { callWithBorrowedCredential, BORROWED_CREDENTIAL_SKEW_MS } from '@object
 import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
 import type { ILock } from '@objectstack/spec/contracts';
 import type { ConnectorConnectionRecord, ConnectorConnectionStore, ConnectorGrantWrite } from '../connector-connections.js';
-import { createOAuth2GrantHandle, type OAuth2GrantConfig } from './grant-handle.js';
+import { createOAuth2GrantHandle, reconnectRequiredReason, type OAuth2GrantConfig } from './grant-handle.js';
+import { serializeInstallerClient } from './installer-client.js';
 
 const TOKEN_URL = 'https://idp.example.com/oauth/token';
 
@@ -51,6 +52,7 @@ function fakeConnections(rows: Array<{ org: string; refreshToken?: string; statu
             revision: 1,
             hasRefreshToken: r.refreshToken !== undefined,
             hasRegisteredClient: r.registeredClient !== undefined,
+            installerClientHasSecret: false,
             refreshToken: r.refreshToken,
             registeredClient: r.registeredClient,
         });
@@ -308,7 +310,7 @@ describe('ADR-0143 D4 — authorization_code: refresh', () => {
         expect(refused.message).not.toContain('dummy-rt-a');
         expect(calls.markReconnectRequired).toEqual(['org_a']);
         expect(held.get('org_a')).toMatchObject({ status: 'reconnect_required', refreshToken: undefined });
-        expect(onGrantRefused).toHaveBeenCalledWith('org_a');
+        expect(onGrantRefused).toHaveBeenCalledWith('org_a', refused.message);
         // The next dispatch reads the row: refused before any token request.
         await expect(handle.get({ organizationId: 'org_a' })).rejects.toMatchObject({ status: 503 });
         expect(idp.state.requests).toHaveLength(1);
@@ -410,6 +412,227 @@ describe('ADR-0143 D2.1 — an MCP instance whose connection keeps the client it
         await expect(handle.get({ organizationId: 'org_a' })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
         expect(idp.seen).toHaveLength(0);
         expect(calls.markReconnectRequired).toEqual(['org_a']);
-        expect(onGrantRefused).toHaveBeenCalledWith('org_a');
+        expect(onGrantRefused).toHaveBeenCalledWith('org_a', expect.stringContaining('keeps no client to refresh with'));
+    });
+});
+
+describe("ADR-0143 D2.1 (2026-11-02) — an instance taking the installer's client refreshes as the client its administrator entered", () => {
+    const INSTALLER_SECRET = 'dummy-installer-secret-28866';
+    const DISCOVERED_ENDPOINTS = {
+        issuer: 'https://auth.mcp.example.com',
+        authorizationUrl: 'https://auth.mcp.example.com/authorize',
+        tokenUrl: 'https://auth.mcp.example.com/token',
+        resource: 'https://mcp.example.com/mcp',
+        clientId: 'installer-client-a',
+        registered: false,
+    };
+    function recordingEndpoint() {
+        const seen: Array<{ url: string; form: URLSearchParams; authorization?: string }> = [];
+        const fetchImpl = (async (url: string, init: RequestInit) => {
+            const headers = new Headers(init.headers);
+            seen.push({ url, form: new URLSearchParams(String(init.body)), ...(headers.get('authorization') ? { authorization: headers.get('authorization') as string } : {}) });
+            return new Response(JSON.stringify({ access_token: `dummy-at-${seen.length}`, token_type: 'Bearer', expires_in: 3600 }), { status: 200 });
+        }) as unknown as typeof fetch;
+        return { seen, fetch: fetchImpl };
+    }
+    const INSTALLER: OAuth2GrantConfig = { grant: 'authorization_code', tokenUrl: TOKEN_URL, clientSource: 'installer' };
+    const basic = (id: string, secret: string) => `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`;
+
+    it("refreshes at the declared token endpoint as the connection's installer client, its secret in Basic", async () => {
+        const idp = recordingEndpoint();
+        const { store } = fakeConnections([{
+            org: 'org_a', refreshToken: 'dummy-rt-a', registeredClient: serializeInstallerClient({ clientId: 'installer-client-a', clientSecret: INSTALLER_SECRET }),
+        }]);
+        const handle = createOAuth2GrantHandle({ connector: 'docusign', config: INSTALLER, connections: store, fetch: idp.fetch });
+        expect((await handle.get({ organizationId: 'org_a' })).auth).toEqual({ type: 'bearer', token: 'dummy-at-1' });
+        expect(idp.seen[0].url).toBe(TOKEN_URL);
+        expect(idp.seen[0].authorization).toBe(basic('installer-client-a', INSTALLER_SECRET));
+        expect(idp.seen[0].form.get('grant_type')).toBe('refresh_token');
+    });
+
+    it('each organization refreshes with its own administrator\'s client; a public one sends its id in the form', async () => {
+        const idp = recordingEndpoint();
+        const { store } = fakeConnections([
+            { org: 'org_a', refreshToken: 'dummy-rt-a', registeredClient: serializeInstallerClient({ clientId: 'installer-client-a', clientSecret: INSTALLER_SECRET }) },
+            { org: 'org_b', refreshToken: 'dummy-rt-b', registeredClient: serializeInstallerClient({ clientId: 'installer-client-b' }) },
+        ]);
+        const handle = createOAuth2GrantHandle({ connector: 'docusign', config: INSTALLER, connections: store, fetch: idp.fetch });
+        await handle.get({ organizationId: 'org_a' });
+        await handle.get({ organizationId: 'org_b' });
+        expect(idp.seen[0].authorization).toBe(basic('installer-client-a', INSTALLER_SECRET));
+        expect(idp.seen[1].authorization).toBeUndefined();
+        expect(idp.seen[1].form.get('client_id')).toBe('installer-client-b');
+    });
+
+    it("on MCP over http, refreshes at the kept discovered endpoint as the installer's client", async () => {
+        const idp = recordingEndpoint();
+        const { store } = fakeConnections([{
+            org: 'org_a', refreshToken: 'dummy-rt-a',
+            registeredClient: serializeInstallerClient({ clientId: 'installer-client-a', clientSecret: INSTALLER_SECRET }, DISCOVERED_ENDPOINTS),
+        }]);
+        const handle = createOAuth2GrantHandle({
+            connector: 'notion', config: { grant: 'authorization_code', clientSource: 'installer' }, connections: store, fetch: idp.fetch,
+        });
+        await handle.get({ organizationId: 'org_a' });
+        expect(idp.seen[0].url).toBe('https://auth.mcp.example.com/token');
+        expect(idp.seen[0].form.get('resource')).toBe('https://mcp.example.com/mcp');
+        expect(idp.seen[0].authorization).toBe(basic('installer-client-a', INSTALLER_SECRET));
+    });
+
+    it('⛔ a kept client of the other kind than the declaration takes is never used: reconnect required, no token request', async () => {
+        // An installer declaration over a client an MCP registration kept, and
+        // a dynamic-registration declaration over an installer's client.
+        const registered = JSON.stringify({ ...DISCOVERED_ENDPOINTS, clientId: 'registered-client-a', registered: true });
+        const installerKept = serializeInstallerClient({ clientId: 'installer-client-a', clientSecret: INSTALLER_SECRET }, DISCOVERED_ENDPOINTS);
+        for (const [config, kept] of [
+            [{ grant: 'authorization_code', clientSource: 'installer' }, registered],
+            [{ grant: 'authorization_code' }, installerKept],
+        ] as Array<[OAuth2GrantConfig, string]>) {
+            const idp = recordingEndpoint();
+            const { store, calls } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a', registeredClient: kept }]);
+            const handle = createOAuth2GrantHandle({ connector: 'notion', config, connections: store, fetch: idp.fetch });
+            const err = await handle.get({ organizationId: 'org_a' }).catch((e: Error) => e);
+            expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+            expect((err as Error).message).toContain('keeps no client to refresh with');
+            expect((err as Error).message).not.toContain(INSTALLER_SECRET);
+            expect(idp.seen).toHaveLength(0);
+            expect(calls.markReconnectRequired).toEqual(['org_a']);
+        }
+    });
+});
+
+describe('[#28863] the stored reason of a connection marked reconnect required names the cause that happened', () => {
+    const storedReason = (held: Map<string, ConnectorConnectionRecord>) => String(held.get('org_a')?.statusReason);
+
+    it('no refresh token: the reason names the missing refresh token, claims no refusal and no expiry', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch });
+        const refused = await handle.get({ organizationId: 'org_a' }).catch((e) => e);
+        const reason = storedReason(held);
+        expect(reason).toContain("connector instance 'crm' needs to be reconnected for organization 'org_a'");
+        expect(reason).toContain('issued no refresh token, so an access token the connection has to renew cannot be renewed');
+        expect(reason).not.toMatch(/refused/);
+        expect(reason).not.toMatch(/expired/);
+        expect(refused.message).toBe(reason);
+        expect(idp.state.requests).toHaveLength(0);
+    });
+
+    it('no client: the reason names the missing client, claims no refusal and no expiry', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'notion', config: { grant: 'authorization_code' }, connections: store, fetch: idp.fetch });
+        const refused = await handle.get({ organizationId: 'org_a' }).catch((e) => e);
+        const reason = storedReason(held);
+        expect(reason).toContain("connector instance 'notion' needs to be reconnected for organization 'org_a'");
+        expect(reason).toContain('keeps no client to refresh with, so an access token it has to renew cannot be renewed');
+        expect(reason).not.toMatch(/refused/);
+        expect(reason).not.toMatch(/expired/);
+        expect(refused.message).toBe(reason);
+        expect(idp.state.requests).toHaveLength(0);
+    });
+
+    it('control: a refresh the authorization server refuses (`invalid_grant`) stores a reason naming the refusal', async () => {
+        const idp = tokenEndpoint();
+        idp.state.answer = () => ({ status: 400, body: { error: 'invalid_grant' } });
+        const { store, held } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch });
+        const refused = await handle.get({ organizationId: 'org_a' }).catch((e) => e);
+        const reason = storedReason(held);
+        expect(reason).toContain('its authorization server refused the grant (revoked, or expired with no usable refresh)');
+        expect(reason).not.toContain('dummy-rt-a');
+        expect(refused.message).toBe(reason);
+        expect(idp.state.requests).toHaveLength(1);
+    });
+});
+
+describe('[#28963] a connection already marked reconnect required answers the cause it stores, and the log names it', () => {
+    const NO_REFRESH_TOKEN = 'issued no refresh token, so an access token the connection has to renew cannot be renewed';
+    const NO_CLIENT = 'keeps no client to refresh with, so an access token it has to renew cannot be renewed';
+    const REFUSED = 'its authorization server refused the grant (revoked, or expired with no usable refresh)';
+    const refusalOf = (p: Promise<unknown>) => p.then(() => { throw new Error('the dispatch was not refused'); }, (e: Error & { status?: number; code?: string }) => e);
+
+    it('a row marked because no refresh token was issued answers that sentence on the first dispatch and on every later one', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch });
+        const first = await refusalOf(handle.get({ organizationId: 'org_a' }));
+        const stored = String(held.get('org_a')?.statusReason);
+        expect(stored).toContain(NO_REFRESH_TOKEN);
+        expect(first.message).toBe(stored);
+        // Every later dispatch reads the marked row and answers what it stores, not the refusal sentence.
+        for (const later of [
+            () => handle.get({ organizationId: 'org_a' }),
+            () => handle.get({ organizationId: 'org_a' }),
+            () => handle.refresh({ organizationId: 'org_a' }),
+        ]) {
+            const refused = await refusalOf(later());
+            expect(refused).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+            expect(refused.message).toBe(stored);
+            expect(refused.message).not.toMatch(/refused/);
+        }
+        // So does a handle that never saw the marking (another replica, a restart).
+        const other = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch });
+        expect((await refusalOf(other.get({ organizationId: 'org_a' }))).message).toBe(stored);
+        expect(idp.state.requests).toHaveLength(0);
+    });
+
+    it('a row another replica marked while this one waited for the lock answers the cause that replica stored', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
+        const markedThere = reconnectRequiredReason('crm', 'org_a', 'no_client');
+        const lock = {
+            async withLock(_key: string, fn: () => Promise<unknown>) {
+                Object.assign(held.get('org_a')!, { status: 'reconnect_required', statusReason: markedThere, refreshToken: undefined });
+                return fn();
+            },
+        } as unknown as ILock;
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, lock: () => lock, fetch: idp.fetch });
+        const refused = await refusalOf(handle.get({ organizationId: 'org_a' }));
+        expect(refused).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(refused.message).toBe(markedThere);
+        expect(idp.state.requests).toHaveLength(0);
+    });
+
+    it('a marked row that stores no cause still answers the refusal sentence, on both reads', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a', status: 'reconnect_required' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch });
+        const atSelect = await refusalOf(handle.get({ organizationId: 'org_a' }));
+        expect(atSelect.message).toBe(reconnectRequiredReason('crm', 'org_a'));
+        expect(atSelect.message).toContain(REFUSED);
+
+        held.get('org_a')!.status = 'connected';
+        held.get('org_a')!.refreshToken = 'dummy-rt-a';
+        const lock = {
+            async withLock(_key: string, fn: () => Promise<unknown>) {
+                held.get('org_a')!.status = 'reconnect_required';
+                return fn();
+            },
+        } as unknown as ILock;
+        const locked = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, lock: () => lock, fetch: idp.fetch });
+        const underLock = await refusalOf(locked.get({ organizationId: 'org_a' }));
+        expect(underLock.message).toBe(reconnectRequiredReason('crm', 'org_a'));
+        expect(idp.state.requests).toHaveLength(0);
+    });
+
+    it('the plugin is told the cause of each refresh path, in the words it stored', async () => {
+        const cases = [
+            { cause: NO_REFRESH_TOKEN, config: AUTH_CODE, row: { org: 'org_a' }, answer: undefined },
+            { cause: NO_CLIENT, config: { grant: 'authorization_code' } as OAuth2GrantConfig, row: { org: 'org_a', refreshToken: 'dummy-rt-a' }, answer: undefined },
+            { cause: REFUSED, config: AUTH_CODE, row: { org: 'org_a', refreshToken: 'dummy-rt-a' }, answer: { status: 400, body: { error: 'invalid_grant' } } },
+        ];
+        for (const { cause, config, row, answer } of cases) {
+            const idp = tokenEndpoint();
+            if (answer) idp.state.answer = () => answer;
+            const { store, held } = fakeConnections([row]);
+            const onGrantRefused = vi.fn();
+            const handle = createOAuth2GrantHandle({ connector: 'crm', config, connections: store, fetch: idp.fetch, onGrantRefused });
+            await refusalOf(handle.get({ organizationId: 'org_a' }));
+            const stored = String(held.get('org_a')?.statusReason);
+            expect(stored).toContain(cause);
+            expect(onGrantRefused).toHaveBeenCalledTimes(1);
+            expect(onGrantRefused).toHaveBeenCalledWith('org_a', stored);
+        }
     });
 });

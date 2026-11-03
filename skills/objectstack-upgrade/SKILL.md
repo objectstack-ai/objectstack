@@ -71,7 +71,7 @@ node -e "console.log(require('fs').readFileSync(require.resolve('@objectstack/sp
 # 3 · acceptance — all four, not three
 os validate                      # green (compare against validate-before.txt)
 tsc --noEmit                     # tombstones type the retired keys as `never`
-os migrate meta --from 17 --json # `applied` must be [] (see §3.3)
+os migrate meta --from 16 --to 18 --json   # `applied` [] and no `replayedNothing` (see §3.3)
 # → write .upgrade/REPORT.md (template in §3.4)
 ```
 
@@ -159,8 +159,6 @@ it prints:
   Layer 2's input, not a warning to dismiss.
 - **`Migrated stack is schema-valid`** — or the warning that it is not yet,
   which means a residue item is still blocking the parse.
-- **Pending data migrations**, when the chain crosses into a major with
-  per-deployment data gates — see below.
 
 ### ⚠ The one fact that surprises every operator
 
@@ -171,18 +169,17 @@ other with the reason it was not written, never writes a semantic change, and
 if re-running the chain over the written files disagrees, restores every file
 and exits 1.
 
-### Stored rows: rehydration replays the same conversions
+### Stored rows: rehydration replays what the release carries
 
-A deployment's `sys_metadata` rows are the other subject. They are handled for
-you at read time — the metadata loader and the ObjectQL plugin both pass each
-stored row through `applyConversionsToStoredItem`, which replays the conversion
-chain over a single item **including entries retired from the load path**. A row
-written under protocol 16 therefore rehydrates in its protocol-17 shape without
-anybody editing it.
+A deployment's `sys_metadata` rows are the other subject. At read time the
+metadata loader and the ObjectQL plugin pass each stored row through
+`applyConversionsToStoredItem`, which replays every conversion the release still
+carries, **including entries retired from the load path**. 18.3 drops those
+retired at or below 16.x, so a row still in such a shape is no longer rewritten.
 
 Rehydration is a read-time projection: the rows on disk keep their old shape,
-and you never hand-edit `sys_metadata`. To make it durable, run the stored pass
-— read-only by default:
+and you never hand-edit `sys_metadata`. ⛔ Run the stored pass before you move
+(on 18.2 or earlier for such a row) — read-only by default:
 
   ```bash
   os migrate meta --stored                     # preview, writes nothing
@@ -392,22 +389,25 @@ that output as the control.
 > Some conversions are **migration-chain-only**: the loader deliberately does
 > not apply them and no tombstone rejects the old shape, because the change is a
 > default flip rather than a rename — auto-applying it would stamp a constraint
-> onto sources that deliberately omit it. The 16 → 17 crossing has one:
-> `field-required-notnull-explicit`, which writes the physical `storage.notNull`
-> that `required` used to imply on its own.
+> onto sources that deliberately omit it. This build ships none (every
+> conversion it carries is tombstoned, so the parse refuses the old shape too),
+> but a later one can, and the chain, not the parse, is what knows.
 >
-> A project carrying only that shape validates **green** while the chain still
+> A project carrying only such a shape validates **green** while the chain still
 > has work. So `validate` green is necessary and not sufficient, and the
-> criterion that closes the gap is the replay:
+> criterion that closes the gap is a replay of the whole range you ported:
 >
 > ```bash
-> os migrate meta --from <target-major> --json   # `applied` must be []
+> os migrate meta --from <authored-major> --to <target-major> --json
+> # `applied` must be [] and `replayedNothing` absent
 > ```
 >
-> Read `applied`, not the headline: `--to` defaults to the highest major this
-> build carries a step for, which is one PAST the installed major for most of a
-> release line, so `todos` carries the next major's semantic residue — real, but
-> not this upgrade's business.
+> `--from <target-major>` proves nothing: `--to` defaults to the highest major
+> this build carries a step for, so the range is empty — no step runs, `applied`
+> is `[]` whatever the metadata holds, and the JSON says so with
+> `replayedNothing` (its `widestRange` is `null` there: no wider range exists
+> from that `--from`) — or it holds only the next major's step. `todos` is
+> semantic residue, Layer 2's business, not a failure.
 
 → Moved verbatim to [references/examples-upgrade.md](./references/examples-upgrade.md) § 3.4 The report — the human half.
 
@@ -435,7 +435,7 @@ got — "it passed" is a different fact in every row:
 |:--|:--|:--|
 | Rejected, error carries the fix-it text | A tombstoned key. Not "unrecognized key", not a deprecation label — the prescription *is* the error. | The refusal itself, quoted. |
 | Accepted, and the chain rewrites it | A conversion with a live load-path acceptance window. | The chain's diff — not the parse gate. |
-| Accepted, and `validate` stays green | A migration-chain-only conversion ([3.3](#33-validate)). | Only the replay from the target major sees this class. |
+| Accepted, and `validate` stays green | A migration-chain-only conversion ([3.3](#33-validate)). | Only the acceptance replay sees this class. |
 
 ### 3.6 Stored rows: assert them, do not believe them
 
@@ -447,9 +447,9 @@ code:
 os migrate meta --stored --json    # 0 = every row canonical, 1 = work left
 ```
 
-That is what makes "this deployment is on protocol N" a CI check rather than a
-belief. Nothing gates on it having run; the read-time rehydration is still the
-guarantee.
+That is what makes "this deployment is on protocol N" a CI check — valid only
+on the release you are leaving: one that dropped a row's conversions no longer
+recognises it and answers `0`. Nothing gates on it having run.
 
 ---
 
@@ -461,10 +461,9 @@ guarantee.
 
 | Symptom | What it actually is | Fix |
 |:--|:--|:--|
-| `migrate meta` reports changes, but the files are unchanged | Working as designed — the default run only lists. | Pass `--write`, or port the printed edits by hand; then replay from the target major to confirm 0 changes. |
-| Replay from the target major still applies changes | The port is incomplete, or a source builds metadata at runtime from a shape the chain never saw. | Diff against `--out`; grep for the `conversionId`'s surface in code that constructs metadata dynamically. |
+| `migrate meta` reports changes, but the files are unchanged | Working as designed — the default run only lists. | Pass `--write`, or port the printed edits by hand; then replay the ported range to confirm 0 changes. |
+| The acceptance replay still applies changes | The port is incomplete, or a source builds metadata at runtime from a shape the chain never saw. | Diff against `--out`; grep for the `conversionId`'s surface in code that constructs metadata dynamically. |
 | `validate` green, but a feature silently stopped working | An R2 residue item: code reading a renamed key now reads `undefined`. | Exercise the path for real. A green parse says nothing about a `??` chain in the project's own code. |
-| `validate` green from the start, so "there was nothing to upgrade" | A migration-chain-only conversion — no tombstone rejects it, so nothing complains. | Replay the chain anyway. `validate` green is necessary, not sufficient; see [3.3](#33-validate). |
 | `validate` reports findings that have nothing to do with retired keys | The author-time rule pass, not the schema pass. | Diff against the pre-upgrade `validate` control. Pre-existing findings are not this upgrade's scope. |
 | A retired key round-trips without error | The schema carrying it is not strict and the key is being stripped, or the key still has a live load-path window. | Determine which — the two need different acceptance evidence. See [the reverse check](#reverse-check). |
 | `--apply` refused / stored-only flag rejected | `--apply`, `--yes`, `--force`, `--type`, `--database-url` mean something only with `--stored`. | Add `--stored`, or drop the flag; the authored-source chain writes only `--out` and, with `--write`, the sources. |

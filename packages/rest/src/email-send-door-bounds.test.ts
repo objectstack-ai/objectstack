@@ -143,6 +143,62 @@ describe('POST /api/v1/email/send — the capability', () => {
   });
 });
 
+describe('POST /api/v1/email/send — a malformed recipient is the caller\'s 400, never a 500', () => {
+  /**
+   * A service whose `send` refuses the way `@objectstack/plugin-email`'s
+   * `normalizeMessage` does: a malformed caller-supplied address is a
+   * `VALIDATION_FAILED: invalid recipient address in FIELD: ADDRESS` throw
+   * (that producer's own suite pins the exact text per field), and a
+   * malformed CONFIGURED sender is the plain `Invalid email address` throw —
+   * a server fault. This file pins the door half: what each answers on the wire.
+   */
+  function refusingDouble(refusal?: string) {
+    const send = vi.fn(async (_input: SendEmailInput) => {
+      if (refusal !== undefined) throw new Error(refusal);
+      return { id: 'eml_1', status: 'sent' as const, messageId: 'm1' };
+    });
+    const service: Partial<IEmailService> = { send, getDefaultFrom: () => CONFIGURED };
+    return { service, send };
+  }
+
+  it.each([
+    ['a malformed `to`', { to: 'not-an-email' }, 'invalid recipient address in `to`: not-an-email'],
+    ['an empty `to`', { to: '' }, 'invalid recipient address in `to`: (empty)'],
+    ['a `to` list with one bad member', { to: ['ok@example.org', 'nope'] }, 'invalid recipient address in `to`: nope'],
+    ['a malformed `cc`', { cc: 'bad cc' }, 'invalid recipient address in `cc`: bad cc'],
+  ])('%s answers 400 VALIDATION_FAILED naming the address', async (_label, fields, reason) => {
+    const { service, send } = refusingDouble(`VALIDATION_FAILED: ${reason}`);
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post({ ...MESSAGE, ...fields });
+
+    expect(out.status).toBe(400);
+    expect(out.body.code).toBe('VALIDATION_FAILED');
+    expect(out.body.error).toBe(reason);
+    // The door forwarded the caller's addresses untouched — the refusal is the service's verdict on them.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toMatchObject(fields);
+  });
+
+  it('a well-formed send through the same service still answers 200', async () => {
+    const { service, send } = refusingDouble();
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post({ ...MESSAGE, cc: ['cc@example.org'] });
+
+    expect(out.status).toBe(200);
+    expect(out.body).toMatchObject({ status: 'sent', id: 'eml_1' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('a malformed CONFIGURED sender stays a server fault: 500 EMAIL_SEND_FAILED, not a 400 that blames the caller', async () => {
+    const { service } = refusingDouble('Invalid email address: noreply@localhost');
+    const { post } = boot({ service, ctx: ADMIN });
+    const out = await post(MESSAGE);
+
+    expect(out.status).toBe(500);
+    expect(out.body.code).toBe('EMAIL_SEND_FAILED');
+  });
+});
+
 describe('POST /api/v1/email/send — `sentBy` is the authenticated caller', () => {
   it('a body naming another user as `sentBy` is refused 403, and nothing is sent', async () => {
     const { service, send } = emailDouble();

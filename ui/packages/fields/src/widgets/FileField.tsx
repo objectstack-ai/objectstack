@@ -1,11 +1,12 @@
 import React, { useRef, useState, useCallback } from 'react';
-import { Button, EmptyValue } from '@object-ui/components';
+import { Button, EmptyValue, cn } from '@object-ui/components';
 import { useUpload } from '@object-ui/providers';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Upload, X, File as FileIcon, ImageIcon, Camera, Loader2, Lock } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 import { toHostGroupProps } from './toHostGroupProps.js';
+import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import { useUploadingSignal } from './useUploadingSignal.js';
 import { useUploadingScopeHold } from './uploadingScope.js';
 import { maxSizeError, type TranslateFn } from './file-size-guard.js';
@@ -344,7 +345,7 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
             type="button"
             variant="outline"
             size="sm"
-            className="w-full"
+            className={cn('w-full', PHONE_TOUCH_HEIGHT)}
             onClick={(e) => {
               e.stopPropagation();
               cameraRef.current?.click();
@@ -430,7 +431,7 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
                     e.stopPropagation();
                     handleRemove(idx);
                   }}
-                  className="h-6 w-6 p-0"
+                  className={cn('h-6 w-6 p-0', PHONE_TOUCH_SQUARE)}
                   aria-label={t('fields.file.remove', { name: file.name })}
                 >
                   <X className="size-3" />

@@ -201,7 +201,9 @@ Two prompt families are bridged — there is no per-item prompt registration cal
 
 1. **`agent_prompt`** — one dynamic prompt that loads a registered agent's
    system prompt by name, with optional UI context (`objectName`, `recordId`,
-   `viewName`).
+   `viewName`). It is listed only when the boot registers at least one agent,
+   and its `agentName` argument names agents that boot holds; the open
+   framework registers none, so there it is not listed.
 2. **One prompt per authored skill** that carries `instructions` (#3905). Write
    a `*.skill.ts`, and its instructions become a prompt any connected MCP client
    can list and fetch.

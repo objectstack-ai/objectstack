@@ -45,6 +45,7 @@ import type { IAuthService, IDataEngine, IHttpServer } from '@objectstack/spec/c
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { inProcessSessionReadInput, sendOk, sendError } from '@objectstack/types';
 import { DRIVER_CATALOG } from './driver-catalog.js';
+import { DRIVER_CATALOG_SEGMENT } from './datasource-route-reserved-names.js';
 // [#27618] The package's one "no such datasource" refusal: GET answers an
 // unknown name in its words, as every other by-name door does.
 import { datasourceNotFoundError } from './datasource-admin-service.js';
@@ -692,7 +693,7 @@ export function registerDatasourceAdminRoutes(
   // Catalog of connection drivers + their JSON-Schema config (drives the
   // Studio connection form). Static metadata — no service dependency, so it
   // is always available even before any datasource-admin service is wired.
-  server.get(`${root}/drivers`, async (req: any, res: any) => {
+  server.get(`${root}/${DRIVER_CATALOG_SEGMENT}`, async (req: any, res: any) => {
     if (await requireDatasourceAdmin(req, res)) return;
     sendOk(res, { drivers: DRIVER_CATALOG });
   });

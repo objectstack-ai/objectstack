@@ -229,11 +229,52 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  * page state slot, a screen field): the declared `type` is itself an open
  * `string`, so there is no closed vocabulary to check against, and inventing
  * one here would be a new validation surface rather than this additive key.
+ *
+ * ## `objectName` — a start input that is a record id (#29425 ruling A)
+ *
+ * [planned] An input may declare that its value is the id of a record of a
+ * named object. The contract the declaration states: every door that starts
+ * the flow by name judges the input as a record, whether or not the definition
+ * reads it as one in plain sight — the door loads it from the named object in
+ * the caller's own scope before the run exists, refusing an unreadable id
+ * `404 RECORD_NOT_FOUND` and a value that is not an id
+ * `400 VALIDATION_FAILED` naming the input. An input without the declaration
+ * keeps the visible-read rule (`flowDeclaredRecordReads` in
+ * `packages/runtime/src/flow-start-admission.ts`).
+ *
+ * ⛔ No door applies it yet. This is the spec half; the start doors read the
+ * declaration in the ruling's server half (Blocked-by #29442). Until then the
+ * key is parsed, refused on a non-input (below) and linted
+ * (`flow-input-unknown-object`), and its liveness row is `planned` with an
+ * author warning (`packages/spec/liveness/flow.json` › `variables.objectName`),
+ * so an author who writes it is told. Flip the row, drop the warning and the
+ * describe's planned sentence in the commit that lands the reader.
+ *
+ * The spelling is `objectName`, the word the CRUD nodes already use for the
+ * object they read, and ⛔ not a `type: 'record'` beside it: `type` already
+ * carries `'record'` in the shipped corpus for a variable that holds a WHOLE
+ * record (`examples/app-todo` `completedTask`, a `get_record`
+ * `outputVariable`), so the same word would name an id on an input and a row
+ * on every other variable. `type` stays the data type; the value an input
+ * declared this way holds is the id the caller sent.
+ *
+ * Only an input carries it: nothing a caller sends reaches a variable that is
+ * not an input, so a declaration there would load nothing and is refused
+ * here rather than shipped as documentation.
  */
 export const FlowVariableSchema = lazySchema(() => strictObject(
   {
     surface: 'this flow variable',
-    aliases: { input: 'isInput', output: 'isOutput', default: 'defaultValue', initialValue: 'defaultValue' },
+    aliases: {
+      input: 'isInput',
+      output: 'isOutput',
+      default: 'defaultValue',
+      initialValue: 'defaultValue',
+      // The two in-repo words for "the object a reference points at": a
+      // lookup field's `reference` and a time-relative trigger's `object`.
+      reference: 'objectName',
+      object: 'objectName',
+    },
     history:
       'Until this shape was closed, these were dropped silently — the variable still parsed, so a ' +
       'mis-declared input/output contract shipped without a diagnostic.',
@@ -255,6 +296,30 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
       '`false` and `null`; the boundary is `params[name] !== undefined`.',
     )
     .meta({ title: 'Default Value' }),
+  objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional()
+    .describe(
+      '[planned] Declares this input a record reference: its value is the id of one record of the named object ' +
+      '(the object\'s snake_case name, e.g. `crm_account`). Only on an input (`isInput: true`). The contract: ' +
+      'every door that starts the flow by name (the trigger route, an action of type flow over REST and MCP ' +
+      'run_action, a declared endpoint of type flow) loads a declared input from this object in the caller\'s ' +
+      'own scope before the run exists; an id the caller cannot read there is refused 404 RECORD_NOT_FOUND, and ' +
+      'a value that is not an id is refused 400 VALIDATION_FAILED naming the input. No door applies it yet: ' +
+      'today the key is parsed and checked, and a start with an id the caller cannot read still runs. An input ' +
+      'without this declaration is judged as a record only where the flow\'s own definition reads it as a ' +
+      'record id. `type` stays the data type: the variable holds the id the caller sent.',
+    )
+    .meta({ title: 'Record Object' }),
+}).superRefine((variable, ctx) => {
+  if (variable.objectName !== undefined && variable.isInput !== true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['objectName'],
+      message:
+        `\`objectName\` declares a start input a record reference, and \`${variable.name}\` is not an ` +
+        'input: no value a caller sends reaches it, so nothing would load it from ' +
+        `\`${variable.objectName}\`. Set \`isInput: true\` on it, or remove \`objectName\`.`,
+    });
+  }
 }));
 
 /**
@@ -1640,7 +1705,11 @@ export const FlowSchema = lazySchema(() => strictObject(
   // stands only in a flow a create or update record trigger starts — anywhere
   // else no write waits on the run. Refused at each such node, at any region
   // depth; the reasons are `save-notice-placement.ts`'s header. [#28806] Also
-  // refused where a node that always suspends the run reaches it.
+  // refused where a node that always suspends the run reaches it. A notice
+  // after a `subflow` / `map` whose child can suspend is not refused here: the
+  // engine's arming gate declines that flow (#28840,
+  // `notice_after_suspending_subflow`), and the run-time refusal by name is the
+  // residue.
   for (const refusal of saveNoticePlacementRefusals(flow, FLOW_PAUSE_CAPABLE_NODE_TYPES)) {
     ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
   }

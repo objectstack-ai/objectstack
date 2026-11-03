@@ -51,7 +51,7 @@
 import { describe, it, expect } from 'vitest';
 import { QuickJSScriptRunner } from '@objectstack/runtime';
 import type { ScriptContext } from '@objectstack/runtime';
-import { SANDBOX_GLOBALS, NODE_ONLY_GLOBALS } from './detect-free-identifiers.js';
+import { SANDBOX_GLOBALS, NODE_ONLY_GLOBALS, MEMBER_JUDGED_GLOBALS } from './detect-free-identifiers.js';
 
 const sorted = (xs: Iterable<string>): string[] => [...xs].sort();
 
@@ -64,9 +64,20 @@ const CONTROL_PRESENT = 'Math';
 const CONTROL_ABSENT = '__objectstack_probe_control_absent__';
 
 function probeSource(names: readonly string[]): string {
-  const entry = (n: string): string =>
-    `${JSON.stringify(n)}: ((typeof ${n} !== 'undefined') || ` +
-    `(typeof globalThis !== 'undefined' && ${JSON.stringify(n)} in globalThis))`;
+  const entry = (n: string): string => {
+    // [#28898] A member of a namespace the sandbox provides in part
+    // (`Intl.DateTimeFormat`): present when the namespace resolves AND the
+    // member does — the same two-step a body's `Intl.NAME` read performs.
+    const dot = n.indexOf('.');
+    if (dot > 0) {
+      const root = n.slice(0, dot);
+      return `${JSON.stringify(n)}: ((typeof ${root} !== 'undefined') && (typeof ${n} !== 'undefined'))`;
+    }
+    return (
+      `${JSON.stringify(n)}: ((typeof ${n} !== 'undefined') || ` +
+      `(typeof globalThis !== 'undefined' && ${JSON.stringify(n)} in globalThis))`
+    );
+  };
   return `return { ${names.map(entry).join(', ')} };`;
 }
 
@@ -111,11 +122,30 @@ describe('sandbox global probe (#14301 — the allowlist is measured, not recall
     expect(measuredAbsent).toEqual(sorted(NODE_ONLY_GLOBALS));
   }, 60_000);
 
-  it("the card's named case and its positive control", () => {
-    // Implied by the partition above; spelled out because these two names are
-    // what the report was about, and a reader should not have to re-derive
-    // them from a measurement to see the verdict.
-    expect(NODE_ONLY_GLOBALS.has('Intl')).toBe(true);
+  it('a member-judged namespace is present, and every member either set names is judged under it', async () => {
+    // [#28898] `Intl` resolves in the sandbox, but only in part, so it is in
+    // neither set: its members are. The namespace itself must measure present
+    // (else a member reading present would be impossible), and every dotted
+    // member of the two sets must hang off a namespace listed here.
+    const readings = await probe([...MEMBER_JUDGED_GLOBALS]);
+    for (const ns of MEMBER_JUDGED_GLOBALS) expect(readings[ns], ns).toBe(true);
+    const dotted = [...SANDBOX_GLOBALS, ...NODE_ONLY_GLOBALS].filter((n) => n.includes('.'));
+    expect(dotted.length).toBeGreaterThan(0);
+    for (const n of dotted) expect(MEMBER_JUDGED_GLOBALS.has(n.split('.')[0]), n).toBe(true);
+    for (const ns of MEMBER_JUDGED_GLOBALS) {
+      expect(SANDBOX_GLOBALS.has(ns), ns).toBe(false);
+      expect(NODE_ONLY_GLOBALS.has(ns), ns).toBe(false);
+    }
+  }, 60_000);
+
+  it("the cards' named cases and their positive control", () => {
+    // Implied by the partition above; spelled out because these names are
+    // what the reports were about, and a reader should not have to re-derive
+    // them from a measurement to see the verdict. #14301: the sandbox had no
+    // `Intl`; #28898: it has `Intl.DateTimeFormat` and nothing else of `Intl`.
+    expect(SANDBOX_GLOBALS.has('Intl.DateTimeFormat')).toBe(true);
+    expect(NODE_ONLY_GLOBALS.has('Intl.NumberFormat')).toBe(true);
+    expect(MEMBER_JUDGED_GLOBALS.has('Intl')).toBe(true);
     expect(SANDBOX_GLOBALS.has('JSON')).toBe(true);
   });
 });

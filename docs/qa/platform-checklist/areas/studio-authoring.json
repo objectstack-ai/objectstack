@@ -102,7 +102,7 @@
       "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 12,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -112,11 +112,11 @@
           "a writable package to author into (create one via the Studio wizard or POST /api/v1/packages — the source-loaded com.example.showcase is read-only and rejects designer saves server-side)"
         ],
         "knownGaps": [
-          "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs here (`pnpm --filter @object-ui/PKG exec vitest run --maxWorkers=2 FILE`); a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs from ui/, the objectui root, with its path written relative to ui/: `cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE`. ⛔ Not `pnpm --filter @object-ui/PKG exec vitest run FILE`: that runs in the package directory, and the ui vitest guard (ui/scripts/vitest-invocation-guard.mjs, which ui/vitest.config.mts calls) refuses any run whose Vitest root is not ui/ (its package-cwd verdict). a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
-        "open Studio on the writable package — /_console/studio/PKG/data (PKG = the writable package's id; note its namespace NS, from GET /api/v1/packages) — and click New object. Studio is the authoring door this item drives (QA run #26715 drove every clause through it); the Setup metadata editor (/_console/apps/setup/metadata/object/new?package=PKG) is a second door onto the same save, and it is the one the objectui pins in automated.ref drive. ⛔ Not /_console/apps/com.objectstack.studio/…: the studio app is not loaded on a stock boot (RUNNER.md environment facts), so that route renders inside another app's chrome",
+        "open Studio on the writable package — /_console/studio/PKG/data (PKG = the writable package's id; note its namespace NS, from GET /api/v1/packages) — and click New object. Studio is the authoring door this item drives (QA run #26715 drove every clause through it); Studio's All metadata area designer (/_console/studio/PKG/metadata/object/new?package=PKG — where the retired Setup metadata editor URL /_console/apps/setup/metadata/object/new now redirects, #28818) is a second door onto the same save, and it is the one the pins in automated.ref drive. ⛔ Not /_console/apps/com.objectstack.studio/…: the studio app is not loaded on a stock boot (RUNNER.md environment facts), so that route renders inside another app's chrome",
         "in the New object dialog type the Label 'Repair Asset', THEN type the identifier repair_asset character by character (never .fill — the F2 per-keystroke-sanitisation bug only reproduces when typed) and confirm its underscore survives. The dialog applies the package namespace itself: it previews and stores NS_repair_asset (StudioDesignSurface prefixObjectName, objectui CreateItemDialog.storedName-11792 — no double prefix when NS_ is typed as well), which the publish gate requires in a namespaced package (NAMESPACE_PREFIX). Type the identifier after the Label, and re-check it before 'Save as draft' (objectui#12680: a Label typed after a hand-typed identifier can re-derive it). Keep the pre-selected OWD choice and click 'Save as draft' (the dialog's confirm button, engine.studio.createDraft; no Studio create dialog has a button named Create)",
         "add a Text field, set its label to 'Asset Code', blur — the API name input must derive asset_code (F3)",
         "add a Picklist field and author its 3 real options, THEN add one EMPTY option row; wait out the debounced live validation — no validation banner may appear for the empty row (F4). ⚠ Order matters: with NO real option yet the select-needs-options banner fires, legitimately — the empty rows ARE dropped, so the field has no options — which collides with a literal 'no banner' (objectui F4, as repaired at 0b36ffa, gives its picklist one real option first for this reason). Assert the empty-row half with real options present",
@@ -135,13 +135,13 @@
         {
           "clause": "a new field's API name derives from its label on blur, so the data column is the derived name — never a frozen field_N (the contract behind audit finding 2, where the saved record stored 'field_2': 'in_progress' forever)",
           "oracle": "api",
-          "verify": "the field's API-name input shows asset_code after the label blur (corroborated at the Setup designer door by objectui F3, which drives that door, not Studio), and the stored record's column key is asset_code",
+          "verify": "the field's API-name input shows asset_code after the label blur (corroborated by F3 at the All metadata area's designer door, /studio/PKG/metadata/object/new — a sibling door inside Studio, not the Data pillar), and the stored record's column key is asset_code",
           "evidence": "designer screenshot + the record read"
         },
         {
           "clause": "typed identifiers survive per-keystroke sanitisation — repair_asset keeps its underscore when typed char-by-char, and the stored name is NS_repair_asset",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the dialog rendered, the identifier input's value equals the typed repair_asset, character for character, and the dialog's stored-name preview reads NS_repair_asset; the meta read's name is NS_repair_asset (pre-fix repair_asset yielded 'repairasset'; objectui F2 corroborates the typing half at the Setup designer door)",
+          "verify": "after a screenshot confirms the dialog rendered, the identifier input's value equals the typed repair_asset, character for character, and the dialog's stored-name preview reads NS_repair_asset; the meta read's name is NS_repair_asset (pre-fix repair_asset yielded 'repairasset'; F2 corroborates the typing half at the All metadata area's designer door)",
           "evidence": "screenshot + input value read"
         },
         {
@@ -155,9 +155,12 @@
         "an API name frozen at field_N after its label was set pre-save is audit finding 2 regressed — FAIL, but confirm against a fresh objectui build first: the vendored /_console bundle may predate the derive-on-blur fix the e2e now pins"
       ],
       "traps": ["stale-console-bundle", "automation-input"],
-      "automated": { "kind": "e2e", "ref": "ui/e2e/live/studio-object-designer.spec.ts — ⚠ F2, F3 and F4 drive the Setup designer route (/apps/showcase_app/metadata/object/new), not the Studio Data pillar this item's steps drive since revision 9, so each is evidence at a sibling door onto the same save. F3 pins acceptance[1]'s designer half (the API-name input derives asset_code from the label on blur) and F2 pins acceptance[2] (a name typed character by character keeps its underscore). F4 pins acceptance[3]'s banner half ONLY: it gives the picklist one real option, not three, adds an empty row and finds no metadata-validation banner after the debounce, but it never publishes or reads the stored options, so 'the PUBLISHED picklist carries exactly the 3 authored options' is driven by hand. F1 (a package created from the Studio surface's switcher appears in it without a reload) asserts no clause of this item. No pin covers acceptance[0] or acceptance[1]'s stored-column half" },
+      "automated": {
+        "kind": "e2e",
+        "ref": "ui/e2e/live/studio-object-designer.spec.ts — F2, F3 and F4 drive Studio's All metadata area designer on a package the test authors (/studio/PKG/metadata/object/new?package=PKG, the metadata-admin object editor; the Setup designer route they drove before redirects there since #28818, ADR-0146 D1), not the Data pillar's New object dialog this item's steps drive since revision 9, so each is evidence at a sibling door onto the same save. F3 pins acceptance[1]'s designer half (the API-name input derives asset_code from the label on blur) and F2 pins acceptance[2]'s typing half (a name typed character by character keeps its underscore). F4 corroborates acceptance[3] under a different fixture: it gives the picklist ONE real option, adds an empty row, finds no metadata-validation banner after the debounce, then saves a DRAFT and reads back exactly the one option — so the banner half and 'the empty row was dropped' are pinned at that door, while 'the PUBLISHED picklist carries exactly the 3 authored options' is still driven by hand. F1 (a package created from the Studio surface's switcher appears in it without a reload) asserts no clause of this item. No pin covers acceptance[0] or acceptance[1]'s stored-column half"
+      },
       "source": [
-        "objectui: e2e/live/studio-object-designer.spec.ts (F1–F4, the objectui#1926 regression classes: per-keystroke sanitisation, label→api-name derivation, empty picklist row, switcher refresh)",
+        "ui/e2e/live/studio-object-designer.spec.ts (F1–F4, the objectui#1926 regression classes: per-keystroke sanitisation, label→api-name derivation, empty picklist row, switcher refresh; F2–F4 open the All metadata area's designer since #28818)",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 2 — field API name did not follow the label at audit time)",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 1 — read-only package rejects designer saves server-side, which is why a writable package is a fixture requirement)"
       ],
@@ -211,7 +214,14 @@
           "change": "steps[0], [1], [4] and [5], acceptance[1].verify, acceptance[2] (clause, verify) and automated.ref re-pointed to Studio as the door (checklist-accuracy finding of the Data card of QA run #26715, at 3fcafcd3; re-read at 43731031). Studio's New object dialog applies the package namespace itself (prefixObjectName, so the author types repair_asset and the stored name is NS_repair_asset), Studio has no Save button (autosave, then Publish → Publish all), and the Form tab's reorder is dnd-kit (a 4 px pointer activation and a keyboard sensor), not native HTML5 drag. The objectui pins drive the Setup designer route, so automated.ref says they are evidence at a sibling door. The run passed every clause this way. Not loosened: the typed underscore must survive and the stored name must carry the prefix",
           "ref": "#26715"
         },
-        { "revision": 10, "date": "2026-10-31", "change": "steps[1] names the New object dialog's confirm button: 'Save as draft', not Create, in both places the step named it. Every Studio create dialog takes its submit label from engine.studio.createDraft (ui/packages/i18n/src/namespaces/studio/en.ts; ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx, the engine.studio.data.newObject dialog). Accuracy finding of QA run #27438. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" }
+        { "revision": 10, "date": "2026-10-31", "change": "steps[1] names the New object dialog's confirm button: 'Save as draft', not Create, in both places the step named it. Every Studio create dialog takes its submit label from engine.studio.createDraft (ui/packages/i18n/src/namespaces/studio/en.ts; ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx, the engine.studio.data.newObject dialog). Accuracy finding of QA run #27438. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" },
+        { "revision": 11, "date": "2026-11-02", "change": "fixtures.knownGaps[0] names the invocation the ui vitest guard accepts, the form revision 8 of studio-authoring.expression-editors landed in its knownGaps[1] (#28701): a jsdom unit pin runs from ui/ as cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE. The pnpm --filter @object-ui/PKG exec form it quoted runs in the package directory, which the guard refuses (ui/scripts/vitest-invocation-guard.mjs, verdict package-cwd), so a runner following it is refused at config load, before any test runs. Wording only; no clause changed. Checklist-accuracy finding of QA run #28656 (W3-RT), carried by #28750", "ref": "#28656" },
+        {
+          "revision": 12,
+          "date": "2026-11-02",
+          "change": "automated.ref, source[0], steps[0]'s second-door note and acceptance[1]/[2] verify re-pointed: the live spec's F2–F4 no longer drive the Setup designer route; since #28818 (ADR-0146 D1) they open Studio's All metadata area designer on a package the test authors, /studio/PKG/metadata/object/new?package=PKG, and F4 now saves a draft and reads back the one stored option. Re-read at base dfbe34d887 (ui/e2e/live/studio-object-designer.spec.ts newObjectIn, F4's draft read). The pins stay corroboration at a sibling door (the area's metadata-admin editor, not the Data pillar's New object dialog the steps drive), and F4 still seeds one option where acceptance[3] judges three and reads a draft where the clause reads the published picklist, so no clause's scoring basis changed",
+          "ref": "#28579"
+        }
       ]
     },
     {
@@ -294,7 +304,7 @@
       "title": "Record-page authoring round-trip: created bound to its object, seeded from the default layout, block-edited, published, rendered",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors)", "end user (opens the record). On stock no non-admin persona reads showcase_contact (auditor.demo is refused 'You don't have access to Contact records', QA run #24604), so the viewer is the admin unless a grant is provisioned — e.g. a member bound to the `manager` position, whose showcase_manager set reads showcase_contact (examples/app-showcase/src/security/permission-sets.ts); record which"],
@@ -302,14 +312,14 @@
         "app": "showcase",
         "requires": ["seeded showcase_contact records to render the published page against (stock showcase seed). ⛔ Not showcase_invoice: it ships the package default record page showcase_invoice_document (isDefault: true, examples/app-showcase/src/ui/pages/invoice-document.page.ts), which wins by design (objectui react usePageAssignment: the default record page, else the first), and authoring a second isDefault page answers 422 DEFAULT_RECORD_PAGE_CONFLICT. showcase_project, showcase_task and showcase_preference ship defaults too; showcase_contact ships no record page (QA runs #24571 and #24604)"],
         "knownGaps": [
-          "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs here (`pnpm --filter @object-ui/PKG exec vitest run --maxWorkers=2 FILE`); a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs from ui/, the objectui root, with its path written relative to ui/: `cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE`. ⛔ Not `pnpm --filter @object-ui/PKG exec vitest run FILE`: that runs in the package directory, and the ui vitest guard (ui/scripts/vitest-invocation-guard.mjs, which ui/vitest.config.mts calls) refuses any run whose Vitest root is not ui/ (its package-cwd verdict). a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
-        "open /_console/apps/showcase_app/metadata/page/new and fill the create form: Label 'Invoice Page <uniq>' (slugifies into Name), set Page type = record (the create form defaults Page type to list — objectui metadata-admin anchors.ts, the page createSchema), Kind = full (a record page's Kind defaults to slotted, which saves regions [] and shows the object's synthesized default page by design; only an explicit full copies the default's regions into the draft, the page createSeed in ui/packages/app-shell/src/views/metadata-admin/anchors.ts), Object showcase_contact (fixtures.requires[0]); Save",
+        "open /_console/studio/~all/metadata/page/new — Studio's All metadata area, where the retired Setup create URL (/_console/apps/showcase_app/metadata/page/new) lands in one hop since #28818 (setupMetadataStudioPath); the same create form (MetadataResourceEditPage in create mode), and with no ?package= the save binds no package, as before — and fill the create form: Label 'Invoice Page <uniq>' (slugifies into Name), set Page type = record (the create form defaults Page type to list — objectui metadata-admin anchors.ts, the page createSchema), Kind = full (a record page's Kind defaults to slotted, which saves regions [] and shows the object's synthesized default page by design; only an explicit full copies the default's regions into the draft, the page createSeed in ui/packages/app-shell/src/views/metadata-admin/anchors.ts), Object showcase_contact (fixtures.requires[0]); Save",
         "capture the PUT /api/v1/meta/page/<name> request the save issues",
         "assert the draft body: type:'record', object:'showcase_contact', kind:'full', and regions seeded NON-empty from the object's synthesized default detail page (the page resource's createSeed hook) including a record:highlights block — never a blank canvas (ADR-0034 / objectui#1541)",
-        "open the page editor (/apps/showcase_app/metadata/page/<name>): the Basics, Data Context and Advanced panels render (the layout is edited on the canvas, not in a Layout section — see acceptance[1].verify), and 'Add block' opens the block-type picker",
+        "open the page editor (/_console/studio/~all/metadata/page/<name>, the All metadata item page — the generic editor, since the cross-package leg opens no pillar): the Basics, Data Context and Advanced panels render (the layout is edited on the canvas, not in a Layout section — see acceptance[1].verify), and 'Add block' opens the block-type picker",
         "add a block (e.g. Card), Save draft, Publish through the ResourceEditPage draft/publish chrome",
         "GET /api/v1/meta/page/<name>: the published regions must include the added block",
         "open a showcase_contact record as the end user (personas[1]): the page assignment (usePageAssignment) renders the authored page over the synthesized default",
@@ -350,7 +360,8 @@
         "ref": "ui/e2e/live/studio-editor.spec.ts — acceptance[1], carrier-neutrally: 'Add block opens a block-type picker with configurable block kinds' opens the live page editor on an environment-authored copy of the shipped showcase_project_workspace (an app page, not this item's showcase_contact record page) and asserts that the dialog offers Card, Section and Record details. The picker offers one static catalogue whatever the page (AddBlockButton in objectui's PageBlockCanvas.tsx reads TYPES_BY_CATEGORY from block-types.ts), so the carrier does not change the answer. It was read at the console pin cf153eb2e535 (blob 19f9cc131654) and again at objectui b41ed7f68956, QA run #25815's pin, where it is present and asserts as described; it now lives under ui/e2e/live in this checkout and runs in Nightly Tiers. It covers none of acceptance[0], [2] or [3]. On a cold Vite dev console both of its tests can time out at getByTestId('metadata-edit-page'), Playwright's default 5 s expect, while the page still shows 'Loading…', and a warm rerun passes (QA run #27438): open the console once, or run the spec twice, before citing a red"
       },
       "source": [
-        "objectui: e2e/live/studio-editor.spec.ts (page editor sections + Add-block picker contract)"
+        "objectui: e2e/live/studio-editor.spec.ts (page editor sections + Add-block picker contract)",
+        "ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts#setupMetadataStudioPath + ui/packages/app-shell/src/views/studio-design/StudioMetadataArea.tsx (the area mounts the metadata-admin create and item pages unchanged; the cross-package leg is never read-only) — #28578 (N-28), PR #28818"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: record-page authoring round-trip pinned to the two objectui live e2e specs (create-seeded draft, block picker) and extended to the publish + end-user render sides they do not cover", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -398,7 +409,14 @@
           "ref": "#25848"
         },
         { "revision": 10, "date": "2026-10-28", "change": "automated.ref, acceptance[0].verify and source[0] drop ui/e2e/live/studio-record-page.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B): measured red on the workspace backend at 1e8e5296, alone, twice: a Studio-created record page is saved kind slotted with no copied regions unless the author picks full (fd73f2b3, the page createSeed in ui/packages/app-shell/src/views/metadata-admin/anchors.ts; both outcomes unit-pinned in anchors.page-seed.test.ts beside it), so the spec's seeded-regions assertion reads a superseded design. acceptance[0] is hand-driven again; its clause still asks for seeded regions, which now holds only for a page the author creates full, and is left for the ledger's owner. studio-editor.spec.ts keeps acceptance[1]. No clause changed", "ref": "#25914" },
-        { "revision": 11, "date": "2026-10-31", "change": "steps[0], steps[2], acceptance[0] and negative[0] create the record page with Kind = full, and automated.ref carries a warm-console note. The page create form has a Kind field; a record page defaults to slotted, which saves regions [] and renders the synthesized default by design, and only an explicit full copies the default's regions into the draft (the createSeed in ui/packages/app-shell/src/views/metadata-admin/anchors.ts, fd73f2b3). Revision 10 left the seeded-regions clause for the ledger's owner; it now holds as written on the create it names, and a slotted page's empty regions are no longer read as #1541. QA run #27438 also found studio-editor.spec.ts timing out at metadata-edit-page (5 s) on a cold dev console and passing warm. The clause is unchanged in strength: a full create without seeded regions is still the FAIL. Accuracy findings of QA run #27438. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" }
+        { "revision": 11, "date": "2026-10-31", "change": "steps[0], steps[2], acceptance[0] and negative[0] create the record page with Kind = full, and automated.ref carries a warm-console note. The page create form has a Kind field; a record page defaults to slotted, which saves regions [] and renders the synthesized default by design, and only an explicit full copies the default's regions into the draft (the createSeed in ui/packages/app-shell/src/views/metadata-admin/anchors.ts, fd73f2b3). Revision 10 left the seeded-regions clause for the ledger's owner; it now holds as written on the create it names, and a slotted page's empty regions are no longer read as #1541. QA run #27438 also found studio-editor.spec.ts timing out at metadata-edit-page (5 s) on a cold dev console and passing warm. The clause is unchanged in strength: a full create without seeded regions is still the FAIL. Accuracy findings of QA run #27438. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" },
+        { "revision": 12, "date": "2026-11-02", "change": "fixtures.knownGaps[0] names the invocation the ui vitest guard accepts, the form revision 8 of studio-authoring.expression-editors landed in its knownGaps[1] (#28701): a jsdom unit pin runs from ui/ as cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE. The pnpm --filter @object-ui/PKG exec form it quoted runs in the package directory, which the guard refuses (ui/scripts/vitest-invocation-guard.mjs, verdict package-cwd), so a runner following it is refused at config load, before any test runs. Wording only; no clause changed. Checklist-accuracy finding of QA run #28656 (W3-RT), carried by #28750", "ref": "#28656" },
+        {
+          "revision": 13,
+          "date": "2026-11-02",
+          "change": "steps[0] and steps[3] re-pointed to Studio's All metadata area (#28579 slice 2, FOLLOW-UPS §13c): the Setup page URLs they named redirect there since #28818, which mounts the same create form and editor, so the steps now name the landing URL. A source row cites the redirect and the area. No clause changed. Read at base eb123b7ccc",
+          "ref": "#28579"
+        }
       ]
     },
     {
@@ -406,7 +424,7 @@
       "title": "Metadata draft→publish lifecycle: drafts staged not served, publish flips visibility atomically, conflicts and invalid drafts refused, and the history/audit/diff/rollback forensics tell the truth",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors drafts)", "end user (must not see drafts)"],
@@ -430,7 +448,7 @@
         "package-wide door: stage two drafts in the writable package and POST /api/v1/packages/<pkg id>/publish-drafts — both flip in one atomic release (the audit's 'Published all drafts in this package (one atomic release)' toast); capture the STATUS and the BODY separately, because the abort path answers 200 with data.success:false (see the clause below)",
         "author an INVALID draft (a widget carrying a stray legacy key) and attempt its publish — the author-time gate must reject the draft→active transition (#4463)",
         "meta forensics (after the two publishes of qa_lifecycle_probe — revision 1, then the second revision): GET /api/v1/meta/dashboard/qa_lifecycle_probe/history — the durable sys_metadata_history events must list BOTH published revisions (a dashboard is an overlay type, so history is real; a non-overlay type answers { events: [] } by design). History counts draft saves AND publishes, so two save-draft-then-publish rounds read v1 (draft), v2 (its publish), v3 (draft), v4 (publish): read the two PUBLISH versions off this body for the diff step, steps[9] (QA run #23166 read v2 and v4)",
-        "GET /api/v1/meta/dashboard/qa_lifecycle_probe/diff?from=<first publish version>&to=<second publish version> — the two publish versions read off /history in steps[8] (v2 and v4 on a clean two-round run; QA run #26715 read v2 and v5, because one extra If-Match draft save sat between them); the diff is SHALLOW by design — it names the changed TOP-LEVEL key (`widgets`, with its whole before/after value) and only the keys that differ, never the whole body and never a path inside the array (packages/metadata-protocol/src/protocol.ts#diffShallow: deep structural diffs are out of scope, Studio renders the full bodies side by side). ⛔ Not ?from=1&to=2: v1 → v2 is a draft save and its own publish, which differ in nothing (changed []), and a default previous-vs-current read can land on the same draft/publish pair",
+        "GET /api/v1/meta/dashboard/qa_lifecycle_probe/diff?from=<first publish version>&to=<second publish version> — the two publish versions read off /history in steps[8] (v2 and v4 on a clean two-round run; QA run #26715 read v2 and v5, because one extra If-Match draft save sat between them); the diff is SHALLOW by design — it names the changed TOP-LEVEL key (`widgets`, with its whole before/after value) and only the keys that differ, never the whole body and never a path inside the array (packages/metadata-protocol/src/protocol-write-face.ts#diffShallow: deep structural diffs are out of scope, Studio renders the full bodies side by side). ⛔ Not ?from=1&to=2: v1 → v2 is a draft save and its own publish, which differ in nothing (changed []), and a default previous-vs-current read can land on the same draft/publish pair",
         "POST /api/v1/meta/dashboard/qa_lifecycle_probe/rollback with { toVersion: 1 }, driven under an authenticated session so the actor is attributable — the authenticated identity is the ONLY source ([#7941]; resolveMetaWriteActor no longer consults `X-Actor` at all); the runtime GET must then serve revision 1's body again and the rendered dashboard must show revision 1's widget",
         "repeat the rollback (or another /meta write on this item, e.g. a follow-up draft save) while ALSO sending header `X-Actor: someone_else_entirely` on the authenticated request — the header must NOT change the recorded actor: the audit/history rows for that action still name the authenticated runner's own identity, never `someone_else_entirely` ([#7941] — pinned at the unit layer in packages/rest/src/meta-write-actor-identity.test.ts)",
         "attempt a rollback with a missing/invalid toVersion and capture the 400 INVALID_REQUEST guard",
@@ -456,9 +474,9 @@
           "evidence": "the three reads"
         },
         {
-          "clause": "optimistic concurrency holds: a write carrying a stale If-Match version answers 409 metadata_conflict — a concurrent edit is reported, never silently overwritten",
+          "clause": "optimistic concurrency holds: a write carrying a stale If-Match version answers 409 METADATA_CONFLICT — a concurrent edit is reported, never silently overwritten",
           "oracle": "api",
-          "verify": "re-PUT with the superseded version token → 409 with the metadata_conflict code (the ADR-0008 chain the receipt's version field exists for)",
+          "verify": "re-PUT with the superseded version token while a draft row of this name exists → 409 with the wire code METADATA_CONFLICT (the ADR-0008 chain the receipt's version field exists for; acceptance[10]'s audit row stores it lower-case, metadata_conflict). Send it while a draft is staged: with no draft row the ?mode=draft door judges the token against no head, so any If-Match, the published version included, answers 409 '… (current is null)' (packages/metadata-protocol/src/protocol-lock-version-gates.ts#storedParentForToken) and does not exercise the stale-token guard",
           "evidence": "the 409 response"
         },
         {
@@ -488,7 +506,7 @@
         {
           "clause": "diff names the changed top-level key, not a whole-body dump — GET .../diff between the two PUBLISH versions read off /history (v2 → v4 on a clean run) reports `widgets` under changed[] with its before and after values, and no top-level key whose value did not change",
           "oracle": "api",
-          "verify": "changed[] carries an entry with path 'widgets' (the top-level key the second revision edited) whose from/to carry the two arrays, and no entry for a top-level key whose value is the same in both revisions; the diff is shallow by contract (protocol.ts#diffShallow), so a path inside the array (widgets[0].title) is NOT expected and its absence is not a FAIL, while an unchanged key listed, or the whole document under one path, is. A diff of a draft save against its own publish (from=1&to=2) reports changed [] and scores nothing either way",
+          "verify": "changed[] carries an entry with path 'widgets' (the top-level key the second revision edited) whose from/to carry the two arrays, and no entry for a top-level key whose value is the same in both revisions; the diff is shallow by contract (protocol-write-face.ts#diffShallow), so a path inside the array (widgets[0].title) is NOT expected and its absence is not a FAIL, while an unchanged key listed, or the whole document under one path, is. A diff of a draft save against its own publish (from=1&to=2) reports changed [] and scores nothing either way",
           "evidence": "the diff response"
         },
         {
@@ -498,9 +516,9 @@
           "evidence": "the rollback response + the post-rollback GET + the reverted-render screenshot + the 400 response"
         },
         {
-          "clause": "audit rows carry the actor — GET .../audit lists the save/publish/rollback attempts each stamped with the acting user, resolved from the authenticated session identity ([#7941] — the sole source; `resolveMetaWriteActor` no longer reads `X-Actor` at all), never anonymous. An allowed attempt writes an outcome 'allowed' row. Of the denials, only those the protocol audits write a row: outcome 'denied' with code item_locked (403 ITEM_LOCKED), metadata_conflict (409 on a stale If-Match or a lost race), or, on the batch publish, batch_aborted, namespace_prefix or stored_type_not_canonical. A 422 INVALID_METADATA spec refusal and a 404 NO_DRAFT write no row (packages/metadata-protocol/src/protocol.ts and protocol-lock-version-gates.ts, the recordMetadataAudit callers; protocol-save-conflict.ts)",
+          "clause": "audit rows carry the actor — GET .../audit lists the save/publish/rollback attempts each stamped with the acting user, resolved from the authenticated session identity ([#7941] — the sole source; `resolveMetaWriteActor` no longer reads `X-Actor` at all), never anonymous. An allowed attempt writes an outcome 'allowed' row. Of the denials, only those the protocol audits write a row, outcome 'denied' with the lower-case code: item_locked (403 ITEM_LOCKED) and metadata_conflict (409 METADATA_CONFLICT on a stale If-Match or a lost race), which their own gates write; on the batch publish, batch_aborted, namespace_prefix or stored_type_not_canonical; and, at the four single-item doors (save, publish, rollback, delete), exactly one row per catalogued refusal ([#28355]): invalid_metadata (422 INVALID_METADATA, e.g. the stray-key draft save of steps[7]), not_overridable (403 NOT_OVERRIDABLE), not_creatable (403 NOT_CREATABLE) and destructive_change (409 DESTRUCTIVE_CHANGE). A refusal outside that set writes no row: a 404 NO_DRAFT, a 400 INVALID_REQUEST (the bad-toVersion rollback of steps[12]) and any 5xx (packages/metadata-protocol/src/protocol-refusal-audit.ts#REFUSAL_AUDIT_CODES, the closed map withRefusalAudit reads at each door; protocol.ts and protocol-lock-version-gates.ts, the other recordMetadataAudit callers; protocol-save-conflict.ts)",
           "oracle": "api",
-          "verify": "the /audit body's rows for this name include the publish and rollback actions, and steps[5]'s stale-If-Match 409 as an outcome 'denied', code 'metadata_conflict' save row, each with a non-empty actor field; no row is expected for a 422 spec refusal",
+          "verify": "the /audit body's rows for this name include the publish and rollback actions, steps[5]'s stale-If-Match 409 as an outcome 'denied', code 'metadata_conflict' save row, and steps[7]'s 422 INVALID_METADATA stray-key refusal as exactly ONE outcome 'denied', code 'invalid_metadata', operation 'save' row (source protocol.saveMetaItem), each with a non-empty actor field naming the authenticated runner. steps[12]'s 400 INVALID_REQUEST rollback, and a POST .../publish sent when no draft is pending (404 NO_DRAFT), add no row. A catalogued refusal with no denied row, a second row for one refusal, a row coded in the SCREAMING wire spelling, or a row for NO_DRAFT or INVALID_REQUEST is a FAIL",
           "evidence": "the audit response"
         },
         {
@@ -537,7 +555,8 @@
         { "revision": 7, "date": "2026-10-19", "change": "steps[2], acceptance[6].clause and acceptance[6].verify corrected from QA run #24604 (18.0 sweep round 2, ba4afcc2), re-read at the console pin 4016370af3c9: the Studio item header reads 'Draft · N unpublished' (engine.studio.itemDraftPending, objectui#12725) — 'Unpublished draft' is the chip of other surfaces (ObjectListViewInspector, the OWD overview), not this item header — and a REST publish shows in Studio only after a reload. The round's other draft notes are not taken: no step of this item discards a draft (so the ?state=draft discard spelling has no clause to correct), and the NS_ prefix a scratch dashboard was given is not required (the namespace-prefix rule judges objects only — packages/spec/src/kernel/namespace-prefix.ts). Wave anchor #24579 round 2 §3 (6272314386)", "ref": "#24671" },
         { "revision": 8, "date": "2026-10-20", "change": "automated dropped and fixtures.knownGaps[0] added — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 scored every clause not-run on dashboard-designer-roundtrip.dogfood.test.ts, green 3/3 at ba4afcc2: it saves, publishes and reads back a layout-less dashboard, which is acceptance[1]'s post-publish half and no full clause. Round 1's QA run #24571 had scored acceptance[0]–[5] and [7]–[11] pass on that pin alone; QA run #24604 drove acceptance[6] and negative[0]–[4] by hand. The item had no knownGaps, so the line is new: it says what the pin asserts and when `automated` may return. The item is now Tier 2 (P1, no pin). No clause changed", "ref": "#24723" },
         { "revision": 9, "date": "2026-10-27", "change": "acceptance[8] (clause, verify) and steps[9] follow the diff's shipped granularity, and acceptance[5].verify names the earlier refusal (checklist-accuracy findings c8 and c5 of the coordinator leg of QA run #26715, at 3fcafcd3; re-read at 43731031). (1) The clause expected the edited widget's own key (widgets[0].title); the door answered changed [{ path: 'widgets', from, to }]. diffMetaItem's diff is shallow by contract (protocol.ts diffShallow: top-level keys only, deep structural diffs out of scope), so the clause now asks for the changed top-level key and no unchanged one — still never a whole-document dump. (2) A stray widget key is refused at the draft save (422 INVALID_METADATA, unrecognized_keys), so there is no invalid draft to publish; that refusal now scores the invalid-draft clause beside the unchanged live read", "ref": "#26715" },
-        { "revision": 10, "date": "2026-10-31", "change": "acceptance[10] names which denials the audit trail records, in place of 'attempts (allowed and denied)'. The protocol writes a denied row only for item_locked, metadata_conflict (the save door's 409 on a stale If-Match included, packages/metadata-protocol/src/protocol-save-conflict.ts) and the batch publish's batch_aborted, namespace_prefix and stored_type_not_canonical; a 422 INVALID_METADATA spec refusal and a 404 NO_DRAFT write none. The verify gains steps[5]'s 409 as a denied metadata_conflict row with its actor, which this item already drives, so the clause is stronger. The other denial codes the sys_metadata_audit object documents (not_overridable, not_creatable, invalid_metadata, destructive_change) have no writer in packages/metadata-protocol at this base. Accuracy finding of QA run #27441. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27441" }
+        { "revision": 10, "date": "2026-10-31", "change": "acceptance[10] names which denials the audit trail records, in place of 'attempts (allowed and denied)'. The protocol writes a denied row only for item_locked, metadata_conflict (the save door's 409 on a stale If-Match included, packages/metadata-protocol/src/protocol-save-conflict.ts) and the batch publish's batch_aborted, namespace_prefix and stored_type_not_canonical; a 422 INVALID_METADATA spec refusal and a 404 NO_DRAFT write none. The verify gains steps[5]'s 409 as a denied metadata_conflict row with its actor, which this item already drives, so the clause is stronger. The other denial codes the sys_metadata_audit object documents (not_overridable, not_creatable, invalid_metadata, destructive_change) have no writer in packages/metadata-protocol at this base. Accuracy finding of QA run #27441. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27441" },
+        { "revision": 11, "date": "2026-11-02", "change": "acceptance[10] (clause, verify) re-pointed to #28355: revision 10 said a 422 INVALID_METADATA spec refusal writes no row, and #28355 now stamps one denied row per catalogued refusal at the four single-item doors (protocol-refusal-audit.ts, REFUSAL_AUDIT_CODES = NOT_OVERRIDABLE, NOT_CREATABLE, INVALID_METADATA, DESTRUCTIVE_CHANGE, stored lower-case). The clause names those four beside item_locked, metadata_conflict and the batch codes, and keeps NO_DRAFT, INVALID_REQUEST and 5xx as writing none; the verify asks for steps[7]'s 422 as exactly one denied invalid_metadata save row with the actor, and for no row from steps[12]'s 400 or a NO_DRAFT publish. acceptance[3] spells the wire code METADATA_CONFLICT and says the stale If-Match must be sent while a draft row exists. Measured at base 0a41075a through the real protocol doors with a throwaway probe (deleted): the stray-key dashboard draft save answered 422 INVALID_METADATA with one denied invalid_metadata row carrying the actor; a publish with no draft answered 404 NO_DRAFT and a rollback with no toVersion 400 INVALID_REQUEST, neither writing a row; a draft save carrying the published version as If-Match with no draft row answered 409 METADATA_CONFLICT (current is null). Stronger, not weaker: the 422 that scored a row as a FAIL now owes one. QA run #29002 clause FAIL", "ref": "#29013" }
       ]
     },
     {
@@ -545,7 +564,7 @@
       "title": "An invalid authored shape is rejected at save with a LOCATED error and is not persisted",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -563,7 +582,7 @@
         "attempt PUT /api/v1/meta/object/qa_invalid_probe?mode=draft with a field MISSING its type; capture the status and full error body",
         "attempt PUT /api/v1/meta/view/qa_invalid_views?mode=draft with `type`/`columns` at the CONTAINER level (the flat-list-view mistake) BESIDE a container key (e.g. `list: {…}`), so the body is container-shaped and the container's guidance answers; capture the guidance error. Bind the body's `object` to an object that holds NO stored view container (a fresh scratch object): against one that already has a container, the container name-collision check answers 400 VALIDATION_ERROR naming the other owner first and masks the guidance (protocol.ts viewContainerNameCollisionRefusal; QA run #26715 met it). A body of `type`/`columns` alone is judged as an inline view config instead and refused as naming no `object`/`viewKind` — the same 'Wrap it: defineView({ list: … })' remedy, different first sentence (packages/spec/src/ui/view.zod.ts INLINE_VIEW_OBJECT_REQUIRED / INLINE_VIEW_KIND_REQUIRED)",
         "after each rejection, GET the name back and record what the store holds",
-        "drive one invalid shape through the browser door that reaches the server gate — the Setup metadata editor's Source tab (/_console/apps/setup/metadata/object/NAME), whose autosave PUTs it — and capture the surfaced error. The Studio designer holds an incomplete shape client-side and never sends it ('Not saved yet: …'), so it does not exercise the 422 — it must locate the offending field, not say a generic 'save failed'",
+        "drive one invalid shape through the browser door that reaches the server gate — the metadata editor's Source tab on Studio's All metadata item page (/_console/studio/~all/metadata/object/NAME; the Setup URL it was reached by, /_console/apps/setup/metadata/object/NAME, redirects there since #28818, ADR-0146 D1), whose autosave PUTs it — and capture the surfaced error. The Data pillar's object designer holds an incomplete shape client-side and never sends it ('Not saved yet: …'), so it does not exercise the 422 — it must locate the offending field, not say a generic 'save failed'",
         "author the CORRECTED shapes (field with a type; views wrapped under list:) and confirm both save 200 — the gate rejects the shape, not the name",
         "dashboard-kind stray keys are deep-covered by dashboards.strict-widget-rejects-stray-keys — cite a pass there rather than re-enumerating the 11 legacy keys here"
       ],
@@ -616,7 +635,13 @@
         { "revision": 2, "date": "2026-08-11", "change": "recorded run #7695's sighting of the ALREADY-KNOWN spurious '_diagnostics' banner on a freshly saved VALID draft (the designer re-validates the server's own annotation on read-back) as a knownGap + a NOT-this-item's-FAIL negative, so the sighting is not filed as a new defect and the false positive is told apart from a real located-error miss. Note only; no clause changed", "ref": "#7753" },
         { "revision": 3, "date": "2026-09-23", "change": "re-spelled the located-error shape, which had stopped being true: the clause quoted '[invalid_metadata] … fields.<name>.type: Required', but saveMetaItem's spec-validation refusal no longer opens with a bracketed restatement of its code (retired in 7a25a3ee9c; the token rides code INVALID_METADATA), and on the REST and dispatcher doors its message is a headline of 'path [zod code]' locators with the per-issue prose on issues[]. Measured on c11852406 for a field missing its type: 'object/qa_invalid_probe failed spec validation: 1 issue — fields.amount.type [invalid_value]', 422, INVALID_METADATA. The dispatcher source pointer presented that test's hand-built mock message as the producer's text; it now says what the test pins, and the producer's per-face renderer is cited beside it. The capability itself (4xx, located path, nothing persisted) is unchanged", "ref": "#19709" },
         { "revision": 4, "date": "2026-10-19", "change": "steps[1], steps[3], acceptance[1] (clause, verify) and acceptance[3].verify corrected from QA run #24571 (18.0 sweep, 5b14b7f3; carried by #24604), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) The quoted container guidance answers only a container-shaped body; a flat `type`/`columns` body is judged as an inline view config and refused as naming no `object`/`viewKind`, with the same Wrap remedy (view.zod.ts). (2) The Studio designer holds an incomplete shape client-side and never PUTs it, so the browser door that reaches the server gate is the Setup metadata editor's Source tab, which the run used. Wave anchor #24579 §3", "ref": "#24671" },
-        { "revision": 5, "date": "2026-10-27", "change": "steps[1] and fixtures.requires[1] name the fixture the wrong-layer view probe needs (checklist-accuracy finding of the Data card of QA run #26715, at 3fcafcd3; re-read at 43731031): bound to an object that already has a stored view container, the container-shaped body is refused 400 VALIDATION_ERROR by the name-collision check before the ViewSchema guidance can answer, so the probe needs an object with no container. No clause changed", "ref": "#26715" }
+        { "revision": 5, "date": "2026-10-27", "change": "steps[1] and fixtures.requires[1] name the fixture the wrong-layer view probe needs (checklist-accuracy finding of the Data card of QA run #26715, at 3fcafcd3; re-read at 43731031): bound to an object that already has a stored view container, the container-shaped body is refused 400 VALIDATION_ERROR by the name-collision check before the ViewSchema guidance can answer, so the probe needs an object with no container. No clause changed", "ref": "#26715" },
+        {
+          "revision": 6,
+          "date": "2026-11-02",
+          "change": "steps[3] re-pointed to the Studio door: the metadata editor whose Source tab autosave reaches the server gate is now served by Studio's All metadata area (/_console/studio/~all/metadata/object/NAME, the same metadata-admin ResourceEditPage), and the Setup URL the step named redirects there (setupMetadataStudioPath, #28818, ADR-0146 D1). On the ~all leg the item page opens the generic editor, not the Data pillar (areaItemPillarPath answers null without a package), so the Source tab is still there. 'The Studio designer' that holds an incomplete shape client-side is named as the Data pillar's, since both doors are now Studio's. Read at base dfbe34d887; not yet driven live at this URL — the next run records it. No clause changed",
+          "ref": "#28579"
+        }
       ]
     },
     {
@@ -624,7 +649,7 @@
       "title": "The metadata type registry gates runtime writes: allowEnvironmentOverlay=false kinds refuse overlay (403 NOT_OVERRIDABLE), allowRuntimeCreate=false kinds refuse creation (403 NOT_CREATABLE) — both sides",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -634,17 +659,18 @@
           "the stock showcase artifact (artifact-backed objects like showcase_task and packaged views are the locked targets; a scratch name serves the allowed-create side)"
         ],
         "knownGaps": [
+          "RE-POINTED (r9, ADR-0146 D2/D11; read at base eb123b7ccc): the 'overlay open' side of this gate is the declared override from the base's pair, not a package-less PUT. A package-less write onto a view or dashboard a read-only code package ships answers 403 NOT_OVERRIDABLE naming the base's <base>.custom pair (#28850, packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#packagelessOverlayWriteRefusal) — that close is scored by cli.packageless-overlay-ceremony-and-close; here steps[1] writes the same change into com.example.showcase.custom declaring overrides: { package, basedOn } (packages/spec/src/kernel/override-declaration.zod.ts#OverrideDeclarationSchema), and steps[5] removes the pair's row. Studio's door onto the same write is studio-authoring.package-customize-restore-display",
           "CORRECTION TO RUN #7637 (recorded by run #7695): the Studio read-only badge is HONEST on this build/pin — it is not asserting a lock the server declines to apply. With OS_METADATA_WRITABLE=permission set, GET /meta reports permission { allowEnvironmentOverlay: true, overrideSource: 'env' } (the enum is registry|env — packages/spec/src/api/protocol.zod.ts) and the editor becomes fully writable; the badge tracks the real writable computation, proven BOTH ways in that run. #7637's contrary observation does not reproduce here — do not act on it as written, and do not re-file it",
           "ROUTE NOTE (run #7695 / #7690): a flow authored over the metadata API is NOT editable in Studio — it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', with or without `?package=`. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'` (packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx / 1311-1323) and `flow` declares allowEnvironmentOverlay:false, so for THIS kind the banner is arguably telling the truth: the server would refuse the overlay write anyway. The editable path is the console's own create page. Recorded as a route note, NOT a defect — the polarity-reversed case (the same heuristic locking an object published into a WRITABLE package, which Studio and the server both treat as editable) IS the defect and is filed at objectui#4308; whoever works that card should confirm this case stays correct"
         ]
       },
       "steps": [
         "read the authority first: DEFAULT_METADATA_TYPE_REGISTRY in packages/spec/src/kernel/metadata-plugin.zod.ts declares per-kind allowEnvironmentOverlay and allowRuntimeCreate — if the flags have changed, revise this item's variants before running",
-        "positive overlay: PUT /api/v1/meta/view/<a packaged showcase view name> with a modified label (view: allowEnvironmentOverlay true) → expect acceptance; GET the name and confirm the overlay wins at read",
+        "positive override: POST /api/v1/packages/com.example.showcase/ensure-customization (201 on a fresh DB, 200 after); then PUT /api/v1/meta/view/<a packaged showcase view name>?package=com.example.showcase.custom with a modified label and overrides: { package: 'com.example.showcase', basedOn: '0.1.0' } (view is an overridable type; the registry flag no longer opens the write, the declaration does — ADR-0146 D2) → expect acceptance; GET the name with no package and confirm the override wins at read. The same PUT naming no package answers 403 NOT_OVERRIDABLE naming the pair — the closed door, recorded here, scored by cli.packageless-overlay-ceremony-and-close",
         "negative overlay: PUT /api/v1/meta/object/showcase_task (artifact-backed; object: allowEnvironmentOverlay false) with any modified body → capture the refusal",
         "negative create: PUT /api/v1/meta/job/qa_probe_job (job: allowRuntimeCreate false — a runtime-authored job could never be scheduled, #4509) → capture the refusal",
         "positive create: PUT /api/v1/meta/object/qa_org_probe as a brand-NEW object (object: allowRuntimeCreate true) whose body declares sharingModel (e.g. 'private') → expect acceptance — the two flags gate different doors. Without sharingModel the save answers 422 security-owd-unset, an error-tier authoring rule (packages/lint/src/validate-security-posture.ts), before the create gate is visible: that refusal is the body's, not this gate's (QA run #27438 met it, then saved 200 with sharingModel private)",
-        "cleanup + reset semantics: DELETE /api/v1/meta/view/<overlaid name> and confirm reset:true, then GET returns the artifact default again",
+        "cleanup + reset semantics: DELETE /api/v1/meta/view/<overridden name>?package=com.example.showcase.custom and confirm reset:true, then GET (no package) returns the artifact default again",
         "run every probe against the LIVE server os dev runs — never a simulated dispatch"
       ],
       "acceptance": [
@@ -655,9 +681,9 @@
           "evidence": "the 403 response body"
         },
         {
-          "clause": "an overlay-enabled kind accepts the write AND the overlay takes precedence at read — the other side of the same gate",
+          "clause": "an overridable kind accepts a DECLARED override from the base's pair AND the override takes precedence at read — the other side of the same gate",
           "oracle": "api",
-          "verify": "the packaged view accepts the overlay PUT and the follow-up GET serves the overlaid label (overlay-precedence)",
+          "verify": "the pair's PUT carrying overrides is accepted and the follow-up package-less GET serves the overridden label with _packageId com.example.showcase (ADR-0146 D8: the declared override is served at the base's address); refusePackagedBaseOverride admits it from the pair alone",
           "evidence": "the accepted write + the read showing the overlay"
         },
         {
@@ -673,9 +699,9 @@
           "evidence": "the paired responses"
         },
         {
-          "clause": "deleting the overlay row resets to the artifact default: reset:true when a row was removed, reset:false when none existed",
+          "clause": "deleting the pair's overriding row resets to the artifact default: reset:true when a row was removed, reset:false when none existed",
           "oracle": "api",
-          "verify": "DELETE answers per DeleteMetaItemResponseSchema and the follow-up GET serves the artifact body again",
+          "verify": "DELETE …?package=com.example.showcase.custom answers per DeleteMetaItemResponseSchema and the follow-up package-less GET serves the artifact body again",
           "evidence": "the delete response + post-delete read"
         }
       ],
@@ -686,8 +712,8 @@
         "object (override locked, create open)",
         "field (override locked, create LOCKED — the standalone runtime-create door was retired by the 2026-08-12 ruling, #7893: field declares allowRuntimeCreate:false, so PUT /api/v1/meta/field/OBJECT.NAME for a new name answers 403 NOT_CREATABLE; fields are authored inside the object)",
         "job (create locked — 403 NOT_CREATABLE)",
-        "view (override open)",
-        "dashboard (override open)"
+        "view (override open — declared, from the base's .custom pair)",
+        "dashboard (override open — declared, from the base's .custom pair)"
       ],
       "traps": ["dispatcher-vs-hono-route"],
       "automated": { "kind": "unit", "ref": "packages/objectql/src/overlay-precedence.test.ts — a unit test of the overlay whitelist (describe 'overlay whitelist enforcement (shared-DB invariant)') that stops above the HTTP door. It corroborates acceptance[0], [2] and [3] and negative[0] and scores none of them, since every clause here is api-oracle; no pin touches acceptance[4]'s DELETE reset. The whole item is the run's live leg" },
@@ -697,7 +723,8 @@
         "packages/metadata-protocol/src/protocol.ts#isRuntimeCreateAllowed (isRuntimeCreateAllowed — the write-gate authority)",
         "ADR-0005 (metadata customization opt-in), ADR-0049 (enforce-or-remove — the job rationale)",
         "packages/spec/src/api/protocol.zod.ts#overrideSource (overrideSource registry|env — how GET /meta reports an OS_METADATA_WRITABLE-granted override, the read that made the #7637 correction checkable)",
-        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx (its isArtifactItem test, the artifact-backed heuristic behind the read-only banner; cross-linked to objectui#4308)"
+        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx (its isArtifactItem test, the artifact-backed heuristic behind the read-only banner; cross-linked to objectui#4308)",
+        "packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#refusePackagedBaseOverride (a declared override from the base's paired .custom is admitted; every other write onto the sealed item is refused) + docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md supersede table, ADR-0005 row (the per-type flag survives as the migration's predicate; what a customer may override is decided by declaration and closure)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the registry's runtime-write gates (not_overridable / not_creatable vs accepted overlay / accepted create), variants sampled straight from DEFAULT_METADATA_TYPE_REGISTRY and pinned to the overlay-precedence suite", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -706,7 +733,19 @@
         { "revision": 4, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[5] cited lines 1311-1323 of objectui ResourceEditPage.tsx in the comma-range spelling, written with a space (authored in 3bb9340974 as the list 951-955 and 1311-1323). At the objectui pin that commit shipped, 6314e87f2d49, 1311-1323 was the isArtifactItem test; at the shipped pin 12dc7b47c340 it has moved and also excludes provenance 'org'. source[5] now names isArtifactItem. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
         { "revision": 5, "date": "2026-10-26", "change": "automated.ref says what its only pin proves (checklist-accuracy finding of QA run #25815, release-18.2.0-tier1 at 6679644a, objectui pin b41ed7f68956; wave anchor #25807): overlay-precedence.test.ts is a unit test of the overlay whitelist that stops above the HTTP door, so it corroborates acceptance[0], [2], [3] and negative[0] and scores none, and no pin touches acceptance[4]'s DELETE reset. The clauses are unchanged", "ref": "#25848" },
         { "revision": 6, "date": "2026-10-27", "change": "title, acceptance[0] (clause, verify), acceptance[2] (clause, verify) and variants[2] spell the served codes NOT_OVERRIDABLE and NOT_CREATABLE (checklist-accuracy note of the coordinator leg of QA run #26715, at 3fcafcd3, where all five clauses passed): the item spelled them lowercase, after the registry's doc comment, while the door serves SCREAMING_SNAKE codes per ADR-0112. The source rows keep the lowercase where they quote source text. No clause is loosened", "ref": "#26715" },
-        { "revision": 7, "date": "2026-10-31", "change": "steps[4]'s brand-new object declares sharingModel. QA run #27438's first PUT of qa_org_probe without one answered 422 security-owd-unset, the error-tier authoring rule in packages/lint/src/validate-security-posture.ts, before the allowRuntimeCreate gate could be read; with sharingModel private it saved 200, and acceptance[3] passed. Accuracy finding of QA run #27438. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" }
+        { "revision": 7, "date": "2026-10-31", "change": "steps[4]'s brand-new object declares sharingModel. QA run #27438's first PUT of qa_org_probe without one answered 422 security-owd-unset, the error-tier authoring rule in packages/lint/src/validate-security-posture.ts, before the allowRuntimeCreate gate could be read; with sharingModel private it saved 200, and acceptance[3] passed. Accuracy finding of QA run #27438. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" },
+        {
+          "revision": 8,
+          "date": "2026-11-02",
+          "change": "fixtures.knownGaps[0] (new) marks the positive overlay half TRANSITIONAL — acceptance[1] and [4], steps[1] and [5], variants[3] and [4]. Re-measured from source at base dfbe34d887: since #28850 (ADR-0146 D11) a package-less write onto a view or dashboard a read-only code package ships answers 403 NOT_OVERRIDABLE naming the .custom pair (packagelessOverlayWriteRefusal), so the packaged showcase view this item overlays is refused and there is no overlay row to reset; the open side is a declared override in com.example.showcase.custom (ADR-0146 D2), which slice 2 of #28579 adds as new items. Those two clauses are scored blocked(dependency) until then — a measured narrowing, recorded here, because as written they would FAIL by design. acceptance[0], [2] and [3] (NOT_OVERRIDABLE on the artifact-backed object, NOT_CREATABLE, the independent create gate) are unchanged",
+          "ref": "#28579"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-02",
+          "change": "The positive overlay half is re-pointed from TRANSITIONAL to the declared override (#28579 slice 2): steps[1] ensures com.example.showcase.custom and saves the view there declaring overrides { package, basedOn }; steps[5] deletes the pair's row; acceptance[1] and [4], variants[3] and [4] and knownGaps[0] say so, and a source row cites refusePackagedBaseOverride and ADR-0146's supersede table. The package-less PUT's 403 NOT_OVERRIDABLE is recorded in steps[1] as the expected answer and scored by the new cli.packageless-overlay-ceremony-and-close. acceptance[0], [2] and [3] are unchanged. Read at base eb123b7ccc",
+          "ref": "#28579"
+        }
       ]
     },
     {
@@ -867,7 +906,7 @@
       "title": "Permission-matrix editor UX: field-filter + bulk apply to EXACTLY the visible fields, and the Bulk column never clips at narrow widths",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 10,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin"],
@@ -880,18 +919,19 @@
           "in package scope, the package's objects PUBLISHED before the set is opened: while they are only drafts, the Studio Access matrix lists none of them ('0 objects') — a defect QA run #26715 recorded (the matrix lists objects without the draft preview); publish them first, or record the leg blocked(fixture) citing the run"
         ],
         "knownGaps": [
-          "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs here (`pnpm --filter @object-ui/PKG exec vitest run --maxWorkers=2 FILE`); a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs from ui/, the objectui root, with its path written relative to ui/: `cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE`. ⛔ Not `pnpm --filter @object-ui/PKG exec vitest run FILE`: that runs in the package directory, and the ui vitest guard (ui/scripts/vitest-invocation-guard.mjs, which ui/vitest.config.mts calls) refuses any run whose Vitest root is not ui/ (its package-cwd verdict). a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
-        "open the Permission Matrix editor on a writable permission set (Studio Access pillar, /_console/studio/PKG/access, or the metadata admin's door /_console/apps/com.objectstack.setup/metadata/permission/<name>; ⛔ not /_console/apps/com.objectstack.studio/…, the studio app is not loaded on a stock boot — RUNNER.md environment facts); expand an object with > 6 fields so the field sub-table's filter renders (threshold is > 6)",
+        "open the Permission Matrix editor on a writable permission set (Studio Access pillar, /_console/studio/PKG/access, or Studio's All metadata item page /_console/studio/~all/metadata/permission/<name>, where the retired Setup door /_console/apps/com.objectstack.setup/metadata/permission/<name> lands in one hop since #28818 (setupMetadataStudioPath); ⛔ not /_console/apps/com.objectstack.studio/…, the studio app is not loaded on a stock boot — RUNNER.md environment facts); expand an object with > 6 fields so the field sub-table's filter renders (threshold is > 6)",
         "B4 field filter: type a filter that narrows the field set to a couple of fields; confirm the sub-table's 'n / N' counter and the DOM show only the matching fields (the hidden fields' read/edit checkboxes are absent)",
         "B4 bulk-over-visible: click 'Write all' (perm.field.bulk.writable) → it must grant read+write to EXACTLY the visible fields; clear the filter and confirm the previously-hidden fields are UNTOUCHED (still at their prior grant), never bulk-applied",
         "on a different filtered set click 'Read-only all' (perm.field.bulk.readable) → it revokes write on the visible fields only; click 'Clear' → it drops the explicit overrides so the visible fields fall back to the read-only default (readable, not editable)",
         "Save; GET /api/v1/meta/permission/<name> (or the package draft read) and assert the fields map (keyed `${object}.${field}`) carries overrides for ONLY the fields that were visible when each bulk fired — never a filter-hidden field",
         "B3 clip: shrink the viewport to a narrow width; confirm the object matrix's enclosing overflow-auto container SCROLLS horizontally (the table carries min-w-[1304px]; Studio's is data-testid perm-studio-matrix) and the Bulk column (Read / CRUD / All / None per row) stays reachable, not clipped off the right edge",
         "read-only gate: open a read-only package/type set; confirm Save is hidden, every checkbox is disabled, the field sub-table's bulk buttons (Read-only all / Write all / Clear) are ABSENT — FieldsSubTable renders them only while the set is writable — and the object row's Read / CRUD / All / None, which Studio shows only on the row under the pointer or with keyboard focus, are disabled when they show; the read-only badge names package-vs-type as the reason",
-        "the grant→access flip (a flipped verb actually changing a persona's API access) is access-security.permission-matrix-edit-loop — cite a pass there; this item does NOT re-prove that a saved grant changes access"
+        "the grant→access flip (a flipped verb actually changing a persona's API access) is access-security.permission-matrix-edit-loop — cite a pass there; this item does NOT re-prove that a saved grant changes access",
+        "B5 field boxes under a sideways scroll: at a pane narrower than the matrix floor (a 1000 px pane, and a narrower one), expand an object, scroll the matrix container right in steps (0, 80, 200 px and its far end); at each offset read document.elementFromPoint at the centre of every field row's Read and Edit box, and at the field name"
       ],
       "acceptance": [
         {
@@ -929,11 +969,18 @@
           "oracle": "screenshot",
           "verify": "on the read-only set Save is absent, every checkbox is disabled, the field bulk buttons (Read-only all / Write all / Clear) are absent — not merely disabled (PermissionMatrixEditor.tsx FieldsSubTable renders them only while writable; QA run #26715 read them absent in read-only Studio) — and the object row's bulk, which appears only on hover or keyboard focus (engine.studio.access.bulkHint), is disabled when it appears; an operating bulk control is the FAIL. The badge names the gate that holds; the console distinguishes FOUR (objectui PermissionMatrixEditor.tsx at the pin): the package gate (engine.studio.pkg.readonly — Studio on a read-only package), the artifact gate (perm.readOnly.artifact, 'Read-only (this set is provided by a code package)' — a set a code package ships, in the metadata admin), the wall (perm.readOnly.walled — the security catalog under isolated/group tenancy) and the type gate (perm.readOnly — a type with no runtime write channel). On a stock boot only the package and artifact gates are reachable — the wall needs a walled tenancy posture and the type gate a permission type with no write channel, which stock does not have — so score those two on the packaged showcase_contributor set (Studio Access and the metadata admin) and record the other two as not reachable on stock. A badge that blames the wrong gate is the FAIL",
           "evidence": "the read-only screenshot"
+        },
+        {
+          "clause": "an expanded object's field Read and Edit boxes stay in view and clickable at every horizontal scroll offset of the matrix and at any pane width, and each field's name stays readable beside them — the field panel holds its place at the cell's inset, no wider than the pane shows, instead of scrolling with the object columns or sitting under a pinned name cell (objectstack#29677)",
+          "oracle": "dom",
+          "verify": "at a narrow pane (scrollWidth > clientWidth on the matrix container) and at each scroll offset of step B5, elementFromPoint at the centre of every field row's Read and Edit box returns that box (or a node inside it) and the centre lies inside the container's visible box; the field name answers at its first characters. A box answering the field-name cell, or a box only reachable at scrollLeft 0, is the FAIL",
+          "evidence": "the elementFromPoint readings per offset + screenshots at scrollLeft 0 and at the far end"
         }
       ],
       "negative": [
         "a field bulk that writes grants to fields hidden by the filter is the FAIL this item exists for — a wrong bulk scope silently grants or revokes access on fields the admin never saw (assert against the SAVED fields map, not the repaint)",
-        "the Bulk column clipped off the right edge at a narrow width with no horizontal scroll is the B3 FAIL — the admin cannot reach Read / CRUD / All / None"
+        "the Bulk column clipped off the right edge at a narrow width with no horizontal scroll is the B3 FAIL — the admin cannot reach Read / CRUD / All / None",
+        "a field row's Read or Edit box covered by the field-name cell, or carried out of view, once the matrix scrolls sideways is the B5 FAIL — below the matrix floor the admin cannot grant or revoke that field at all"
       ],
       "variants": [
         "field bulk: Read-only all (readable)",
@@ -941,7 +988,7 @@
         "field bulk: Clear"
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
-      "automated": { "kind": "unit", "ref": "objectui code under ui/: ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.fieldBulk.test.tsx (+ PermissionMatrixEditor.readonly.test.tsx, PermissionMatrixEditor.artifactTier.test.tsx). fieldBulk asserts filter narrowing, the '2 / 8' counter and the bulk scope as jsdom checkbox states: component-layer evidence for acceptance[0] and [1], never the SAVED fields map that acceptance[2], [3] and negative[0] make the authority. For acceptance[5], readonly covers the package gate, the type gate and the capability gate, and artifactTier covers the artifact gate ('provided by a code package'). Every screenshot and api clause stays the run's" },
+      "automated": { "kind": "unit", "ref": "objectui code under ui/: ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.fieldBulk.test.tsx (+ PermissionMatrixEditor.readonly.test.tsx, PermissionMatrixEditor.artifactTier.test.tsx). fieldBulk asserts filter narrowing, the '2 / 8' counter and the bulk scope as jsdom checkbox states: component-layer evidence for acceptance[0] and [1], never the SAVED fields map that acceptance[2], [3] and negative[0] make the authority. For acceptance[5], readonly covers the package gate, the type gate and the capability gate, and artifactTier covers the artifact gate ('provided by a code package'). For acceptance[6], ui/e2e/permission-field-panel-scroll.spec.ts measures elementFromPoint at every field box over a sweep of scroll offsets in Chromium on both matrix renderings (a stubbed client; Build & E2E UI runs it). Every screenshot and api clause stays the run's" },
       "source": [
         "objectui: packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx (FieldsSubTable B4 — field filter + bulkSetFields over visibleNames; PermissionTable min-w-[1304px] B3 anti-clip on the Bulk column; the writable gate + celErrorCount Save gate)",
         "objectui: packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.fieldBulk.test.tsx ('the filter narrows the field set and bulk acts only on what is visible'; 'Clear drops the overrides so fields fall back to the read-only default')",
@@ -981,7 +1028,20 @@
           "change": "steps[0], steps[6], acceptance[5] (clause, verify) and fixtures.requires[3] corrected from the Access card of QA run #26715 (at 3fcafcd3; re-read at 43731031). (1) The metadata-admin door is /_console/apps/com.objectstack.setup/metadata/permission/NAME; the com.objectstack.studio route renders nothing useful, the studio app being unloaded on a stock boot. (2) In read-only Studio the field bulk buttons are absent, not disabled (FieldsSubTable renders them only while writable), and the object-row bulk shows only on hover or focus and is disabled there. (3) In package scope the matrix lists no object while the package's objects are only drafts, so the fixture publishes them first. No other clause changed",
           "ref": "#26715"
         },
-        { "revision": 7, "date": "2026-10-31", "change": "steps[3], [5], [6], acceptance[1], [4], [5], variants[0] and source[0] read the matrix as it renders. The field bulk that revokes write is labelled 'Read-only all' (perm.field.bulk.readable, ui/packages/i18n/src/namespaces/studio/en.ts), not 'Read all', and both matrix tables carry min-w-[1304px], not min-w-[960px], inside the overflow-auto container (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx; Studio's table is data-testid perm-studio-matrix). Accuracy findings of QA run #27438. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" }
+        { "revision": 7, "date": "2026-10-31", "change": "steps[3], [5], [6], acceptance[1], [4], [5], variants[0] and source[0] read the matrix as it renders. The field bulk that revokes write is labelled 'Read-only all' (perm.field.bulk.readable, ui/packages/i18n/src/namespaces/studio/en.ts), not 'Read all', and both matrix tables carry min-w-[1304px], not min-w-[960px], inside the overflow-auto container (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx; Studio's table is data-testid perm-studio-matrix). Accuracy findings of QA run #27438. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" },
+        { "revision": 8, "date": "2026-11-02", "change": "fixtures.knownGaps[0] names the invocation the ui vitest guard accepts, the form revision 8 of studio-authoring.expression-editors landed in its knownGaps[1] (#28701): a jsdom unit pin runs from ui/ as cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE. The pnpm --filter @object-ui/PKG exec form it quoted runs in the package directory, which the guard refuses (ui/scripts/vitest-invocation-guard.mjs, verdict package-cwd), so a runner following it is refused at config load, before any test runs. Wording only; no clause changed. Checklist-accuracy finding of QA run #28656 (W3-RT), carried by #28750", "ref": "#28656" },
+        {
+          "revision": 9,
+          "date": "2026-11-02",
+          "change": "steps[0]'s second door re-pointed (#28579 slice 2, FOLLOW-UPS §13c): the Setup metadata item URL it named redirects since #28818 to Studio's All metadata item page, which mounts the same PermissionMatrixEditor, so the step names the landing URL. No clause changed. Read at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-03",
+          "change": "new clause acceptance[6], step B5 (steps[8]) and negative[2] (objectstack#29677, from QA run #29672, whose acceptance[4] covers only the Bulk column): an expanded object's field Read and Edit boxes stay in view and clickable at every horizontal scroll offset and pane width. On main at 3482f3d8d2 the field sub-table's name column, its flexible column and about 697 px wide, was pinned left and covered both boxes from a scroll of about 80 px on, so below the 1304 px floor they could not be reached. The field panel is now pinned at the cell's inset instead (FIELD_PANEL in ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx); automated.ref names the browser geometry pin ui/e2e/permission-field-panel-scroll.spec.ts. Appended, so no existing index moves; no other clause changed",
+          "ref": "#29677"
+        }
       ]
     },
     {
@@ -1274,10 +1334,10 @@
     },
     {
       "id": "studio-authoring.packaged-automation-studio-lock",
-      "title": "Studio Automations pillar on a read-only package: a packaged flow is NOT editable in place — New-flow and autosave honor the courtesy gate, the enable/disable switch produces no metadata write, and inspector edits are inert or announced, never silently discarded",
+      "title": "Studio Automations pillar on a read-only package: a packaged flow is NOT editable in place — New lands in the base's .custom pair, autosave never writes the base, the header switch is the activation-ledger switch (a toggle, no metadata write), and inspector edits are inert or announced, never silently discarded",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin (opens Studio on the read-only package)"],
@@ -1288,26 +1348,28 @@
           "a console built from this tree with `pnpm console:build` — the pillar markup under test is the objectui code under ui/, so a stale bundle tests yesterday's gate"
         ],
         "knownGaps": [
-          "FIXED at objectui 1fb1ced36243 (objectui#11124), recorded so runs don't re-derive it: on a read-only package the Automations pillar's enable/disable switch is disabled (disabled={!isEditable || !!saving || readOnly}, its read-only reason carried by aria-describedby and a tooltip since objectui#12303, not a `title`) and toggleEnabled is guarded as well, so a forced click saves nothing; the flow node inspector receives the pillar's REAL readOnly flag, threaded as the Data pillar threads it, so its inputs are disabled; New-flow and autosave still honour the gate (StudioDesignSurface.tsx). QA run #23163 measured exactly that: the switch disabled with a reason title, a forced click sending nothing, the inspector inputs disabled, the flow byte-identical. The pre-fix shape — a clickable switch only the server's 422 refused, and inspector edits that took locally and vanished on reload — is gone; meeting it again is a regression FAIL, not a standing finding",
-          "objectui code now pins the read-only posture: ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.automationsReadOnly-11124.test.tsx ('disables the header \"Enabled\" switch, and a click on it saves nothing'; 'opens the flow inspector read-only: the node inputs are disabled'; no canvas edit handles). It is a jsdom unit test, so the item stays browser-driven end to end; run it from this checkout to cite it beside the live read — FROM ui/, against the ui/ workspace config: `cd ui && pnpm exec vitest run --root . --maxWorkers=2 packages/app-shell/src/views/studio-design/StudioDesignSurface.automationsReadOnly-11124.test.tsx`. app-shell has no vitest config of its own (its `test` script is `vitest run --root ../.. packages/app-shell/`), so `pnpm --filter @object-ui/app-shell exec vitest run FILE` from the package misses the ui/ setup; QA run #26715 read 10/10 only the ui/ way"
+          "FIXED at objectui 1fb1ced36243 (objectui#11124), recorded so runs don't re-derive it: the flow node inspector on a read-only package receives the pillar's REAL readOnly flag, threaded as the Data pillar threads it, so its inputs are disabled, and autosave honours the gate (StudioDesignSurface.tsx). The pre-fix shape — inspector edits that took locally and vanished on reload — is gone; meeting it again is a regression FAIL, not a standing finding",
+          "CHANGED SHAPE (ADR-0146 D3/D4, #28572 and #28148; QA run #29002 at 7fa9873f, card note 6570476620): on a read-only package (1) the rail's New is OFFERED and creates the flow in the base's customization pair com.example.showcase.custom (openCreateFlow, gated on !packageReadOnly || newInPair), never in the base; (2) the header switch over a packaged flow is the activation-ledger switch (FlowLedgerSwitch, data-testid auto-ledger-switch): a click is POST /api/v1/automation/NAME/toggle, answered 200 with the definition unchanged. The disabled definition switch the 11124 pin asserts is what the pillar draws only when no _status row is served for the flow — that pin answers the _status probe 404 — so ui/packages/app-shell/src/views/studio-design/AutomationsPillar.ledgerSwitch-28148.test.tsx is the pin for the live shape",
+          "OUT OF SCOPE HERE — Customize (ADR-0146 D9, #28570): a packaged flow's editors stay read-only until the author presses Customize (data-testid studio-customize), which opens them onto a declared override saved in the pair. This item does not press it; every clause below is about the base staying unedited without it. The override journey is its own item",
+          "pins: ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.automationsReadOnly-11124.test.tsx ('opens the flow inspector read-only: the node inputs are disabled'; no canvas edit handles; and, with no _status row, 'disables the header \"Enabled\" switch, and a click on it saves nothing') + AutomationsPillar.ledgerSwitch-28148.test.tsx ('binds the switch to the ledger, not the definition, and a flip posts the toggle and saves no draft'). They are jsdom unit tests, so the item stays browser-driven end to end; run them from this checkout to cite them beside the live read — FROM ui/, against the ui/ workspace config: `cd ui && pnpm exec vitest run --root . --maxWorkers=2 packages/app-shell/src/views/studio-design/StudioDesignSurface.automationsReadOnly-11124.test.tsx packages/app-shell/src/views/studio-design/AutomationsPillar.ledgerSwitch-28148.test.tsx`. app-shell has no vitest config of its own (its `test` script is `vitest run --root ../.. packages/app-shell/`), so `pnpm --filter @object-ui/app-shell exec vitest run FILE` from the package misses the ui/ setup; QA run #26715 read 10/10 only the ui/ way"
         ]
       },
       "steps": [
         "boot the showcase (objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db), sign in admin@objectos.ai/admin123; open Studio, switch to the read-only com.example.showcase package, open the Automations pillar",
         "pin the precondition: GET /api/v1/packages must report com.example.showcase writable:false — the pillar's readOnly gate is pkgWritable===false (objectui StudioDesignSurface.tsx) and an UNKNOWN writability (fetch failed / still loading) deliberately leaves the pillar ungated, so a race here fakes a gate failure (hydration-race)",
         "baseline the server truth: GET /api/v1/meta/flow/showcase_urgent_task_alert (full body) — every later clause diffs against this read",
-        "affordance sweep with the network panel recording: confirm the New-flow button is ABSENT from the rail heading; select the packaged flow and wait past the autosave debounce after touching the canvas — no flow save may leave the browser",
-        "click the enable/disable switch in the pillar header and capture everything: whether it is disabled/absent (it is disabled, and its read-only reason rides aria-describedby and a tooltip — objectui#12303 — not a `title`), whether a forced click fires any request (it must not — were it to, the request would be a flow DRAFT save flipping status active↔obsolete, StudioDesignSurface.tsx toggleEnabled), and what the UI surfaces",
-        "select a flow node and edit a property in the inspector; record whether the edit visibly takes on the canvas/draft, and whether any affordance announces a read-only or will-not-persist state",
+        "affordance sweep with the network panel recording: record the rail's New (+) — offered on the read-only base since ADR-0146 D3 — and open its dialog, reading where it says the flow lands (the pair, com.example.showcase.custom), then cancel; select the packaged flow (do NOT press Customize) and wait past the autosave debounce after touching the canvas — no flow save naming the base may leave the browser",
+        "click the header switch (data-testid auto-ledger-switch, reading 'On for this deployment') and capture everything: the request it fires (POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false}, expected 200), that no metadata write (PUT /meta/flow…, a draft save) accompanies it, and the switch's new reading; then flip it back on",
+        "select a flow node and edit a property in the inspector (Customize NOT pressed); record whether the edit visibly takes on the canvas/draft, and whether any affordance announces a read-only or will-not-persist state",
         "reload the pillar (re-open the package) and re-inspect: record whether the inspector edit survived or vanished, and whether its discard was ever announced",
         "forge the write the client gate withholds, both spellings: PUT /api/v1/meta/flow/showcase_urgent_task_alert?mode=draft&package=com.example.showcase and the same PUT without ?package=, each with a modified body — capture each status and code (the top-level `code` of the flat { error, code } refusal body). Then close out: GET /api/v1/meta/flow/showcase_urgent_task_alert again and diff against the baseline — byte-identical"
       ],
       "acceptance": [
         {
-          "clause": "the courtesy gate holds on the affordances that consult it: on a read-only package the New-flow button is absent from the Automations rail and the flow autosave never fires — no draft write leaves the browser from ordinary canvas edits",
+          "clause": "the courtesy gate holds on the base: on a read-only package the rail's New creates into the base's customization pair, never into the base, and the flow autosave never fires against the base — no draft write naming com.example.showcase leaves the browser from ordinary canvas edits",
           "oracle": "network",
-          "verify": "the rail DOM carries no New button (gated on !readOnly, objectui StudioDesignSurface.tsx); the network trace across the edit session and past the autosave debounce carries zero flow save/PUT from the autosave path (blocked on readOnly)",
-          "evidence": "the rail DOM read + the flow-write-free network trace over the debounce window"
+          "verify": "the rail's New is present and its dialog targets com.example.showcase.custom (openCreateFlow is offered when !packageReadOnly || newInPair, StudioDesignSurface.tsx; QA run #29002 measured it present and targeting the pair); the network trace across the edit session and past the autosave debounce carries zero flow save/PUT naming the base (the autosave is blocked while editLocked = readOnly && !flowUnlocked). A New that writes into com.example.showcase, or a draft save naming it, is the FAIL",
+          "evidence": "the New dialog's target + the base-write-free network trace over the debounce window"
         },
         {
           "clause": "a packaged flow definition is not editable in place in Studio (ADR-0126 §2 Regime C, card F2): after driving every affordance the pillar offers, the flow's server-side metadata is byte-identical — and any write that slips past client courtesy is refused server-side with a 403 — code ITEM_LOCKED when the write names the read-only package (?package=com.example.showcase: the named read-only base), NOT_OVERRIDABLE when it does not (flow declares allowEnvironmentOverlay:false) — each naming the clone or toggle remedy (ADR-0124 D1: the server is the authority, the client gate is courtesy)",
@@ -1316,15 +1378,15 @@
           "evidence": "the before/after meta reads, diffed + each refusal body"
         },
         {
-          "clause": "the enable/disable switch honors the read-only package lock exactly as the New-flow button does: clicking it produces NO metadata write",
+          "clause": "the header switch over a packaged flow is the activation-ledger switch and produces NO metadata write: a click toggles the deployment's ledger row through POST /api/v1/automation/NAME/toggle and leaves the flow definition byte-identical",
           "oracle": "network",
-          "verify": "click the switch: the PASS shape is disabled/absent-or-inert (no request fires). The switch is disabled — its read-only reason on aria-describedby and a tooltip (objectui#12303), not a `title` — and toggleEnabled is guarded (objectui#11124), so even a forced click fires nothing; the expected-fail this clause once carried (a clickable switch only the server refused) is fixed. A switch that fires a request is now a FAIL of this clause; a 2xx on that write escalates to clause 2's hard FAIL",
-          "evidence": "the click's network capture (no request) + the disabled switch's DOM state and its accessible description"
+          "verify": "click auto-ledger-switch: the trace carries POST /api/v1/automation/showcase_urgent_task_alert/toggle (200) and no PUT /meta/flow or draft save; the step-8 meta read diffs byte-identical to the baseline (FlowLedgerSwitch.tsx 'never the definition's status'; StudioDesignSurface.tsx toggleLedger; QA run #29002: toggle 200, definition unchanged). Where the deployment's posture walls the caller the switch draws disabled with the console's sentence (auto-ledger-walled-reason) and nothing is sent — record which. A click that sends a draft save flipping status active↔obsolete is the pre-ADR-0146 D4 shape and FAILS this clause; a 2xx on that write escalates to clause 2's hard FAIL",
+          "evidence": "the click's network capture + the switch's data-reading before and after"
         },
         {
-          "clause": "inspector edits are inert OR their discard is announced: the flow node inspector on a read-only package either disables its inputs or tells the author the edit will not persist — an edit that visibly takes and silently vanishes on reload is the failure",
+          "clause": "inspector edits are inert OR their discard is announced: the flow node inspector on a read-only package (Customize not pressed) either disables its inputs or tells the author the edit will not persist — an edit that visibly takes and silently vanishes on reload is the failure",
           "oracle": "dom",
-          "verify": "edit attempt on a node property, then reload the pillar and re-read the inspector + canvas: the edit must not silently vanish. At objectui 1fb1ced36243 the inspector receives the pillar's real readOnly flag (objectui#11124), so its inputs are DISABLED — the inert half of the clause, which is the PASS shape; the expected-fail this clause carried (inputs editable, the edit taking locally and vanishing on reload) is fixed. An input that accepts the edit is now a FAIL",
+          "verify": "edit attempt on a node property, then reload the pillar and re-read the inspector + canvas: the edit must not silently vanish. The inspector receives the pillar's lock (editLocked, objectui#11124; StudioDesignSurface.tsx), so its inputs are DISABLED — the inert half of the clause, which is the PASS shape. An input that accepts the edit with Customize not pressed is a FAIL",
           "evidence": "before-edit / after-edit / after-reload screenshots + the inspector input DOM state (disabled or not)"
         }
       ],
@@ -1334,13 +1396,13 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
       "source": [
-        "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (readOnly = pkgWritable===false; unknown writability deliberately leaves the pillar ungated), (the prop's own contract: 'hide/disable flow-authoring affordances'), (autosave blocked on readOnly), (the enable/disable switch — disabled={!isEditable || !!saving || readOnly} and a guarded toggleEnabled since objectui#11124), (toggleEnabled = client.save flow draft flipping status active↔obsolete), (New-flow gated on !readOnly), (the inspector receives the real readOnly flag since objectui#11124, as the Data pillar's editors do), (the rail lists package-scoped flows) + StudioDesignSurface.automationsReadOnly-11124.test.tsx (the pin) — objectui owns this pillar's markup, so locator and gate fixes land there (ADR-0054)",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (readOnly = pkgWritable===false; unknown writability deliberately leaves the pillar ungated), (openCreateFlow: New offered on a read-only base when newInPair, landing in the pair — ADR-0146 D3, #28572), (autosave and the inspector held by editLocked = readOnly && !flowUnlocked), (toggleLedger: the ledger switch's POST /automation/NAME/toggle — ADR-0146 D4, #28148), (the definition switch, disabled on a read-only package, drawn only when no _status row is served) + FlowLedgerSwitch.tsx + StudioDesignSurface.automationsReadOnly-11124.test.tsx and AutomationsPillar.ledgerSwitch-28148.test.tsx (the pins) — the ui/ tree owns this pillar's markup, so locator and gate fixes land there (ADR-0054)",
         "packages/metadata-protocol/src/sys-metadata-repository.ts + packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts (a read-only code package's write refusals — the server half of the lock; com.example.showcase is source-loaded read-only. The test pins 'a read-only base answers ITEM_LOCKED / 403 where a writable base answers NOT_OVERRIDABLE / 403')",
         "docs/adr/0126-packaged-metadata-customization-model.md §2/§3 (flow = Regime C: locked base, in-place edit refused loudly at the write door — card F2)",
         "packages/metadata-protocol/src/sys-metadata-repository.ts#readOnlyBaseOverrideError (the 403 ITEM_LOCKED a write naming a read-only base answers) + packages/metadata-protocol/src/protocol.ts (the 403 NOT_OVERRIDABLE an overlay write on a non-overlayable type answers when no package is named)",
         "#12438 (the ADR-0126 packaged flow/action sweep this item lands from)",
-        "access-security.readonly-package-locks-studio (object designer + permission matrix — cross-referenced, not widened), access-security.packaged-flow-write-door-parity (the API-side door parity for the same packaged flow), automation.setup-packaged-automation-board (the ledgered enable/disable surface — a different mechanism from this pillar's status flip)",
-        "cross-ref: do not re-prove or widen access-security.readonly-package-locks-studio — its steps own the object designer + permission matrix surfaces; this item owns the Automations pillar. And do not conflate this switch with the packaged-flow activation ledger: the Studio pillar switch flips the flow's deployment `status` field via a draft save (a metadata write, refused on a read-only package), while the LEDGERED enable/disable (sys_metadata_activation) lives on the Setup packaged-automation board — automation.setup-packaged-automation-board / automation.packaged-flow-disable-durable own that surface"
+        "access-security.readonly-package-locks-studio (object designer + permission matrix — cross-referenced, not widened), access-security.packaged-flow-write-door-parity (the API-side door parity for the same packaged flow), automation.setup-packaged-automation-board and automation.packaged-flow-disable-durable (the activation ledger this pillar's switch now writes — its UI and API contracts)",
+        "cross-ref: do not re-prove or widen access-security.readonly-package-locks-studio — its steps own the object designer + permission matrix surfaces; this item owns the Automations pillar. The header switch over a packaged flow writes the activation ledger (sys_metadata_activation) since ADR-0146 D4; that ledger's persistence and dispatch effect are automation.setup-packaged-automation-board's and automation.packaged-flow-disable-durable's — this item asks only that the click writes no metadata"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-26", "change": "new item (#12438 card F2, UI half): the Studio Automations pillar's read-only package lock — the promise (no in-place edit, switch produces no metadata write, inspector edits inert or announced) asserted with the current source shape recorded as the expected finding: the switch is clickable with only the server-side 422 behind it (disabled expression omits readOnly, StudioDesignSurface.tsx) and the inspector hardcodes readOnly:false so edits take locally and silently vanish on reload; New-flow and autosave honor the gate. Grounded in objectui f7c52e2 + the framework's writable_package_required door; owns the Automations pillar only, cross-referencing readonly-package-locks-studio for the surfaces it already owns", "ref": "#12438" },
@@ -1348,15 +1410,23 @@
         { "revision": 3, "date": "2026-10-16", "change": "acceptance[1] (clause, verify), acceptance[2] (verify, evidence), steps[4] and [7], knownGaps[0] and source re-pointed (checklist-accuracy finding 5 of QA run #23942, wave #23878). Clause 1 named the server refusal as 422 [writable_package_required]; the forged flow write is refused 403 — ITEM_LOCKED when it names com.example.showcase, NOT_OVERRIDABLE when it names no package (sys-metadata-repository.package-writability.test.ts pins the pair) — so step 7 now forges both spellings and the clause scores status and code. The switch's reason is an aria-describedby plus tooltip since objectui#12303, not a `title`. Not loosened: a 2xx on any flow write is still the hard FAIL, and a 403 with any other code fails the clause", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-26", "change": "fixtures.requires[1] and fixtures.knownGaps[1] drop the retired objectui-pin wording (a vendored console matching .objectui-sha; a pin runnable only from an objectui checkout), which #26035 left to this file's card: the console builds from this tree with pnpm console:build and the pin resolves under ui/. Wording only; the clauses are unchanged", "ref": "#25848" },
         { "revision": 5, "date": "2026-10-27", "change": "fixtures.knownGaps[1], steps[7] and acceptance[1] (clause, verify) corrected from the Automations card of QA run #26715 (at 3fcafcd3, all four clauses pass; re-read at 43731031). (1) The pin runs only from ui/ against the ui/ workspace config (`pnpm exec vitest run --root . FILE`): app-shell has no vitest config of its own, so the filtered spelling from the package misses the setup. (2) The forged write's 403 is the flat { error, code } body, so the code is read at the top level, not as error.code. Not loosened: the status must be 403 and the code ITEM_LOCKED or NOT_OVERRIDABLE", "ref": "#26715" },
-        { "revision": 6, "date": "2026-11-01", "change": "negative[2] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" }
+        { "revision": 6, "date": "2026-11-01", "change": "negative[2] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" },
+        {
+          "revision": 7,
+          "date": "2026-11-02",
+          "change": "Re-pointed to ADR-0146 D3/D4 on the read-only base. Measured input: QA run #29002 (W4-C3b1, 7fa9873f; card note 6570476620), which failed acceptance[0]'s New half and acceptance[2] as stale spec and passed acceptance[1], [3], negative[0] and [1]. Re-read at base dfbe34d887: acceptance[0] now asks that New (offered since #28572) lands in com.example.showcase.custom and that nothing writes the base; acceptance[2] asks that the header switch, now the activation-ledger switch (FlowLedgerSwitch, auto-ledger-switch, #28148), fires the toggle and no metadata write, the definition byte-identical — the property the clause always guarded; acceptance[3] says Customize is not pressed. fixtures.knownGaps record the changed shape, that the 11124 pin answers _status 404 (so AutomationsPillar.ledgerSwitch-28148.test.tsx pins the live switch), and that Customize (ADR-0146 D9) is out of this item's scope; steps[3]–[5] and source follow. No clause weakened: the lock on the base is asserted as before",
+          "ref": "#28579"
+        }
       ]
     },
     {
       "id": "studio-authoring.packaged-display-class-direct-edit",
       "title": "Packaged views and dashboards are 'yours to edit directly' (ADR-0126 Regime O): the designer live-edits the PACKAGED artifact, publish reaches the end user, reset-overlay returns the shipped base — while a Regime-C flow in the same surface stays locked",
       "since": "v17",
-      "status": "active",
-      "revision": 5,
+      "status": "retired",
+      "retiredReason": "The capability this item proved was removed by ADR-0146: D2 records in-place overlay editing of a read-only package's item as not taken, D11 closed the package-less write onto a packaged view, dashboard, report, translation or email template (#28850, then #29270 for a write naming the base), and #29264 (N-30) withdrew the docs claim it tested ('views and dashboards are yours to edit directly'). What replaced it — Customize into the base's .custom pair as a declared override, every read and the end user serving it, and Restore package original bringing the base back — is studio-authoring.package-customize-restore-display, which carries this item's clauses: acceptance[0]→its [0]+[1], [1]→its [2], [2]→its dashboard variant (on the showcase's own showcase_ops_dashboard, not the platform's system_overview), [3]→its [5]; [4] (a packaged flow stays locked) is studio-authoring.packaged-automation-studio-lock's, and a flow now opens through Customize too (automation.package-flow-override).",
+      "supersededBy": "studio-authoring.package-customize-restore-display",
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin (authors the overlay in the designer)", "end user (renders the published change)"],
@@ -1369,6 +1439,7 @@
           "a console built from this tree with `pnpm console:build`"
         ],
         "knownGaps": [
+          "TRANSITIONAL (ADR-0146 D2/D11; read at base dfbe34d887): the contract this item proves — a packaged view or dashboard edited in place as a package-less org overlay, reset by deleting the overlay row — is closed on main. A package-less save, publish, active delete or rollback onto a view, dashboard, report, translation or email template that a read-only code package ships answers 403 NOT_OVERRIDABLE naming the base's <base>.custom pair (#28850, packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#packagelessOverlayWriteRefusal), and a write naming the read-only base itself is refused naming the pair too (#29270). What replaced it is Studio's Customize: the edit is a declared override (overrides: { package, basedOn }) saved in com.example.showcase.custom, and 'Restore package original' removes it (ADR-0146 D2, D9). That journey is a new item of #28579 slice 2 (the card's Wanted 2, 'view, dashboard and report customize, export and restore', N-17), not a re-point of this one, so the item carries `blocked` until slice 2 lands it: acceptance[0]–[3] would FAIL by design on main, and acceptance[4]'s flow lock is asserted live by studio-authoring.packaged-automation-studio-lock. Do not run it; do not file its refusals as defects",
           "DASHBOARD OVERLAY DOOR VERIFIED PRESENT at authoring time (this worktree): DEFAULT_METADATA_TYPE_REGISTRY declares dashboard allowEnvironmentOverlay:true (packages/spec/src/kernel/metadata-plugin.zod.ts), same as view — so the dashboard leg is ASSERTED, not waived. If a run finds the flag flipped, revise this item (ADR-0005 admission-pair change) before scoring",
           "dashboards.system-overview-live-counts drives the SAME system_overview board expecting its stock shape — the dashboard leg here MUST end with the reset-overlay step; an overlay left behind corrupts that item's next run",
           "the neighbouring failure class is objectui#4308 mis-tiering (an item in a WRITABLE package shown behind the installed-package lock): if the packaged view/dashboard opens LOCKED, read the ResourceEditPage tiering (isArtifactItem; artifact-backed canWrite = allowEnvironmentOverlay) and the layered envelope's provenance, and forge the raw PUT, before filing a registry defect"
@@ -1437,7 +1508,19 @@
         { "revision": 2, "date": "2026-10-16", "change": "fixtures.requires[0] and [1], steps[0], [1] and [7] and acceptance[2] (clause) and [4] (clause, verify) corrected (checklist-accuracy finding 6 of QA run #23942, wave #23878). The showcase ships individual views, not a container, so the 'discover the container name' instruction pointed at nothing — the item now picks a packaged view from the list and reads its /layers. The flow's banner is the lock banner ('This item is locked and cannot be edited or deleted.' plus the owning package), not an 'installed-package' banner; its wording is recognised, not scored. system_overview is defined in platform-objects but registered by plugin-auth, which is why its /layers reports com.objectstack.plugin-auth. Not loosened: the flow must still open locked with no operating save path", "ref": "#24036" },
         { "revision": 3, "date": "2026-10-26", "change": "fixtures.requires[3] names a console built from this tree with pnpm console:build instead of a vendored console matching the retired .objectui-sha pin (#26035 left this file to its card). Wording only; the clauses are unchanged", "ref": "#25848" },
         { "revision": 4, "date": "2026-10-27", "change": "steps[2] and steps[5] say to blur the edited input before Save (checklist-accuracy finding of the Interfaces card of QA run #26715, at 3fcafcd3, where every clause passed): the designer form takes a value on blur, so Save does not see an edit whose input still holds focus. negative[3] spells the cross-referenced code NOT_OVERRIDABLE, as org-override-registry-gate now does. No clause changed", "ref": "#26715" },
-        { "revision": 5, "date": "2026-11-01", "change": "negative[3] moved to source[7]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" }
+        { "revision": 5, "date": "2026-11-01", "change": "negative[3] moved to source[7]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" },
+        {
+          "revision": 6,
+          "date": "2026-11-02",
+          "change": "Marked TRANSITIONAL with `blocked` (by: dependency, ref #28579 slice 2). Re-measured from source at base dfbe34d887 after N-28/N-30 and the D11 closure: the item proves a packaged view/dashboard edited directly as a package-less org overlay and reset by deleting that row, and main now refuses that write — 403 NOT_OVERRIDABLE naming the .custom pair for a package-less write (#28850, packagelessOverlayWriteRefusal) and a refusal naming the pair for a write that names the read-only base (#29270). The Studio door that replaced it is Customize → a declared override in com.example.showcase.custom, undone by 'Restore package original' (ADR-0146 D2/D9) — the card's Wanted 2 (N-17), a new item of slice 2. acceptance[0]–[3] would FAIL by design, so the item leaves the runnable set rather than scoring false FAILs; acceptance[4] (the flow stays locked) stays asserted live by studio-authoring.packaged-automation-studio-lock. No clause text changed. The seat decides whether slice 2 rewrites this id in place or retires it with supersededBy",
+          "ref": "#28579"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-02",
+          "change": "Retired, superseded by studio-authoring.package-customize-restore-display (#28579 slice 2; the seat's ruling on slice 1's report: supersededBy when a new item covers every clause). Re-read at base eb123b7ccc: the package-less overlay this item drove is refused (403 NOT_OVERRIDABLE naming the pair) and ADR-0146 D2 records in-place overlay editing as not taken, so the item cannot run on main; its clauses map onto the successor as retiredReason lists. One specimen is not carried: the dashboard leg moves from the platform's system_overview (registered by plugin-auth) to the showcase's showcase_ops_dashboard — the seat decides whether a platform-shipped dashboard needs its own leg. `blocked` is removed: a retired item is not run. No clause text changed",
+          "ref": "#28579"
+        }
       ]
     },
     {
@@ -1992,7 +2075,7 @@
       },
       "source": [
         "packages/metadata-protocol/src/runtime-authoring-gate.ts",
-        "packages/metadata-protocol/src/protocol.ts#protectionBlockRefusal",
+        "packages/metadata-protocol/src/protocol-authoring-refusals.ts#protectionBlockRefusal",
         "packages/spec/src/ui/page.zod.ts#PAGE_SLOTS_TABS_RETIRED",
         "packages/spec/src/ui/view.zod.ts#checkListViewChartBinding",
         "packages/lint/src/validate-expressions.ts#validateStackExpressions",
@@ -3621,10 +3704,10 @@
     },
     {
       "id": "studio-authoring.access-permission-set-lifecycle",
-      "title": "Permission sets are created, found and locked honestly in Studio's Access pillar: the New dialog derives the identifier and refuses one already taken — published or draft — the rail searches and shows its empty states, and a read-only package offers no edit while the server refuses the forged write",
+      "title": "Permission sets are created, found and locked honestly in Studio's Access pillar: the New dialog derives the identifier and refuses one already taken — published or draft — the rail searches and shows its empty states, and on a read-only package New lands in its .custom pair while the packaged set offers no edit and the server refuses the forged write, and New similar on a packaged set copies it under a new name into that pair",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3644,7 +3727,8 @@
         "New permission set again with the identifier project_editor (a draft holds it): capture the refusal and the network",
         "publish; then New permission set with the identifier project_editor once more (now published): capture what happens, and GET /api/v1/meta/permission/project_editor (live) and ?state=draft",
         "rail search: type part of the label, part of the identifier, then a string nothing matches",
-        "read-only: switch to com.example.showcase → Access; read the banner and the affordances on a packaged set; then forge PUT /api/v1/meta/permission/showcase_contributor?mode=draft&package=com.example.showcase with a modified body, and a brand-new name into the same package; GET showcase_contributor before and after"
+        "read-only: switch to com.example.showcase → Access; read the banner and the affordances on a packaged set (do not press New similar yet — steps[6] drives it); then New permission set (+) on the read-only package: give it a fresh name, save, and capture the network — POST /api/v1/packages/com.example.showcase/ensure-customization (expected 201 on the first use, 200 once the pair exists) followed by the create into com.example.showcase.custom; GET /api/v1/meta/permission/NAME?state=draft&package=com.example.showcase.custom; delete that set at teardown. Then forge PUT /api/v1/meta/permission/showcase_contributor?mode=draft&package=com.example.showcase with a modified body, and a brand-new name into the same package; GET showcase_contributor before and after",
+        "New similar on the packaged set (#28573): on com.example.showcase → Access select showcase_contributor and read the header — 'New similar' (data-testid access-new-similar) is offered and no Customize is drawn. Open it, give a new name and label, and confirm with the network panel recording: POST /api/v1/security/permission-sets/showcase_contributor/clone with exactly { name, label } and no package; read the answer's package and notice, where the copy opens, and GET /api/v1/meta/permission/NAME?package=com.example.showcase.custom. Then repeat with the copy's name to read the 409. Delete the copy at teardown"
       ],
       "acceptance": [
         {
@@ -3666,16 +3750,22 @@
           "evidence": "the three DOM reads"
         },
         {
-          "clause": "on a read-only package the pillar shows the read-only banner, offers no New set and no editing control",
+          "clause": "on a read-only package the pillar shows the read-only banner and the packaged set offers no editing control, and New permission set creates into the base's customization pair, never into the base (ADR-0146 D3)",
           "oracle": "screenshot",
-          "verify": "the banner names the package as read-only; no + button; the set's controls are disabled or absent",
-          "evidence": "the read-only screenshot described"
+          "verify": "the banner names the package as read-only; the packaged set's controls are disabled or absent; the + is offered (openCreateSet is defined when newInPair, StudioDesignSurface.tsx) and its save calls POST /api/v1/packages/com.example.showcase/ensure-customization (packages-io.ts ensureCustomizationPackage) before the create lands in com.example.showcase.custom — corroborated by the network trace and the draft read of step 6. QA run #29002 measured ensure 201 then the set created in com.example.showcase.custom. A set created into com.example.showcase itself is the FAIL",
+          "evidence": "the read-only screenshot described + the New save's network trace and draft read"
         },
         {
           "clause": "the server refuses the forged write — 403 for the packaged set (ITEM_LOCKED), 422 WRITABLE_PACKAGE_REQUIRED for a new name — and the packaged set is byte-identical afterwards",
           "oracle": "api",
           "verify": "status and code of both forged PUTs; the before/after reads of showcase_contributor diff empty",
           "evidence": "the two refusals + the diff"
+        },
+        {
+          "clause": "New similar on a packaged set copies it whole under a new name into the base's .custom pair and opens the copy there, while the packaged set itself offers no override gesture (ADR-0146 D6: a permission set is never overridden, only copied)",
+          "oracle": "network",
+          "verify": "steps[6]: the clone POST carries exactly { name, label } (clonePermissionSet sends no package); the answer names package com.example.showcase.custom and the copy opens there, selected; the pair's read holds it with the source's grants; no Customize or studio-customize is drawn on the set. A name already taken answers 409 shown verbatim in the dialog, which stays open. A copy landing in com.example.showcase, or an override of showcase_contributor under its own name, is the FAIL",
+          "evidence": "the clone request and answer + the pair's read + the header screenshot"
         }
       ],
       "negative": [
@@ -3685,8 +3775,13 @@
         "automation-input",
         "stale-console-bundle"
       ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.accessNewSimilar-28573.test.tsx (jsdom, the real Access pillar against a mocked server: acceptance[5]'s console half — New similar posts exactly { name, label }, opens the copy where the answer says it landed, shows a 409 in the server's words, and draws no override gesture on a base set) + packages/runtime/src/domains/permission-set-clone.test.ts (the clone door through the HttpDispatcher in-process over a test security catalog: acceptance[5]'s server half — a packaged source with no target is copied whole into <X>.custom through the ensure door). Neither drives a booted deployment, so they score acceptance[5] partial at most (RUNNER rule 6) and its live leg is the run's. Acceptance[0]–[4] have no pin: they are the run's live leg. The live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not open the Access pillar"
+      },
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Access pillar: the New set dialog, the taken-identifier check findTakenIdentifier and CreateTakenNotice before the create's If-None-Match: *, discardDraft, the rail search and empty states)",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Access pillar: the New set dialog, the taken-identifier check findTakenIdentifier and CreateTakenNotice before the create's If-None-Match: *, discardDraft, the rail search and empty states, openCreateSet offered on a read-only base when newInPair — ADR-0146 D3, #28572) + ui/packages/app-shell/src/views/studio-design/packages-io.ts#ensureCustomizationPackage (the ensure door the New save calls first on a read-only base)",
+        "ui/packages/app-shell/src/views/metadata-admin/permission-set-clone.ts#clonePermissionSet (POST /api/v1/security/permission-sets/:name/clone with { name, label }; where the copy lands is read off the answer) + packages/runtime/src/domains/permission-set-clone.ts#clonePermissionSetDefinition (the whole copy, saved in the source package's pair) — #28573 (N-20b) landed by PR #28669; the door's pair placement #28563 (N-20a)",
         "ui/packages/i18n/src/namespaces/studio/en.ts (engine.studio.access.created / createTaken / createTakenElsewhere / emptyMain / search / bannerTitleReadOnly)",
         "access-security.readonly-package-locks-studio (the sibling read-only surfaces — cross-referenced)",
         "cross-ref: the object designer and matrix locks on a read-only package are access-security.readonly-package-locks-studio; the matrix editor's own UX is studio-authoring.permission-matrix-editor-ux"
@@ -3715,6 +3810,24 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-02",
+          "change": "acceptance[3] and steps[5] re-pointed to ADR-0146 D3 (#28572): the read-only showcase package now offers New permission set, which ensures the pair and creates the set in com.example.showcase.custom. Measured input: QA run #29002 (W4-C3b1, 7fa9873f; card note 6570476620) — acceptance[3] failed only on its 'no New set' half; ensure answered 201, the set landed in the pair, the packaged set's controls were all disabled, and the forged writes got 403 ITEM_LOCKED / 422 WRITABLE_PACKAGE_REQUIRED (acceptance[4] passes as written). Re-read at base dfbe34d887 (StudioDesignSurface.tsx openCreateSet, packages-io.ts ensureCustomizationPackage). The clause now asserts New lands in the pair and never in the base; the read-only banner and the disabled controls are kept. No clause weakened",
+          "ref": "#28579"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-02",
+          "change": "New similar on a packaged permission set joins the item (#28579 slice 2, ADR-0146 N-20b #28573 / PR #28669) instead of a twin item: steps[5] no longer defers it, new steps[6] drives it, new acceptance[5] scores the copy landing in com.example.showcase.custom with no override gesture on the base set, and a source row cites the client and the door. The title adds it. The other clauses are unchanged. Read at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-02",
+          "change": "an automated block is added (#28579 slice 3): New similar's two pins, StudioDesignSurface.accessNewSimilar-28573.test.tsx (jsdom) and permission-set-clone.test.ts (the door in-process), scoped to acceptance[5] and its layers; acceptance[0]–[4] keep no pin, and the slice 3 live spec does not open the Access pillar. kind unit. No clause or step changed",
+          "ref": "#28579"
         }
       ]
     },
@@ -4272,6 +4385,310 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.package-customize-restore-display",
+      "title": "Customize a read-only base's view, dashboard or report in Studio: the edit lands in <base>.custom as a declared override, every read serves it, the pair's export carries the declaration, and 'Restore package original' brings the base back",
+      "since": "v18",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (holds manage_metadata; single posture)",
+        "end user (renders the customized and the restored item)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin (admin@objectos.ai / admin123), and a console built from this tree with `pnpm console:build`",
+          "the stock read-only base com.example.showcase (examples/app-showcase/objectstack.config.ts: id com.example.showcase, namespace showcase, version 0.1.0 — a booted code package, so read-only to isWritablePackage) and its customization pair com.example.showcase.custom (namespace showcase_custom, dependency ^0 on the base), created by the ensure door on the first customization; the run starts with no pair (GET /api/v1/packages/com.example.showcase.custom answers 404), so the first save's ensure answers 201",
+          "one packaged item per variant, picked from the served list rather than guessed: a showcase_task list view from GET /api/v1/meta/view?object=showcase_task, the dashboard showcase_ops_dashboard (examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts) and a report from GET /api/v1/meta/report?package=com.example.showcase (e.g. showcase_hours_by_status)"
+        ],
+        "knownGaps": [
+          "AUTOMATION LIVES UNDER ui/ — the jsdom pins run from ui/, the objectui root: `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/studio-design/FILE`. They mock the server; they prove the console's calls and states, not that the server serves the override",
+          "the uninstall and the ensure door's own refusals are platform-core.customization-pair-ensure-door; the package-less and base-named writes this door replaced are cli.packageless-overlay-ceremony-and-close — cite them, never re-prove them here"
+        ]
+      },
+      "steps": [
+        "record the shipped base first, for each variant: GET /api/v1/meta/TYPE/NAME, the same with ?package=com.example.showcase, GET /api/v1/meta/TYPE/NAME/layers, and GET /api/v1/packages/com.example.showcase/export — the restore clause diffs against these",
+        "dashboard leg: open /_console/studio/com.example.showcase/interfaces and select showcase_ops_dashboard. Read the header: the editors are read-only and a Customize button (data-testid studio-customize) is offered, titled with the base. Press it with the network panel recording: nothing is sent",
+        "edit a widget title, blur the input, and let the autosave run: capture POST /api/v1/packages/com.example.showcase/ensure-customization and the PUT /api/v1/meta/dashboard/showcase_ops_dashboard?mode=draft&package=com.example.showcase.custom that follows; GET /api/v1/meta/dashboard/showcase_ops_dashboard?state=draft&package=com.example.showcase.custom",
+        "publish through the surface's Pending / Publish, which act on the pair (POST /api/v1/packages/com.example.showcase.custom/publish-drafts); reload the pillar and read the header badge (data-testid studio-override-chip)",
+        "the reads after publish: GET /api/v1/meta/dashboard/showcase_ops_dashboard with no package, with ?package=com.example.showcase, its /layers, and the list GET /api/v1/meta/dashboard; then open the dashboard in the showcase app as the end user (client reload only, no server restart)",
+        "export: GET /api/v1/packages/com.example.showcase.custom/export and GET /api/v1/packages/com.example.showcase/export",
+        "Restore: open the item menu, choose 'Restore package original' (data-testid studio-restore-original), read the confirmation (studio-restore-original-dialog) and confirm; capture DELETE /api/v1/meta/dashboard/showcase_ops_dashboard?state=draft&package=com.example.showcase.custom then DELETE …?package=com.example.showcase.custom; repeat step 5's reads and render",
+        "view leg: in the same Interfaces pillar open the showcase_task object leaf's list-view inspector (ObjectListViewInspector) on a packaged list view; Customize, change a setting or the column set, publish, and run steps 5–7 for the view (GET /api/v1/meta/view/VIEW, ?package=com.example.showcase, /layers, the list GET /api/v1/meta/view?object=showcase_task, and the end user's task list). Report leg: the same for the picked report from the Interfaces pillar"
+      ],
+      "acceptance": [
+        {
+          "clause": "Customize unlocks the item and writes nothing; the first saved edit asks the ensure door once and writes the item's draft into com.example.showcase.custom, declaring overrides: { package: 'com.example.showcase', basedOn: '0.1.0' }, while the base's own item is untouched",
+          "oracle": "network",
+          "verify": "step 2 sends no request; step 3 sends exactly one ensure POST (201 on the run's first customization, 200 after) and then the draft PUT naming package=com.example.showcase.custom whose body carries the overrides block and none of the read's `_` keys (overrideDraftBody, StudioCustomizeControls.tsx). No write names com.example.showcase. A draft written into com.example.showcase, or a package-less write, is the FAIL",
+          "evidence": "the network trace of steps 2–3 + the pair's draft read"
+        },
+        {
+          "clause": "after publish every read of the base's name serves the override — the read naming no package, the read naming the base, the layered read (code = the base's document, overlay and effective = the override) and the list — so the three reads the epic names show one column set",
+          "oracle": "api",
+          "verify": "step 5's reads carry the edited title (dashboard) or column set (view) on all four; the package-less read reports _packageId com.example.showcase and carries the overrides block; /layers' code is byte-identical to step 1's base. Re-fetch each read fresh (cache-staleness). A read that still serves the base, or two reads that disagree, is the FAIL ADR-0146 D8 forbids",
+          "evidence": "the four reads per variant, beside step 1's baseline"
+        },
+        {
+          "clause": "the end user sees the customization after publish with no server restart",
+          "oracle": "screenshot",
+          "verify": "the showcase dashboard (and, on the view leg, the task list) renders the edited title or columns after a client reload; the server log shows no restart across the sequence",
+          "evidence": "before/after end-user screenshots + the server log excerpt"
+        },
+        {
+          "clause": "the badge is read from the served declaration: the published item's header names the base it overrides",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the header rendered, studio-override-chip reads the overrides sentence naming com.example.showcase's label and its title names basedOn 0.1.0 (StudioOverrideChip, from useServedOverride — never a diff or a spelled pair)",
+          "evidence": "the badge DOM read"
+        },
+        {
+          "clause": "the pair's export carries the overriding item with its overrides block, and the base's export carries the base unchanged",
+          "oracle": "api",
+          "verify": "step 6: the pair's export holds TYPE/NAME with overrides { package: 'com.example.showcase', basedOn: '0.1.0' }; the base's export holds the item byte-identical to step 1's base export, with no overrides key",
+          "evidence": "the two export bodies, the item's entries diffed against step 1"
+        },
+        {
+          "clause": "'Restore package original' deletes the pair's draft and row at the pair, and every read and the end user's render serve the base again",
+          "oracle": "api",
+          "verify": "step 7's two DELETEs name package=com.example.showcase.custom and answer 200; the four reads equal step 1's baseline and the render shows the shipped title or columns. Cancel on the dialog deletes nothing (a separate attempt before the confirm). A restore that answers 200 while any read still serves the override is the FAIL",
+          "evidence": "the DELETE trace + the post-restore reads diffed against step 1 + the reverted render"
+        },
+        {
+          "clause": "the view and report legs hold the same as the dashboard leg (the variants)",
+          "oracle": "api",
+          "verify": "per variant, acceptance[0]–[5] are scored on its own reads; a variant that cannot be customized (no Customize offered on a packaged view or report of the read-only base) is the FAIL",
+          "evidence": "the per-variant verdict table"
+        }
+      ],
+      "negative": [
+        "the editors of a packaged item are editable before Customize is pressed, or an edit saved before it lands anywhere — FAIL: the read-only base takes no write (ADR-0146 D1, D2)",
+        "a customization that carries no overrides block, or declares a package other than com.example.showcase, is served over the base — FAIL: only the base's pair declares, and only a declared item is served at the base's name (ADR-0146 D2, D8)"
+      ],
+      "variants": [
+        "dashboard (showcase_ops_dashboard, Interfaces pillar)",
+        "view (a showcase_task list view, the Interfaces pillar's object leaf and its list-view inspector)",
+        "report (a packaged showcase report, Interfaces pillar)"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race",
+        "automation-input",
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "ui/e2e/live/studio-customize-journey.spec.ts (live Playwright against a booted showcase and a built console, in the required Live E2E UI job's test:e2e:live:ci allowlist; the VIEW variant only, on showcase_task.in_progress: acceptance[0] at the network layer — Customize, one ensure answering 200 or 201, the draft PUT naming package=com.example.showcase.custom with overrides { package: 'com.example.showcase', basedOn } and the edited column set; acceptance[1]'s read naming no package, the read naming the base and the list, at HTTP — not /layers; acceptance[3]'s studio-override-chip drawn — not its sentence or title; acceptance[5]'s two DELETEs at the pair answering 200 and the three reads back to the shipped columns — not Cancel and not the end user's render. It drives neither the dashboard nor the report variant, acceptance[2] or acceptance[4]) + ui/packages/app-shell/src/views/studio-design/InterfacesPillar.customize-28562.test.tsx + StudioCustomizeControls.customize-28562.test.tsx + StudioDesignSurface.customizePublish-28562.test.tsx (jsdom, the console's calls and states for acceptance[0], [3] and [5]'s client half) + packages/objectql/src/protocol-custom-override-effective-read.test.ts (protocol layer: the five reads agree and the pair's per-package read carries the declaration — corroborates acceptance[1] and [4], drives no HTTP door). The dashboard and report variants, the end user's render and both exports remain the run's live leg"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#STUDIO_CUSTOMIZE_TYPES (view, dashboard, report), ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#overrideDraftBody (the pair's draft body and its declaration), ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioCustomizeButton, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioOverrideChip, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioRestoreOriginalDialog",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Interfaces pillar's save into the pair and restoreOriginal: two client.reset calls at the pair, the draft then the row) + ui/packages/app-shell/src/views/studio-design/packages-io.ts#ensureCustomizationPackage",
+        "packages/spec/src/kernel/override-declaration.zod.ts#OverrideDeclarationSchema (overrides: { package, basedOn })",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D2, D3, D8 (the five reads agree; export carries the declaration; the epic's two-minute check 「HotCRM 视图「定制」→ 三处读取同一列集、导出带声明、「恢复包原版」回原样」)",
+        "#28562 (N-17) landed by PR #28711; the one effective read #28409 (N-10) by PR #28507; the pair's Pending and Publish by PR #28747 (#28572)",
+        "content/docs/build-without-code.mdx (the docs claim since #29264: Customize saves an override marked with the app it overrides, Restore package original removes it)",
+        "cross-ref: studio-authoring.packaged-display-class-direct-edit (retired into this item); studio-authoring.package-customization-counts-and-marks (the landing count and the directory marks this customization feeds); studio-authoring.org-override-registry-gate (the same declared override at the raw PUT)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-02",
+          "change": "new item (ADR-0146 N-17, #28562 / PR #28711, with N-10's one effective read): Customize → a declared override in com.example.showcase.custom, the four reads and the end user agree, the pair's export carries the declaration, Restore package original brings the base back; dashboard, view and report variants. Read from source at base eb123b7ccc. Replaces the retired studio-authoring.packaged-display-class-direct-edit",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "automated now names the live spec ui/e2e/live/studio-customize-journey.spec.ts (#28579 slice 3) and says which clauses of the view variant it drives at which layer; kind e2e. The sentence that the e2e was still owed by slice 3 is gone. No clause, step or fixture changed",
+          "ref": "#28579"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.package-extension-field-c",
+      "title": "Add a field to a read-only base object in Studio: it is written as an extension in <base>.custom named xxx__c, a base field changes only within the display-property whitelist, and `__c` is refused outside a .custom pair",
+      "since": "v18",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (holds manage_metadata; single posture)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin (admin@objectos.ai / admin123), and a console built from this tree with `pnpm console:build`",
+          "the stock read-only base com.example.showcase (examples/app-showcase/objectstack.config.ts: id com.example.showcase, namespace showcase, version 0.1.0 — a booted code package, so read-only to isWritablePackage) and its customization pair com.example.showcase.custom (namespace showcase_custom, dependency ^0 on the base), created by the ensure door on the first customization",
+          "the packaged object showcase_task and one of its text fields with a label (the base-field patch leg)",
+          "a writable project package of the run's own, for the `__c`-outside-the-pair refusal (POST /api/v1/packages, scope project); deleted at teardown"
+        ],
+        "knownGaps": [
+          "AUTOMATION LIVES UNDER ui/ — `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/studio-design/FILE`; the jsdom pins mock the server",
+          "the extension's publish and its merge into the served object are server behaviour the jsdom pins do not reach; the protocol pins (packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts, packages/objectql/src/registry-extension-field-patches.test.ts) drive no HTTP door"
+        ]
+      },
+      "steps": [
+        "open /_console/studio/com.example.showcase/data, pick showcase_task, open its Form; press the extension add-field control (data-testid data-form-add-extension-field), type the label 'Region', and read the API-name preview (add-field-api-name-preview) before Create",
+        "Create with the network panel recording: capture POST /api/v1/packages/com.example.showcase/ensure-customization and PUT /api/v1/meta/object_extension/showcase_task?mode=draft&package=com.example.showcase.custom; confirm no PUT /api/v1/meta/object/showcase_task is sent",
+        "add a second field ('Tier'): capture that the ensure door is not asked again and the extension draft now carries both fields",
+        "base-field patch: select a shipped text field, edit its label, and read the save; then read the field's `required` control and the sentence under it (data-testid field-base-patch-only)",
+        "publish the pair (Pending / Publish → POST /api/v1/packages/com.example.showcase.custom/publish-drafts); GET /api/v1/meta/object/showcase_task and GET /api/v1/meta/object_extension/showcase_task?package=com.example.showcase.custom; create a showcase_task with region__c set through the data API and read it back",
+        "reopen Add field and type 'Region' again: read the hint the popover gives for region__c",
+        "refusal legs over the API: PUT /api/v1/meta/object/NS_qa_c_probe?package=QA_PKG (the run's writable package; NS is QA_PKG's namespace, because an object name without it answers 422 NAMESPACE_PREFIX before the `__c` judge is asked) with a field named note__c; and PUT /api/v1/meta/object_extension/showcase_task?mode=draft&package=com.example.showcase.custom with an unsuffixed field 'plain_note'; capture both answers",
+        "teardown: Restore package original on showcase_task's extension (or DELETE the pair's object_extension draft and row), delete QA_PKG"
+      ],
+      "acceptance": [
+        {
+          "clause": "Add field on the read-only base object writes an extension into the pair, the field named region__c, and never sends the base object's body",
+          "oracle": "network",
+          "verify": "the preview reads region__c before Create; step 2 sends one ensure POST then the object_extension draft PUT naming package=com.example.showcase.custom with body { extend: 'showcase_task', fields: { region__c: { type: 'text', label: 'Region' } } }; no object PUT is sent. Step 3 adds tier__c to the same extension with no second ensure",
+          "evidence": "the network trace of steps 1–3"
+        },
+        {
+          "clause": "after publish the base object is served with the extension's field merged, and a record stores and returns a value for it",
+          "oracle": "api",
+          "verify": "step 5: GET /meta/object/showcase_task lists region__c and tier__c beside the shipped fields; the pair's object_extension read returns the extension; the data API create with region__c answers 2xx and the read-back carries the value",
+          "evidence": "the object read + the extension read + the record round trip"
+        },
+        {
+          "clause": "a base field changes only within the display-property whitelist: a label edit is written as a patch in the extension's fieldPatches, and `required` is not editable, with one sentence naming the whitelist",
+          "oracle": "network",
+          "verify": "step 4's save carries the label alone under fieldPatches for that field (BASE_FIELD_DISPLAY_WHITELIST: label, description, inlineHelpText, placeholder, and option labels); the required control is disabled and field-base-patch-only names the whitelist. A save that sends the base field whole, or any non-whitelisted key, is the FAIL",
+          "evidence": "the save body + the disabled-control screenshot"
+        },
+        {
+          "clause": "`__c` is reserved to a base's .custom pair: a `__c` field in any other package is refused, and an unsuffixed extension field in the pair is refused, each naming the fix",
+          "oracle": "api",
+          "verify": "step 7: both PUTs answer 400 VALIDATION_ERROR with the field located in issues (judgeExtensionFieldSuffix: reserved_outside_pair — rename it; unsuffixed_in_pair — suffix it, or patch the base field's display properties in fieldPatches); a GET afterwards finds neither stored",
+          "evidence": "the two refusal bodies + the follow-up reads"
+        },
+        {
+          "clause": "the popover refuses a name already taken: region__c, once published, is not offered again",
+          "oracle": "dom",
+          "verify": "step 6: add-field-api-name-hint names region__c as taken and add-field-create is aria-disabled",
+          "evidence": "the popover DOM read"
+        }
+      ],
+      "negative": [
+        "a field added from the read-only base's Studio that lands in com.example.showcase, or is written into the base object's own body, is the FAIL ADR-0146 D10 exists for: objects are extended, never replaced"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "automation-input",
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "ui/e2e/live/studio-customize-journey.spec.ts (live Playwright against a booted showcase and a built console, in the required Live E2E UI job's test:e2e:live:ci allowlist: acceptance[0] for region__c at the network layer — the API-name preview, the draft PUT naming package=com.example.showcase.custom with body { extend: 'showcase_task', fields: { region__c: { type: 'text', label: 'Region' } } } — not tier__c, not the absence of an object PUT; acceptance[1] at HTTP after publish — GET /meta/object/showcase_task lists region__c, the pair's object_extension read and the pair's export carry it — not the record round trip) + ui/packages/app-shell/src/views/studio-design/DataPillar.baseObjectExtension-28575.test.tsx + StudioCustomizeControls.objectExtension-28575.test.ts (jsdom: acceptance[0], [2]'s client half and [4], the console's calls against a mocked server) + packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts (protocol layer: both refusal cases of acceptance[3], no HTTP door). The record round trip, acceptance[2] and [3] at HTTP and acceptance[4] remain the run's live leg"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#OBJECT_EXTENSION_TYPE, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#extensionFieldName, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#routeFoldedFieldsEdit (a whitelisted change routed into fieldPatches) + ui/packages/app-shell/src/views/studio-design/AddFieldPopover.tsx#AddFieldPopover",
+        "packages/spec/src/data/field-customization.ts#BASE_FIELD_DISPLAY_WHITELIST",
+        "packages/metadata-protocol/src/protocol-extension-field-suffix.ts#judgeExtensionFieldSuffix (reserved_outside_pair, unsuffixed_in_pair; VALIDATION_ERROR / 400)",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D10 (the maintainer: 「扩展字段用 __c 后缀，只有 .custom 包能用。」)",
+        "#28575 (N-23c) landed by PR #28860; the `__c` judge #28564 (N-23b) by PR #28724; the extension write path #28574 (N-23e) by PR #28811",
+        "cross-ref: platform-core.packaged-object-extend-only (the object's own write doors, unchanged); studio-authoring.package-customization-counts-and-marks (the extension counted as a customization)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-02",
+          "change": "new item (ADR-0146 N-23c, #28575 / PR #28860, with the `__c` judge of PR #28724): Studio's Add field on the read-only showcase_task writes region__c into an object_extension of com.example.showcase.custom, a base field's label edit is a fieldPatches entry, `required` is outside the whitelist, and `__c` is refused outside the pair. Read from source at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "steps[6]'s object outside the pair is named with QA_PKG's namespace prefix: measured in the slice 3 run (base 128681f4), PUT /api/v1/meta/object/qa_c_probe?package=QA_PKG answers 422 NAMESPACE_PREFIX before the `__c` judge runs, while the prefixed name answers the 400 VALIDATION_ERROR acceptance[3] scores. automated now names the live spec ui/e2e/live/studio-customize-journey.spec.ts and the clauses it drives; kind e2e, and the sentence that the e2e was owed by slice 3 is gone. No clause changed",
+          "ref": "#28579"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.package-customization-counts-and-marks",
+      "title": "The Studio landing says 'n customized, m switched off' for each read-only base, and the All metadata lists mark the pair's items 'Customized' or 'Added' with an 'only customizations' filter — every number read from GET /packages/:id/customizations",
+      "since": "v18",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin (admin@objectos.ai / admin123), and a console built from this tree with `pnpm console:build`",
+          "the stock read-only base com.example.showcase (examples/app-showcase/objectstack.config.ts: id com.example.showcase, namespace showcase, version 0.1.0 — a booted code package, so read-only to isWritablePackage) and its customization pair com.example.showcase.custom (namespace showcase_custom, dependency ^0 on the base), created by the ensure door on the first customization",
+          "at least one published override (studio-authoring.package-customize-restore-display's dashboard leg, before its restore), one published extension (studio-authoring.package-extension-field-c), one item the pair adds (Studio's New on the read-only base, e.g. a permission set from studio-authoring.access-permission-set-lifecycle step 6) and one packaged flow switched off (Studio's auto-ledger-switch), so every number is non-zero"
+        ],
+        "knownGaps": [
+          "AUTOMATION LIVES UNDER ui/ — `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/studio-design/FILE`; the jsdom pins mock the customizations read"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/packages/com.example.showcase/customizations and record counts.overrides, counts.extensions and counts.switchedOff and the listed items",
+        "open /_console/studio and read the read-only showcase card's line (data-testid studio-landing-customizations, data-state read), its pair link (studio-landing-customizations-pair) and its switched-off link (studio-landing-customizations-switched-off)",
+        "open /_console/studio/com.example.showcase/metadata: read the directory total (directory-customizations-total) and the per-type tile counts",
+        "open the dashboard list of that area: read the mark on the overridden dashboard and on the pair's added item (customization-mark), then switch on the 'only customizations' filter (metadata-only-customizations) and read what remains",
+        "control: open the landing and a writable package's All metadata area with the network panel recording — the landing asks for no writable card, and the area's read of the writable package draws no line, no mark and no filter; and GET /api/v1/packages/com.example.showcase.custom/customizations"
+      ],
+      "acceptance": [
+        {
+          "clause": "the landing line reads 'n customized, m switched off' where n = counts.overrides + counts.extensions and m = counts.switchedOff of the served read — no number of the console's own",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the card rendered, the line's numbers equal step 1's served counts (fetchPackageCustomizations computes none); the pair link opens com.example.showcase.custom and the switched-off link the Automations pillar",
+          "evidence": "the served read + the landing DOM read"
+        },
+        {
+          "clause": "the All metadata area marks the pair's items — an override 'Customized', an item the pair adds 'Added' — and the 'only customizations' filter leaves exactly those; the directory's total and tiles match the served read",
+          "oracle": "dom",
+          "verify": "step 3's total equals overrides + extensions; step 4's marks sit on exactly the items step 1 lists (customizationMarkOf: an override served under the base or the pair is customized, any other item of the pair is added, the base's own items carry nothing); the filter hides every unmarked row",
+          "evidence": "the directory and list DOM reads beside step 1"
+        },
+        {
+          "clause": "a failed read draws no number and no mark — never a '0' — the landing asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
+          "oracle": "network",
+          "verify": "step 5: the landing sends no customizations request for a writable card; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: BuilderLanding.customizationCounts-28566 and metadataAreaHost.customizations-28568 pin it",
+          "evidence": "the network trace + the pair-id refusal body"
+        }
+      ],
+      "negative": [
+        "a count the console derives (from the list it holds, or a `.custom` spelling) instead of the served counts is the FAIL ADR-0146 D8 item 4 rules out: the customization list is served rows and ledger rows, nothing computed"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race",
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/studio-design/BuilderLanding.customizationCounts-28566.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment, and the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not read the counts or the marks, so every browser and api clause is the run's live leg"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/studio-design/packageCustomizations-io.ts#fetchPackageCustomizations (GET /api/v1/packages/:id/customizations, judged by GetPackageCustomizationsResponseSchema; a pair id refused before a request) + ui/packages/app-shell/src/views/studio-design/BuilderLanding.tsx#BuilderLanding (the card's line)",
+        "ui/packages/app-shell/src/views/studio-design/customizationMarks.ts#customizationMarkOf + ui/packages/app-shell/src/views/studio-design/CustomizationMark.tsx#CustomizationMark + ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx (the only-customizations filter) + ui/packages/app-shell/src/views/metadata-admin/DirectoryPage.tsx (the total and the tile counts)",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D3 (one line per package on the landing) and D8 item 4 (the per-package customization read)",
+        "#28566 (N-24) landed by PR #28634; #28568 (N-26b) by PR #28667; the read #28411 (N-15)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-02",
+          "change": "new item (ADR-0146 N-24 #28566 / PR #28634 and N-26b #28568 / PR #28667): the landing's 'n customized, m switched off' and the All metadata marks and filter, each number read from GET /packages/:id/customizations. Read from source at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "acceptance[2] and steps[4] corrected, an assertion defect measured in the slice 3 run (base 128681f4): the clause said a writable package is never asked, but the All metadata area asks every package except a pair (usePackageCustomizations; metadataAreaHost.customizations-28568's 'a base without a pair is unchanged' pins the read), and only the landing limits itself to read-only bases. The clause now scores what the console promises: the landing asks no writable card, a package with zero counts draws nothing, a pair id is refused. automated says the slice 3 live spec does not cover this item instead of saying the e2e is owed. The run scored acceptance[2] FAIL against revision 1",
+          "ref": "#28579"
         }
       ]
     }

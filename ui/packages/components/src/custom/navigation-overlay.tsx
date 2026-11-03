@@ -10,20 +10,20 @@
  * NavigationOverlay
  *
  * A reusable component that renders record detail overlays based on
- * ViewNavigationConfig mode: the drawer (Sheet), and the split pane a host
- * draws from a reader's own preference. `modal` and `popover` were retired
- * from the spec's `NavigationModeSchema` (objectstack#26677), and with them
- * the Dialog and Popover faces: no caller could reach either once the values
- * left metadata.
+ * ViewNavigationConfig mode: the drawer (Sheet). `modal` and `popover` were
+ * retired from the spec's `NavigationModeSchema` (objectstack#26677), and with
+ * them the Dialog and Popover faces: no caller could reach either once the
+ * values left metadata. The split pane beside the list retired too
+ * (objectstack#28915, maintainer ruling 2026-11-02: 「默认改抽屉，分屏彻底退役，
+ * 只留抽屉和整页」): a record opens in the drawer or as the full page.
  *
- * Both faces leave a list the host hands over (`mainContent`) usable
- * (objectstack#27545): the drawer over it draws no dimming overlay and is
- * non-modal, so a click on another row swaps the record instead of closing
- * it; the split pane sits beside it, and it narrows to the remaining width.
- * A drawer with no list is the modal sheet over the page, as before. A split pane falls back to the drawer when
- * the content area is narrower than {@link RECORD_SPLIT_MIN_CONTENT_PX}, and a
- * `maximizable` host gets `⤢`, which widens the pane in place over the whole
- * content area — the sidebar stays — without leaving the URL it is on.
+ * The drawer leaves a list the host hands over (`mainContent`) usable and at
+ * its full width (objectstack#27545): over it the drawer draws no dimming
+ * overlay and is non-modal, so a click on another row swaps the record
+ * instead of closing it. A drawer with no list is the modal sheet over the
+ * page, as before. A `maximizable` host gets `⤢`, which widens the drawer in
+ * place over the whole content area — the sidebar stays — without leaving the
+ * URL it is on.
  *
  * Works in conjunction with useNavigationOverlay hook from @object-ui/react —
  * the hook manages state while this component handles the visual presentation.
@@ -77,12 +77,7 @@ import {
 import { useOptionalSidebar } from '../ui/sidebar';
 import { usePopperAwareInteractOutside } from './mobile-dialog-content';
 import { createSafeTranslation } from '@object-ui/i18n';
-import {
-  ActiveListRecordProvider,
-  RecordListFaceProvider,
-  recordListFaceFor,
-  type RecordListFace,
-} from './record-list-face';
+import { ActiveListRecordProvider } from './record-list-face';
 import { RecordTopBar, RecordTopBarButton, useRecordStepKeys, type RecordTopBarStepper } from './record-top-bar';
 
 /**
@@ -98,7 +93,6 @@ import { RecordTopBar, RecordTopBarButton, useRecordStepKeys, type RecordTopBarS
  */
 const OVERLAY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'common.close': 'Close',
-  'common.closePanel': 'Close panel',
   // The drag handle is a bare `role="separator"` with no visible label, so
   // this literal IS the control to a screen reader.
   'common.resizeDrawer': 'Resize drawer',
@@ -108,8 +102,8 @@ const OVERLAY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // The bar's ⤢ / ⤡ pair (`maximizable`, objectstack#27545).
   'detail.maximize': 'Maximize',
   'detail.restoreSize': 'Restore size',
-  // The pane's accessible name when the host passes no `title`. The bar draws
-  // no title text on either face (objectstack#26679: the record body names
+  // The drawer's accessible name when the host passes no `title`. The bar
+  // draws no title text (objectstack#26679: the record body names
   // the record), so this is an accessible name only.
   'detail.recordDetail': 'Record Detail',
   // The bar's back control (`onBack`, objectstack#26679).
@@ -133,15 +127,12 @@ const useOverlayTranslation = createSafeTranslation(
 
 /**
  * Navigation mode type — the spec's `NavigationMode` (`drawer | page |
- * new_window | none`, objectstack#26677) plus `split`: the side-by-side pane is
- * no longer metadata but a reader's own preference, which a host (the
- * console's object page) turns into this mode when it draws an open record
- * beside its list.
+ * new_window | none`, objectstack#26677). The `split` face a host could add
+ * retired with objectstack#28915.
  */
 export type NavigationOverlayMode =
   | 'page'
   | 'drawer'
-  | 'split'
   | 'new_window'
   | 'none';
 
@@ -157,8 +148,8 @@ export interface NavigationOverlayProps {
   /** Set open state (for the controlled Sheet's onOpenChange) */
   setIsOpen: (open: boolean) => void;
   /**
-   * Width of the pane (drawer / split) until the reader drags it. Drawn as
-   * given: no floor widens it (objectstack#27545).
+   * Width of the drawer until the reader drags it. Drawn as given: no floor
+   * widens it (objectstack#27545).
    */
   width?: string | number;
   /** Whether navigation is an overlay mode */
@@ -166,7 +157,7 @@ export interface NavigationOverlayProps {
   /** Target view/form name from NavigationConfig */
   view?: string;
   /**
-   * The pane's accessible name. Neither face draws title text — the bar holds
+   * The drawer's accessible name. It draws no title text — the bar holds
    * controls only (objectstack#26679, maintainer ruling 2).
    */
   title?: string;
@@ -186,16 +177,15 @@ export interface NavigationOverlayProps {
    */
   renderView?: (record: Record<string, unknown>, viewName: string) => React.ReactNode;
   /**
-   * The list the pane opens records from (drawer and split, objectstack#27545).
+   * The list the drawer opens records from (objectstack#27545).
    *
-   * Drawn whether or not a record is open, always in the same place, so
-   * opening, stepping and closing never remount it. The split face narrows it
-   * beside the pane and publishes its narrowed face (`useRecordListFace`);
-   * both faces publish which row is open (`useIsActiveListRecord`, from
+   * Drawn whether or not a record is open, always in the same place and at
+   * its full width, so opening, stepping and closing never remount or narrow
+   * it. The drawer publishes which row is open (`useIsActiveListRecord`, from
    * {@link activeListRecordId}). Pass the same element across renders: an
    * unchanged element is not re-rendered when the open record changes.
    *
-   * Without it the split face draws nothing and the drawer floats alone.
+   * Without it the drawer is the modal sheet over the page.
    */
   mainContent?: React.ReactNode;
   /**
@@ -212,7 +202,7 @@ export interface NavigationOverlayProps {
    */
   onExpand?: () => void;
   /**
-   * `⤢` maximize in place (objectstack#27545): the pane widens over the whole
+   * `⤢` maximize in place (objectstack#27545): the drawer widens over the whole
    * content area — the viewport less the sidebar's live width — and the list
    * behind it is hidden; `⤡` or `Esc` restores the width it had. Nothing else
    * changes: the URL, the history, the list's scroll and the host's stack.
@@ -229,7 +219,7 @@ export interface NavigationOverlayProps {
   expandLabel?: string;
   /**
    * Optional storage key for persisting the user's manually-resized drawer
-   * width (drawer and split). When provided, the pane renders a drag
+   * width. When provided, the drawer renders a drag
    * handle on its left edge and remembers the resized width in
    * `localStorage` across sessions. Use a stable, scoped key such as
    * `'drawer-width:lead'` so different objects get independent widths.
@@ -239,8 +229,7 @@ export interface NavigationOverlayProps {
    */
   storageKey?: string;
   /**
-   * Retired storage key whose value is migrated into `storageKey` once
-   * (drawer and split).
+   * Retired storage key whose value is migrated into `storageKey` once.
    *
    * ⭐ objectui#9299 item 4: there used to be TWO drag-resize implementations
    * with two different persisted keys and two different floors —
@@ -258,7 +247,7 @@ export interface NavigationOverlayProps {
    */
   legacyStorageKey?: string;
   /**
-   * One level back (drawer and split, objectstack#26679). When provided the
+   * One level back (objectstack#26679). When provided the
    * bar draws a `←` control at its left edge and `Esc` calls this instead of
    * closing the drawer: a host that opened a record IN PLACE (a related row,
    * a lookup value) hands it the pop of its stack, so each `←` / `Esc` undoes
@@ -266,7 +255,7 @@ export interface NavigationOverlayProps {
    */
   onBack?: () => void;
   /**
-   * The left end of the bar after the `←` control (drawer and split): the
+   * The left end of the bar after the `←` control: the
    * host's breadcrumb — 「对象 › 记录名」 at the root of a record pane, and one
    * level down the ancestors of the record shown, each one a control that
    * returns to it (objectstack#26679, objectstack#27524 Target 7). Nothing is
@@ -275,7 +264,7 @@ export interface NavigationOverlayProps {
    */
   trail?: React.ReactNode;
   /**
-   * Previous / next record (drawer and split, objectstack#26679). When passed
+   * Previous / next record (objectstack#26679). When passed
    * the bar draws the counter 「3 / 21」 (with `position`; its tooltip names
    * `scope`) and the `↓` `↑` pair (objectstack#27524, Target 7), and `↑` /
    * `↓` / `k` / `j` step through the host's sibling set while no text input,
@@ -333,12 +322,6 @@ const DRAWER_MIN_PX = 360;
 const DRAWER_MAX_VW = 60;
 
 /**
- * Below this content-area width a split pane draws as the drawer instead
- * (objectstack#27545): beside a 720 px pane the list would have no room left.
- */
-export const RECORD_SPLIT_MIN_CONTENT_PX = 1000;
-
-/**
  * The sidebar provider's own widths (`--sidebar-width`, `--sidebar-width-icon`
  * in `ui/sidebar.tsx`). Inside the provider the variables resolve to their
  * live values; these stand in only where they do not resolve — the drawer
@@ -366,27 +349,6 @@ function maximizedWidthCss(sidebarWidth: string): string {
   return `calc(100vw - ${sidebarWidth})`;
 }
 
-/** An element's rendered width, kept current while it resizes; `null` until measured. */
-function useElementWidth(el: HTMLElement | null): number | null {
-  const [width, setWidth] = React.useState<number | null>(null);
-  React.useLayoutEffect(() => {
-    if (!el) {
-      setWidth(null);
-      return;
-    }
-    const read = () => {
-      const next = el.getBoundingClientRect().width;
-      setWidth(next > 0 ? next : null);
-    };
-    read();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(read);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [el]);
-  return width;
-}
-
 /**
  * Whether an `Esc` belongs to the element it was pressed in rather than to the
  * pane: a text field, or an open menu, list box or dialog (which closes itself
@@ -400,26 +362,6 @@ function escapeOwnedByTarget(target: EventTarget | null, pane?: Element | null):
   }
   const owner = target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
   return !!owner && owner !== pane;
-}
-
-/**
- * The split pane's `Esc`, on the document while it is open: the drawer gets
- * the same key from its dialog layer, the pane beside the list has none.
- */
-function useSplitEscape(active: boolean, onEscape: () => void) {
-  const handler = React.useRef(onEscape);
-  handler.current = onEscape;
-  React.useEffect(() => {
-    if (!active || typeof document === 'undefined') return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if (escapeOwnedByTarget(e.target)) return;
-      e.preventDefault();
-      handler.current();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [active]);
 }
 
 /**
@@ -475,8 +417,7 @@ function useDrawerResize(
     draggingRef.current = true;
 
     const maxPx = Math.floor((window.innerWidth * DRAWER_MAX_VW) / 100);
-    // The pane is right-anchored: the drawer at the viewport's edge, the
-    // split pane at the content area's (the handle's own pane).
+    // The drawer is right-anchored, at the viewport's edge.
     const paneRight = e.currentTarget.parentElement?.getBoundingClientRect().right || window.innerWidth;
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
@@ -528,9 +469,7 @@ function useDrawerResize(
  *
  * Supports:
  * - **drawer**: Right-side Sheet panel — non-modal over a `mainContent` list,
- *   modal over the page without one
- * - **split**: a pane beside the list (a host's preference face); the drawer
- *   when the content area is too narrow for both
+ *   which keeps its full width, modal over the page without one
  * - **page / new_window / none**: no record is drawn (the hook navigates); a
  *   `mainContent` is still drawn, in the same place
  */
@@ -570,7 +509,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   const resolvedExpandLabel = expandLabel ?? t('detail.openAsFullPage');
   // sr-only Sheet description for the drawer below.
   const overlayDescription = t('detail.recordDetailOverlay', { title: resolvedTitle });
-  const paneMode = mode === 'drawer' || mode === 'split';
+  const paneMode = mode === 'drawer';
   // Keep hooks above all conditional returns. Opening a record changes
   // selectedRecord from null to an object, but hook order must stay stable.
   const resize = useDrawerResize(
@@ -578,16 +517,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     paneMode ? legacyStorageKey : undefined,
   );
   // The list is drawn in every mode, in one place, so a host that hands it
-  // over never remounts it when the mode or the face changes.
+  // over never remounts it when the mode changes.
   const hasList = mainContent != null;
-  const [hostEl, setHostEl] = React.useState<HTMLDivElement | null>(null);
-  const [listEl, setListEl] = React.useState<HTMLDivElement | null>(null);
-  const hostWidth = useElementWidth(hasList ? hostEl : null);
-  const listWidth = useElementWidth(hasList ? listEl : null);
   const shown = paneMode && isOpen && !!selectedRecord;
-  // An unmeasured host (no layout yet) is taken as wide enough.
-  const face: 'drawer' | 'split' =
-    mode === 'split' && !(hostWidth !== null && hostWidth < RECORD_SPLIT_MIN_CONTENT_PX) ? 'split' : 'drawer';
   const [maximizedState, setMaximized] = React.useState(false);
   // Not remembered: a closed pane opens at its own width again.
   React.useEffect(() => {
@@ -605,11 +537,10 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     else if (onBack) onBack();
     else close();
   };
-  useSplitEscape(hasList && face === 'split' && shown, handleEscape);
   // The drawer's dialog layer hears `Esc` on the document in the capture
-  // phase, before any field in the record does, so it asks the split pane's
-  // question itself: a key already handled, or pressed where a field or a
-  // menu owns it, is not the pane's. It still holds the sheet open — left
+  // phase, before any field in the record does, so it asks itself whether
+  // the key is the drawer's: a key already handled, or pressed where a field
+  // or a menu owns it, is not. It still holds the sheet open — left
   // unprevented, the layer would dismiss the whole drawer on it.
   const sheetRef = React.useRef<HTMLDivElement>(null);
   const handleDrawerEscape = (e: KeyboardEvent) => {
@@ -621,10 +552,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
 
   // Non-overlay modes draw no record (the hook navigates); only the list.
   if (!paneMode && !hasList) {
-    return null;
-  }
-  // A split pane needs the list it sits beside.
-  if (mode === 'split' && !hasList) {
     return null;
   }
 
@@ -662,9 +589,8 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     />
   ) : null;
 
-  // ✕ closes the whole path on either face; beside the list it is named the
-  // panel's close, as it always was.
-  const closeLabel = hasList && face === 'split' ? t('common.closePanel') : t('common.close');
+  // ✕ closes the whole path.
+  const closeLabel = t('common.close');
 
   /* The bar — the record's top bar (objectstack#27524, Target 7, after
      objectstack#26679): the left end holds `←` and the host's breadcrumb; the
@@ -714,7 +640,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // (objectstack#27545): the list stays readable and clickable, so an outside
   // click — another row, the toolbar — never dismisses it; ✕ and `Esc` do.
   // With no list it is the modal sheet over the page it always was.
-  const drawer = paneMode && face === 'drawer' && selectedRecord ? (
+  const drawer = paneMode && selectedRecord ? (
     <Sheet open={isOpen} onOpenChange={setIsOpen} modal={!hasList}>
       <SheetContent
         side="right"
@@ -771,55 +697,22 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
 
   if (!hasList) return drawer;
 
-  // --- The list, and the split pane beside it ---
-  // One element across every state — closed, split, drawer, maximized — so
-  // the list never remounts and its scroll survives (objectstack#27545). The
-  // pane is one element too: maximizing restyles it, it does not remount it.
-  const paneBeside = face === 'split' && shown;
-  const listFace: RecordListFace = paneBeside && !maximized
-    ? listWidth !== null ? recordListFaceFor(listWidth) : 'columns'
-    : 'full';
+  // --- The list under the drawer ---
+  // One element across every state — closed, drawer, maximized — so the list
+  // never remounts and its scroll survives (objectstack#27545), and it keeps
+  // its full width whether or not a record is open (objectstack#28915).
   return (
     <>
       <ActiveListRecordProvider recordId={shown ? activeListRecordId ?? null : null}>
-        <RecordListFaceProvider value={listFace}>
-          <div
-            ref={setHostEl}
-            className={cn('relative flex h-full min-h-0 min-w-0 flex-1 flex-row', mode === 'split' && className)}
-            data-testid="record-split-host"
-          >
-            <div
-              ref={setListEl}
-              className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
-              // Maximized, the pane covers the list; the list keeps its place
-              // and its scroll, out of reach until the pane is restored.
-              inert={maximized}
-              data-testid="record-split-list"
-            >
-              {mainContent}
-            </div>
-            {paneBeside && selectedRecord && (
-              <aside
-                aria-label={resolvedTitle}
-                className={cn(
-                  'flex h-full min-h-0 flex-col overflow-hidden bg-background',
-                  maximized
-                    ? 'absolute inset-y-0 right-0 z-20 w-[var(--ov-w)] max-w-full'
-                    : 'relative w-[var(--ov-w)] max-w-full shrink-0 border-l',
-                )}
-                style={widthStyle}
-                data-testid="record-split-pane"
-                data-maximized={maximized ? '' : undefined}
-              >
-                {resizeHandle}
-                {bar}
-                <div className="flex-1 min-h-0 overflow-y-auto">
-                  {renderContent(selectedRecord)}
-                </div>
-              </aside>
-            )}
-          </div>
-        </RecordListFaceProvider>
+        <div
+          className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+          // Maximized, the drawer covers the list; the list keeps its place
+          // and its scroll, out of reach until the drawer is restored.
+          inert={maximized}
+          data-testid="record-list-host"
+        >
+          {mainContent}
+        </div>
       </ActiveListRecordProvider>
       {drawer}
     </>

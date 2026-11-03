@@ -1243,6 +1243,14 @@ export const ShowcaseTranslationBundle = {
       showcase_active_projects: { label: '进行中的项目' },
       // `ui/pages/invoice-document.page.ts` — the invoice print page.
       showcase_invoice_document: { label: '发票' },
+      // `ui/pages/task-detail.page.ts` — the banner a task in review shows.
+      // Only its `title` has a key on this face; its `body` carries its
+      // zh-CN text inline on the page (see the comment on the node there).
+      showcase_task_detail: {
+        components: {
+          review_alert: { title: '待评审' },
+        },
+      },
       showcase_contact_form: {
         components: {
           field_name: { label: '姓名', placeholder: '艾达·洛夫莱斯' },

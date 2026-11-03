@@ -115,8 +115,9 @@ import {
   withServedLabelTargets,
   type DimensionLabelDeps,
 } from './dimension-labels.js';
-import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
+import { evaluateAnalyticsQueryOverRows, lowerPreviewRowFilters } from './preview-evaluator.js';
 import { assertDatasetGroupColumnsDistinct } from './dataset-group-column-door.js';
+import { assertDatasetDateBucketsTemporal } from './dataset-date-bucket-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { scopedMeasureFilter } from './scoped-measure-key.js';
@@ -2891,6 +2892,17 @@ export class AnalyticsService implements IAnalyticsService {
             // under one `null` key (and a filter on one matched no row) where
             // the live strategies join it. See {@link assertPreviewJoinsNothing}.
             this.assertPreviewJoinsNothing(q, cube);
+            // [#28977] …then the row filters (the `where`, then the
+            // time-dimension windows), lowered once here and handed to the
+            // evaluator: the ObjectQL strategy lowers both before the two doors
+            // below, so an unrecognised `dateRange` beside a column asked twice
+            // or a bucket over a text column is refused about the `dateRange`
+            // on every face. The evaluator lowered them after both doors, and
+            // answered the door's refusal.
+            const previewCube = previewEvaluationCube(q, cube);
+            const declaredType = (field: string) => this.sourceFieldMeta?.(dataset.object, field)?.type;
+            const whereColumns = previewWhereColumns(q, cube);
+            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns);
             // [#28765, #28798] …and a selection asking one column for two
             // values under one name (raw beside its own bucket, or two buckets
             // of it), with the refusal the ObjectQL strategy gives both live
@@ -2902,15 +2914,21 @@ export class AnalyticsService implements IAnalyticsService {
               q,
               (member) => resolveCubeFieldName(cube, member, 'dimension'),
             );
+            // [#28852] …and a date bucket over a field declared neither a date
+            // nor a datetime, with the refusal the engine gives both live faces
+            // for the same keys (after the column refusal above, as there),
+            // where the evaluator served one `null` (or `1970`) group.
+            assertDatasetDateBucketsTemporal(aggregateObjectOf(cube), aggregateGroupKeys(q, cube), declaredType);
             return evaluateAnalyticsQueryOverRows(
               q,
-              previewEvaluationCube(q, cube),
+              previewCube,
               seedRows!,
-              (field) => this.sourceFieldMeta?.(dataset.object, field)?.type,
+              declaredType,
               compiled.durations,
               // [#28691] …and each `where` member the live faces read from a
               // column spelled otherwise is read from that column.
-              previewWhereColumns(q, cube),
+              whereColumns,
+              rowFilters,
             );
           },
         } as IAnalyticsService;
@@ -4992,6 +5010,36 @@ export function inferredCallerMeasureSql(measure: string, cubeName: string): str
 }
 
 /**
+ * [#29364] The service's date-bucket door (`dataset-date-bucket-door.ts`) in
+ * front of the delegated service, on both the query and the dry run.
+ *
+ * The delegate (`MemoryAnalyticsService` is the in-repo one) folds a bucketed
+ * time dimension itself and reads no field type, so on `origin/main` `aca58cdb`
+ * a month bucket over a `formula` answered 200 with one `null` group holding
+ * every row, and over a `text` column one `null` group beside whatever text
+ * happened to parse as a date — while the engine face refused both. It is
+ * judged here with the keys the ObjectQL strategy's direct path would build
+ * and the context's `declaredFieldType` (the host's `sourceFieldMeta`), so this
+ * face answers the engine's refusal field for field. A host that wired no
+ * field types is not judged, as on the preview and the dry run.
+ *
+ * Reached by no shipped composition (the auto-mounted plugin always bridges
+ * `executeAggregate`, so every bucketed query goes to the engine); reached by
+ * a host composing `new AnalyticsService({ fallbackService })`, or a
+ * `queryCapabilities` override with `objectqlAggregate: false`.
+ */
+function assertDelegatedDateBucketsTemporal(query: AnalyticsQuery, ctx: StrategyContext): void {
+  const cube = ctx.getCube(query.cube!);
+  if (!cube) return;
+  const object = aggregateObjectOf(cube);
+  assertDatasetDateBucketsTemporal(
+    object,
+    aggregateGroupKeys(query, cube),
+    (field) => (ctx as DatasetScopedStrategyContext).declaredFieldType?.(object, field),
+  );
+}
+
+/**
  * FallbackDelegateStrategy — Internal strategy for fallback service delegation.
  *
  * Automatically added to the strategy chain when `fallbackService` is configured.
@@ -5008,10 +5056,12 @@ class FallbackDelegateStrategy implements AnalyticsStrategy {
   }
 
   async execute(query: AnalyticsQuery, ctx: StrategyContext): Promise<AnalyticsResult> {
+    assertDelegatedDateBucketsTemporal(query, ctx);
     return ctx.fallbackService!.query(query);
   }
 
   async generateSql(query: AnalyticsQuery, ctx: StrategyContext): Promise<{ sql: string; params: unknown[] }> {
+    assertDelegatedDateBucketsTemporal(query, ctx);
     if (ctx.fallbackService?.generateSql) {
       return ctx.fallbackService.generateSql(query);
     }

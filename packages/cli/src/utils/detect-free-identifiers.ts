@@ -36,10 +36,12 @@
  * so the handler falls back to the bundle (where it runs in Node and works).
  */
 
-// `ts-morph` is already a CLI runtime dependency and re-exports the full
-// TypeScript compiler namespace, so we use its `ts` rather than adding a direct
-// `typescript` dependency.
-import { ts } from 'ts-morph';
+// The compiler namespace comes from `typescript`, a direct CLI runtime
+// dependency on the same `^6.0.3` line `@objectstack/lint` declares. The CLI
+// uses the compiler API and nothing else, so it does not take it through
+// `ts-morph`, whose `@ts-morph/common` would add a second bundled compiler and
+// its own `minimatch` line to every install.
+import ts from 'typescript';
 
 /**
  * Identifiers the HOOK SANDBOX provides ambiently — the allowlist proper.
@@ -72,6 +74,11 @@ export const SANDBOX_GLOBALS: ReadonlySet<string> = new Set([
   'encodeURIComponent', 'decodeURIComponent', 'encodeURI', 'decodeURI',
   // Literal-ish globals
   'undefined', 'NaN', 'Infinity', 'globalThis',
+  // A MEMBER of a {@link MEMBER_JUDGED_GLOBALS} namespace. The sandbox installs
+  // `Intl` with this one constructor, whole (every prototype method), and
+  // backs it with the host's (#28898) — so a handler formatting a date in an
+  // IANA zone lowers and runs the same in both places.
+  'Intl.DateTimeFormat',
 ]);
 
 /**
@@ -92,9 +99,12 @@ export const SANDBOX_GLOBALS: ReadonlySet<string> = new Set([
  * measured by the probe, never an edit here.
  */
 export const NODE_ONLY_GLOBALS: ReadonlySet<string> = new Set([
-  // ECMA-402. Standard in every browser and in Node; absent from this QuickJS
-  // build. The name the defect was reported under.
-  'Intl',
+  // ECMA-402. Standard in every browser and in Node; the sandbox's `Intl`
+  // carries `DateTimeFormat` only (#28898), so every other member is absent.
+  // `Intl` was the name the #14301 defect was reported under.
+  'Intl.Collator', 'Intl.DisplayNames', 'Intl.ListFormat', 'Intl.Locale',
+  'Intl.NumberFormat', 'Intl.PluralRules', 'Intl.RelativeTimeFormat', 'Intl.Segmenter',
+  'Intl.getCanonicalLocales', 'Intl.supportedValuesOf',
   // Host/Web platform additions, not ECMAScript. QuickJS is the language, not
   // the platform — nothing installs these into the VM.
   'structuredClone', 'queueMicrotask', 'atob', 'btoa',
@@ -112,6 +122,22 @@ export const NODE_ONLY_GLOBALS: ReadonlySet<string> = new Set([
   // run in-process, does not.
   'arguments',
 ]);
+
+/**
+ * Namespaces the sandbox provides IN PART, so a reference to one is judged per
+ * member rather than per name (#28898). `Intl.DateTimeFormat` resolves in the
+ * sandbox and `Intl.NumberFormat` does not, so "is `Intl` in scope?" has no
+ * single answer: {@link collectReferences} records a non-computed member read
+ * as `Intl.NAME` and judges that against {@link SANDBOX_GLOBALS} /
+ * {@link NODE_ONLY_GLOBALS}. Any other use of the bare name — `const I = Intl`,
+ * `Intl[k]`, passing it along — cannot be judged statically, so it is reported
+ * as `Intl` and the handler stays bundled: the safe direction.
+ *
+ * Measured like the other two sets: `sandbox-globals-probe.test.ts` requires
+ * each member here to be PRESENT in the sandbox, and a member it reaches
+ * through to be present or absent as the two sets say.
+ */
+export const MEMBER_JUDGED_GLOBALS: ReadonlySet<string> = new Set(['Intl']);
 
 export interface FreeIdentifierResult {
   /**
@@ -268,6 +294,16 @@ function collectReferences(fn: ts.FunctionLikeDeclarationBase): Set<string> {
     if (ts.isTypeNode(node)) return;
 
     if (ts.isPropertyAccessExpression(node)) {
+      // [#28898] `Intl.DateTimeFormat` — a member of a namespace the sandbox
+      // provides in part is the reference, judged as `Intl.NAME`.
+      if (
+        ts.isIdentifier(node.expression) &&
+        MEMBER_JUDGED_GLOBALS.has(node.expression.text) &&
+        ts.isIdentifier(node.name)
+      ) {
+        refs.add(`${node.expression.text}.${node.name.text}`);
+        return;
+      }
       // `a.b` — visit `a` (could be a ref) but NOT `b` (member name).
       walk(node.expression);
       return;
@@ -346,13 +382,18 @@ export function detectFreeIdentifiers(rawFunctionSource: string): FreeIdentifier
   const free: string[] = [];
   const nodeOnly: string[] = [];
   for (const name of refs) {
-    if (bound.has(name)) continue;
+    // A member reference (`Intl.NAME`) is bound when its namespace name is: a
+    // local or parameter called `Intl` is the author's, not the host's.
+    const root = name.split('.', 1)[0];
+    if (bound.has(root)) continue;
     // Only the SANDBOX set waives a name. A `NODE_ONLY_GLOBALS` member falls
     // through to `free` on purpose — that is the whole fix — and is ALSO
-    // recorded in `nodeOnly` so the refusal can name the right remedy.
+    // recorded in `nodeOnly` so the refusal can name the right remedy. So is
+    // any other use of a member-judged namespace (the bare name, or a member
+    // neither set lists): the host has it, the sandbox is not known to.
     if (SANDBOX_GLOBALS.has(name)) continue;
     free.push(name);
-    if (NODE_ONLY_GLOBALS.has(name)) nodeOnly.push(name);
+    if (NODE_ONLY_GLOBALS.has(name) || MEMBER_JUDGED_GLOBALS.has(root)) nodeOnly.push(name);
   }
   free.sort();
   nodeOnly.sort();

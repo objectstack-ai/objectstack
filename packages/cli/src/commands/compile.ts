@@ -84,6 +84,10 @@ import { findOverrideDeclarationRefusals } from '../utils/override-declarations.
 // (`judgeExtensionFieldSuffix`).
 import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
 
+// [#29051] An undeclared top-level flow cycle — the walk `os validate` step
+// 3a-vii runs, over the automation engine's own judge.
+import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
+
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
 
@@ -833,6 +837,31 @@ export default class Compile extends Command {
         printBulletList(
           suffixRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
           { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3b-iii-ter. [#28893] Flow region shape (ADR-0031) is judged by the
+      //     rule table at step 3b since #29049 (`flow-region-shape-invalid`),
+      //     the same verdict `os validate` and `os lint` give.
+
+      // 3b-iii-quater. [#29051] An undeclared top-level flow cycle (ADR-0044),
+      //     at build time — the SAME call `os validate` makes at its step
+      //     3a-vii: the engine's registration judge (`findUndeclaredFlowCycle`).
+      //     Before this the build emitted a flow the engine then refused at
+      //     boot; now the door that ships refuses it and writes no artifact.
+      const cycleRefusals = findFlowCycleRefusals(result.data as Record<string, unknown>);
+      if (cycleRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: cycleRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = cycleRefusals.length;
+        console.log('');
+        printError(`The automation engine would refuse to register ${n} flow${n > 1 ? 's' : ''} for a cycle no back edge declares (ADR-0044)`);
+        printBulletList(
+          cycleRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'flow cycle refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

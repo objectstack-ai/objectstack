@@ -119,6 +119,10 @@ import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface'
 import { t, tFormat } from '../metadata-admin/i18n';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
+// The pinyin dictionary a Chinese label derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690).
+import { loadHanRomanizer } from '../metadata-admin/romanizeHan';
+await loadHanRomanizer();
 
 registerMetadataInspector('object', ObjectFieldInspector);
 
@@ -347,6 +351,12 @@ describe('Studio adds a field to a read-only base object as an extension in its 
       expect(sentence).toHaveTextContent(t(name, 'en'));
     }
     expect(sentence).toHaveTextContent(t('designer.field.basePatchOnly.optionLabels', 'en'));
+    // objectstack#28986 — the locked box explains itself: a focusable wrapper
+    // described by that sentence; an editable input carries no reason.
+    const lock = within(inspector).getByRole('checkbox', { name: t('designer.field.required', 'en') }).closest('[data-disabled-reason]');
+    expect(lock).toHaveAttribute('tabindex', '0');
+    expect(lock).toHaveAttribute('aria-describedby', sentence.id);
+    expect(within(inspector).getByTestId('field-label-input').closest('[data-disabled-reason]')).toBeNull();
   });
 
   it('a refusal is shown as the server sent it: the ensure door’s, and the save door’s', async () => {
@@ -413,5 +423,22 @@ describe('CONTROL: a writable package’s add-field is unchanged (objectstack#28
     const inspector = await screen.findByTestId('data-field-inspector');
     expect(within(inspector).queryByTestId('field-base-patch-only')).toBeNull();
     expect(within(inspector).getByRole('checkbox', { name: t('designer.field.required', 'en') })).toBeEnabled();
+  });
+});
+
+describe('A Chinese label names a base object\'s extension field by pinyin, suffixed (objectstack#29690)', () => {
+  it('previews kehu_dengji__c and writes the field under exactly that name into the pair', async () => {
+    await renderBase();
+    await openForm();
+    await userEvent.click(await screen.findByTestId('data-form-add-extension-field'));
+    const popover = await screen.findByTestId('add-field-popover');
+    await userEvent.type(within(popover).getByTestId('add-field-label-input'), '客户等级');
+    expect(within(popover).getByTestId('add-field-api-name-preview')).toHaveTextContent('kehu_dengji__c');
+    await userEvent.click(within(popover).getByTestId('add-field-create'));
+    await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
+    expect(extensionSaves()[0][2]).toStrictEqual({
+      extend: OBJECT,
+      fields: { kehu_dengji__c: { type: 'text', label: '客户等级' } },
+    });
   });
 });

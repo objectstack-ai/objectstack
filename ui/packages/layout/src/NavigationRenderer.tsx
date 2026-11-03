@@ -72,6 +72,7 @@ import {
   Separator,
   cn,
   useIsMobile,
+  useOptionalSidebar,
 } from '@object-ui/components';
 import type { NavigationItem, KeyedI18nLabel } from '@object-ui/types';
 import { isElementApiDataSourceShape } from '@object-ui/react';
@@ -1244,6 +1245,148 @@ export function resolveActiveNavItem(
  */
 const ActiveNavIdContext = React.createContext<string | null>(null);
 
+/**
+ * Whether the rows draw at phone size (44 px rows, larger text and icons),
+ * provided once at the tree root by {@link NavMobileSource} (objectstack#29141).
+ */
+const NavIsMobileContext = React.createContext<boolean>(false);
+
+/**
+ * The phone-size answer the rows read, decided once for the whole tree.
+ *
+ * Inside a sidebar provider it is the provider's own `isMobile`, which settled
+ * when the shell mounted. Each row used to ask `useIsMobile()` itself, and that
+ * hook answers `false` on its first render and corrects itself in an effect:
+ * every time the phone drawer opened, its whole tree mounted at desktop size,
+ * then each row's effect read the viewport and set state, and the tree rendered
+ * and restyled a second time. On the showcase (54 rows) that second pass was
+ * about a third of the open at 4x CPU.
+ *
+ * With no sidebar provider the tree keeps the viewport answer it had, asked
+ * once here for every row. The provider's value does not change when the
+ * sidebar opens or closes, so the rows below do not re-render on a toggle:
+ * `children` is the element the root rendered, and the provided value is the
+ * same boolean.
+ */
+function NavMobileSource({ children }: { children: React.ReactNode }) {
+  const sidebar = useOptionalSidebar();
+  if (sidebar) {
+    return <NavIsMobileContext.Provider value={sidebar.isMobile}>{children}</NavIsMobileContext.Provider>;
+  }
+  return <ViewportMobileSource>{children}</ViewportMobileSource>;
+}
+
+function ViewportMobileSource({ children }: { children: React.ReactNode }) {
+  const isMobile = useIsMobile();
+  return <NavIsMobileContext.Provider value={isMobile}>{children}</NavIsMobileContext.Provider>;
+}
+
+/**
+ * Whether a group is open on first view (objectui#13336):
+ *
+ * 1. A group that holds the current route opens, whatever it declares — a
+ *    closed group would hide the active item and the user would lose
+ *    orientation.
+ * 2. Otherwise the author's declaration decides. `expanded` is the spec field
+ *    name; `defaultOpen` is the legacy objectui field name. Either one, when
+ *    set, is honoured as written.
+ * 3. A group that declares neither opens. Its length does not decide:
+ *    collapsing an undeclared group because it is long hid entries the
+ *    navigation never asked to hide, so a group is closed on first view only
+ *    when it says `expanded: false` (or `defaultOpen: false`).
+ *
+ * A group row and the phone drawer's first-frame budget (below) both read it.
+ */
+function groupOpensOnFirstView(item: NavigationItem, activeNavId: string | null): boolean {
+  if (item.type === 'group' && activeNavId) {
+    const visit = (nodes: NavigationItem[] | undefined): boolean =>
+      !!nodes?.some((node) => node.id === activeNavId || (node.type === 'group' && visit(node.children)));
+    if (visit(item.children)) return true;
+  }
+  if (typeof item.expanded === 'boolean') return item.expanded;
+  if (typeof item.defaultOpen === 'boolean') return item.defaultOpen;
+  return true;
+}
+
+/** The height of one phone drawer row, `min-h-[44px]` on the rows below. */
+const PHONE_ROW_PX = 44;
+
+/**
+ * How many rows the phone drawer draws in the frame it opens with: as many as
+ * fit the window, and a few more (objectstack#29141). The rest of a long menu
+ * lies below the fold, so it renders right after that frame instead of in it.
+ */
+function phoneFirstFrameRows(): number {
+  const height = typeof window === 'undefined' ? 0 : window.innerHeight;
+  return Math.ceil(height / PHONE_ROW_PX) + 4;
+}
+
+/**
+ * The rows `item` draws on first view: one for an entry or a separator; for a
+ * group, its label and, when it opens, its children's rows. Nothing for an
+ * entry or a group the guards hide, under the very statements the rows run.
+ */
+function firstViewRowCount(
+  item: NavigationItem,
+  guards: NavigationVisibilityOptions,
+  activeNavId: string | null,
+): number {
+  if (!passesNavItemGuards(item, guards)) return 0;
+  if (item.type === 'action' && !guards.hasActionHandler) return 0;
+  if (item.type !== 'group') return 1;
+  const children = item.children ?? [];
+  if (!hasVisibleNavigationItems(children, guards)) return 0;
+  if (!groupOpensOnFirstView(item, activeNavId)) return 1;
+  return children.reduce((rows, child) => rows + firstViewRowCount(child, guards, activeNavId), 1);
+}
+
+/**
+ * How many of `sections` the phone drawer's first frame draws: the sections,
+ * in order, until their rows fill {@link phoneFirstFrameRows}.
+ */
+function firstFrameSectionCount(sectionRows: number[], rowsAbove: number): number {
+  const budget = phoneFirstFrameRows();
+  let rows = rowsAbove;
+  for (let i = 0; i < sectionRows.length; i += 1) {
+    if (rows >= budget) return i;
+    rows += sectionRows[i];
+  }
+  return sectionRows.length;
+}
+
+/**
+ * Draws `children` (the tree's sections, or a flat menu's rows) whole, except
+ * when a phone drawer opens on a menu longer than the window: then the first
+ * `firstFrame()` of them draw in the frame the drawer opens with, and the rest
+ * join in a transition right after it (objectstack#29141). Those are below the
+ * fold, and the drawer slides in over several frames, so what the drawer shows
+ * is unchanged; the opening frame just stops paying for rows nobody sees yet.
+ *
+ * The rows already drawn are not drawn again when the rest join: they are the
+ * same elements, under the same keys. Desktop and every later update draw the
+ * whole tree at once.
+ */
+function PhoneFirstFrame({
+  firstFrame,
+  children,
+}: {
+  /** How many of `children` the first frame draws; asked only on a phone, once. */
+  firstFrame: () => number;
+  children: React.ReactNode[];
+}) {
+  const isMobile = React.useContext(NavIsMobileContext);
+  // Once whole, always whole: a menu that grows later draws its new rows at once.
+  const [drawn, setDrawn] = useState(() => {
+    const first = isMobile ? firstFrame() : Number.POSITIVE_INFINITY;
+    return first >= children.length ? Number.POSITIVE_INFINITY : first;
+  });
+  const whole = drawn === Number.POSITIVE_INFINITY;
+  React.useEffect(() => {
+    if (!whole) React.startTransition(() => setDrawn(Number.POSITIVE_INFINITY));
+  }, [whole]);
+  return <>{whole ? children : children.slice(0, drawn)}</>;
+}
+
 // ---------------------------------------------------------------------------
 // Search filter helper
 // ---------------------------------------------------------------------------
@@ -1541,36 +1684,18 @@ function NavigationItemRenderer({
 }) {
   // iOS-native mobile drawer polish: >=44px tap targets, larger text and
   // icons, rounder rows. Desktop (>=768px) keeps the compact rail untouched.
-  const isMobile = useIsMobile();
+  // Decided once for the tree (`NavMobileSource`), not by a hook per row.
+  const isMobile = React.useContext(NavIsMobileContext);
   const mobileBtnClass = isMobile ? 'min-h-[44px] text-[15px] gap-3 rounded-xl' : undefined;
+  // A row's tooltip names it in the icon rail. On a phone the primitive draws
+  // the tooltip `hidden`, so a row there skips the Tooltip it would never show:
+  // one Radix Tooltip per row was a measurable part of every drawer open
+  // (objectstack#29141).
+  const rowTooltip = (label: string) => (isMobile ? undefined : label);
   const navIconClass = cn('shrink-0', isMobile ? 'h-5 w-5' : 'h-4 w-4');
-  // Resolve the initial open state (objectui#13336):
-  //
-  // 1. A group that holds the current route opens, whatever it declares —
-  //    a closed group would hide the active item and the user would lose
-  //    orientation.
-  // 2. Otherwise the author's declaration decides. `expanded` is the spec
-  //    field name; `defaultOpen` is the legacy objectui field name. Either
-  //    one, when set, is honoured as written.
-  // 3. A group that declares neither opens. Its length does not decide:
-  //    collapsing an undeclared group because it is long hid entries the
-  //    navigation never asked to hide, so a group is closed on first view
-  //    only when it says `expanded: false` (or `defaultOpen: false`).
-  const explicitOpen = (() => {
-    if (typeof item.expanded === 'boolean') return item.expanded;
-    if (typeof item.defaultOpen === 'boolean') return item.defaultOpen;
-    return undefined;
-  })();
+  // The initial open state (objectui#13336): see `groupOpensOnFirstView`.
   const activeNavId = React.useContext(ActiveNavIdContext);
-  const hasActiveDescendant = React.useMemo(() => {
-    if (item.type !== 'group' || !activeNavId) return false;
-    const visit = (nodes: NavigationItem[] | undefined): boolean =>
-      !!nodes?.some(
-        (node) => node.id === activeNavId || (node.type === 'group' && visit(node.children)),
-      );
-    return visit(item.children);
-  }, [item, activeNavId]);
-  const initialOpen = hasActiveDescendant ? true : (explicitOpen ?? true);
+  const initialOpen = React.useMemo(() => groupOpensOnFirstView(item, activeNavId), [item, activeNavId]);
   const [isOpen, setIsOpen] = useState(initialOpen);
 
   // --- Per-item guards: `visible`, `requiredPermissions`, and the
@@ -1708,7 +1833,7 @@ function NavigationItemRenderer({
       <SidebarMenuItem ref={row?.ref} style={row?.style}>
         {row?.dropIndicator && <DropIndicator at={row.dropIndicator} />}
         <SidebarMenuButton
-          tooltip={actionLabel}
+          tooltip={rowTooltip(actionLabel)}
           onClick={() => onAction?.(item)}
           className={cn(mobileBtnClass, dragActivator && 'cursor-grab')}
           {...(dragActivator ? dragActivatorProps(dragActivator) : {})}
@@ -1777,7 +1902,7 @@ function NavigationItemRenderer({
       <SidebarMenuButton
         asChild
         isActive={isActive}
-        tooltip={itemLabel}
+        tooltip={rowTooltip(itemLabel)}
         className={cn(mobileBtnClass, dragActivator && 'cursor-grab')}
       >
         {external ? (
@@ -1933,6 +2058,18 @@ export function NavigationRenderer({
 
   const hasGroups = sorted.some((i) => i.type === 'group');
 
+  // --- The phone drawer's first frame (objectstack#29141) --- the rows each
+  // top-level entry draws on first view, and the rows the Favorites section
+  // draws above them; read only when a phone drawer opens (`PhoneFirstFrame`).
+  const firstViewGuards: NavigationVisibilityOptions = {
+    evaluateVisibility: evalVis,
+    checkPermission: checkPerm,
+    checkCapability: checkCap,
+    checkDocTarget,
+    hasActionHandler: !!onAction,
+  };
+  const firstViewRows = (item: NavigationItem) => firstViewRowCount(item, firstViewGuards, activeNavId);
+
   // --- Favorites section (pinned items) --- the one place a user orders the
   // sidebar (objectui#12059): sortable when the host stores the order. The
   // host's own favorite rows follow the pinned ones (objectui#12427), outside
@@ -1967,37 +2104,49 @@ export function NavigationRenderer({
       </SidebarGroupContent>
     </SidebarGroup>
   ) : null;
+  const favoritesRows = favoritesSection
+    ? 1 + (showPinned ? pinnedItems.length : 0) + React.Children.toArray(extraFavorites).length
+    : 0;
 
   // --- No explicit groups → wrap in a single SidebarGroup ---
   if (!hasGroups) {
     return (
-      <ActiveNavIdContext.Provider value={activeNavId}>
-        {favoritesSection}
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {sorted.map((item) => (
-                <NavigationItemRenderer
-                  key={item.id}
-                  item={item}
-                  {...itemProps}
-                />
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </ActiveNavIdContext.Provider>
+      <NavMobileSource>
+        <ActiveNavIdContext.Provider value={activeNavId}>
+          {favoritesSection}
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <PhoneFirstFrame
+                  firstFrame={() => firstFrameSectionCount(sorted.map(firstViewRows), favoritesRows)}
+                >
+                  {sorted.map((item) => (
+                    <NavigationItemRenderer
+                      key={item.id}
+                      item={item}
+                      {...itemProps}
+                    />
+                  ))}
+                </PhoneFirstFrame>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </ActiveNavIdContext.Provider>
+      </NavMobileSource>
     );
   }
 
   // Mixed content: render groups inline, wrap consecutive leaf items
   const fragments: React.ReactNode[] = [];
+  // The top-level entries each fragment draws, for the phone first frame.
+  const fragmentItems: NavigationItem[][] = [];
   let leafBuffer: NavigationItem[] = [];
 
   const flushLeaves = (key: string) => {
     if (leafBuffer.length === 0) return;
     const leaves = leafBuffer;
     leafBuffer = [];
+    fragmentItems.push(leaves);
     fragments.push(
       <SidebarGroup key={key}>
         <SidebarGroupContent>
@@ -2018,6 +2167,7 @@ export function NavigationRenderer({
   sorted.forEach((item, idx) => {
     if (item.type === 'group') {
       flushLeaves(`leaf-${idx}`);
+      fragmentItems.push([item]);
       fragments.push(
         <NavigationItemRenderer
           key={item.id}
@@ -2034,10 +2184,21 @@ export function NavigationRenderer({
   flushLeaves('leaf-end');
 
   return (
-    <ActiveNavIdContext.Provider value={activeNavId}>
-      {favoritesSection}
-      {fragments}
-    </ActiveNavIdContext.Provider>
+    <NavMobileSource>
+      <ActiveNavIdContext.Provider value={activeNavId}>
+        {favoritesSection}
+        <PhoneFirstFrame
+          firstFrame={() =>
+            firstFrameSectionCount(
+              fragmentItems.map((entries) => entries.reduce((rows, entry) => rows + firstViewRows(entry), 0)),
+              favoritesRows,
+            )
+          }
+        >
+          {fragments}
+        </PhoneFirstFrame>
+      </ActiveNavIdContext.Provider>
+    </NavMobileSource>
   );
 }
 

@@ -142,7 +142,7 @@ describe('door 1 — REST `POST /actions/:object/:action`', () => {
         // The words are the contract here (they are what the toast reads), so
         // the first sentence is pinned, and the remedy beside it.
         expect(message.startsWith('This action is turned off for this deployment.')).toBe(true);
-        expect(message).toContain('An administrator can turn it on again under Setup › Packaged automation');
+        expect(message).toContain('An administrator can turn it on again under Setup › Packaged Actions');
         // No system table, no ADR citation, no tracker number in what an end user reads.
         expect(message).not.toContain('sys_metadata_activation');
         expect(message).not.toMatch(/ADR-\d+/);

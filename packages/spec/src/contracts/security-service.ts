@@ -64,7 +64,7 @@
 import type { GetRecordFieldAccessResponse } from '../api/protocol.zod.js';
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
-import type { ExplainDecision, ExplainOperation } from '../security/explain.zod.js';
+import type { EXPLAIN_BATCH_MAX_RECORD_IDS, ExplainDecision, ExplainOperation, ExplainRequest } from '../security/explain.zod.js';
 import type { EffectiveObjectPermission, ObjectAccessScope, PermissionSet } from '../security/permission.zod.js';
 
 /**
@@ -166,6 +166,25 @@ export interface ExplainAccessRequest {
   userId?: string;
   /** Narrow the explanation to a single record (adds record-level layers). */
   recordId?: string;
+  /**
+   * Batch form of `recordId`: the same record-grained question for several
+   * records of one `(object, operation)` pair, in one call. The type is the
+   * wire schema's own member ({@link ExplainRequest}), so the two cannot drift.
+   *
+   * - Mutually exclusive with `recordId`. The wire schema refuses a request
+   *   carrying both at the REST explain route, and the reference security
+   *   service refuses it too; an implementation that ignores `recordIds` does
+   *   not. A direct caller of `explain` sends one spelling, never both.
+   * - At least one and at most {@link EXPLAIN_BATCH_MAX_RECORD_IDS} ids; the
+   *   wire schema refuses an empty or a longer array.
+   * - Answered by `ExplainDecision.records` in the same order: `records[i]`
+   *   answers `recordIds[i]`, same length, duplicates answered per position.
+   * - An implementation may ignore it and answer only the object-level
+   *   decision, with no `records`. A caller that needs the per-record verdicts
+   *   then asks each id singularly through `recordId`, as the REST explain
+   *   route does.
+   */
+  recordIds?: ExplainRequest['recordIds'];
 }
 
 /** Filter accepted by the audience-binding suggestion list. */

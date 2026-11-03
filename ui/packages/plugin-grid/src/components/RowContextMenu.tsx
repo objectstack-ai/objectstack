@@ -150,7 +150,7 @@ export const SelectionContextMenuItems: React.FC<{
           </DropdownMenuItem>
         );
       })}
-      {items.legacy.map(({ name, destructive }) => (
+      {items.legacy.map(({ name, label, destructive }) => (
         <DropdownMenuItem
           key={name}
           onClick={() => onAction?.(name, selectedRows)}
@@ -158,7 +158,7 @@ export const SelectionContextMenuItems: React.FC<{
           className={destructive ? 'text-destructive focus:text-destructive' : undefined}
         >
           {destructive && <Trash2 className="mr-2 h-4 w-4" />}
-          {formatActionLabel(name)}
+          {label}
         </DropdownMenuItem>
       ))}
       <DropdownMenuSeparator />

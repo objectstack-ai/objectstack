@@ -41,6 +41,7 @@ import {
   TENANT_EMAIL_OBJECT,
   type EmailLogObject,
 } from './email-log-objects.js';
+import { resolveBundleLocale } from '@objectstack/spec/system';
 
 /**
  * Queue topic durable email delivery is published to and consumed from
@@ -295,15 +296,59 @@ export function formatAddress(addr: EmailAddress): string {
   return `${quoted} <${address}>`;
 }
 
-function listToArray(v: EmailAddress | EmailAddress[] | undefined): string[] | undefined {
+/**
+ * The message fields whose addresses the CALLER supplies — every one of them
+ * is the caller's to correct, so a malformed address in any of them is the
+ * caller's `VALIDATION_FAILED`, never a server fault.
+ */
+type CallerAddressField = 'to' | 'cc' | 'bcc' | 'replyTo';
+
+/**
+ * {@link formatAddress} for an address the CALLER supplied: the same
+ * acceptance ({@link isSendableAddress}, one spelling of "valid enough to
+ * send"), refused as `VALIDATION_FAILED: invalid recipient address …` naming
+ * the field, so the REST send door answers 400 — the caller can fix it —
+ * instead of 500 `EMAIL_SEND_FAILED`.
+ *
+ * The SENDER deliberately stays on {@link formatAddress}'s plain
+ * `Invalid email address` throw: `from` is the deployment's configured sender
+ * (`OS_EMAIL_FROM`, the `mail` settings, or a caller `from` the REST door has
+ * already bound to that same configured value), so an unsendable one is a
+ * server-side fault that a 400 would wrongly pin on the caller.
+ */
+function formatCallerAddress(addr: EmailAddress, field: CallerAddressField): string {
+  const what = field === 'replyTo' ? 'reply-to address' : 'recipient address';
+  if (!isSendableAddress(addr)) {
+    const shown = addr == null ? '' : addressPart(addr);
+    throw new Error(`VALIDATION_FAILED: invalid ${what} in \`${field}\`: ${shown || '(empty)'}`);
+  }
+  // A JSON body can carry any value as the display name; a non-string one
+  // would otherwise fail inside `formatAddress` as a TypeError — a 500 for
+  // input the caller wrote.
+  const name: unknown = typeof addr === 'object' ? addr.name : undefined;
+  if (name !== undefined && name !== null && typeof name !== 'string') {
+    throw new Error(
+      `VALIDATION_FAILED: invalid ${what} in \`${field}\`: the display name of ${addressPart(addr)} must be a string`,
+    );
+  }
+  return formatAddress(addr);
+}
+
+function listToArray(
+  v: EmailAddress | EmailAddress[] | undefined,
+  field: Exclude<CallerAddressField, 'replyTo'>,
+): string[] | undefined {
   if (v === undefined) return undefined;
   const arr = Array.isArray(v) ? v : [v];
-  return arr.map(formatAddress);
+  return arr.map((addr) => formatCallerAddress(addr, field));
 }
 
 /**
  * Validate input + apply default-from + canonicalize recipients.
- * Throws Error('VALIDATION_FAILED: <reason>') for malformed payloads.
+ * Throws Error('VALIDATION_FAILED: REASON') for malformed payloads — a
+ * malformed caller-supplied address (`to` / `cc` / `bcc` / `replyTo`)
+ * included. An unsendable `from` is the one malformed address that is NOT a
+ * `VALIDATION_FAILED`: see {@link formatCallerAddress}.
  */
 export function normalizeMessage(
   input: SendEmailInput,
@@ -317,7 +362,7 @@ export function normalizeMessage(
   if (!input.text && !input.html) {
     throw new Error('VALIDATION_FAILED: at least one of text or html is required');
   }
-  const toArr = listToArray(input.to);
+  const toArr = listToArray(input.to, 'to');
   if (!toArr || toArr.length === 0) {
     throw new Error('VALIDATION_FAILED: at least one recipient (to) is required');
   }
@@ -334,11 +379,11 @@ export function normalizeMessage(
     ...(input.text !== undefined ? { text: input.text } : {}),
     ...(input.html !== undefined ? { html: input.html } : {}),
   };
-  const cc = listToArray(input.cc);
+  const cc = listToArray(input.cc, 'cc');
   if (cc && cc.length > 0) msg.cc = cc;
-  const bcc = listToArray(input.bcc);
+  const bcc = listToArray(input.bcc, 'bcc');
   if (bcc && bcc.length > 0) msg.bcc = bcc;
-  if (input.replyTo) msg.replyTo = formatAddress(input.replyTo);
+  if (input.replyTo) msg.replyTo = formatCallerAddress(input.replyTo, 'replyTo');
   if (input.attachments && input.attachments.length > 0) msg.attachments = input.attachments;
   if (input.headers && Object.keys(input.headers).length > 0) msg.headers = input.headers;
   return msg;
@@ -523,6 +568,20 @@ export interface TemplateLoader {
 }
 
 /**
+ * [#28880] The built-in registry loader's own capability, kept off
+ * {@link TemplateLoader} and out of the package's exports: under this key it
+ * answers the locale tags a template name's bundle carries, sorted ascending.
+ * With it, {@link EmailService}'s ladder folds a named locale against that
+ * list (`resolveBundleLocale`) before loading the resolved tag exactly, and
+ * the stack's declared fallback joins the ladder. A loader without it — any
+ * replacement loader — answers the exact ladder it always did.
+ */
+export const TEMPLATE_BUNDLE_LOCALES = Symbol('@objectstack/plugin-email:template-bundle-locales');
+
+/** What the built-in loader answers under {@link TEMPLATE_BUNDLE_LOCALES}. */
+export type TemplateBundleLocales = (name: string) => Promise<string[]>;
+
+/**
  * What the loader answers: the render input of one resolved `email_template`
  * definition, spelled as the `sys_email_template` columns were — the shape
  * the renderer has always read. No row backs it any more; the registry
@@ -609,6 +668,9 @@ export class EmailService implements IEmailService {
    */
   private readonly managedRowIds = new Set<string>();
 
+  /** [#28880] The stack's declared fallback locale, read at each resolve. Unset ⇒ none declared. */
+  private templateFallbackLocale?: () => string | undefined;
+
   /**
    * Set once queue delivery has been reported as unavailable, so the
    * degradation is stated at the FIRST send and not on every one
@@ -637,6 +699,24 @@ export class EmailService implements IEmailService {
   /** Wire (or replace) the template loader after construction. */
   setTemplateLoader(loader: TemplateLoader): void {
     this.options.templateLoader = loader;
+  }
+
+  /**
+   * [#28880] Wire the stack's declared fallback locale (`i18n.fallbackLocale`,
+   * else `defaultLocale`, as the i18n service's `getFallbackLocale` answers
+   * it). Read at each resolve, so a later-registered i18n service is seen.
+   */
+  setTemplateFallbackLocale(read: () => string | undefined): void {
+    this.templateFallbackLocale = read;
+  }
+
+  private declaredFallbackLocale(): string | undefined {
+    try {
+      const declared = this.templateFallbackLocale?.();
+      return typeof declared === 'string' && declared.trim() ? declared.trim() : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Wire (or replace) persistence after construction. */
@@ -1404,8 +1484,33 @@ export class EmailService implements IEmailService {
     // locale means the DOCUMENTED default, so ask for it by name.
     const preferred = input.locale && String(input.locale).trim();
     const wanted = preferred || DEFAULT_TEMPLATE_LOCALE;
-    let row = await loader.load(input.template, wanted);
-    if (!row && wanted !== DEFAULT_TEMPLATE_LOCALE) {
+    // [#28880] A named locale, over the built-in loader, is folded against the
+    // bundle's own tags by the platform's one BCP-47 ladder (exact →
+    // case-insensitive → base language → variant expansion, the first match
+    // in ascending tag order), then the stack's declared fallback is folded
+    // the same way, before the `en-US` rung below. Each rung loads the tag it
+    // resolved to, exactly. A no-locale call keeps its ladder: en-US, then the
+    // loader's own answer.
+    const bundleLocales = (loader as { [TEMPLATE_BUNDLE_LOCALES]?: TemplateBundleLocales })[TEMPLATE_BUNDLE_LOCALES];
+    const locales = preferred && typeof bundleLocales === 'function'
+      ? await bundleLocales.call(loader, input.template)
+      : undefined;
+    const tried = new Set<string>();
+    let row: EmailTemplateRow | null = null;
+    if (locales) {
+      const bundle: Record<string, true> = Object.fromEntries(locales.map((tag) => [tag, true] as const));
+      for (const requested of [wanted, this.declaredFallbackLocale()]) {
+        const tag = requested === undefined ? undefined : resolveBundleLocale(bundle, requested);
+        if (tag === undefined || tried.has(tag)) continue;
+        tried.add(tag);
+        row = await loader.load(input.template, tag);
+        if (row) break;
+      }
+    } else {
+      tried.add(wanted);
+      row = await loader.load(input.template, wanted);
+    }
+    if (!row && !tried.has(DEFAULT_TEMPLATE_LOCALE)) {
       row = await loader.load(input.template, DEFAULT_TEMPLATE_LOCALE);
     }
     if (!row && !preferred) {

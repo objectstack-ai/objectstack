@@ -48,8 +48,9 @@ function CountPill({ count, primary, testId }: { count: number; primary?: boolea
 }
 
 /**
- * One 40 px row of a My-work column: a 24 px icon tile, the one-line title
- * with an ellipsis, and a 12 px muted time at the right.
+ * One 40 px row of a My-work column (44 px below `sm`, the touch target): a
+ * 24 px icon tile, the one-line title with an ellipsis, and a 12 px muted time
+ * at the right.
  */
 function WorkRow({
   icon: Icon,
@@ -67,12 +68,12 @@ function WorkRow({
   testId?: string;
 }) {
   return (
-    <li className="h-10 border-t">
+    <li className="h-10 border-t max-sm:h-auto">
       <button
         type="button"
         onClick={onClick}
         data-testid={testId}
-        className="flex h-full w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none"
+        className="flex h-full w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none max-sm:min-h-11"
       >
         <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', tileClass)}>
           <Icon className="h-3.5 w-3.5" />
@@ -178,7 +179,7 @@ function WorkColumn({
 }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border bg-card" data-testid={testId}>
-      <div className="flex h-10 items-center justify-between gap-2 px-3">
+      <div className="flex h-10 items-center justify-between gap-2 px-3 max-sm:h-11">
         <h3 className="inline-flex min-w-0 items-center gap-2 text-[13px] font-semibold">
           <span className="truncate">{title}</span>
           {count > 0 && <CountPill count={count} primary={primaryPill} testId={`${testId}-count`} />}
@@ -187,7 +188,7 @@ function WorkColumn({
           type="button"
           onClick={onViewAll}
           data-testid={`${testId}-view-all`}
-          className="shrink-0 text-xs text-primary hover:underline focus-visible:underline focus-visible:outline-none"
+          className="shrink-0 text-xs text-primary hover:underline focus-visible:underline focus-visible:outline-none max-sm:min-h-11 max-sm:min-w-11"
         >
           {t('home.myWork.viewAll', { defaultValue: 'View all' })}
         </button>
@@ -236,7 +237,7 @@ export function HomePendingDraftsRow({
       : t('home.pendingDrafts.waiting', { names: joined, defaultValue: '{{names}} waiting to publish' });
   return (
     <div
-      className="flex h-10 items-center gap-2.5 rounded-lg border border-primary/35 bg-primary/5 px-3 dark:bg-primary/10"
+      className="flex h-10 items-center gap-2.5 rounded-lg border border-primary/35 bg-primary/5 px-3 dark:bg-primary/10 max-sm:h-14"
       data-testid="home-pending-drafts"
     >
       <Rocket className="h-4 w-4 shrink-0 text-primary" aria-hidden />
@@ -248,7 +249,7 @@ export function HomePendingDraftsRow({
       </p>
       <Button
         size="sm"
-        className="h-7 shrink-0 px-3 text-xs"
+        className="h-7 shrink-0 px-3 text-xs max-sm:h-11"
         onClick={onPublish}
         disabled={publishing}
         data-testid="pending-drafts-publish"
@@ -360,7 +361,7 @@ export function HomeActionCenter({
             type="button"
             onClick={onOpenInbox}
             data-testid="home-my-work-open-inbox"
-            className="text-xs text-primary hover:underline focus-visible:underline focus-visible:outline-none"
+            className="text-xs text-primary hover:underline focus-visible:underline focus-visible:outline-none max-sm:min-h-11 max-sm:min-w-11"
           >
             {t('home.myWork.openInbox', { defaultValue: 'Open inbox' })}
           </button>
@@ -533,7 +534,7 @@ export function HomeContinue({
                   onClick={() => onOpen(it.href)}
                   data-testid="home-recent-row"
                   data-recent-type={it.type}
-                  className="flex h-10 w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors hover:bg-muted/60"
+                  className="flex h-10 w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors hover:bg-muted/60 max-sm:h-11"
                 >
                   <span
                     className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
@@ -637,7 +638,8 @@ export function HomeActivity({ activity, onViewAll, t }: { activity: ActivityFee
         <button
           type="button"
           onClick={onViewAll}
-          className="mt-1.5 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          className="mt-1.5 inline-flex items-center gap-1 text-xs text-primary hover:underline max-sm:min-h-11"
+          data-testid="home-activity-view-all"
         >
           {t('layout.activityFeed.viewAll', { defaultValue: 'View all activity' })}
           <ArrowRight className="h-3 w-3" />

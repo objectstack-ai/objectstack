@@ -215,8 +215,8 @@ describe('objectstack#27950 — the list title names the object ahead of the vie
     expect(crumb()).toHaveTextContent(/^Leads$/);
   });
 
-  it('a record open beside the list (the split pane) leaves one object label and one switcher', async () => {
-    localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
+  it('a record open in the drawer over the list leaves one object label and one switcher', async () => {
+    localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
     mount('/apps/crm/crm_lead/view/mine?recordId=lead_1');
     await listToolbar();
     expect(screen.getAllByTestId('object-list-crumb')).toHaveLength(1);

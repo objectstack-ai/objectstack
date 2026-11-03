@@ -2,9 +2,14 @@
 
 import type { IBusinessUnitGraphService } from '@objectstack/spec/contracts';
 import type { SharingEngine } from './sharing-service.js';
-import { TeamGraphService, managerIsProvablyOutsideOrg } from './team-graph.js';
+import { TeamGraphService, managerIsProvablyOutsideOrg, readMembershipToCompletion } from './team-graph.js';
 
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+/**
+ * [#29655] Rows per page of a child-unit read — the bound the read always
+ * carried, so a parent with fewer children issues the one read it always did,
+ * and one with more is read in further pages rather than cut.
+ */
+const CHILD_UNIT_PAGE_ROWS = 1000;
 
 type DeptCache = {
   descendants?: Map<string, string[]>;
@@ -86,7 +91,8 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     const cached = this.cache.descendants!.get(businessUnitId);
     if (cached) return cached;
 
-    // Verify seed itself is active + within tenant scope.
+    // Verify seed itself is active + within tenant scope. [#29655] A failed
+    // seed read throws, so nothing is cached for it.
     const seedActive = await this.seedIsUsable(businessUnitId);
     if (!seedActive) {
       this.cache.descendants!.set(businessUnitId, []);
@@ -97,20 +103,8 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     const queue: string[] = [businessUnitId];
     while (queue.length) {
       const parent = queue.shift()!;
-      let children: any[] = [];
-      try {
-        children = await this.engine.find('sys_business_unit', {
-          where: this.orgScope({ parent_business_unit_id: parent, active: { $ne: false } }),
-          fields: ['id'],
-          limit: 1000,
-          context: SYSTEM_CTX,
-        });
-      } catch {
-        children = [];
-      }
-      for (const c of children ?? []) {
-        const cid = String((c as any).id ?? '');
-        if (cid && !seen.has(cid)) {
+      for (const cid of await this.readChildUnits(parent)) {
+        if (!seen.has(cid)) {
           seen.add(cid);
           queue.push(cid);
         }
@@ -122,29 +116,57 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
   }
 
   /**
+   * [#29655] The ids of every active child unit of `parent`, read to
+   * completion through the one walk the member reads share
+   * ({@link readMembershipToCompletion}) — or a refusal.
+   *
+   * It read once at a 1,000-row bound and answered `[]` on any failure, and
+   * the subtree feeds the `unit_and_subordinates` member read: a child past
+   * the bound, or every child of a parent whose read failed, dropped out of
+   * the subtree with its members, and the reconcilers revoked their grants. A
+   * failed read, or a walk that cannot vouch for completion, now throws before
+   * {@link descendants} caches anything; a stack that never materialises
+   * `sys_business_unit` has no child units.
+   */
+  private async readChildUnits(parent: string): Promise<string[]> {
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_business_unit',
+      where: this.orgScope({ parent_business_unit_id: parent, active: { $ne: false } }),
+      fields: [],
+      subject: `the child units of business unit '${parent}'`,
+      pageRows: CHILD_UNIT_PAGE_ROWS,
+    });
+    if (!rows) return [];
+    return rows.map((r) => String(r?.id ?? '')).filter(Boolean);
+  }
+
+  /**
    * Is the seed unit itself active and inside the tenant scope?
    *
    * Shared by both widths so they agree on what an unusable seed is: a unit
    * that does not exist, sits in another organization, or carries
    * `active: false` contributes NOBODY — it is never merely "expanded without
-   * its descendants". A read failure answers `false` (fail closed: an
-   * unreadable unit must not grant).
+   * its descendants".
+   *
+   * [#29655] A read that FAILS is not an unusable seed: it throws, so neither
+   * width caches an answer for it. It answered `false` ("fail closed: an
+   * unreadable unit must not grant"), but that `false` was cached as nobody
+   * for the pass, and a business-unit graph write's recompute read it as
+   * "this rule now reaches nobody" and revoked every grant the rule gave. A
+   * refusal grants nothing either, and revokes nothing. A stack that never
+   * materialises `sys_business_unit` has no usable seed and answers `false`.
    */
   private async seedIsUsable(businessUnitId: string): Promise<boolean> {
-    try {
-      const seedRows = await this.engine.find('sys_business_unit', {
-        where: this.orgScope({ id: businessUnitId }),
-        fields: ['id', 'active'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      const seedRow: any = Array.isArray(seedRows) ? seedRows[0] : null;
-      if (!seedRow) return false;
-      if (seedRow.active === false) return false;
-      return true;
-    } catch {
-      return false;
-    }
+    const seedRows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_business_unit',
+      where: this.orgScope({ id: businessUnitId }),
+      fields: ['active'],
+      subject: `business unit '${businessUnitId}'`,
+    });
+    const seedRow = seedRows?.[0];
+    if (!seedRow) return false;
+    if (seedRow.active === false) return false;
+    return true;
   }
 
   /**
@@ -176,21 +198,14 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
       return [];
     }
 
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_business_unit_member', {
-        // [#14547] Tenant-screened — see {@link memberScope}, which is STRICT
-        // on purpose and is not {@link orgScope}.
-        where: this.memberScope({ business_unit_id: businessUnitId }),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      });
-    } catch {
-      rows = [];
-    }
-    const users = Array.from(
-      new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)),
+    // [#29606] Read to completion, and a failed or incomplete read throws — so
+    // nothing is cached for it, and the next caller reads again. A stack with
+    // no `sys_business_unit_member` has no unit members.
+    const users = await this.readMembers(
+      // [#14547] Tenant-screened — see {@link memberScope}, which is STRICT
+      // on purpose and is not {@link orgScope}.
+      this.memberScope({ business_unit_id: businessUnitId }),
+      `the members of business unit '${businessUnitId}'`,
     );
     this.cache.unitMembers!.set(businessUnitId, users);
     return users;
@@ -204,44 +219,67 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     const units = await this.descendants(businessUnitId);
     if (units.length === 0) return [];
 
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_business_unit_member', {
-        // [#14547] Tenant-screened — see {@link memberScope}. The WIDE width
-        // needs the screen exactly as much as the narrow one: the reported
-        // reproduction used `unit_and_subordinates`, and a subtree walk that
-        // now admits org-less (seeded) units reaches MORE unscreened member
-        // rows than the single-unit read, not fewer.
-        where: this.memberScope({ business_unit_id: { $in: units } }),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      });
-    } catch {
-      rows = [];
-    }
-    const users = Array.from(
-      new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)),
+    // [#29606] Read to completion, and a failed or incomplete read throws —
+    // nothing is cached for it. A stack with no `sys_business_unit_member` has
+    // no members in the subtree.
+    const users = await this.readMembers(
+      // [#14547] Tenant-screened — see {@link memberScope}. The WIDE width
+      // needs the screen exactly as much as the narrow one: the reported
+      // reproduction used `unit_and_subordinates`, and a subtree walk that
+      // now admits org-less (seeded) units reaches MORE unscreened member
+      // rows than the single-unit read, not fewer.
+      this.memberScope({ business_unit_id: { $in: units } }),
+      `the members of business unit '${businessUnitId}' and its descendant units`,
     );
     this.cache.expandUsers!.set(businessUnitId, users);
     return users;
   }
 
+  /**
+   * [#29606] The `user_id`s of every `sys_business_unit_member` row matching
+   * `where`, read to completion through the one walk the team, role and
+   * position reads share ({@link readMembershipToCompletion}) — or a refusal,
+   * never a shortened or an invented empty set.
+   *
+   * Both widths read here. They read once at a 10,000-row bound and answered
+   * `[]` on any failure, and the set feeds sharing GRANTS that the reconcilers
+   * diff against it: a member past the bound lost the grant, and a failed read
+   * revoked every member's. A failed read, or a walk that cannot vouch for
+   * completion, now throws; a stack that never materialises the object has no
+   * members through it and answers `[]`.
+   */
+  private async readMembers(where: Record<string, unknown>, subject: string): Promise<string[]> {
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_business_unit_member',
+      where,
+      fields: ['user_id'],
+      subject,
+    });
+    if (!rows) return [];
+    return Array.from(new Set(rows.map((r) => String(r?.user_id ?? '')).filter(Boolean)));
+  }
+
+  /**
+   * The unit's head (`manager_user_id`), or `null` when the unit has none.
+   *
+   * [#29713] Read through the walk {@link seedIsUsable} uses
+   * ({@link readMembershipToCompletion}), so a read that FAILS throws and
+   * nothing is cached for it. It caught any error to `null` and cached that
+   * for the pass: a consumer naming a unit's head would have dropped the head
+   * on an outage, and kept dropping it after the read recovered. A unit that
+   * does not exist, sits in another organization or names no head answers
+   * `null`, and so does a stack that never materialises `sys_business_unit`.
+   */
   async headOf(businessUnitId: string): Promise<string | null> {
     if (!businessUnitId) return null;
     if (this.cache.head!.has(businessUnitId)) return this.cache.head!.get(businessUnitId) ?? null;
-    let row: any = null;
-    try {
-      const rows = await this.engine.find('sys_business_unit', {
-        where: this.orgScope({ id: businessUnitId }),
-        fields: ['id', 'manager_user_id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      row = Array.isArray(rows) ? rows[0] : null;
-    } catch {
-      row = null;
-    }
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_business_unit',
+      where: this.orgScope({ id: businessUnitId }),
+      fields: ['manager_user_id'],
+      subject: `the head of business unit '${businessUnitId}'`,
+    });
+    const row = rows?.[0];
     const head = row?.manager_user_id ? String(row.manager_user_id) : null;
     this.cache.head!.set(businessUnitId, head);
     return head;
@@ -257,29 +295,34 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * unscreened answer from the same method name purely by how the service
    * happened to be constructed. A screen that depends on a constructor option
    * is not a screen.
+   *
+   * [#29713] The standalone fallback's `sys_user` read goes through
+   * {@link readMembershipToCompletion}: a read that FAILS throws, where it
+   * answered `null` ("no manager"); a stack that never materialises
+   * `sys_user` has no manager on file and answers `null`. The fallback caches
+   * nothing, before or after. The organization screen keeps its ruled
+   * fail-open posture ({@link managerIsProvablyOutsideOrg}), and the
+   * delegating limb is {@link TeamGraphService.managerOf}'s own answer,
+   * unchanged here.
    */
   async managerOf(userId: string, organizationId?: string): Promise<string | null> {
     if (this.teamGraph) return this.teamGraph.managerOf(userId, organizationId);
     // Standalone fallback: read sys_user.manager_id directly.
     if (!userId) return null;
     const org = organizationId ?? this.organizationId;
-    try {
-      const rows = await this.engine.find('sys_user', {
-        where: { id: userId },
-        fields: ['id', 'manager_id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      const row: any = Array.isArray(rows) ? rows[0] : null;
-      const managerId = row?.manager_id ? String(row.manager_id) : null;
-      if (!managerId) return null;
-      // The SAME screen the delegating limb applies — one implementation,
-      // imported rather than restated, so the two limbs cannot drift.
-      if (await managerIsProvablyOutsideOrg(this.engine, managerId, org)) return null;
-      return managerId;
-    } catch {
-      return null;
-    }
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_user',
+      where: { id: userId },
+      fields: ['manager_id'],
+      subject: `the manager of user '${userId}'`,
+    });
+    const row = rows?.[0];
+    const managerId = row?.manager_id ? String(row.manager_id) : null;
+    if (!managerId) return null;
+    // The SAME screen the delegating limb applies — one implementation,
+    // imported rather than restated, so the two limbs cannot drift.
+    if (await managerIsProvablyOutsideOrg(this.engine, managerId, org)) return null;
+    return managerId;
   }
 
   /**
@@ -324,7 +367,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * ## Why the member rows are screened at all
    *
    * Both member reads used to carry no organization predicate whatever, under
-   * a {@link SYSTEM_CTX} that carries no tenant either — so the query was
+   * a system context that carries no tenant either — so the query was
    * completely unscoped by organization: any unit an org-stamped rule could
    * see handed back EVERY tenant's membership rows hanging off it, and tenant
    * A's rule materialised real `sys_record_share` rows for tenant B's users.

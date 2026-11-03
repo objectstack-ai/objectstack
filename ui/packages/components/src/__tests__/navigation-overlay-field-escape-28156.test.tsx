@@ -20,7 +20,8 @@
  * - an enlarged face, which marks the key handled from a window capture
  *   listener, ahead of the layer: both its own `Esc` (it closes itself) and
  *   one pressed in a field inside it.
- * The split pane beside a list answers the same, from its document listener.
+ * The non-modal drawer over a list answers the same (the split pane beside
+ * the list retired, objectstack#28915).
  */
 
 import * as React from 'react';
@@ -28,7 +29,6 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import {
   NavigationOverlay,
-  RECORD_SPLIT_MIN_CONTENT_PX,
   type NavigationOverlayProps,
 } from '../custom/navigation-overlay';
 
@@ -79,22 +79,12 @@ const FIELDS: Array<[label: string, logged: string]> = [
   ['Enlarged face', 'face'],
 ];
 
-/** Rendered widths by test id; everything else measures 0 (unmeasured). */
-let widths: Record<string, number> = {};
-const realRect = HTMLElement.prototype.getBoundingClientRect;
-
 beforeEach(() => {
   fieldLog = [];
-  widths = {};
-  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
-    const width = widths[this.dataset.testid ?? ''] ?? 0;
-    return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
-  };
   try { window.localStorage.clear(); } catch { /* private mode */ }
 });
 afterEach(() => {
   cleanup();
-  HTMLElement.prototype.getBoundingClientRect = realRect;
 });
 
 function renderPane(props: Partial<NavigationOverlayProps> = {}) {
@@ -117,9 +107,9 @@ function renderPane(props: Partial<NavigationOverlayProps> = {}) {
   return { setIsOpen, close };
 }
 
-/** The split pane beside a list wide enough to keep it there. */
-const besideList: Partial<NavigationOverlayProps> = {
-  mode: 'split',
+/** The non-modal drawer over a list. */
+const overList: Partial<NavigationOverlayProps> = {
+  mode: 'drawer',
   mainContent: <div>list</div>,
 };
 
@@ -180,15 +170,12 @@ describe('drawer, maximized: a field keeps its Esc, the pane stays maximized', (
   });
 });
 
-describe('split pane beside the list: the same answers', () => {
-  beforeEach(() => {
-    widths = { 'record-split-host': RECORD_SPLIT_MIN_CONTENT_PX + 200, 'record-split-list': 600 };
-  });
-
+describe('the non-modal drawer over a list: the same answers', () => {
   it.each(FIELDS)('below the root, Esc in the %s keeps the level; a bare Esc steps back (CONTROL)', (label, logged) => {
     const onBack = vi.fn();
-    renderPane({ ...besideList, onBack });
-    expect(screen.getByTestId('record-split-pane')).toBeTruthy();
+    renderPane({ ...overList, onBack });
+    expect(screen.getByRole('dialog', { name: 'Lead' })).toBeTruthy();
+    expect(screen.getByTestId('record-list-host')).toBeTruthy();
     esc(field(label));
     expect(fieldLog).toEqual([logged]);
     expect(onBack).not.toHaveBeenCalled();
@@ -197,7 +184,7 @@ describe('split pane beside the list: the same answers', () => {
   });
 
   it.each(FIELDS)('maximized, Esc in the %s keeps it maximized; a bare Esc restores (CONTROL)', (label, logged) => {
-    const { close } = renderPane({ ...besideList, maximizable: true });
+    const { close } = renderPane({ ...overList, maximizable: true });
     maximize();
     esc(field(label));
     expect(fieldLog).toEqual([logged]);

@@ -184,6 +184,65 @@ export interface EngineTransactionInfo {
 }
 
 /**
+ * The slice of a read {@link QueryEvaluationGate.assertNoInternalFieldEvaluated}
+ * judges. Every member is optional and is read as the generic data door hands
+ * it over: `where` (or its `filter` alias), `orderBy`, `groupBy`,
+ * `aggregations` and the `expand` tree.
+ */
+export interface InternalFieldEvaluationQuery {
+    where?: unknown;
+    filter?: unknown;
+    orderBy?: unknown;
+    groupBy?: unknown;
+    aggregations?: unknown;
+    expand?: unknown;
+}
+
+/**
+ * Options for {@link QueryEvaluationGate.assertNoInternalFieldEvaluated}.
+ */
+export interface InternalFieldEvaluationOptions {
+    /**
+     * Called at every nested-relation condition the walk reaches, with the
+     * related object and the condition's position, BEFORE anything of the
+     * related object is judged. A door uses it to ask its own question of
+     * that hop first (the data door asks the related object's API exposure),
+     * so the first refusal a caller meets is the same whichever door it used.
+     * Whatever it throws propagates.
+     */
+    beforeRelationTarget?: (target: string, param: string) => void;
+}
+
+/**
+ * The engine's refusal to EVALUATE a field declared `internal: true`.
+ *
+ * Such a field is withheld from every generic data exit: the engine omits it
+ * from every row. A filter, sort, group key, aggregation operand or
+ * per-aggregation filter on it would still reveal the stored value by
+ * evaluating it, so the engine refuses those positions before any driver is
+ * asked: ADR-0112 `INVALID_FIELD` / 400, located at the object, the field and
+ * the position (`filter`, `sort`, `groupBy`, `aggregations[i].field`,
+ * `aggregations[i].filter`, `expand['REL'].filter`, `expand['REL'].sort`, a
+ * nested-relation condition at `filter.LOOKUP`).
+ *
+ * The engine applies it on its own read path (`find`, `findOne`, `count`,
+ * `aggregate`) for every caller but a system context, so a host that
+ * registers no `protocol` service, or a protocol other than the shipped one,
+ * still refuses. This member is the same judgement asked directly, for every
+ * caller, by a door that wants to answer before the engine runs (the data
+ * door, and a data path a system context can reach). It is ONE definition:
+ * a door asks it and never restates it.
+ */
+export interface QueryEvaluationGate {
+    /** Throw the refusal described on {@link QueryEvaluationGate}, or return. */
+    assertNoInternalFieldEvaluated(
+        object: string,
+        query: InternalFieldEvaluationQuery,
+        options?: InternalFieldEvaluationOptions,
+    ): void;
+}
+
+/**
  * Options for {@link IObjectQLEngine.judgeFilter} (#20157).
  */
 export interface EngineFilterJudgementOptions {
@@ -236,7 +295,7 @@ export type EngineFilterJudgement =
  * (#28001, that shape again). Their callers must work with an engine
  * that lacks them, so the optional mark states that requirement in the type.
  */
-export interface IObjectQLEngine extends IDataEngine {
+export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
     // ── Schema access ────────────────────────────────────────────────────
     /**
      * The registered schema for an object, or `undefined` — the write
@@ -355,10 +414,10 @@ export interface IObjectQLEngine extends IDataEngine {
     /**
      * The objects a delete of a record of `objectName` can cascade into, by
      * name: every object holding a relation into it whose resolved delete
-     * behaviour is `cascade` (a `master_detail` by default, a `lookup` or
-     * `tree` that declares `deleteBehavior: 'cascade'`), and transitively the
-     * objects that cascade into those, each once, in the order the delete's
-     * own walk first reaches them. `objectName` itself is named only when a
+     * behaviour is `cascade` (a `master_detail` by default, a `lookup`, `tree`
+     * or `user` field that declares `deleteBehavior: 'cascade'`), and
+     * transitively the objects that cascade into those, each once, in the
+     * order the delete's own walk first reaches them. `objectName` itself is named only when a
      * cascading relation leads back to it. A `restrict` or `set_null`
      * relation removes nothing and is not named. `undefined` when the engine
      * does not hold `objectName`.

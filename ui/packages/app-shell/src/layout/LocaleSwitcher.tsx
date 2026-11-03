@@ -108,12 +108,13 @@ export function LocaleSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8">
+        <Button variant="ghost" size="icon" className="h-8 w-8 max-md:size-11">
           <Globe className="h-4 w-4" />
           <span className="sr-only">{t('console.localeSwitcher.label')}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
+      {/* 44 px rows below `md`, as the top bar's menus (objectstack#29075). */}
+      <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto max-md:[&_[role=menuitem]]:min-h-11">
         {offerableLanguages.map((code) => (
           <DropdownMenuItem
             key={code}

@@ -222,7 +222,7 @@ describe('ObjectGrid link column — must-not-change (#4490)', () => {
     expect(cell.outerHTML).toBe(
       '<span role="link" tabindex="0" data-testid="link-cell" ' +
         'class="text-primary font-medium underline-offset-4 hover:underline cursor-pointer ' +
-        'truncate block max-w-full">Alice</span>',
+        'truncate block max-w-full max-md:pointer-events-none">Alice</span>',
     );
   });
 

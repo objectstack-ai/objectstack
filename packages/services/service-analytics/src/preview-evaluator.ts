@@ -770,33 +770,30 @@ function undeclaredPreviewMeasureError(member: string, cube: Cube): Error {
   );
 }
 
+/** [#28977] The draft preview's row filters, lowered by {@link lowerPreviewRowFilters}. */
+export interface PreviewRowFilters {
+  /** Whether a drafted row passes the `where` and every window. */
+  readonly matches: (row: Row) => boolean;
+}
+
 /**
- * Evaluate `query` over `rows` using the cube's measure/dimension specs.
- * Mirrors the engine strategies' output contract: rows keyed by bare
- * measure/dimension names, `fields` describing each output column.
+ * [#28977] The draft preview's row filters, lowered: the `where`, then each
+ * `timeDimensions[].dateRange` window, raising every refusal either carries.
+ * {@link evaluateAnalyticsQueryOverRows} matches its rows with them.
  *
- * `declaredType` is the host's declared type of a column of the drafted
- * object, which {@link declaredPreviewLowering} turns into this face's reader
- * for the shared lowering; the production caller always passes it. A caller
- * that passes none cannot read declarations, and every column then reads
- * type-blind (ADR-0053 D-D1 item 7).
- *
- * `whereColumns` maps a `where` member to the column the live strategies
- * resolve it to, for each member spelled other than its column
- * (`OBJECT.region`, a dataset dimension `zone` over `region`). The rows carry
- * columns, so the match reads each such member from its column, and the
- * declared type is the column's (#28691). The service builds it with the
- * member resolution the strategies use; a member it does not list is read as
- * written.
+ * Exported so the preview can lower them once, where the live ObjectQL
+ * strategy lowers its filter and its windows (before its column-asked-twice
+ * and date-bucket doors), and hand them to the evaluator. Lowered inside the
+ * evaluator, after both doors, an unrecognised `dateRange` beside either
+ * fault answered the door's refusal, where both live faces answer the
+ * `dateRange`'s. Arguments as {@link evaluateAnalyticsQueryOverRows}'s.
  */
-export function evaluateAnalyticsQueryOverRows(
+export function lowerPreviewRowFilters(
   query: AnalyticsQuery,
   cube: Cube,
-  rows: Row[],
   declaredType?: (field: string) => string | undefined,
-  durations?: Readonly<Record<string, DurationMeasureSpec>>,
   whereColumns?: Readonly<Record<string, string>>,
-): AnalyticsResult {
+): PreviewRowFilters {
   const aliased = Object.entries(whereColumns ?? {});
   const whereType =
     declaredType && aliased.length > 0 ? (field: string) => declaredType(whereColumns![field] ?? field) : declaredType;
@@ -843,11 +840,11 @@ export function evaluateAnalyticsQueryOverRows(
   // comparand here and the row value at the match (see {@link previewTemporalKind}).
   const whereKindOf = previewTemporalKind(whereType);
   const where = previewStorageComparands(lowered, whereKindOf);
-  let filtered = rows.filter((r) => matchesWhere(previewStorageRow(whereRow(r), whereKindOf), where));
   // The time window below names columns, so it reads the declarations as written.
   const windowLowering = declaredPreviewLowering(declaredType);
   const kindOf = previewTemporalKind(declaredType);
   const timeDims = query.timeDimensions ?? [];
+  const windows: (Row | undefined)[] = [];
   for (const td of timeDims) {
     const dim = cube.dimensions?.[td.dimension];
     const field = String(dim?.sql ?? td.dimension);
@@ -872,8 +869,49 @@ export function evaluateAnalyticsQueryOverRows(
     // spells for the published faces, so the draft counts the published days.
     const bounds = dateRangeWindowBounds({ start, end, endExclusive }, query.timezone, declaredType?.(field) === 'date');
     const window = previewStorageComparands(lowerFilterCondition({ [field]: bounds }, windowLowering), kindOf);
-    filtered = filtered.filter((r) => matchesWhere(previewStorageRow(r, kindOf), window));
+    windows.push(window);
   }
+  return {
+    matches: (r) =>
+      matchesWhere(previewStorageRow(whereRow(r), whereKindOf), where)
+      && windows.every((window) => matchesWhere(previewStorageRow(r, kindOf), window)),
+  };
+}
+
+/**
+ * Evaluate `query` over `rows` using the cube's measure/dimension specs.
+ * Mirrors the engine strategies' output contract: rows keyed by bare
+ * measure/dimension names, `fields` describing each output column.
+ *
+ * `declaredType` is the host's declared type of a column of the drafted
+ * object, which {@link declaredPreviewLowering} turns into this face's reader
+ * for the shared lowering; the production caller always passes it. A caller
+ * that passes none cannot read declarations, and every column then reads
+ * type-blind (ADR-0053 D-D1 item 7).
+ *
+ * `whereColumns` maps a `where` member to the column the live strategies
+ * resolve it to, for each member spelled other than its column
+ * (`OBJECT.region`, a dataset dimension `zone` over `region`). The rows carry
+ * columns, so the match reads each such member from its column, and the
+ * declared type is the column's (#28691). The service builds it with the
+ * member resolution the strategies use; a member it does not list is read as
+ * written.
+ *
+ * `rowFilters` is the row filters {@link lowerPreviewRowFilters} lowered from
+ * the same arguments, for a caller that lowered them already (#28977);
+ * otherwise they are lowered here, first.
+ */
+export function evaluateAnalyticsQueryOverRows(
+  query: AnalyticsQuery,
+  cube: Cube,
+  rows: Row[],
+  declaredType?: (field: string) => string | undefined,
+  durations?: Readonly<Record<string, DurationMeasureSpec>>,
+  whereColumns?: Readonly<Record<string, string>>,
+  rowFilters: PreviewRowFilters = lowerPreviewRowFilters(query, cube, declaredType, whereColumns),
+): AnalyticsResult {
+  const filtered = rows.filter(rowFilters.matches);
+  const timeDims = query.timeDimensions ?? [];
 
   // 2. Grouping keys: each selected dimension (time dims bucketed).
   // [#28690] The set the live strategies project — every `dimensions` entry,

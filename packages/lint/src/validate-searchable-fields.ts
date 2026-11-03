@@ -94,12 +94,19 @@
  *
  * The OBJECT's own `searchableFields` stays existence-only OTHERWISE, and the
  * dividing line is STORAGE, not search quality: the runtime's declared branch
- * filters by existence and scannability, never by type taste, so a json or
- * lookup column declared THERE is a choice the engine executes (a `$contains`
- * over the stored JSON text / the stored foreign key) — narrow, rarely useful,
- * but a scan that CAN match, so it is neither a 400 nor a finding. Flagging
- * those would reject metadata the runtime accepts — the false finding that
- * makes authors stop trusting the linter (ADR-0072 D1). A virtual entry is the
+ * filters by existence and scannability, never by type taste, so a lookup or
+ * json column declared THERE is admitted to the resolved set: neither a 400
+ * nor a finding. What it then contributes is the `$search` expansion's call
+ * (`expandSearchToFilter`, `@objectstack/objectql`). A single-valued lookup
+ * becomes an `$icontains` over the stored foreign key (a `multiple: true` one,
+ * a `$contains` membership match) — narrow, rarely useful, but a scan that
+ * CAN match. A column whose declared type can never hold a string — the
+ * text-operator door's `door-refusal` verdict (`textOperatorDoorVerdict`,
+ * `@objectstack/spec/data`), json among them — is admitted but contributes NO
+ * clause, and a set made only of such columns answers no rows, never an
+ * error. Flagging either would reject metadata the runtime accepts — the
+ * false finding that makes authors stop trusting the linter (ADR-0072 D1).
+ * A virtual entry is the
  * opposite case: no column exists on any driver, so admitting it is the
  * fail-open #4254 closed one axis over, surviving on the known-but-virtual
  * axis.
@@ -148,6 +155,7 @@ import {
   isCredentialFieldType,
   isVirtualSearchField,
   SEARCH_AUTO_EXCLUDED_FIELDS,
+  SEARCH_FLAG_EXCLUDED_TYPES,
   type SearchFieldMeta,
 } from '@objectstack/spec/data';
 import { recordsOf, suggestName } from './object-graph.js';
@@ -258,6 +266,10 @@ function declaredFieldTarget(obj: AnyRec): ObjectSearchTarget | null {
     metas[n] = {
       type: typeof f.type === 'string' ? f.type : undefined,
       hidden: f.hidden === true,
+      // The field's own opt-in: with no `searchableFields` declared, the
+      // runtime resolution admits a field marked `searchable: true` (ruling
+      // record 6573569376), so a narrowing naming it is accepted there.
+      searchable: f.searchable === true,
     };
   }
   if (names.size === 0) return null;
@@ -515,10 +527,19 @@ export function checkSearchableFieldList(
     } else if (meta?.hidden) {
       why = 'hidden';
     } else if (typeof meta?.type === 'string') {
-      why = `of type '${meta.type}', which 'search' cannot scan`;
+      // The runtime admits a field of any type its author marks
+      // `searchable: true`, except the hard exclusions — so "cannot scan" is
+      // said only of those, and every other type names the opt-in it lacks.
+      why = SEARCH_FLAG_EXCLUDED_TYPES.has(meta.type)
+        ? `of type '${meta.type}', never scanned even with \`searchable: true\``
+        : `of type '${meta.type}' and not marked \`searchable: true\``;
     } else {
       continue; // no readable type — unresolvable, not wrong (ADR-0072 D1)
     }
+    // Whether the field's own opt-in would admit it — every arm above, a
+    // system name and `hidden` included, since the flag is asked before the
+    // auto-default's exclusions (`@objectstack/spec/data` `search-fields.ts`).
+    const flaggable = typeof meta?.type === 'string' && !SEARCH_FLAG_EXCLUDED_TYPES.has(meta.type);
     findings.push({
       severity: 'error',
       rule: SEARCHABLE_FIELD_UNSEARCHABLE,
@@ -535,7 +556,10 @@ export function checkSearchableFieldList(
       hint: isReference
         ? `Drop "${name}" from this view; to search by the related record's title, mirror it onto ` +
           `a stored text field here and declare that instead`
-        : `Drop "${name}" from this view, or target a text-like field instead`,
+        : flaggable
+          ? `Mark "${name}" \`searchable: true\` on "${objectName}", drop it from this view, or target ` +
+            `a text-like field instead`
+          : `Drop "${name}" from this view, or target a text-like field instead`,
     });
   }
   return findings;

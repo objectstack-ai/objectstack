@@ -127,6 +127,7 @@ export const AppLauncherRenderer: React.FC<AppLauncherRendererProps> = ({
     >
       <HomeAppsStrip
         apps={openable}
+        routeApps={apps}
         favorites={favorites}
         // See the header: with an empty prop shape there is no authoring key
         // that could address the marketplace shortcut, so it is not offered.

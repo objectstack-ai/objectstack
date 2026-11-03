@@ -62,14 +62,22 @@
  *   declares resolves `_actions.<name>.outcomeMessages.<outcome>`; a bundle
  *   entry for an outcome the action does not declare is never read, so a
  *   bundle cannot add copy for an answer the author never wrote one for.
- * - **`label`, `confirmText`, `successMessage`, `errorMessage` and each
- *   `outcomeMessages` entry are reduced through `pickLocalized` first**,
- *   because each is an `I18nLabel` — a string or an inline per-locale map. The map is collapsed to the active language
+ * - **`label`, `confirmText`, `successMessage`, `errorMessage`, `description`
+ *   and each `outcomeMessages` entry are reduced through `pickLocalized`
+ *   first**, because each is an `I18nLabel` — a string or an inline per-locale map. The map is collapsed to the active language
  *   BEFORE it is offered to the bundle as the fallback, so a per-locale
  *   literal and a bundle entry cannot disagree about what "the authored text"
  *   is, and the action runner, which has no language, only ever receives a
  *   string. `errorMessage` has no bundle key (the spec's action translation
  *   declares none), so the collapse is all it gets (objectui#12757).
+ * - **`description` is collapse-only too** (objectstack#29249): the line the
+ *   param dialog draws under its title is an `I18nLabel` on an inline action
+ *   (`InlineActionSchema` picks it), so a locale map collapses to the active
+ *   language here, before the runner and the dialog, which have no language,
+ *   receive it. Its bundle entry (`_actions.<name>.description`) is NOT read
+ *   here: the param-collection host resolves it (`actionDescription` in
+ *   `useConsoleActionRuntime`), over the string this hook hands on. An action
+ *   that declares none gains no key, so the dialog keeps its generic line.
  * - **`disabledReason` follows the same declared-only rule**
  *   (objectstack#26619): the reason a greyed action gives resolves
  *   `_actions.<name>.disabledReason` only when the action declares one, after
@@ -77,6 +85,12 @@
  *   that declares none is never read, so every such action keeps the
  *   surface's default reason ("Not available for this record"). It is display
  *   copy only: nothing here, nor the runner, reads it as a condition.
+ * - **`cancelText` follows the same declared-only rule** (objectstack#28879):
+ *   the dismiss label of the action's confirm dialog resolves
+ *   `_actions.<name>.cancelText` only when the action declares one, after its
+ *   `I18nLabel` map is collapsed like `label`, so the runner hands the confirm
+ *   dialog one string. A bundle entry for an action that declares none is never
+ *   read, and every such dialog keeps its default "Cancel".
  * - **The success copy stays a template.** A `${result.*}` token, in a bundle
  *   entry or in the authored text, passes through this hook untouched: the
  *   action has not run yet, so there is no result to read. The runner fills
@@ -84,7 +98,8 @@
  *   scope `onSuccess.navigate` reads — one interpolation, in one place.
  * - **The `template` envelope keeps its shape** (objectui#13367, the renderer
  *   half of objectstack#24814). `confirmText`, `successMessage`,
- *   `errorMessage` and each `outcomeMessages` entry (objectstack#27948) may
+ *   `errorMessage`, `description` and each `outcomeMessages` entry
+ *   (objectstack#27948) may
  *   arrive as `{ dialect: 'template', source }` instead of a string. The
  *   envelope is not an `I18nLabel` map — read as one it would
  *   collapse to its first string value, the word `template` — so its `source`
@@ -107,10 +122,11 @@ export interface ActionTextLocalizerOptions {
 
 /**
  * Returns a copy of `action` with `label` — plus `confirmText`,
- * `successMessage`, `errorMessage`, `outcomeMessages` and `disabledReason`
- * when the action declares them —
+ * `successMessage`, `errorMessage`, `description`, `outcomeMessages`,
+ * `disabledReason` and `cancelText` when the action declares them —
  * resolved from the active locale's bundle, falling back to the authored
- * literals. `objectName` is the host object the action is drawn on; the
+ * literals (`errorMessage` and `description` are collapsed to the active
+ * language only; neither reads the bundle here). `objectName` is the host object the action is drawn on; the
  * action's own declared `objectName` wins over it when present.
  */
 export type ActionTextLocalizer = <T extends Record<string, any>>(
@@ -120,7 +136,7 @@ export type ActionTextLocalizer = <T extends Record<string, any>>(
 ) => T;
 
 /** The declared `I18nLabel` copy, besides `label`, that reaches the runner. */
-const DECLARED_COPY_KEYS = ['confirmText', 'successMessage', 'errorMessage'] as const;
+const DECLARED_COPY_KEYS = ['confirmText', 'successMessage', 'errorMessage', 'description'] as const;
 
 /**
  * Collapse one declared copy value to the active language: an `I18nLabel`
@@ -149,7 +165,7 @@ function resolveCopy(
 }
 
 export function useActionTextLocalizer(): ActionTextLocalizer {
-  const { actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason } = useObjectLabel();
+  const { actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason, actionCancelText } = useObjectLabel();
   const { language } = useObjectTranslation();
 
   return useMemo<ActionTextLocalizer>(() => {
@@ -188,6 +204,15 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
         if (collapsed.disabledReason !== declaredReason) changed = true;
       }
 
+      // The confirm dialog's dismiss label is an `I18nLabel` too, collapsed
+      // the same way; unlike the reason it reaches the runner, which has no
+      // language to collapse a map with.
+      const declaredCancel: unknown = (action as any).cancelText;
+      if (declaredCancel !== undefined) {
+        collapsed.cancelText = pickLocalized(declaredCancel, language);
+        if (collapsed.cancelText !== declaredCancel) changed = true;
+      }
+
       // No name, no translation key: the literals are the answer. They are
       // still normalized (map to string, last-resort placeholder applied) so
       // every caller reads one shape.
@@ -215,6 +240,9 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
       if (declaredReason !== undefined) {
         out.disabledReason = actionDisabledReason(keyObject, name, collapsed.disabledReason);
       }
+      if (declaredCancel !== undefined) {
+        out.cancelText = actionCancelText(keyObject, name, collapsed.cancelText || undefined);
+      }
       // The map is an authored bag (outcome → copy), so the one "is this a
       // real bag?" predicate in this package answers whether to read it.
       const authoredOutcomes: unknown = action.outcomeMessages;
@@ -234,5 +262,5 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
       }
       return out as T;
     }) as ActionTextLocalizer;
-  }, [actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason, language]);
+  }, [actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason, actionCancelText, language]);
 }

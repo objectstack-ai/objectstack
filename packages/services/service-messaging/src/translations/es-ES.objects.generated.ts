@@ -417,5 +417,69 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Pending"
       }
     }
+  },
+  sys_user_device: {
+    label: "Dispositivo de usuario",
+    pluralLabel: "Dispositivos de usuario",
+    description: "Dispositivo de notificaciones push de un usuario: una fila por instalación de la aplicación, con su token push del proveedor.",
+    fields: {
+      id: {
+        label: "ID de fila"
+      },
+      device_id: {
+        label: "ID del dispositivo",
+        help: "ID del dispositivo que guarda el cliente, estable en cada instalación de la aplicación. Único por usuario."
+      },
+      user_id: {
+        label: "Usuario",
+        help: "El usuario al que pertenece el dispositivo: el usuario con sesión iniciada que lo registró."
+      },
+      vendor: {
+        label: "Proveedor",
+        help: "Proveedor push al que pertenece el token.",
+        options: {
+          apns: "APNs",
+          fcm: "FCM"
+        }
+      },
+      token: {
+        label: "Token push",
+        help: "Token push del proveedor. Solo lo tiene un dispositivo a la vez."
+      },
+      platform: {
+        label: "Plataforma",
+        options: {
+          ios: "iOS",
+          android: "Android",
+          web: "Web"
+        }
+      },
+      app_id: {
+        label: "ID de la aplicación",
+        help: "El ID de paquete de iOS o el ID de aplicación de Android para el que se emitió el token."
+      },
+      locale: {
+        label: "Configuración regional",
+        help: "Configuración regional del dispositivo en la que se muestran las notificaciones push enviadas a él."
+      },
+      name: {
+        label: "Nombre del dispositivo"
+      },
+      enabled: {
+        label: "Habilitado",
+        help: "Falso cuando el proveedor informa de que el token ya no es válido; a un dispositivo deshabilitado no se le entrega nada."
+      },
+      invalidated_at: {
+        label: "Invalidado el",
+        help: "Cuándo informó el proveedor de que el token ya no es válido. Se borra con el registro que vuelve a habilitar el dispositivo."
+      },
+      last_seen_at: {
+        label: "Visto por última vez",
+        help: "Cuándo se registró o actualizó el dispositivo por última vez."
+      },
+      created_at: {
+        label: "Creado el"
+      }
+    }
   }
 };

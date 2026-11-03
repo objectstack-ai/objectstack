@@ -10,12 +10,13 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
-import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, extractWriteErrorMessage } from '@object-ui/react';
+import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage } from '@object-ui/react';
+import type { AnsweredLoadFailure } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
@@ -44,6 +45,7 @@ import {
   recordPageComments,
   recordPageRelatedLists,
   recordPageRequestOf,
+  recordPageTimeline,
   seedRecordPageReaders,
 } from './recordPagePayload.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
@@ -53,7 +55,7 @@ import { createConsoleServerActionHandler } from '../utils/consoleServerAction.j
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
-import { resolveHostAppSegment } from '../utils/appRoute.js';
+import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
@@ -301,6 +303,31 @@ const PAGE_NODE_PROPERTY_KEYS = ['children', 'items'] as const;
 const TABS_URL_SYNC_KEYS: ReadonlySet<string> = new Set(['regions', 'components', 'children']);
 
 /**
+ * The fields the highlight strip of a synthesized record page draws: the
+ * `fields` of the `record:highlights` blocks among the page's top-level blocks,
+ * where the synthesizer places the strip (a phone's cut-short one included)
+ * and where a slotted page's own `highlights` slot lands. A field is read in
+ * either form the block accepts, a bare name or a `{ name }` entry, from the
+ * block's `properties` bag over its own keys.
+ */
+function drawnHighlightFieldsOf(page: unknown): string[] {
+  const out: string[] = [];
+  const regions = (page as { regions?: unknown } | null | undefined)?.regions;
+  for (const region of Array.isArray(regions) ? regions : []) {
+    const components = (region as { components?: unknown } | null | undefined)?.components;
+    for (const node of Array.isArray(components) ? components : []) {
+      if ((node as { type?: unknown } | null | undefined)?.type !== 'record:highlights') continue;
+      const props = { ...(node as object), ...((node as { properties?: object }).properties ?? {}) } as { fields?: unknown };
+      for (const field of Array.isArray(props.fields) ? props.fields : []) {
+        const name = typeof field === 'string' ? field : (field as { name?: unknown } | null | undefined)?.name;
+        if (typeof name === 'string' && name.length > 0 && !out.includes(name)) out.push(name);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Whether a node of one of `types` is on screen when `page` opens with
  * `activeTab` as its `?tab=` value — that is, whether it is mounted.
  *
@@ -370,15 +397,40 @@ function pageShowsNodeOnOpen(page: unknown, types: ReadonlySet<string>, activeTa
 }
 
 /**
- * Which of a record's two feed reads the server REFUSED (objectui#11195):
- * 401 / 403, or a permission envelope, judged by plugin-detail's
- * `isRefusedFeedRead`. A read that answered, even with zero rows, and a read
- * that failed for any other reason are both `false` here. Only a refusal is a
- * different answer from "nothing to show".
+ * How each of a record's two feed reads ended, per source.
+ *
+ *   - `answered`: the read answered, even with zero rows (a bare 404, a table
+ *     this deployment does not provision, answers empty), or it was refused
+ *     for a reason no retry or grant changes (the object withholds its API, a
+ *     400). The panel draws the rows, or its empty state.
+ *   - `refused`: the server REFUSED it (objectui#11195): 401 / 403, or a
+ *     permission envelope, judged by plugin-detail's `isRefusedFeedRead`. The
+ *     panel says the reader may not see that half. Never retried.
+ *   - `failed`: it FAILED (objectstack#29188): a 5xx or a network failure
+ *     (`feedReadVerdictOf`). The panel says it could not load that
+ *     half and offers a Retry, which re-reads only the failed sources.
  */
-interface FeedRefusal {
-  activity: boolean;
-  comments: boolean;
+type FeedReadVerdict = 'answered' | 'refused' | 'failed';
+type FeedSource = 'activity' | 'comments';
+type FeedReadVerdicts = Record<FeedSource, FeedReadVerdict>;
+
+/**
+ * A feed read's rejection, as a {@link FeedReadVerdict}. `failed` is a 5xx or
+ * a rejection with no status at all (the request never got an answer):
+ * `classifyLoadError`'s `network`, less the 4xx statuses it also folds there.
+ * A 404 (a system table this deployment does not serve) stays the empty
+ * answer it has always been.
+ */
+function feedReadVerdictOf(err: unknown): FeedReadVerdict {
+  if (isRefusedFeedRead(err)) return 'refused';
+  if (classifyLoadError(err) !== 'network') return 'answered';
+  const e = err as { httpStatus?: unknown; status?: unknown; statusCode?: unknown; message?: unknown } | null;
+  let status = [e?.httpStatus, e?.status, e?.statusCode].find((v): v is number => typeof v === 'number');
+  if (status === undefined) {
+    const m = /HTTP (\d{3})\b/.exec(String(e?.message ?? ''));
+    if (m) status = Number(m[1]);
+  }
+  return status === undefined || status >= 500 ? 'failed' : 'answered';
 }
 
 /**
@@ -400,6 +452,41 @@ function mergeFeedRows(prev: readonly FeedItem[], incoming: readonly FeedItem[])
     const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
     return ta - tb;
   });
+}
+
+/**
+ * The record feed's own read of the activity window (`$top:
+ * RECORD_PAGE_ACTIVITY_ROWS`, newest first): the feed's read where the page
+ * payload carries no activity, and the 动态 tab's when it opens on a feed that
+ * holds only the 动态 panel's rows (objectstack#28737). The actor's record in
+ * place of its id, so a row with no `actor_name` names its user instead of
+ * reading "System" (objectui#12067); the `record:activity` block's own read
+ * passes the same expand.
+ */
+function activityWindowQuery(objectName: string, recordId: string) {
+  return {
+    $filter: { object_name: objectName, record_id: recordId },
+    $orderby: { timestamp: 'desc' as const },
+    $top: RECORD_PAGE_ACTIVITY_ROWS,
+    $expand: ['actor_id'],
+  };
+}
+
+/**
+ * `sys_activity` rows as feed items, through `record:activity`'s own reading
+ * (`activityRowToFeedItem`). `null` is the ONE outcome that drops a row, and
+ * it means exactly one thing: a type the shared table maps to no entry ON
+ * PURPOSE (`RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES` — their content lives in
+ * `sys_comment`, or they are account events rather than record activity).
+ * Everything else comes back as an item, including a type nobody has mapped.
+ */
+function activityRowsToFeedItems(rows: readonly any[], systemActorLabel: string): FeedItem[] {
+  const mapped: FeedItem[] = [];
+  for (const row of rows) {
+    const item = activityRowToFeedItem(row, systemActorLabel);
+    if (item) mapped.push(item);
+  }
+  return mapped;
 }
 
 /**
@@ -816,7 +903,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The tenant default currency (ADR-0053) a `dynamic` currency diff reads,
   // the same `useLocalization().currency` the record page's cells read.
   const { currency: tenantCurrency } = useLocalization();
-  const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionResultDialog, fieldLabel, fieldOptionLabel } = useObjectLabel();
+  const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionCancelText, actionResultDialog, fieldLabel, fieldOptionLabel } = useObjectLabel();
   // label + confirmText + successMessage through ONE call (objectui#4265) —
   // the three keys of an `_actions.<name>` bundle entry can no longer be
   // localized apart from one another on this surface.
@@ -827,10 +914,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The discussion feed, stored PER RECORD (objectui#3268). See the
   // `feedRecordKey` block below for why this is a map and not a `FeedItem[]`.
   const [feedItemsByRecord, setFeedItemsByRecord] = useState<Record<string, FeedItem[]>>({});
-  // Which feed reads were refused, stored under the same per-record key as the
-  // rows (objectui#11195), so a refusal on record A never reaches record B's
-  // panel.
-  const [feedRefusalByRecord, setFeedRefusalByRecord] = useState<Record<string, FeedRefusal>>({});
+  // How each feed read ended (refused, objectui#11195; failed,
+  // objectstack#29188), stored under the same per-record key as the rows, so a
+  // refusal or a failure on record A never reaches record B's panel.
+  const [feedVerdictByRecord, setFeedVerdictByRecord] = useState<Record<string, FeedReadVerdicts>>({});
+  // objectstack#29188 — the sources a Retry asked to read again, per record.
+  // The feed effect takes them when it runs on the bumped nonce, and reads only
+  // those, directly (never from the page payload, which already answered).
+  const feedRetryRef = useRef(new Map<string, Set<FeedSource>>());
+  const [feedRetryNonce, setFeedRetryNonce] = useState(0);
+  // objectstack#28737 — the 动态 stream's count the page payload answered, per
+  // record (`recordPageTimeline`): `null` when it carried none.
+  const [timelineCountByRecord, setTimelineCountByRecord] = useState<Record<string, { total: number; comments: number } | null>>({});
+  // objectstack#28737 — the records whose feed holds only the 动态 panel's
+  // activity rows of more: the 动态 tab reads the window when it opens.
+  const [activityPeekByRecord, setActivityPeekByRecord] = useState<Record<string, boolean>>({});
   const [mentionSuggestions, setMentionSuggestions] = useState<MentionSuggestion[]>([]);
   // Screen-flow runtime: a paused `screen`-node flow launched from a record action.
   const [screenFlow, setScreenFlow] = useState<ScreenFlowState | null>(null);
@@ -944,13 +1042,23 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // overrides, not by the host route, so it never reads the segment. On the
   // record route itself `requestedPageName` is undefined and the lookup is the
   // object's default record page, exactly as before.
+  //
+  // The app the record opens in picks its own record page first
+  // (`PageSchema.apps`, maintainer ruling A on objectstack#28979): the
+  // route's `:appName` segment is resolved to its app and the app's NAME is
+  // what the assignment compares, never the segment itself, which carries the
+  // package id when the app has one (`appRouteSegment`). Where a package ships
+  // two apps, the package id resolves to the first (`matchAppBySegment`), so
+  // the second app's scoped page opens under its name segment only. A record
+  // drawer reads the same segment: it is opened inside the host route's app.
   const requestedPageName = embedded ? undefined : params.pageName;
+  const { pages: metadataPages, apps: metadataApps } = useMetadata();
+  const routeAppName = matchAppBySegment(metadataApps, appName)?.name;
   const {
     page: resolvedPage,
     slots: resolvedSlots,
     loading: pageAssignmentLoading,
-  } = usePageAssignment(objectName, requestedPageName ? { pageName: requestedPageName } : undefined);
-  const metadataPages = useMetadata().pages;
+  } = usePageAssignment(objectName, requestedPageName ? { pageName: requestedPageName } : { app: routeAppName });
   const namedPageState: 'none' | 'pending' | 'accepted' | 'refused' = useMemo(() => {
     if (!requestedPageName) return 'none';
     if (pageAssignmentLoading) return 'pending';
@@ -1077,6 +1185,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [pageRecordStatus, setPageRecordStatus] = useState<
     'idle' | 'loading' | 'loaded' | 'missing' | 'accessEnded' | 'forbidden' | 'failed'
   >('idle');
+  // objectstack#29704 — the server's code and sentence for a `failed` read it
+  // ANSWERED (a 500 it explained), read by the list page's own rule
+  // (`answeredLoadFailure`). `null` = no answer, so the state keeps its
+  // "check your connection" sentence, which is only true of that case.
+  const [pageRecordFailure, setPageRecordFailure] = useState<AnsweredLoadFailure | null>(null);
   // The record-load effect's own `loadRecord`, for the `failed` state's Retry
   // (objectui#11902). Held so Retry re-runs THE read the page already makes —
   // same request, same cancellation guard — rather than a second read path.
@@ -1099,6 +1212,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     feedKey: string;
     discussion: boolean;
     activity: boolean;
+    /**
+     * objectstack#28737 — how many activity rows the payload asked (fewer
+     * than the window when it asked the 动态 panel's), and whether it asked
+     * the stream's count.
+     */
+    activityRows: number;
+    timeline: boolean;
   } | null>(null);
   // objectstack#26589 — the record this viewer just decided an approval on,
   // as `objectName` + `recordId`. A pending approver with no standing access
@@ -1236,6 +1356,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // objectui#11902 — a rejection is never "not found": the adapter
           // answers a 404 by resolving `null` (the branch above). A refusal is
           // told apart by the shared classifier; anything else is a failed load.
+          setPageRecordFailure(answeredLoadFailure(err));
           setPageRecordStatus(classifyLoadError(err) === 'forbidden' ? 'forbidden' : 'failed');
         });
     };
@@ -1415,6 +1536,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // resolves it: the bundle entry first, then the authored `I18nLabel`
       // collapsed to the active language; absent, the dialog says "Confirm".
       const submitText = actionSubmitText(objForI18n, action?.name, pickLocalized(action?.submitText, language) || undefined);
+      // The dismiss button's label (`cancelText`), resolved the same way;
+      // absent, the dialog says "Cancel".
+      const cancelText = actionCancelText(objForI18n, action?.name, pickLocalized(action?.cancelText, language) || undefined);
       setParamState({
         open: true,
         params: localized,
@@ -1436,6 +1560,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // the runner's template scope, as `confirmText` is (objectui#12967).
         description: interpolate && declaredDescription ? interpolate(declaredDescription) : declaredDescription,
         submitText,
+        cancelText,
         interpolate,
         resolve,
         // The runner's `run`, as `useConsoleActionRuntime` forwards it: a
@@ -1443,7 +1568,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         run,
       });
     });
-  }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, language]);
+  }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);
 
   // Global undo/redo (Ctrl+Z), backed by the dataSource — the success toast's
   // "Undo" button (for `undoable` actions) restores the record's prior values.
@@ -1486,7 +1611,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // (objectui#13433). Only the route's app: outside an app route it is
   // undefined and the form keeps the app-less route.
   const { currentAppName } = useNavigationContext();
-  const metadataApps = useMetadata().apps;
   const hostAppSegment = appName ?? resolveHostAppSegment(metadataApps, currentAppName);
 
   const navigateHandler = useCallback((url: string, options?: { external?: boolean; newTab?: boolean }) => {
@@ -2244,13 +2368,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // list names the lookups of its rows to resolve, as `RelatedList`'s own read
   // expands them (every declared reference of the child but the parent's,
   // gated by field-level security), so its rows carry the names the list draws.
+  // The audit history gate (the audit read below explains its three
+  // preconditions), read here first: the 动态 stream's count names the field
+  // changes as one of its sources (objectstack#28737).
+  const historyEnabled = useMemo(() => {
+    if (!objectDef) return false;
+    if (objectDef.name === 'sys_audit_log') return false;
+    if (objectDef.enable?.trackHistory !== true) return false;
+    return objects.some((o: any) => o.name === 'sys_audit_log');
+  }, [objectDef, objects]);
+  const feedPageOnOpen = useMemo(
+    () => (!effectivePage ? null : objectDef?.enable?.feeds !== false ? effectivePage : stripDiscussionNodes(effectivePage)),
+    [effectivePage, objectDef],
+  );
   const feedOnOpen = useMemo(() => {
-    if (!effectivePage) return false;
-    const page = objectDef?.enable?.feeds !== false ? effectivePage : stripDiscussionNodes(effectivePage);
+    const page = feedPageOnOpen;
     if (page == null) return false;
     return (pageColumnsEligible && buildDefaultPageColumns(page) !== null)
       || pageShowsNodeOnOpen(page, FEED_CONSUMER_TYPES, activeTabParam);
-  }, [effectivePage, objectDef, pageColumnsEligible, activeTabParam]);
+  }, [feedPageOnOpen, pageColumnsEligible, activeTabParam]);
   const recordPagePlan = useMemo(() => {
     if (!hasPage || !objectName || !pureRecordId || typeof dataSource?.getRecordPage !== 'function') return '';
     if (objectName === SYS_APPROVAL_REQUEST_OBJECT) return '';
@@ -2279,11 +2415,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // draws the 动态 panel the assigned one may not) changes them and asks nothing
   // again (objectui#11699). The feed effect reads which streams the payload
   // carries off `recordPageRead`, and asks the rest itself.
+  //
+  // objectstack#28737 — a page that draws the 动态 panel (the synthesized page
+  // laid out in columns) draws the stream's count beside it: the payload counts
+  // the stream (`timeline`, over the sources the stream merges), so the page
+  // asks only the activity rows the panel draws, unless it opens on the 动态
+  // tab, which draws the whole window. The tab reads that window itself when
+  // it opens later (the window effect below).
+  const timelineDrawnOnOpen = feedOnOpen && pageColumnsEligible && !!feedPageOnOpen && buildDefaultPageColumns(feedPageOnOpen) !== null;
+  const timelinePeekOnOpen = timelineDrawnOnOpen && enlargedRelatedParam !== RECORD_PAGE_TIMELINE_PANEL;
+  const streamDiscussion = feedOnOpen && objectDef?.enable?.feeds !== false;
+  const streamActivity = feedOnOpen && objectDef?.enable?.activities !== false;
   const recordPageStreams = {
-    ...(feedOnOpen && objectDef?.enable?.feeds !== false ? { discussion: true } : {}),
-    ...(feedOnOpen && objectDef?.enable?.activities !== false ? { activity: RECORD_PAGE_ACTIVITY_ROWS } : {}),
+    ...(streamDiscussion ? { discussion: true } : {}),
+    ...(streamActivity ? { activity: timelinePeekOnOpen ? RECORD_TIMELINE_PANEL_MAX_ENTRIES : RECORD_PAGE_ACTIVITY_ROWS } : {}),
     ...(objectDef?.enable?.files === true || hasExplicitAttachments(effectivePage as any)
       ? { attachments: RECORD_PAGE_ATTACHMENT_ROWS }
+      : {}),
+    ...(timelineDrawnOnOpen && (streamDiscussion || streamActivity)
+      ? { timeline: { discussion: streamDiscussion, activity: streamActivity, fieldChanges: historyEnabled } }
       : {}),
   };
   const recordPageStreamsRef = useRef(recordPageStreams);
@@ -2316,6 +2466,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       feedKey: `${objectName}:${pureRecordId}`,
       discussion: plan.discussion === true,
       activity: plan.activity !== undefined,
+      activityRows: plan.activity ?? 0,
+      timeline: plan.timeline !== undefined,
     };
     seedRecordPageReaders({ payload, objectName, recordId: pureRecordId, principal: recordPagePrincipal, ...plan });
   }, [recordPagePlan, objectName, pureRecordId, dataSource, recordPagePrincipal]);
@@ -2480,12 +2632,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // browser never receives serialized old_value/new_value payloads, which
   // can contain restricted fields. Field-level redaction in PR2 will harden
   // this further once a backend-scoped audit endpoint exists.
-  const historyEnabled = useMemo(() => {
-    if (!objectDef) return false;
-    if (objectDef.name === 'sys_audit_log') return false;
-    if (objectDef.enable?.trackHistory !== true) return false;
-    return objects.some((o: any) => o.name === 'sys_audit_log');
-  }, [objectDef, objects]);
+  // (`historyEnabled` itself is read further up, where the page payload's
+  // `timeline` part names the field changes as a source of the 动态 stream.)
 
   // ── Capability gates: enable.feeds / enable.activities (objectstack-ai/objectstack#2707) ─────
   // Both are opt-OUT capabilities (spec default `true`): absent enable
@@ -2871,7 +3019,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   //     a spinner while the re-read confirms them (#3205).
   const feedRecordKey = objectName && pureRecordId ? `${objectName}:${pureRecordId}` : null;
   const feedItems = (feedRecordKey ? feedItemsByRecord[feedRecordKey] : undefined) ?? EMPTY_FEED;
-  const feedRefusal = feedRecordKey ? feedRefusalByRecord[feedRecordKey] : undefined;
+  const feedVerdict = feedRecordKey ? feedVerdictByRecord[feedRecordKey] : undefined;
   const feedFetchKey =
     dataSource && feedRecordKey && (feedsEnabled || activitiesEnabled) ? feedRecordKey : null;
   const [settledFeedKey, setSettledFeedKey] = useState<string | null>(null);
@@ -2929,28 +3077,35 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // The payload this open asked, when it is this record's: the discussion
     // and the activity it carries are taken from it, never read again. A read
     // it was not asked for is this effect's own, as before.
+    // objectstack#29188 — a Retry of this record's failed reads: only those
+    // sources are read, each directly, and the page's stream count is left as
+    // it stands.
+    const retrying = feedRetryRef.current.get(threadId) ?? null;
+    if (retrying) feedRetryRef.current.delete(threadId);
     const opened = recordPageRead.current;
-    const fromPage = opened && opened.feedKey === threadId ? opened : null;
+    const fromPage = !retrying && opened && opened.feedKey === threadId ? opened : null;
     // The two reads below run in PARALLEL and are collected here so the
     // loading flag can close over BOTH of them — see the `allSettled` at the
     // end of this effect.
     const inFlight: Promise<unknown>[] = [];
 
-    // objectui#11195: each read's verdict on REFUSAL, recorded under THIS
-    // record's key when it settles. An answered read clears it, so a grant
-    // the member receives shows on the next read. Returning `prev` for an
-    // unchanged verdict keeps the map's identity when nothing moved. Nothing
-    // here re-issues a read: a refusal is recorded, never retried.
-    const recordRefusal = (source: keyof FeedRefusal, refused: boolean) => {
-      setFeedRefusalByRecord(prev => {
+    // objectui#11195 / objectstack#29188: each read's verdict, recorded under
+    // THIS record's key when it settles. An answered read clears a refusal or
+    // a failure, so a grant the member receives, or a server that recovered,
+    // shows on the next read. Returning `prev` for an unchanged verdict keeps
+    // the map's identity when nothing moved. Nothing here re-issues a read: a
+    // refusal is recorded, never retried, and a failure waits for the panel's
+    // Retry.
+    const recordVerdict = (source: FeedSource, verdict: FeedReadVerdict) => {
+      setFeedVerdictByRecord(prev => {
         const current = prev[threadId];
-        if ((current?.[source] ?? false) === refused) return prev;
+        if ((current?.[source] ?? 'answered') === verdict) return prev;
         return {
           ...prev,
           [threadId]: {
-            activity: current?.activity ?? false,
-            comments: current?.comments ?? false,
-            [source]: refused,
+            activity: current?.activity ?? 'answered',
+            comments: current?.comments ?? 'answered',
+            [source]: verdict,
           },
         };
       });
@@ -2987,14 +3142,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       return toReactions(parsed);
     };
 
-    const commentsRead: Promise<{ data?: any[]; reactionRows?: Array<Record<string, unknown>> | null }> | null = !feedsEnabled
+    const commentsRead: Promise<{ data?: any[]; reactionRows?: Array<Record<string, unknown>> | null }> | null = !feedsEnabled || (retrying && !retrying.has('comments'))
       ? null
       : fromPage?.discussion
         ? recordPageComments(fromPage.payload)
         : dataSource.find('sys_comment', { $filter: { thread_id: threadId }, $orderby: { created_at: 'asc' } });
     if (commentsRead) inFlight.push(commentsRead
       .then(async (res: any) => {
-        recordRefusal('comments', false);
+        recordVerdict('comments', 'answered');
         if (!res?.data?.length) return;
         // The `records` store (objectui#12078): ONE batched read of the
         // comments' reaction rows (paged only past REACTION_READ_COMMENT_IDS
@@ -3069,8 +3224,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       })
       // A refused comment read is the same panel's other half (objectui#11195):
       // the panel says the member may not see the comments, instead of "No
-      // comments yet". Any other failure still lands on the empty state.
-      .catch((err: unknown) => { recordRefusal('comments', isRefusedFeedRead(err)); }));
+      // comments yet". A failed one (5xx, network) says the comments could not
+      // be loaded, with a Retry (objectstack#29188).
+      .catch((err: unknown) => { recordVerdict('comments', feedReadVerdictOf(err)); }));
 
     // M10.11: Fetch sys_activity rows for this record and merge into the
     // timeline. plugin-audit's writers populate sys_activity on every
@@ -3106,38 +3262,39 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // activity to sees the panel say so, not "no activity". The verdict is
     // `isRefusedFeedRead`, the one the `record:activity` block's self-fetch
     // uses, so the two surfaces cannot disagree about what a refusal is.
-    const activityRead: Promise<any> | null = !activitiesEnabled
+    const activityRead: Promise<any> | null = !activitiesEnabled || (retrying && !retrying.has('activity'))
       ? null
       : fromPage?.activity
-        // objectstack#28470 — the payload's activity: the newest
-        // RECORD_PAGE_ACTIVITY_ROWS rows, the actor expanded.
+        // objectstack#28470 — the payload's activity: the newest rows it
+        // asked (the window, or the 动态 panel's, objectstack#28737), the
+        // actor expanded.
         ? recordPageActivity(fromPage.payload)
-        : dataSource.find('sys_activity', {
-            $filter: { object_name: objectName, record_id: pureRecordId },
-            $orderby: { timestamp: 'desc' },
-            $top: RECORD_PAGE_ACTIVITY_ROWS,
-            // The actor's record in place of its id, so a row with no `actor_name`
-            // names its user instead of reading "System" (objectui#12067). The
-            // shared constructor reads it; the `record:activity` block's own read
-            // passes the same expand.
-            $expand: ['actor_id'],
-          });
+        : dataSource.find('sys_activity', activityWindowQuery(objectName, pureRecordId));
+    // objectstack#28737 — the stream's count, when the payload asked it.
+    // Collected with the reads, so the panel leaves its loading state with the
+    // count it names. A read without the payload holds the whole window and
+    // counts its own rows.
+    if (retrying) {
+      // A Retry keeps the stream's count as it stands.
+    } else if (fromPage?.timeline) {
+      inFlight.push(recordPageTimeline(fromPage.payload).then((count) => {
+        setTimelineCountByRecord(prev => ({ ...prev, [threadId]: count }));
+      }));
+    } else {
+      setTimelineCountByRecord(prev => (prev[threadId] == null ? prev : { ...prev, [threadId]: null }));
+    }
     if (activityRead) inFlight.push(activityRead
       .then((res: any) => {
-        recordRefusal('activity', false);
+        recordVerdict('activity', 'answered');
+        // objectstack#28737 — the payload asked only the 动态 panel's rows and
+        // the record holds more: the 动态 tab reads the window when it opens.
+        const peek = !!fromPage?.activity
+          && fromPage.activityRows < RECORD_PAGE_ACTIVITY_ROWS
+          && typeof res?.total === 'number'
+          && res.total > (res?.data?.length ?? 0);
+        setActivityPeekByRecord(prev => ((prev[threadId] ?? false) === peek ? prev : { ...prev, [threadId]: peek }));
         if (!res?.data?.length) return;
-        const systemActorLabel = t('detail.systemActor', { defaultValue: 'System' });
-        const mapped: FeedItem[] = [];
-        for (const row of res.data) {
-          // `null` is the ONE outcome that drops a row, and it means exactly
-          // one thing: a type the shared table maps to `undefined` ON PURPOSE
-          // (`commented` / `mentioned` / `login` / `logout` — their content
-          // lives in `sys_comment`, or they are account events rather than
-          // record activity). Everything else comes back as an item, including
-          // a type nobody has mapped yet.
-          const item = activityRowToFeedItem(row, systemActorLabel);
-          if (item) mapped.push(item);
-        }
+        const mapped = activityRowsToFeedItems(res.data, t('detail.systemActor', { defaultValue: 'System' }));
         if (!mapped.length) return;
         // Merge by id into THIS record's slice (timeline events are
         // append-only); `mergeFeedRows` sorts by createdAt ascending so the
@@ -3147,7 +3304,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           [threadId]: mergeFeedRows(prev[threadId] ?? EMPTY_FEED, mapped),
         }));
       })
-      .catch((err: unknown) => { recordRefusal('activity', isRefusedFeedRead(err)); }));
+      .catch((err: unknown) => { recordVerdict('activity', feedReadVerdictOf(err)); }));
 
     // The panel leaves the loading state exactly once, when BOTH reads have
     // answered. `allSettled` over promises that already carry their own
@@ -3163,7 +3320,66 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     });
 
     return () => { cancelled = true; };
-  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady]);
+  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce]);
+
+  // objectstack#29188 — the load-failure notice's Retry: read this record's
+  // FAILED feed reads again, and only those. The feed shows its loading state
+  // until they settle (a panel with rows keeps them), and each read records
+  // its new verdict as it lands.
+  const handleRetryFeed = useCallback(() => {
+    if (!feedRecordKey || !feedVerdict) return;
+    const failed = new Set<FeedSource>();
+    if (feedVerdict.activity === 'failed') failed.add('activity');
+    if (feedVerdict.comments === 'failed') failed.add('comments');
+    if (failed.size === 0) return;
+    feedRetryRef.current.set(feedRecordKey, failed);
+    setSettledFeedKey(null);
+    setFeedRetryNonce(n => n + 1);
+  }, [feedRecordKey, feedVerdict]);
+
+  // ── The 动态 tab's activity window (objectstack#28737) ─────────────────
+  //
+  // A page that opened on the 动态 panel asked only the activity rows the
+  // panel draws. The 动态 tab draws the whole stream, so when it opens on a
+  // record whose feed holds fewer activity rows than the record has, the
+  // window is read here — once per record, merged into its slice by id as the
+  // feed's own read merges. A record whose rows the payload held whole (none,
+  // or fewer than the panel's) reads nothing.
+  const timelineTabOpen = enlargedRelatedParam === RECORD_PAGE_TIMELINE_PANEL;
+  const activityPeekHeld = feedRecordKey ? activityPeekByRecord[feedRecordKey] === true : false;
+  useEffect(() => {
+    if (!timelineTabOpen || !activityPeekHeld || !dataSource || !objectName || !pureRecordId || !activitiesEnabled) return;
+    const threadId = `${objectName}:${pureRecordId}`;
+    setActivityPeekByRecord(prev => ({ ...prev, [threadId]: false }));
+    // Written under the record it was read for, so an answer landing after a
+    // step to another record fills this one's slice, never the one on screen.
+    Promise.resolve(dataSource.find('sys_activity', activityWindowQuery(objectName, pureRecordId)))
+      .then((res: any) => {
+        const mapped = activityRowsToFeedItems(res?.data ?? [], t('detail.systemActor', { defaultValue: 'System' }));
+        if (!mapped.length) return;
+        setFeedItemsByRecord(prev => ({
+          ...prev,
+          [threadId]: mergeFeedRows(prev[threadId] ?? EMPTY_FEED, mapped),
+        }));
+      })
+      .catch((err: unknown) => {
+        // The tab keeps the panel's rows; the stream's count stays the
+        // payload's, so it still names the whole stream.
+        console.warn('[RecordDetailView] Failed to read the activity window for the 动态 tab:', err);
+      });
+    // `t` is identity-stable per language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timelineTabOpen, activityPeekHeld, dataSource, objectName, pureRecordId, activitiesEnabled]);
+
+  // The 动态 stream's count where the payload answered one (objectstack#28737):
+  // its total with the comments it counted replaced by the comments the feed
+  // holds now, which this view keeps whole and current through its own
+  // comment writes. `null` (no count answered): the stream counts its rows.
+  const timelineServed = feedRecordKey ? timelineCountByRecord[feedRecordKey] ?? null : null;
+  const heldCommentCount = useMemo(() => feedItems.filter((item) => item.type === 'comment').length, [feedItems]);
+  const timelineTotal = timelineServed
+    ? Math.max(0, timelineServed.total - timelineServed.comments + heldCommentCount)
+    : null;
 
   /**
    * Note: comment-mention → notification fan-out lives on the server
@@ -3921,13 +4137,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // stack has no right column), no ⤡ (there is no drawer to collapse to).
   const phonePushed = phonePage && isRecordPagePushed(location.state);
   const phoneBackClass =
-    'inline-flex min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+    'inline-flex min-h-[44px] min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const phoneBack = phonePage ? (() => {
     const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
     const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
     const label = parent
       ? parent.t || shortRecordId(parent.i)
-      : phonePushed || (originFromState?.pathname && !originIsObjectList)
+      // A page a list pushed (objectstack#29074) still reads the object's
+      // plural, as Target 3 says; a page pushed from a record, of this
+      // object or another, reads that record's label.
+      : (phonePushed && !(originIsObjectList && !originPathOnly!.startsWith(`${objectListPath}/record/`)))
+        || (originFromState?.pathname && !originIsObjectList)
         ? originFromState?.label ?? plural
         : plural;
     const face = (
@@ -3949,8 +4169,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       : originFromState?.pathname
         ? (originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname)
         : objectListPath;
+    // objectstack#29071 — the way back replaces the record's own history
+    // entry, so the browser's Back after 「‹」 does not open the record again.
+    // A page pushed from a parent goes back in the history (above); a page a
+    // list opened carries no mark that its list is the entry below it, so it
+    // cannot pop safely and replaces instead.
     return to ? (
-      <Link to={to} className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
+      <Link to={to} replace className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
     ) : (
       <span className={phoneBackClass}>{face}</span>
     );
@@ -4107,10 +4332,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             {t('empty.recordLoadFailed', { defaultValue: 'Couldn’t load this record' })}
           </EmptyTitle>
           <EmptyDescription>
-            {t('empty.recordLoadFailedDescription', {
+            {pageRecordFailure?.message ?? t('empty.recordLoadFailedDescription', {
               defaultValue: 'Something went wrong while loading it. Check your connection and try again.',
             })}
           </EmptyDescription>
+          {pageRecordFailure?.code ? (
+            <code
+              data-testid="record-load-failed-code"
+              className="mt-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+            >
+              {pageRecordFailure.code}
+            </code>
+          ) : null}
           <div className="mt-4">
             <Button
               variant="outline"
@@ -4416,6 +4649,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // data), so the early `effectivePage` synth never contains it and checking
   // that tree would double-render the panel (tab + bottom fallback).
   const hasApprovalsNode = hasExplicitApprovals(renderedPage as any);
+  // The strip this page draws (objectstack#28909), handed to the meta line so
+  // it leaves the owner out only when the strip shows it: on a phone the
+  // header draws fewer highlights than the object declares.
+  const drawnHighlightFields = drawnHighlightFieldsOf(renderedPage);
 
   // objectstack#26678 / objectstack#27524 — the page as its tier lays it out:
   // the record header, then the details and the right column (动态, then the
@@ -4713,8 +4950,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         <DiscussionContextProvider
           items={feedItems as any}
           loading={feedLoading}
-          activityDenied={feedRefusal?.activity ?? false}
-          commentsDenied={feedRefusal?.comments ?? false}
+          activityDenied={feedVerdict?.activity === 'refused'}
+          commentsDenied={feedVerdict?.comments === 'refused'}
+          activityFailed={feedVerdict?.activity === 'failed'}
+          commentsFailed={feedVerdict?.comments === 'failed'}
+          onRetryFeed={feedVerdict?.activity === 'failed' || feedVerdict?.comments === 'failed' ? handleRetryFeed : undefined}
           // objectui#12082: each write is handed over only where its row of
           // the affordance-to-grant map allows it, and the panel draws the
           // composer, the reply input and the reaction picker from the
@@ -4745,6 +4985,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`. */}
         <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
+        {/* objectstack#28737 — the whole stream's count, for the 动态 panel,
+            its tab and the tab row's probe. */}
+        <RecordTimelineTotalContext.Provider value={assignedPage ? null : timelineTotal}>
         {/* No `approval` handler in the set below (objectui#3055): the record
             page has no bespoke approval action TYPE any more. A decision is an
             ordinary `type:'api'` action declared on `sys_approval_request` and
@@ -4905,6 +5148,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                         data={readablePageRecord}
                         objectSchema={objectDef}
                         objectName={objectName}
+                        drawnHighlightFields={drawnHighlightFields}
                       />
                     }
                   />
@@ -4979,6 +5223,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     data={readablePageRecord}
                     objectSchema={objectDef}
                     objectName={objectName}
+                    drawnHighlightFields={drawnHighlightFields}
                   />
                 </DefaultRecordPageContext.Provider>
               )}
@@ -5016,6 +5261,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           )}
           {modalElement}
         </ActionProvider>
+        </RecordTimelineTotalContext.Provider>
         </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>

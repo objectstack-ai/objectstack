@@ -156,6 +156,18 @@ function resolveAuthoredSlotMinutes(raw: unknown): number | undefined {
 }
 
 /**
+ * Resolve the `endEditable` hatch: does the host's data store an end for its
+ * events? A declared `CalendarViewProps` key, host-only like `slotMinutes`, and
+ * not derived from `endDateField`: that key defaults to `end`, so every node
+ * names an end field and only the host knows its records keep none. Forwarded
+ * only as a boolean; anything else gets the absent-key answer, the component's
+ * default (`true`, resize handles drawn).
+ */
+function resolveAuthoredEndEditable(raw: unknown): boolean | undefined {
+  return typeof raw === 'boolean' ? raw : undefined;
+}
+
+/**
  * Resolve the authored `currentDate` into the type `CalendarView` declares.
  *
  * The registry input below declares `currentDate` as `type: 'string'` —
@@ -328,6 +340,7 @@ ComponentRegistry.register('calendar-view',
     const hostCallbacks = pickHostCallbacks(rest);
     const locale = resolveAuthoredLocale(rest.locale);
     const slotMinutes = resolveAuthoredSlotMinutes(rest.slotMinutes);
+    const endEditable = resolveAuthoredEndEditable(rest.endEditable);
 
     // The action channel, under the same declared-type rule as the callbacks:
     // `onAction` reaches this renderer through the very same props channel, so
@@ -374,6 +387,7 @@ ComponentRegistry.register('calendar-view',
         view={view}
         locale={locale}
         slotMinutes={slotMinutes}
+        endEditable={endEditable}
         // The declared host hatches. Not a raw spread: `hostCallbacks` holds
         // only keys from `HOST_CALLBACKS`, and only where the value is a
         // function.

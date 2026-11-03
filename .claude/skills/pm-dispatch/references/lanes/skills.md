@@ -19,8 +19,8 @@
 - 额度耗尽豁免的地板是默认判断档,⛔ 不再往下。
 - 棘轮逐行付账,⛔ re-wrap 筹行;砍点逐条核幸存,被砍内容若在别处无家,砍掉就是丢规则。
 - 首触定级每轮;决策形状 ⇒ 决策箱带四棱块,⛔ 永不自裁。
-- 本车道 finding 归分诊首触,自分诊见 `triage-duties.md`;可附证据与「仪器为车队服务」答案。
-- 「仪器为车队服务」答不出的 finding ⇒ 席位建议 p3 或不做,⛔ 不自入队;定级归分诊。
+- finding 归分诊首触,自分诊见 `triage-duties.md`;可附证据与「Instruments serve the fleet」答案。
+- 「Instruments serve the fleet」答不出的 finding ⇒ 建议 p3 或不做,⛔ 不自入队;定级归分诊。
 - 内部指令面中文,机器判据恒英文;认领前重读全线程;标签写 read-modify-write 加回读。
 - QA 波次由维护者手动触发,⛔ 不自启。
 

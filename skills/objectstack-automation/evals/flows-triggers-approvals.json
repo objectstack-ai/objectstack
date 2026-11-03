@@ -7,8 +7,18 @@
       "expected_output": "A `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (no top-level `schedule`), `runAs: 'system'` (a readonly field is stripped under `runAs: 'user'`); one `update_record` with a where-map `filter` (`renewal_date: { $lt: '{today}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
       "files": [],
       "assertions": {
-        "must_contain": ["defineFlow", "type: 'schedule'", "runAs: 'system'", "update_record", "edges"],
-        "must_not_contain": ["next:", "values:", "cron`"]
+        "must_contain": [
+          "defineFlow",
+          "type: 'schedule'",
+          "runAs: 'system'",
+          "update_record",
+          "edges"
+        ],
+        "must_not_contain": [
+          "next:",
+          "values:",
+          "cron`"
+        ]
       }
     },
     {
@@ -17,8 +27,18 @@
       "expected_output": "A `record_change` flow bound on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'`; a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`; `requires` lists `automation`, `triggers`, `messaging`, else notify reports success with `skipped: true`.",
       "files": [],
       "assertions": {
-        "must_contain": ["triggerType", "record-after-update", "previous.", "notify", "recipients", "messaging", "{{"],
-        "must_not_contain": ["trigger:"]
+        "must_contain": [
+          "triggerType",
+          "record-after-update",
+          "previous.",
+          "notify",
+          "recipients",
+          "messaging",
+          "{{"
+        ],
+        "must_not_contain": [
+          "trigger:"
+        ]
       }
     },
     {
@@ -27,8 +47,17 @@
       "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection).",
       "files": [],
       "assertions": {
-        "must_contain": ["type: 'approval'", "approval_revise", "type: 'back'", "maxRevisions", "revise"],
-        "must_not_contain": ["approvals: [", "maxRevisions: 0"]
+        "must_contain": [
+          "type: 'approval'",
+          "approval_revise",
+          "type: 'back'",
+          "maxRevisions",
+          "revise"
+        ],
+        "must_not_contain": [
+          "approvals: [",
+          "maxRevisions: 0"
+        ]
       }
     },
     {
@@ -37,8 +66,17 @@
       "expected_output": "The steps BRANCH, so a `screen` flow (`type: 'screen'`), not a form-view wizard: a `screen` node per step, a `decision` whose out-edges carry mutually exclusive `condition` predicates (an unguarded out-edge always runs, in parallel), a `create_record`, explicit `variables` entries (`{ name, type, isInput, isOutput }`), every path reaching an `end`; `runAs: 'user'`.",
       "files": [],
       "assertions": {
-        "must_contain": ["screen", "decision", "condition", "create_record", "variables"],
-        "must_not_contain": ["type: 'wizard'", "next:"]
+        "must_contain": [
+          "screen",
+          "decision",
+          "condition",
+          "create_record",
+          "variables"
+        ],
+        "must_not_contain": [
+          "type: 'wizard'",
+          "next:"
+        ]
       }
     },
     {
@@ -47,8 +85,19 @@
       "expected_output": "A `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs` and `outputVariable: 'recalc'` — pure compute, so a following `update_record` persists `fields: { discount: { dialect: 'cel', source: 'recalc.discount' } }`. The `http` node sets `timeoutMs`. Failure routing is a `type: 'fault'` edge; a bare error label routes nothing.",
       "files": [],
       "assertions": {
-        "must_contain": ["function:", "outputVariable", "type: 'fault'", "timeoutMs", "update_record", "dialect: 'cel'"],
-        "must_not_contain": ["label: 'error'", "query_record", "{recalc"]
+        "must_contain": [
+          "function:",
+          "outputVariable",
+          "type: 'fault'",
+          "timeoutMs",
+          "update_record",
+          "dialect: 'cel'"
+        ],
+        "must_not_contain": [
+          "label: 'error'",
+          "query_record",
+          "{recalc"
+        ]
       }
     },
     {
@@ -57,8 +106,16 @@
       "expected_output": "`notify` with `recipients: { emailField: 'applicant_email' }` (the fourth recipient form: an `email` field of the trigger record) and `channels: 'email'` alone — never a CEL envelope over `record.applicant_email`, which must yield user ids and fails for an address no user holds.",
       "files": [],
       "assertions": {
-        "must_contain": ["notify", "emailField", "applicant_email", "'email'"],
-        "must_not_contain": ["source: 'record.applicant_email'", "channels: ['inbox']"]
+        "must_contain": [
+          "notify",
+          "emailField",
+          "applicant_email",
+          "'email'"
+        ],
+        "must_not_contain": [
+          "source: 'record.applicant_email'",
+          "channels: ['inbox']"
+        ]
       }
     },
     {
@@ -67,8 +124,15 @@
       "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']`, checked at every door that starts the flow (never a run-user positions check inside it); the `approval` node names `approvers: [{ type: 'position', value: 'finance_manager' }]` with `excludeSubmitter: true`, and `onEmptyApprovers` is anything but `auto_approve`, refused beside it.",
       "files": [],
       "assertions": {
-        "must_contain": ["requiredPermissions", "excludeSubmitter: true", "type: 'position'"],
-        "must_not_contain": ["onEmptyApprovers: 'auto_approve'", "current_user.positions"]
+        "must_contain": [
+          "requiredPermissions",
+          "excludeSubmitter: true",
+          "type: 'position'"
+        ],
+        "must_not_contain": [
+          "onEmptyApprovers: 'auto_approve'",
+          "current_user.positions"
+        ]
       }
     },
     {
@@ -77,8 +141,16 @@
       "expected_output": "A `type: 'screen'` flow whose last `screen` carries `{ name: 'signed_copy', type: 'file', required: true }` and resumes with the `sys_file` id bound to `signed_copy`; a following `create_record` writes `fields: { signed_copy: { dialect: 'cel', source: 'signed_copy' } }`, claiming the file for the record.",
       "files": [],
       "assertions": {
-        "must_contain": ["type: 'screen'", "type: 'file'", "create_record", "signed_copy"],
-        "must_not_contain": ["type: 'upload'", "type: 'attachment'"]
+        "must_contain": [
+          "type: 'screen'",
+          "type: 'file'",
+          "create_record",
+          "signed_copy"
+        ],
+        "must_not_contain": [
+          "type: 'upload'",
+          "type: 'attachment'"
+        ]
       }
     },
     {
@@ -87,8 +159,17 @@
       "expected_output": "A `type: 'screen'` flow: a `screen` collecting `company_name` and `contact_name`; two `create_record` nodes with `outputVariable` (`account`, `contact`), the contact linked by `account: { dialect: 'cel', source: 'account.id' }`; a last `screen` of two `type: 'record_link'` fields with `reference` (`crm_account`, `crm_contact`) and `defaultValue: { dialect: 'cel', source: 'account.id' }` / `'contact.id'`, no `required`, `placeholder` or `options`. The `end` carries no `message` (refused when completed), the `description` no markdown link — the links are the `record_link` fields, never the object field type.",
       "files": [],
       "assertions": {
-        "must_contain": ["record_link", "reference", "defaultValue", "outputVariable", "dialect: 'cel'"],
-        "must_not_contain": ["type: 'record'", "]("]
+        "must_contain": [
+          "record_link",
+          "reference",
+          "defaultValue",
+          "outputVariable",
+          "dialect: 'cel'"
+        ],
+        "must_not_contain": [
+          "type: 'record'",
+          "]("
+        ]
       }
     },
     {
@@ -97,8 +178,14 @@
       "expected_output": "Read the lock itself: `client.approvals.getRecordLock('expense', recordId)` (`GET /api/v1/approvals/records/expense/:recordId/lock`) answers `{ locked }` to anyone who can read the record — the lock hook's own judgement — so the page hides Edit while `locked` is `true`. Not the request row: a non-participant is served none, and request content stays behind `approvalsVisibleToReaders`. An unreadable record answers `404 RECORD_NOT_FOUND`, like a missing one.",
       "files": [],
       "assertions": {
-        "must_contain": ["getRecordLock", "locked"],
-        "must_not_contain": ["lock_record", "approvalsVisibleToReaders: true"]
+        "must_contain": [
+          "getRecordLock",
+          "locked"
+        ],
+        "must_not_contain": [
+          "lock_record",
+          "approvalsVisibleToReaders: true"
+        ]
       }
     },
     {
@@ -126,8 +213,34 @@
       "expected_output": "An assignment rule, not a flow or hook: `defineAssignmentRule({ name: 'case_intake', object: 'crm_case', entries: [{ name: 'all', assignTo: { type: 'queue', value: 'support_team' }, strategy: 'round_robin' }] })` in `assignmentRules` — evaluated once per insert on a still-ownerless row, never on update; no counter field. The sign-off is an `approval` node (`type: 'approval'`) with `approvers: [{ type: 'queue', value: 'support_leads' }]`: the queue's members join the slate at node entry; an empty queue adds nobody.",
       "files": [],
       "assertions": {
-        "must_contain": ["defineAssignmentRule", "strategy: 'round_robin'", "type: 'queue'", "type: 'approval'"],
-        "must_not_contain": ["assigned_to", "record-after-create"]
+        "must_contain": [
+          "defineAssignmentRule",
+          "strategy: 'round_robin'",
+          "type: 'queue'",
+          "type: 'approval'"
+        ],
+        "must_not_contain": [
+          "assigned_to",
+          "record-after-create"
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "prompt": "HotCRM (`hotcrm`, version 3.2.0) ships the flow `crm_deal_won_alert`. We want it to also create a billing task, with no second copy running beside it. Where does our version live, and how is it switched off if we need to?",
+      "expected_output": "A flow with the same name `crm_deal_won_alert` in HotCRM's paired package `hotcrm.custom`, its body declaring `overrides: { package: 'hotcrm', basedOn: '3.2.0' }`: it is armed in the base's place (one reload, no window with both bound), keeps the base's name and its one activation switch — `POST /api/v1/automation/crm_deal_won_alert/toggle` with `{ enabled: false }` turns it off for this deployment — and a run suspended on the old body finishes on that body. Not a clone: `POST /api/v1/automation/crm_deal_won_alert/clone` is \"new similar\", a second flow under a new name that lands switched off in the pair; not an undeclared same-named flow (refused at publish); not an edit of HotCRM's own flow.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "overrides:",
+          "basedOn",
+          "/toggle"
+        ],
+        "must_not_contain": [
+          "_copy",
+          "beforeUpdate"
+        ]
       }
     }
   ]

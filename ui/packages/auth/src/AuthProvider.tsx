@@ -8,7 +8,8 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { authGateEvents } from './auth-gate-events.js';
-import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions } from './types.js';
+import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
+import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
 import { createAuthClient, takePreflightSession, TokenStorage } from './createAuthClient.js';
 import { ActiveOrganizationStorage, SessionUserScope } from './ActiveOrganizationStorage.js';
@@ -191,6 +192,8 @@ export function AuthProvider({
   const bootSessionFor = useRef<string | null>(bootSession ? authUrl : null);
   const [error, setError] = useState<Error | null>(null);
   const [remediationRequired, setRemediationRequired] = useState<{ code: string; message: string } | null>(null);
+  // objectstack#29105 — a password sign-in waiting for its second factor.
+  const [twoFactorChallenge, setTwoFactorChallenge] = useState<TwoFactorChallenge | null>(null);
 
   // Organization / workspace state
   const [organizations, setOrganizations] = useState<AuthOrganization[]>([]);
@@ -393,8 +396,16 @@ export function AuthProvider({
       setError(null);
       try {
         const result = await client.signIn({ email, password });
+        if (result.twoFactor) {
+          // Password accepted, no session yet: the account has two-factor
+          // sign-in on. The sign-in page asks for the code (objectstack#29105).
+          setTwoFactorChallenge(result.twoFactor);
+          return { twoFactorRequired: true };
+        }
+        setTwoFactorChallenge(null);
         setUser(result.user);
         setSession(result.session);
+        return { twoFactorRequired: false };
       } catch (err) {
         const authError = err instanceof Error ? err : new Error(String(err));
         setError(authError);
@@ -405,6 +416,33 @@ export function AuthProvider({
     },
     [client],
   );
+
+  const verifySignInTwoFactor = useCallback(
+    async (code: string, kind: SignInTwoFactorCodeKind) => {
+      setError(null);
+      try {
+        const result = await client.verifySignInTwoFactor(code, kind);
+        setTwoFactorChallenge(null);
+        setUser(result.user);
+        setSession(result.session);
+      } catch (err) {
+        const authError = err instanceof Error ? err : new Error(String(err));
+        // The server has dropped the pending sign-in: too many wrong codes, or
+        // its cookie expired. Another code can never succeed, so the challenge
+        // ends here and the user signs in with their password again.
+        const code = (authError as Error & { code?: string }).code;
+        if (code && TWO_FACTOR_CHALLENGE_ENDED_CODES.has(code)) setTwoFactorChallenge(null);
+        setError(authError);
+        throw authError;
+      }
+    },
+    [client],
+  );
+
+  const cancelTwoFactorChallenge = useCallback(() => {
+    setTwoFactorChallenge(null);
+    setError(null);
+  }, []);
 
   const signUp = useCallback(
     async (name: string, email: string, password: string, callbackURL?: string, captchaToken?: string) => {
@@ -445,6 +483,7 @@ export function AuthProvider({
       setUser(null);
       setSession(null);
       setError(null);
+      setTwoFactorChallenge(null);
       // The organization block is the previous principal's data too: the list
       // is the workspaces THAT user belongs to (the switcher renders it), and
       // a lingering `activeOrganization` would additionally suppress the
@@ -1108,6 +1147,9 @@ export function AuthProvider({
       isPreviewMode,
       previewMode: isPreviewMode ? previewMode : null,
       signIn,
+      twoFactorChallenge,
+      verifySignInTwoFactor,
+      cancelTwoFactorChallenge,
       signUp,
       signOut,
       refreshSession,
@@ -1155,7 +1197,7 @@ export function AuthProvider({
     }),
     [
       user, session, isAuthenticated, isAuthEnabled, isLoading, error, isPreviewMode, previewMode,
-      signIn, signUp, signOut, refreshSession, updateUser, forgotPassword, sendVerificationEmail, resetPassword, changePassword, setInitialPassword, hasLocalPassword, getAuthConfig, signInWithProvider,
+      signIn, twoFactorChallenge, verifySignInTwoFactor, cancelTwoFactorChallenge, signUp, signOut, refreshSession, updateUser, forgotPassword, sendVerificationEmail, resetPassword, changePassword, setInitialPassword, hasLocalPassword, getAuthConfig, signInWithProvider,
       sendPhoneOtp, signInWithPhoneOtp, signInWithPhonePassword, requestPhonePasswordReset, resetPasswordWithPhoneOtp,
       remediationRequired, enrollTotp, verifyTotp,
       organizations, activeOrganization, activeMember, isOrganizationsLoading, isMembershipResolved, switchOrganization, createOrganization, refreshOrganizations,

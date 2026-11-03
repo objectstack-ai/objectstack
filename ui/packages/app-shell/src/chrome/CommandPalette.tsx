@@ -55,6 +55,8 @@ import { useTheme } from './ThemeProvider.js';
 import { navEntriesShownToMember, useNavMemberGates, type NavMemberGates } from '../hooks/useNavMemberGates.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveKeyedI18nLabel, getRecordDisplayName, appRouteSegment } from '../utils/index.js';
+import { appAddressSegment, filterActiveApps } from '../utils/appRoute.js';
+import { navigationNames } from '../console/appObjectScope.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useRecentItems } from '../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../hooks/useRecentItemLabel.js';
@@ -66,7 +68,9 @@ import { confirmUnsavedLeave } from './unsavedEdits.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { resolveHref, resolveNavItemLabel } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
-import { findByName, useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
+import { findByName, useNavTargetLabel, type NavTargetLabelOptions } from '../hooks/useNavTargetLabel.js';
+import { readObjectsByName } from '../hooks/useObjectPresence.js';
+
 import { useAuth } from '@object-ui/auth';
 import { matchesPaletteQuery } from './paletteMatch.js';
 import { fetchPackages, type PkgEntry } from '../views/studio-design/packages-io.js';
@@ -74,6 +78,9 @@ import { isPackageLessItem, studioOrgScopePath } from '../views/studio-design/st
 import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../views/metadata-admin/nav-selection.js';
 import { flattenNavigation, useAppReportEntries } from '../views/appReportIndex.js';
 import { useServedApps } from '../hooks/useLauncherApps.js';
+
+/** A recent row names its object by name (objectstack#29121). */
+const RECENT_ROW_LABELS: NavTargetLabelOptions = { byName: true };
 
 /** The palette of the active app: the frame `ConsoleLayout` draws for `/apps/APP`. */
 interface AppCommandPaletteProps {
@@ -114,6 +121,53 @@ const NO_APP: Omit<AppCommandPaletteProps, 'scope'> = {
   onAppChange: () => {},
   dataSource: undefined,
 };
+
+/** The keys of an app the record-hit resolution reads: its route keys and navigation trees. */
+type PaletteApp = { navigation?: unknown; areas?: unknown } & Record<string, unknown>;
+
+/**
+ * Whether `app` lists `objectName` (objectstack#28890): a `type: 'object'`
+ * entry naming it, at any depth of its `navigation` or of any
+ * `areas[].navigation`, among the entries the member is shown there
+ * (`navEntriesShownToMember` under the palette's gates, as
+ * `activityObjectRoster` reads every app's navigation). `gates` is `null`
+ * only in the `studio` scope, which searches no record.
+ */
+function appListsObject(app: PaletteApp | null | undefined, objectName: string, gates: NavMemberGates | null): boolean {
+  if (!app) return false;
+  const areas: unknown[] = Array.isArray(app.areas) ? app.areas : [];
+  const trees = [app.navigation, ...areas.map((area) => (area as { navigation?: unknown } | null)?.navigation)];
+  const pick = (item: Record<string, unknown>) => (item.type === 'object' ? item.objectName : undefined);
+  return trees.some(
+    (tree) =>
+      Array.isArray(tree) &&
+      navigationNames(gates ? navEntriesShownToMember(tree as NavigationItem[], gates) : tree, pick).includes(objectName),
+  );
+}
+
+/**
+ * The app a record hit opens under (objectstack#28890), as the segment of its
+ * `/apps/APP` link: the palette's own app when it lists the hit's object;
+ * otherwise the first app the user can open (`filterActiveApps`, metadata
+ * order) that lists it, addressed by `appAddressSegment`; and the palette's
+ * own app again when none does, so `undefined` means "stay here".
+ *
+ * An app with no object navigation searches every object (the scope below),
+ * so its hits named objects it does not list, and each opened under it: the
+ * record page drew that app's sidebar and switcher, neither of which reaches
+ * the object (cloud's Account app, a component-only app, opened an
+ * environment there instead of under the Cloud app that lists it).
+ */
+function recordHitAppSegment(
+  apps: readonly PaletteApp[],
+  activeApp: PaletteApp | null | undefined,
+  objectName: string,
+  gates: NavMemberGates | null,
+): string | undefined {
+  if (appListsObject(activeApp, objectName, gates)) return undefined;
+  const host = filterActiveApps(apps).find((app) => appListsObject(app, objectName, gates));
+  return host ? appAddressSegment(apps, host) : undefined;
+}
 
 /**
  * The palette, behind its own error boundary (objectui#13387). It is mounted in
@@ -182,7 +236,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   // such entries through `useNavigationWrites`). A present
   // label renders as authored — an inline locale map in the viewer's `language`,
   // the locale the sidebar passes (objectui#11299).
-  const targetLabel = useNavTargetLabel();
+  const targetLabel = useNavTargetLabel(RECENT_ROW_LABELS);
   const navLabel = (item: NavigationItem) =>
     resolveNavItemLabel(item, t, targetLabel, language);
 
@@ -196,6 +250,11 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   }, [open]);
 
   const baseUrl = `/apps/${appName || appRouteSegment(activeApp)}`;
+  // A record hit's own base: the app that lists its object (objectstack#28890).
+  const recordHitBaseUrl = (objectName: string): string => {
+    const segment = recordHitAppSegment(apps, activeApp, objectName, gates);
+    return segment ? `/apps/${segment}` : baseUrl;
+  };
   const { user, activeOrganization } = useAuth();
   const templateContext = useMemo(
     () => ({ currentUserId: user?.id ?? null, currentOrgId: activeOrganization?.id ?? null }),
@@ -335,17 +394,19 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
    * address names no object, so its row shows no type and keeps the neutral
    * glyph — ⛔ never a type guessed from the title.
    *
-   * `objects` is read inside the function, never at render: the metadata
-   * cache loads the object list when it is first read, and a closed palette
-   * reads nothing (objectui#11863).
+   * The object is read inside the function, never at render, so a closed
+   * palette reads nothing (objectui#11863); and it is read by name
+   * (`readObjectsByName`, objectstack#29121), so a few recent rows never load
+   * the whole object registry — on Home nothing else has.
    */
   const metadata = useMetadata();
+  const recentTargetLabel = useNavTargetLabel(RECENT_ROW_LABELS);
   const recentContext = (item: RecentItem): { type?: string; icon?: string } => {
     const objectName = recentItemObject(item);
     if (!objectName) return {};
-    const def = findByName(metadata.objects, objectName) as { icon?: unknown } | undefined;
+    const def = findByName(readObjectsByName(metadata, [objectName]), objectName) as { icon?: unknown } | undefined;
     return {
-      type: targetLabel({ kind: 'object', objectName }) ?? objectName,
+      type: recentTargetLabel({ kind: 'object', objectName }) ?? objectName,
       icon: typeof def?.icon === 'string' && def.icon !== '' ? def.icon : undefined,
     };
   };
@@ -483,7 +544,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                   // Stable across queries: cmdk filters nothing here
                   // (`shouldFilter` false), it only selects by the value.
                   value={`record ${hit.display} ${hit.objectLabel} ${hit.objectName} ${hit.recordId}`}
-                  onSelect={() => leaveTo(`${baseUrl}/${hit.objectName}/record/${hit.recordId}`)}
+                  onSelect={() => leaveTo(`${recordHitBaseUrl(hit.objectName)}/${hit.objectName}/record/${hit.recordId}`)}
                 >
                   <Icon className="mr-2 h-4 w-4" />
                   <span className="truncate">{hit.display}</span>
@@ -631,7 +692,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                     <CommandItem
                       key={app.name}
                       value={`app ${resolveKeyedI18nLabel(app.label, t)} ${app.name}`}
-                      onSelect={() => runCommand(() => confirmUnsavedLeave(() => onAppChange(appRouteSegment(app) ?? app.name)))}
+                      onSelect={() => runCommand(() => confirmUnsavedLeave(() => onAppChange(appAddressSegment(apps, app) ?? app.name)))}
                     >
                       <Icon className="mr-2 h-4 w-4" />
                       <span>{resolveKeyedI18nLabel(app.label, t)}</span>

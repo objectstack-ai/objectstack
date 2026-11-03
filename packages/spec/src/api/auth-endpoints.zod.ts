@@ -25,6 +25,8 @@ import { z } from 'zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+import { TenancyPostureSchema } from '../security/tenancy-posture';
+import { AUDIENCE_POSTURES } from '../system/auth-config.zod';
 export const AuthEndpointPaths = {
   // Email/Password Authentication
   signInEmail: '/sign-in/email',
@@ -230,6 +232,15 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   passkeys: retiredKey(PASSKEYS_UNADVERTISED),
   magicLink: retiredKey(MAGIC_LINK_UNADVERTISED),
   organization: z.boolean().default(false).describe('Multi-tenant organization support enabled'),
+  // Served by plugin-auth (`getPublicConfig()`, refined by `isSsoUsable()` in
+  // the `/config` route) and by the hono adapter's `/auth/config` route, which
+  // applies the same refinement; read by the console LoginForm (#29344).
+  sso: z.boolean().optional().describe(
+    'Enterprise SSO sign-in usable: the domain-routed SSO plugin is wired AND at least one SSO provider is configured, so the login UI offers its "Sign in with SSO" entry; '
+    + 'false when SSO is off, or on with no provider yet. The served value is that usable answer (isSsoUsable), not the coarse wired flag: '
+    + 'GET /auth/config refines it before answering, and falls open to the wired flag when providers cannot be counted. '
+    + 'Unlike ssoEnforced, which takes the password form away, this only says whether the SSO entry exists; absent means not usable',
+  ),
   ssoEnforced: z.boolean().optional().describe(
     'SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains)',
   ),
@@ -245,6 +256,45 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   turnstileSiteKey: z.string().optional().describe(
     'Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge',
   ),
+  // The keys below are served by plugin-auth `getPublicConfig()` (auth-manager.ts,
+  // the `features` literal) and classified in PUBLIC_AUTH_FEATURES (flags) or
+  // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS (values); the registry-to-schema pin in
+  // auth-endpoints.test.ts keeps the three key sets equal (#29473).
+  multiOrgEnabled: z.boolean().optional().describe(
+    'Multi-organization capability: true when the effective tenancy posture enforces an organization wall (group or isolated), the same answer the create-organization door gives; '
+    + 'false on a single posture, and on a degraded deployment that asked for isolation but has none. The console offers creating, switching and leaving organizations only when it is on; '
+    + 'the flag is default-on, so absent reads as on',
+  ),
+  tenancyPosture: TenancyPostureSchema.optional().describe(
+    'Which tenancy posture is in force (single, group or isolated): the effective posture, from the same derivation as multiOrgEnabled. A value, not a gate: multiOrgEnabled stays the capability flag, '
+    + 'while this tells the console how to render organization context (under group the organization switcher picks the write target and reads span every organization the member belongs to)',
+  ),
+  audiencePosture: z.enum(AUDIENCE_POSTURES).optional().describe(
+    'Who may self-register into this environment (invite_only, email_domain or open): the posture the sign-up path enforces, reported as invite_only when the configured value is off-vocabulary. '
+    + 'A value, not a gate: emailPassword.disableSignUp stays the boolean that hides the sign-up form, while this lets the login page say that registration is by invitation instead of offering a form the server refuses',
+  ),
+  degradedTenancy: z.boolean().optional().describe(
+    'Degraded tenancy: true when multi-organization isolation was requested but is not active (the deployment booted only because OS_ALLOW_DEGRADED_TENANCY=1), so no engine enforces organization boundaries; '
+    + 'the console can raise an operator warning off it. A status signal, not a capability gate; absent means not degraded',
+  ),
+  oidcProvider: z.boolean().optional().describe(
+    'Embedded OIDC authorization server wired, from the same decision that mounts it, so OAuth applications can be registered and managed; on by default alongside the MCP surface. '
+    + 'It says nothing about sign-in providers, which socialProviders lists; the flag is default-on, so absent reads as on',
+  ),
+  deviceAuthorization: z.boolean().optional().describe(
+    'Device authorization (browser-approved CLI login) wired, so the device-code endpoints answer; when false the console device-approval page says device authorization is not enabled instead of calling them. '
+    + 'Absent means not wired',
+  ),
+  admin: z.boolean().optional().describe(
+    'Admin plugin wired (forced on whenever SCIM is enabled), so user administration (creating, banning, unlocking and impersonating users, setting their passwords) is available; '
+    + 'the console shows those actions only when it is true. Absent means not wired',
+  ),
+  termsUrl: z.string().optional().describe(
+    'Terms-of-service link shown beneath the login and register cards: the trimmed OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty or blank (whitespace-only) value to suppress the link',
+  ),
+  privacyUrl: z.string().optional().describe(
+    'Privacy-policy link shown beneath the login and register cards: the trimmed OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty or blank (whitespace-only) value to suppress the link',
+  ),
 }));
 
 /**
@@ -252,6 +302,13 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
  *
  * Returns the public authentication configuration that the frontend
  * can use to render appropriate login UI (social provider buttons, etc.)
+ *
+ * `devSeedAdmin` is deliberately NOT declared here. plugin-auth adds it at the
+ * top level only under NODE_ENV=development, while the auto-seeded admin still
+ * signs in with its default password, and it carries that email and password.
+ * A published response contract would advertise a credential-bearing field that
+ * no production deployment serves; its one reader, the console LoginPage, reads
+ * the raw response and never parses it through this schema.
  */
 export const GetAuthConfigResponseSchema = lazySchema(() => z.object({
   emailPassword: EmailPasswordConfigPublicSchema.describe('Email/password authentication config'),

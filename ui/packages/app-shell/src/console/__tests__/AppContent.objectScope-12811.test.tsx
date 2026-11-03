@@ -18,10 +18,12 @@
  * one `requiresObject` entry, and `useActionModal` is mounted beside it, as
  * `ConsoleShell` mounts it.
  *
- * CONTROLs: an app item with no package id asks the whole registry, as before,
- * and so does the root of an app whose package holds no objects of its own (a
- * platform app such as Setup; its object routes read by name, objectui#13046);
- * a record overlay (`?recordId=`) reads the whole registry, because a record's
+ * An app item with no package id asks its route's names by name instead
+ * (objectstack#29416; it read the whole registry).
+ *
+ * CONTROLs: the root of an app whose package holds no objects of its own (a
+ * platform app such as Setup; its object routes read by name, objectui#13046)
+ * asks the whole registry, as before; a record overlay (`?recordId=`) reads the whole registry, because a record's
  * related lists come from every object that points at it (since
  * objectstack#27626 the drawer reads it beside the list's scope, and the list
  * does not wait for it: `AppContent.recordDrawerKeepsScope-27626.test.tsx`).
@@ -231,14 +233,15 @@ describe('one console open asks for the app\'s objects, not the whole registry (
     expect(screen.getByTestId('console-layout').getAttribute('data-chrome-objects')).toBe('crm_account,crm_contact,sys_user');
   });
 
-  it('CONTROL: an app item with no package id asks the whole registry, as before', async () => {
+  it('an app item with no package id asks the route object and its lookup target by name, never the whole registry (objectstack#29416)', async () => {
     server.apps = [{ name: 'crm', label: 'CRM', navigation: NAVIGATION }];
     boot('/apps/crm/crm_account');
-    await waitFor(() => expect(screen.getByTestId('object-view')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
 
-    expect(objectCalls()).toContain('object');
+    expect(objectCalls()).not.toContain('object');
     expect(objectCalls().some((c) => c.startsWith('object?'))).toBe(false);
-    expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact,crm_case,sys_user');
+    expect(objectCalls()).toEqual(expect.arrayContaining(['object/crm_account', 'object/sys_user']));
+    expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account');
   });
 
   it("CONTROL: the root of an app whose package holds no objects of its own reads the whole registry, and asks none by name", async () => {

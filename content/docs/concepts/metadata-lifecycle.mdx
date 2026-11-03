@@ -137,17 +137,30 @@ document **whole** for every read that serves the base's name
   `overrides`; declaring one there is refused (`403 NOT_OVERRIDABLE` at the save, publish
   and install doors, a row from `os validate`, the sentence naming the locale), because the
   base ships no such member to replace.
+- **The pair's added locale is served on the base's address; a dependent's is not.** The
+  member `hotcrm.custom` adds is listed by `GET /meta/email_template` with no `?package`
+  and with `?package=hotcrm`, is in the execution list the email service reads, and so is
+  what a send in that locale renders — stamped `_packageId: 'hotcrm.custom'`, as the
+  by-name read already served it. The layered read naming `hotcrm` or no package agrees:
+  `code: null`, `overlay` and `effective` = the pair's row. A locale another package that
+  depends on `hotcrm` adds under the base template's name is that package's own item,
+  served only under `?package=` naming it and in the list scoped to it: the by-name and
+  layered reads naming `hotcrm` or no package answer `404`, and the base's lists leave it
+  out.
 - **The environment-wide list** serves one item per name that exactly one code package
   ships. A dependent package's same-named item is not listed beside it and stays under
   its own `?package=` address. A package-unbound row — the overlay row of the table
   below — still wins over the base's document until ADR-0146 D11 migrates it into the
   pair.
-- **Orphans are reported, not dropped.** A row of the base's name stored in the pair
-  without the declaration, or in a package that depends on the base, is reported by the
+- **Orphans are reported, not dropped.** A row of the base's name — for an `email_template`,
+  at a locale the base ships — stored in the pair without the declaration, or in a package
+  that depends on the base, is reported by the
   layered read in `overlay` with `effective` = the base's document.
 - **Export carries the declaration.** `GET /packages/hotcrm.custom/export` carries the
   overriding item with its `overrides` block; `GET /packages/hotcrm/export` carries the
-  base unchanged.
+  base unchanged. `GET /packages/export` (`os package export`) answers the whole
+  deployment in one read: every installed package its own code does not register, the
+  pair as its own entry after its base, each entry exactly the per-package export.
 
 ## Overlay whitelist (shared-DB tenancy invariant)
 
@@ -155,13 +168,15 @@ document **whole** for every read that serves the base's name
 
 > **ADR-0131 D6 — the per-organization overlay axis is retired.** The `/meta` doors (REST and the runtime dispatcher) carry no organization into a metadata write or read: a Studio or `PUT /api/v1/meta/...` write of the five ✅ types below lands **environment-wide** (since ADR-0131 D7 the `sys_metadata` family declares no organization column) and is served to every organization, and an organization admin holding only the retired `manage_org_presentation` capability is refused (`403`). The protocol itself refuses every organization-scoped write, and every read — item, list, layers, cached, history, diff, audit, drafts and the commit timeline — is environment → code, whatever organization a caller names. An overlay row an earlier release stored under an organization — under the `single` posture, every Studio save of these types, filed under the Default Organization — is served by no read, and on a SQL database (SQLite, PostgreSQL, MySQL) still holding one a v18 `os serve` refuses to start until the v18 migration ceremony (ADR-0131 C7: `os migrate organization-ownership --out PLAN`, then `--apply --plan-file PLAN`) has carried such a row to the environment layer and dropped the column; nothing deletes or rewrites it before then. The anonymous form doors read the environment alone too: the ceremony carries every organization-layer public-form withdrawal onto the environment, fail-closed. The table still records which types take an overlay of a shipped item.
 
+> **ADR-0146 D11 — the tier no longer opens a write door onto a packaged item.** A write naming no package — a save, a publish, a reset (`DELETE`) or a rollback — onto a ✅-type item that one installed read-only package ships is refused `403 NOT_OVERRIDABLE`, and the sentence names the base's pair: save it into `?package=<base>.custom`, declaring `overrides` ([above](#customizing-an-installed-package-the-paired-custom-override-adr-0146)). A package-less row stored before the close is still served until `os migrate packageless-overlays` moves it into the pair as a declared override; the ✅ row is now the set that ceremony moves and the read path honours for an unmoved row. A package-less write of a name no package ships is environment metadata, and stays open.
+
 | Type | `allowEnvironmentOverlay` | Rationale |
 | :--- | :---: | :--- |
 | `view`, `dashboard`, `report`, `email_template`, `translation` | ✅ | Pure rendering / render-time content. Customizing it in an environment is safe. |
 | `flow` | ❌ | Flows carry execution side-effects (events, jobs, audit), and the `flow` entry declares `supportsOverlay: false` — the loader cannot merge a per-org flow overlay, so the write permission granted a write nothing could read back: an org-scoped flow overlay wrote successfully and **lost its binding on the next cold start**. Rolled back (#6283) so the silent phantom is a loud `403 not_overridable` at the moment of the write. **`allowRuntimeCreate` stays `true`** — a tenant may still author a *brand-new* flow through the runtime API (ADR-0070 package-first authoring); what is closed is overlaying a *packaged* flow. |
 | `agent` | ❌ | Agents are platform-owned and closed to third parties (ADR-0063 §2) — no environment fork of a packaged agent. |
 | `permission`, `position` | ❌ | Authorization correctness — an overlay of a packaged permission set *is* silent privilege drift (ADR-0005's security row). Rolled back from an unratified `true` by the 2026-08-08 maintainer ruling (#6483); `position` takes the amendment's `false` default for new types. **`allowRuntimeCreate` stays `true`**: runtime-created sets (including package-bound rows materialized through the metadata door) keep working, while an admin-door edit of a *code-declared* set refuses with `403 not_overridable`, naming the sanctioned path: clone the set under a new name and edit the clone ([ADR-0126](#packaged-flows-actions-and-permission-sets-adr-0126)). The package's own author still changes the declaration in the package and re-publishes (ADR-0086 two-doors). |
-| `object` | ❌ | Defines the table schema. Overriding a packaged object would break existing data — but `allowRuntimeCreate: true`, so tenants *can* author brand-new objects, **and this is also how a new field is added** (write the object with the field in `fields`). |
+| `object` | ❌ | Defines the table schema. Overriding a packaged object would break existing data — but `allowRuntimeCreate: true`, so tenants *can* author brand-new objects, **and this is also how a new field is added** (write the object with the field in `fields`). On an object an installed package ships, a field is added as an object extension in the base's paired `.custom` package, named `<name>__c` ([Object extensions](/docs/data-modeling/object-extensions#customizing-an-installed-packages-object)). |
 | `field` | ❌ | **Also `allowRuntimeCreate: false` since protocol 17** (#7893). A field is not a standalone artifact — fields are authored inside their object (`ObjectSchema.fields`), so a `field` write minted a *separate* `sys_metadata` row keyed `('field','<object>.<name>')` that nothing ever composed into the parent: `PUT /meta/field/showcase_task.zz_probe` answered 200 `state=active`, the row read back `_diagnostics.valid: true`, and `GET /meta/object/showcase_task` never listed the field. The door is closed rather than bridged: add a field by writing its **object** (`PUT /meta/object/:name`, or `**/*.object.ts` and redeploy), which both persists and composes. Existing rows are untouched — they were inert before the change too — and remain deletable. |
 | `datasource` | ❌ | Connection strings; multi-tenant isolation is enforced at a higher layer. (`allowRuntimeCreate: true` — the datasource wizard persists `origin: 'runtime'` rows.) |
 | `job` | ❌ | **Also `allowRuntimeCreate: false` since protocol 17** (#4509). `JobSchema.handler` names a function in the compiled bundle's function table, which a runtime writer has no way to reach — so a job created in Studio or through `PUT /meta` parsed, saved, reported success and was never scheduled. The door is closed rather than bridged: `job` stays first-class through `*.job.ts` / `defineStack({ jobs, functions })`, where every schedule shape, `retryPolicy` and `timeout` does reach the scheduler. Existing rows are untouched — they were never scheduled — and `migrateStoredMetadata` reports them `skipped`. |
@@ -173,7 +188,7 @@ There is no `workflow` metadata type (per [ADR-0020](https://github.com/objectst
 
 The gate is **two-tier** — `allowEnvironmentOverlay: false` is not the same as "no runtime writes":
 
-- Overwriting an item that ships from a code package requires `allowEnvironmentOverlay`. Denied → `403 not_overridable`.
+- Overwriting an item that ships from a code package is refused → `403 not_overridable`. The change is a declared override saved into the base's paired `.custom` package ([above](#customizing-an-installed-package-the-paired-custom-override-adr-0146)); for a ✅ type, a package-less row stored before ADR-0146 D11 is still served until it is moved.
 - Creating a brand-new item that has no artifact backing requires `allowRuntimeCreate` (or `allowEnvironmentOverlay`). Denied → `403 not_creatable`.
 
 See [ADR-0005](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0005-metadata-customization-overlay.md) for the full design and amendments.
@@ -184,7 +199,7 @@ See [ADR-0005](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/
 
 | Type | Sanctioned path the refusal names |
 | :--- | :--- |
-| `flow` | Clone it under a new name (`POST /api/v1/automation/:name/clone`, body `{name, label}`), or switch it off (`POST /api/v1/automation/:name/toggle`, body `{enabled: false}`). A flow that holds a credential (an inbound hook's `secret`, an `http` node's `signingSecret`) is not cloned in one step: the clone door refuses it with `409`, because a copy would share the secret, and the copy is authored as a new flow with its own. The copy is written switched off, into the source package's paired customization package `<base>.custom` (created on first use), or into the writable package the body's optional `package` names; a flow no read-only package ships has no pair, so its clone names `package`. The answer's `packageId` says where the copy landed ([ADR-0146](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D3, D4). |
+| `flow` | Declare an override from the base's paired `<base>.custom`, or rename it (a write from any other package is told to rename: only the pair declares an override), or switch it off (`POST /api/v1/automation/:name/toggle`, body `{enabled: false}`). The declared override is armed in the base flow's place, keeps its one activation switch, and a run suspended on the base finishes on the version it started on (ADR-0146 D9). A copy under a new name is "New similar", the clone door `POST /api/v1/automation/:name/clone` (body `{name, label}`), which the removal refusal still names. A flow that holds a credential (an inbound hook's `secret`, an `http` node's `signingSecret`) is not cloned in one step: the clone door refuses it with `409`, because a copy would share the secret, and the copy is authored as a new flow with its own. The copy is written switched off, into the source package's paired customization package `<base>.custom` (created on first use), or into the writable package the body's optional `package` names; a flow no read-only package ships has no pair, so its clone names `package`. The answer's `packageId` says where the copy landed ([ADR-0146](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D3, D4). |
 | `action` | Switch it off (`POST /api/v1/actions/_activation/:object/:action`, body `{enabled: false}`; `:object` is `global` for an object-less action). No clone is offered. |
 | `permission` | Clone it under a new name: the "Clone" action on the permission set, or the clone door `POST /api/v1/security/permission-sets/:name/clone` (body `{name, label, package?}`) with a new name. The clone door copies the whole definition from the security catalog; a copy of a packaged set lands in the package's paired `<X>.custom` (ADR-0146 D3/D6). |
 

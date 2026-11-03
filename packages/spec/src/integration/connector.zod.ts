@@ -166,6 +166,7 @@ import { strictObject } from '../shared/strict-object';
 // ============================================================================
 
 import { lazySchema } from '../shared/lazy-schema';
+import { findConnectorUrlCredentials, type ConnectorUrlCredential } from './connector-url-credentials';
 
 // ============================================================================
 // REMOVED: connector-attached sync — `syncConfig` and `fieldMappings`
@@ -318,9 +319,73 @@ export const ConnectorRetryStrategySchema = lazySchema(() => z.enum([
 export type ConnectorRetryStrategy = z.input<typeof ConnectorRetryStrategySchema>;
 
 /**
- * Retry Configuration
+ * What a credential-shaped key meets on an authored connector entry. A
+ * connector entry holds no secret at any key: a provider-bound instance names
+ * its credential with `auth.credentialRef` and the value lives in the secrets
+ * layer (ADR-0097 §3, ADR-0143 D3).
  */
-export const RetryConfigSchema = lazySchema(() => z.object({
+const ENTRY_CREDENTIAL_KEY_GUIDANCE =
+  'Not authorable on a connector entry — connector metadata never holds a credential. A provider-bound '
+  + 'instance names its secret with `auth: { type, credentialRef }`, and the administrator sets the value '
+  + 'under that name (an environment variable in the open tier, or Setup → Connector credentials).';
+
+/**
+ * The credential-shaped keys an authored connector entry answers with
+ * {@link ENTRY_CREDENTIAL_KEY_GUIDANCE} — at its top level and inside each of
+ * its closed nested shapes (`retryConfig`, an `actions` element), so a secret
+ * misplaced one level down meets the same prescription.
+ */
+const ENTRY_CREDENTIAL_KEYS_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
+  apiKey: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  key: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  token: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  accessToken: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  secret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  clientSecret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  password: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  credentials: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  credentialRef: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+});
+
+/**
+ * What an execution binding written on an authored connector action meets: an
+ * action carries none (ADR-0097 §5). A provider-bound instance derives its
+ * actions from the upstream; a catalog descriptor's actions describe, and
+ * dispatch nothing.
+ */
+const ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE =
+  'Not authorable on a connector action — an action carries no execution binding (ADR-0097 §5). A '
+  + 'provider-bound instance derives its actions from the upstream (the OpenAPI document, or the MCP '
+  + "server's tools), and a catalog descriptor's actions describe an integration without dispatching.";
+
+/**
+ * `make()`'s result, built on the first call and handed to every later one — so
+ * two carriers built from it share each field INSTANCE, not only its spelling.
+ */
+function sharedFields<T>(make: () => T): () => T {
+  let built: { value: T } | undefined;
+  return () => (built ??= { value: make() }).value;
+}
+
+/**
+ * The retry configuration's declared keys — one declaration, two carriers: the
+ * open {@link RetryConfigSchema} and the closed retry shape of an AUTHORED
+ * connector entry ({@link AuthoredRetryConfigSchema}). Built ONCE, so both
+ * carriers hold the same field instances: the closed twin is module-private
+ * and emits no def of its own, and the authorable-surface gate
+ * (`computeSurfaceReachability()`, `scripts/build-schemas.ts`) recognises the
+ * open `integration/RetryConfig` as authorable through the twin by exactly
+ * that identity (its derived-clone bridge). Built per carrier instead, the
+ * open def was reached by no metadata root and a bare deletion from this
+ * declaration read as unreachable.
+ *
+ * The cost `connectorBaseShape` below avoids at the top level — the guidance
+ * census pairing the open def with the closed declaration's `guidance` — is
+ * read here and does not bite: that pairing is consulted only for a deleted
+ * baseline key the guidance NAMES, and every key the twin's guidance names
+ * (credential-shaped keys) is one the open def has never declared.
+ */
+const retryConfigShape = sharedFields(() => ({
   /**
    * Retry strategy
    */
@@ -361,6 +426,31 @@ export const RetryConfigSchema = lazySchema(() => z.object({
    */
   jitter: z.boolean().optional().default(true).describe('Add jitter to retry delays'),
 }));
+
+/**
+ * Retry Configuration — the open shape: the retry policy a plugin's connector
+ * def carries (`ConnectorSchema`), and the shape the runtime parses a policy
+ * with (`resolveConnectorFetchPolicy`, the instance materialization). An
+ * AUTHORED entry's `retryConfig` is the closed {@link AuthoredRetryConfigSchema}.
+ */
+export const RetryConfigSchema = lazySchema(() => z.object(retryConfigShape()));
+
+/**
+ * The CLOSED retry shape of an authored connector entry
+ * ({@link DeclarativeConnectorEntrySchema}): the keys {@link RetryConfigSchema}
+ * declares — the same field instances ({@link retryConfigShape}) — refusing
+ * every other, a credential-shaped key with the entry's own prescription. An
+ * authored entry is stored as the body the save door accepts (ADR-0005
+ * appendix (c), ruling B), so on an open shape an undeclared key here parsed
+ * green, was kept, and meant nothing to the runtime. Module private: the
+ * published carrier stays {@link RetryConfigSchema}, which the runtime keeps
+ * parsing a stored policy with.
+ */
+const AuthoredRetryConfigSchema = lazySchema(() => strictObject({
+  surface: "this connector entry's `retryConfig`",
+  history: 'Until this shape was closed, an undeclared key here was accepted without effect.',
+  guidance: { ...ENTRY_CREDENTIAL_KEYS_GUIDANCE },
+}, retryConfigShape()));
 
 export type RetryConfig = z.input<typeof RetryConfigSchema>;
 /** Post-parse shape of {@link RetryConfig} — defaults applied, transforms run (ADR-0122). */
@@ -792,9 +882,13 @@ export const ConnectorActionEffectSchema = lazySchema(() => z.enum([
 export type ConnectorActionEffect = z.input<typeof ConnectorActionEffectSchema>;
 
 /**
- * Connector Action Definition
+ * A connector action's declared keys — one declaration, two carriers: the open
+ * {@link ConnectorActionSchema} and the closed action shape of an AUTHORED
+ * connector entry ({@link AuthoredConnectorActionSchema}). Built ONCE, so both
+ * carriers hold the same field instances, for the reason
+ * {@link retryConfigShape} records.
  */
-export const ConnectorActionSchema = lazySchema(() => z.object({
+const connectorActionShape = sharedFields(() => ({
   key: z.string().describe('Action key (machine name)'),
   label: z.string().describe('Human readable label'),
   description: z.string().optional(),
@@ -815,6 +909,36 @@ export const ConnectorActionSchema = lazySchema(() => z.object({
    */
   effect: ConnectorActionEffectSchema.optional(),
 }));
+
+/**
+ * Connector Action Definition — the open shape: the actions a plugin's
+ * connector def carries and a provider derives (`ConnectorSchema`). An
+ * AUTHORED entry's `actions` elements are the closed
+ * {@link AuthoredConnectorActionSchema}.
+ */
+export const ConnectorActionSchema = lazySchema(() => z.object(connectorActionShape()));
+
+/**
+ * The CLOSED action shape of an authored connector entry
+ * ({@link DeclarativeConnectorEntrySchema}): the keys
+ * {@link ConnectorActionSchema} declares — the same field instances — refusing
+ * every other, for the reason {@link AuthoredRetryConfigSchema} records. A
+ * credential-shaped key meets the entry's own prescription; an execution
+ * binding — `method`, `path`, `url` — meets ADR-0097 §5's: an action carries
+ * none. Module private: the published carrier stays {@link ConnectorActionSchema}.
+ */
+const AuthoredConnectorActionSchema = lazySchema(() => strictObject({
+  surface: 'this connector action',
+  history: 'Until this shape was closed, an undeclared key here was accepted without effect.',
+  guidance: {
+    // `key` is the action's own declared machine name here, not a misplaced
+    // credential, so the entry's credential table is taken without it.
+    ...Object.fromEntries(Object.entries(ENTRY_CREDENTIAL_KEYS_GUIDANCE).filter(([name]) => name !== 'key')),
+    method: ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE,
+    path: ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE,
+    url: ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE,
+  },
+}, connectorActionShape()));
 export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
 
 // `ConnectorTriggerSchema` / `ConnectorTrigger` (`key`, `label`, `description`,
@@ -835,8 +959,14 @@ export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
  * pair the OPEN `Connector` def with the closed declaration too, and charge it
  * prescriptions an open shape never delivers (the `shared/` ledger row's
  * one-declaration, two-doors finding).
+ *
+ * `authored` selects the closed nested shapes the closed entry is built with
+ * ({@link AuthoredRetryConfigSchema}, {@link AuthoredConnectorActionSchema}),
+ * so the entry refuses an undeclared key inside `retryConfig` and inside each
+ * `actions` element as it does at its own top level; the open carrier keeps
+ * the open nested shapes.
  */
-const connectorBaseShape = () => ({
+const connectorBaseShape = (authored = false) => ({
   /**
    * Machine name (snake_case)
    */
@@ -921,7 +1051,7 @@ const connectorBaseShape = () => ({
   ),
 
   /** Zapier-style Capabilities */
-  actions: z.array(ConnectorActionSchema).optional(),
+  actions: z.array(authored ? AuthoredConnectorActionSchema : ConnectorActionSchema).optional(),
 
   /**
    * `triggers` — RETIRED (ADR-0049 enforce-or-remove). A connector trigger never
@@ -987,7 +1117,7 @@ const connectorBaseShape = () => ({
   /**
    * Retry configuration
    */
-  retryConfig: RetryConfigSchema.optional().describe('Retry configuration'),
+  retryConfig: (authored ? AuthoredRetryConfigSchema : RetryConfigSchema).optional().describe('Retry configuration'),
   
   /**
    * `connectionTimeoutMs` — RETIRED (ADR-0049 enforce-or-remove). A bounded,
@@ -1102,17 +1232,6 @@ const connectorBaseShape = () => ({
 const ConnectorBaseSchema = lazySchema(() => z.object(connectorBaseShape()));
 
 /**
- * What a credential-shaped key meets on an authored connector entry. A
- * connector entry holds no secret at any key: a provider-bound instance names
- * its credential with `auth.credentialRef` and the value lives in the secrets
- * layer (ADR-0097 §3, ADR-0143 D3).
- */
-const ENTRY_CREDENTIAL_KEY_GUIDANCE =
-  'Not authorable on a connector entry — connector metadata never holds a credential. A provider-bound '
-  + 'instance names its secret with `auth: { type, credentialRef }`, and the administrator sets the value '
-  + 'under that name (an environment variable in the open tier, or Setup → Connector credentials).';
-
-/**
  * What a provider setting written at the top level of an entry meets: it
  * belongs under `providerConfig`, which the provider validates at
  * materialization (ADR-0097).
@@ -1133,9 +1252,13 @@ const ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE =
  * parse), and every read exit serves that body. On an open shape an undeclared
  * key therefore parsed green and was kept, while `defineStack`, `os validate`
  * and `os compile` dropped it without a word. Closed, every door that parses
- * this schema refuses it by name, located at the key: `defineConnector()`,
+ * this schema refuses it by name: `defineConnector()`,
  * `defineStack({ connectors })`, `os validate` / `os compile`, the artifact load
- * at boot and reload, and the save door with `422 INVALID_METADATA`. The ADR-0010 protection envelope
+ * at boot and reload, and the save door with `422 INVALID_METADATA`. The refusal
+ * is ONE zod `unrecognized_keys` issue located at the entry, not at the key: its
+ * path is the entry's own (empty when the entry is parsed alone, `connectors.N`
+ * inside a stack), and it names every undeclared key in its `keys` and in its
+ * message. The ADR-0010 protection envelope
  * is declared in the shape, so a stamped, package-loaded entry still parses.
  *
  * The refusal is terminal ({@link strictObject}): a body with an undeclared key
@@ -1152,15 +1275,7 @@ const DeclarativeConnectorEntryBaseSchema = lazySchema(() => strictObject({
     retry: 'retryConfig',
   },
   guidance: {
-    apiKey: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    key: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    token: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    accessToken: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    secret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    clientSecret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    password: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    credentials: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    credentialRef: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    ...ENTRY_CREDENTIAL_KEYS_GUIDANCE,
     baseUrl: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
     url: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
     spec: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
@@ -1168,7 +1283,7 @@ const DeclarativeConnectorEntryBaseSchema = lazySchema(() => strictObject({
     headers: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
     defaultHeaders: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
   },
-}, connectorBaseShape()));
+}, connectorBaseShape(true)));
 
 /**
  * Core connector configuration — the authorable shape behind the ruled
@@ -1229,14 +1344,40 @@ const DefineConnectorSchema = lazySchema(() =>
  * shorthand) — preferred over a bare `: Connector` literal.
  *
  * The parse is CLOSED: a top-level key the connector does not declare is
- * refused by name, located at the key, with the prescription the authored
- * entry gives (a credential-shaped key → `auth.credentialRef`, a provider
- * setting → `providerConfig`, `timeout` → `requestTimeoutMs`). The def a plugin
+ * refused by name, in one `unrecognized_keys` issue located at the root (path
+ * `[]`, not the key's) that lists every such key in `keys`, with the
+ * prescription the authored entry gives (a credential-shaped key →
+ * `auth.credentialRef`, a provider setting → `providerConfig`, `timeout` →
+ * `requestTimeoutMs`). The def a plugin
  * hands to `registerConnector` is parsed there by the open
  * {@link ConnectorSchema}, whose posture this does not change.
  */
 export function defineConnector(config: z.input<typeof ConnectorSchema>): ConnectorParsed {
   return DefineConnectorSchema.parse(config);
+}
+
+/**
+ * What an authored connector URL holding a credential part meets at every door
+ * that runs the {@link DeclarativeConnectorEntrySchema} refinement: one issue
+ * per URL, located at the URL, naming the parts it holds — never the URL or
+ * its value — and the reference to use instead. What a credential part is —
+ * the userinfo, a credential query parameter — and the walk that finds every
+ * URL holding one are defined once, in `./connector-url-credentials.ts`, which
+ * the connector read redactor runs too. No rule per provider: a URL is
+ * recognised by its value, wherever under `providerConfig` or `auth` it sits.
+ */
+function connectorUrlCredentialRefusal(name: string, found: ConnectorUrlCredential): string {
+  const at = found.path.map(String).join('.');
+  const parts = [
+    ...(found.userinfo ? ['a userinfo (`user@` or `user:password@` before the host)'] : []),
+    ...found.params.map((param) => `the \`${param}\` query parameter`),
+  ];
+  return `Connector instance '${name}' keeps a credential in the URL at \`${at}\`: ${parts.join(' and ')}. `
+    + 'Connector metadata never holds a credential, in a URL or anywhere else. Remove it from the URL and name the '
+    + "secret with `auth: { type, credentialRef }` — `bearer` for a token, `api-key` for a key (`paramName` when the "
+    + 'API takes it as a query parameter, which the provider then adds to every request), `basic` for a user and '
+    + 'password — and set the value under that name: an environment variable in the open tier, or Setup → Connector '
+    + 'credentials.';
 }
 
 /**
@@ -1284,6 +1425,10 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  *  - A provider-bound instance must NOT author `actions` — the provider derives
  *    them from the upstream (OpenAPI document / MCP `tools/list`); authoring both
  *    the instance and its actions reintroduces drift (§5 non-goals).
+ *  - A URL under an instance's `providerConfig` or `auth` holds no credential
+ *    part — no userinfo, no credential query parameter — refused at the URL
+ *    (`connectorUrlCredentialRefusal`, judged by the walk the read redactor
+ *    runs too); the secret is named with `auth.credentialRef`.
  *
  * `triggers` used to be the second key of that last rule, refused with the
  * reason that the provider derives triggers too. That reason was untrue — no
@@ -1348,6 +1493,15 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
       }
       return;
     }
+    // An authored URL holds no credential part, under `providerConfig` or
+    // `auth`, at any depth (see `connectorUrlCredentialRefusal`).
+    for (const found of findConnectorUrlCredentials(entry as Record<string, unknown>)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: found.path,
+        message: connectorUrlCredentialRefusal(entry.name, found),
+      });
+    }
     if (entry.actions && entry.actions.length > 0) {
       ctx.addIssue({
         code: 'custom',
@@ -1361,19 +1515,45 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
     // authorization-server metadata, dynamic client registration) and keeps
     // the registered client in the connection record, never in metadata. The
     // rule needs the provider, so it lives here rather than on the auth shape.
-    if (entry.auth?.type === 'oauth2' && !isMcpHttpInstance(entry)) {
-      const missing: Array<[key: 'tokenUrl' | 'clientId' | 'authorizationUrl', why: string]> = [];
-      if (entry.auth.tokenUrl === undefined) missing.push(['tokenUrl', 'its token endpoint']);
-      if (entry.auth.clientId === undefined) missing.push(['clientId', 'its pre-registered client id']);
-      if (entry.auth.grant === 'authorization_code' && entry.auth.authorizationUrl === undefined) {
-        missing.push(['authorizationUrl', "its authorization endpoint (`grant: 'authorization_code'`)"]);
-      }
-      for (const [key, why] of missing) {
+    //
+    // ADR-0143 D2.1, amended 2026-11-02: an `authorization_code` instance
+    // that declares `clientSource: 'installer'` takes its client from the
+    // administrator of each deployment, entered on the instance's connection.
+    // It names no `clientId` on any provider, and a `clientId` beside it is
+    // refused, because the definition would then name two clients. The
+    // endpoints stay the definition's (or the MCP flow's): the installer owns
+    // the client, not the vendor's authorization server. This exclusion sits
+    // here with the other client-key rules and not on the auth shape, because
+    // the published JSON Schema has no form for a shape-level exclusion
+    // (`shared/refinement-projection.ts`), while this refinement is already one
+    // the published file marks as not stated.
+    if (entry.auth?.type === 'oauth2') {
+      const installerClient = entry.auth.grant === 'authorization_code' && entry.auth.clientSource === 'installer';
+      if (installerClient && entry.auth.clientId !== undefined) {
         ctx.addIssue({
           code: 'custom',
-          path: ['auth', key],
-          message: `Connector instance '${entry.name}' declares \`auth: { type: 'oauth2' }\` without \`${key}\`: name ${why}. Only \`provider: 'mcp'\` over an http transport may omit the endpoints and the client id, because that provider discovers them and registers a client itself (ADR-0143 D2.1).`,
+          path: ['auth', 'clientId'],
+          message: `Connector instance '${entry.name}' declares \`clientSource: 'installer'\` and a packaged \`clientId\`. An installer-supplied client is registered with the vendor by the administrator of each deployment, against that deployment's callback, and entered on the instance's connection, so the definition names no client. Delete \`clientId\` (and its \`credentialRef\`), or delete \`clientSource\` if the package's author registers the callback of every deployment that installs it, as for a private app (ADR-0143 D2.1).`,
         });
+      }
+      if (!isMcpHttpInstance(entry)) {
+        const missing: Array<[key: 'tokenUrl' | 'clientId' | 'authorizationUrl', why: string]> = [];
+        if (entry.auth.tokenUrl === undefined) missing.push(['tokenUrl', 'its token endpoint']);
+        if (entry.auth.clientId === undefined && !installerClient) {
+          missing.push(['clientId', entry.auth.grant === 'authorization_code'
+            ? "its pre-registered client id, or declare `clientSource: 'installer'` so the administrator of each deployment enters their own client on the connection"
+            : 'its pre-registered client id']);
+        }
+        if (entry.auth.grant === 'authorization_code' && entry.auth.authorizationUrl === undefined) {
+          missing.push(['authorizationUrl', "its authorization endpoint (`grant: 'authorization_code'`)"]);
+        }
+        for (const [key, why] of missing) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['auth', key],
+            message: `Connector instance '${entry.name}' declares \`auth: { type: 'oauth2' }\` without \`${key}\`: name ${why}. \`provider: 'mcp'\` over an http transport may omit the endpoints and the client id, because that provider discovers its endpoints and can register a client itself (ADR-0143 D2.1).`,
+          });
+        }
       }
     }
     // ADR-0143 D2.3 — a `signed` instance is signed by the HTTP providers

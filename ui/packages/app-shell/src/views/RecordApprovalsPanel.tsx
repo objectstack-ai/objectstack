@@ -8,7 +8,7 @@
 
 import * as React from 'react';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { cn, Badge, Button } from '@object-ui/components';
+import { cn, Badge, Button, useIsMobile } from '@object-ui/components';
 import { Stamp, Paperclip, Loader2, Send, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { createAuthenticatedFetch } from '@object-ui/auth';
@@ -230,6 +230,9 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
 }) => {
   const { t } = useObjectTranslation();
   const displayLocale = useDisplayLocale();
+  // objectstack#29070: on a phone Send reminder is a 44 px target (`lg`), not
+  // the 24 px chip it is beside the approver chips on a desktop.
+  const isMobile = useIsMobile();
   const tr = React.useCallback(
     (key: string, defaultValue: string, opts?: Record<string, unknown>) =>
       String(t(`approvalsInbox.${key}`, { defaultValue, ...opts })),
@@ -479,8 +482,8 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
               {isSubmitter && (
                 <Button
                   variant="outline"
-                  size="sm"
-                  className="h-6 gap-1 px-2 text-[11px]"
+                  size={isMobile ? 'lg' : 'sm'}
+                  className={isMobile ? 'gap-1.5 px-4' : 'h-6 gap-1 px-2 text-[11px]'}
                   disabled={reminding}
                   onClick={() => void handleRemind()}
                 >

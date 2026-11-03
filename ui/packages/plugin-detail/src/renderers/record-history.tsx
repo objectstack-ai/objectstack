@@ -20,7 +20,7 @@
 
 import React from 'react';
 import { useRecordContext } from '@object-ui/react';
-import { HistoryTimeline, type HistoryEntry } from '../HistoryTimeline';
+import { HistoryTimeline, type HistoryActionField, type HistoryEntry } from '../HistoryTimeline';
 import { activityActorName } from './recordActivityFeed';
 
 const splitDesigner = (props: Record<string, any>) => {
@@ -60,6 +60,15 @@ function activityActorId(row: { actor_id?: unknown }): string | number | null {
 /** sys_activity row → HistoryEntry. Only field-mutating activity types map to
  *  history (comments/mentions/logins are not record-history). */
 const HISTORY_TYPES = new Set(['created', 'updated', 'assigned', 'shared', 'deleted']);
+
+/**
+ * Where a self-fetched entry's `action` comes from: `sys_activity.type`, a
+ * select whose declared options carry translated labels. The timeline labels
+ * each badge from that field, so 'updated' reads as the language spells the
+ * option, not as the stored word. Host-supplied entries name no source and
+ * keep the stored value.
+ */
+const SELF_FETCH_ACTION_FIELD: HistoryActionField = { object: 'sys_activity', field: 'type' };
 
 /**
  * Rows this block shows when the author declared no usable cap.
@@ -233,7 +242,13 @@ export const RecordHistoryRenderer: React.FC<RecordHistoryRendererProps> = ({
 
   return (
     <div className={className} {...designer}>
-      <HistoryTimeline entries={entries} loading={loading} emptyText={emptyText} unknownUserText={unknownUserText} />
+      <HistoryTimeline
+        entries={entries}
+        loading={loading}
+        emptyText={emptyText}
+        unknownUserText={unknownUserText}
+        actionField={hostEntries === undefined ? SELF_FETCH_ACTION_FIELD : undefined}
+      />
     </div>
   );
 };

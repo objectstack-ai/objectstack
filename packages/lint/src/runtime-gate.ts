@@ -265,6 +265,14 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // own, resolves nothing into a sibling, and a write's own collection already
   // holds exactly one member — its own item.
   datasource: 'datasources',
+  // [#29341] `connector` — `PUT /meta/connector/:name` publishes a declarative
+  // connector entry, and `lintConnectorCredentialLiterals` crosses the wall with
+  // this row. ⛔ NOT a mapping ahead of its rule: that rule opens with
+  // `recordsOf(stack.connectors)`, the key `ObjectStackDefinitionSchema` gives
+  // the collection, and the door case in its test builds the snapshot at
+  // `stackKeyForType('connector')` itself. Not a context row either, for the
+  // `position` / `app` reason above: the rule judges each entry on its own.
+  connector: 'connectors',
 };
 
 /**

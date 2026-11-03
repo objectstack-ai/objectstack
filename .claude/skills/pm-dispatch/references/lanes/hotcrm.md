@@ -43,7 +43,7 @@
 - 依赖是已发布的 `@objectstack/*` 包,逐包定版号,非 git pin。
 - ⇒ 平台侧修复必须先发版、再在此升版号才到得了展品。
 - 上游卡对本道的解锁判据是已发布,不是已合并。
-- pm 状态机词表五仓统一,幂等创建在 `scripts/pm/ensure-pm-labels.sh`,对 hotcrm 实跑是落地步骤。
+- pm 状态机词表各仓统一,幂等创建在 `scripts/pm/ensure-pm-labels.sh`,对 hotcrm 实跑是落地步骤。
 
 ## 席内判断
 

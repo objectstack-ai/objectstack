@@ -89,7 +89,13 @@ import {
 import { useMetadata } from '@object-ui/react';
 import { useAuth } from '@object-ui/auth';
 import { resolveViewId } from '@object-ui/core';
-import { extractDraftBody, readDraftChanges, type DraftChange, type MetadataClient } from '@object-ui/data-objectstack';
+import {
+  extractDraftBody,
+  formatMetadataError,
+  readDraftChanges,
+  type DraftChange,
+  type MetadataClient,
+} from '@object-ui/data-objectstack';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { NavigationModeSchema, resolveI18nLabel, type I18nLabel, type NavigationMode } from '@objectstack/spec/ui';
 import { InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
@@ -346,8 +352,10 @@ export interface ObjectListViewDraft {
    * The last load's or save's failure, as thrown. Read at render, in the
    * designer locale, the way the pillar reads its own (objectui#11785): a
    * refused save as an author sentence over its raw text, a load as the text.
+   * objectstack#29148 — `draftUnreadable`: the server refused to read the
+   * view's pending draft (`403`), so no buffer was installed over it.
    */
-  failure: { during: 'load' | 'save'; error: unknown } | null;
+  failure: { during: 'load' | 'save' | 'draftUnreadable'; error: unknown } | null;
   /** Replace the view item with an edited one. */
   edit: (row: Row) => void;
   /**
@@ -549,6 +557,17 @@ export function useObjectListViewDraft({
         const readAt = customizationRef.current?.readAt() ?? packageId;
         const draftRead = await readDraftForSave<Row>(client, 'view', viewId, readAt);
         if (cancelled) return;
+        // objectstack#29148 — a pending draft the server refused to read (its
+        // audience gate names a capability this author does not hold) is no
+        // absence. No buffer is installed over it, so nothing is shown to edit
+        // and nothing is saved: one seeded from the published layer would be
+        // saved over the draft, dropping its keys and its gate.
+        if ('refused' in draftRead) {
+          readAtRef.current = null;
+          setBuffer({ for: '', row: null, dirty: false, hasDraft: true, draftChanges: null, published: undefined });
+          setFailure({ during: 'draftUnreadable', error: draftRead.refused });
+          return;
+        }
         const draftResp = draftRead.answer;
         // A served draft is the whole document, taken as-is (objectui#10765);
         // the published layer only without one. Both lose the read
@@ -1212,7 +1231,9 @@ export function ObjectListViewInspector({
     ? null
     : failure.during === 'save'
       ? issueRefusal(failure.error, locale)
-      : plainRefusal(failure.error);
+      : failure.during === 'draftUnreadable'
+        ? { message: t('engine.studio.refusal.draftUnreadable', locale), detail: formatMetadataError(failure.error) }
+        : plainRefusal(failure.error);
   const working = row ?? newListViewItem(target, seedColumns);
   const objectText = navTargetLabel({ kind: 'object', objectName: target.objectName }) ?? target.objectName;
   const title = listViewTitle(target, working, objectText, locale);

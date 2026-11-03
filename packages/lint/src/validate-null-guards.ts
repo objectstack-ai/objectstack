@@ -90,13 +90,15 @@
  * | field `requiredWhen`           | TOTAL   | same `merged` in `evaluateValidationRules` — fail-OPEN, so an unguarded predicate enforces NOTHING in silence | covered (#4811) |
  * | field `readonlyWhen`           | TOTAL   | `rule-validator.ts` `readonlyWhenBindings` materialises BOTH roots (#4953 clause 1, landed in #6454) | excluded — NOT on totality; see below |
  * | action `visible` / `disabled`  | sparse  | evaluated client-side; no materialization exists in `objectui` | excluded (decided — #4953 clause 2) |
- * | flow / edge `condition`        | TOTAL   | `record-change-trigger.ts` `buildContext` layers `previous` under the payload/after-row then runs BOTH `record` and `previous` through a structural-mirror `materializeDeclaredFields` (#4953 clause 1's other half, services lane) | excluded — NOT on totality; see below |
+ * | flow start / edge / `decision` condition — record-triggered flow | TOTAL | `record-change-trigger.ts` `buildContext` layers `previous` under the payload/after-row then runs BOTH `record` and `previous` through a structural-mirror `materializeDeclaredFields` (#4953 clause 1's other half, services lane); `seedRunVariables` flattens that same total record to bare names | covered (#29026), outcome `run-fails`; the runtime publish gate is stricter on a bare start guard; see below |
+ * | the same slots, any other flow | sparse or unknown | the inbound hook hands the request body, an action an empty record carrying at most `id`, a `map` item its own keys; nothing materializes them | excluded |
  * | sharing-rule `condition`       | n/a     | compiled to a SQL filter; `NULL > x` is three-valued, never faults | excluded |
  * | field `expression` (`Field.formula`) | n/a | product judgement, not a wiring gap — see below              | excluded |
  *
- * The four exclusions that are *not* self-evident, spelled out because a
- * surface excluded without a reason is indistinguishable from one nobody
- * looked at — the failure mode this whole family of issues is about:
+ * The three exclusions that are *not* self-evident, and the one covered row
+ * whose wiring is not either, spelled out because a surface excluded without
+ * a reason is indistinguishable from one nobody looked at — the failure mode
+ * this whole family of issues is about:
  *
  *  - **Field `readonlyWhen` — the row where `binding` and `verdict` came
  *    apart.** Its binding is no longer sparse. Since #6454 (the engine-core
@@ -109,13 +111,14 @@
  *    describes code that no longer exists. What keeps the row excluded is
  *    clause 3 of the same ruling: the gate widens once BOTH server-side seams
  *    are total. The other one — flow trigger-record seeding, services lane —
- *    is ALSO wired now (#4953 clause 1's other half; see the `flow / edge
- *    condition` row below), so both server-side seams the ruling named are
- *    total as of that landing. The actual gate widening clause 3 promises is
- *    tracked separately (#4811) rather than folded into either seam's own
- *    PR — this row (and the one below) stay excluded here on purpose, so the
- *    `binding` column keeps meaning what #4811 needs it to mean: a fact about
- *    the surface, not a verdict this module renders on itself.
+ *    is ALSO wired now (#4953 clause 1's other half; see the flow row below),
+ *    so both server-side seams the ruling named are total as of that landing.
+ *    The gate widening clause 3 promises was tracked separately (#4811,
+ *    closed) rather than folded into either seam's own PR; the flow row has
+ *    since been widened on its own card (#29026), and this row has not — it
+ *    stays excluded until a card widens it, so the `binding` column keeps
+ *    meaning a fact about the surface, not a verdict this module renders on
+ *    itself.
  *
  *    Two facts to carry into that widening; neither is bookkeeping:
  *
@@ -213,13 +216,12 @@
  *    correction was a separate card on purpose: it changes what authors are
  *    TOLD TO WRITE, which is not a lint change, and it does not disturb this
  *    row's verdict (still excluded, still permanently).
- *  - **Flow / edge `condition` — the row where `binding` and `verdict` came
- *    apart, same shape as `readonlyWhen` above.** #4811 originally excluded
+ *  - **Flow start / edge / `decision` condition — covered since #29026, on a
+ *    record-triggered flow only.** #4811 originally excluded
  *    these for flattened-scope ambiguity ("a bare identifier may be a flow
- *    variable"). That reason does not actually apply to this module —
- *    {@link findUnguardedNullableOperands} only ever resolves `record.<f>` /
- *    `previous.<f>` and never a bare identifier, and the engine binds
- *    `record` / `previous` unconditionally. The real blocker was totality:
+ *    variable"). That reason never applied to the `record.<f>` /
+ *    `previous.<f>` half — the engine binds both roots whenever the run was
+ *    handed a record. The real blocker was totality:
  *    the trigger used to seed the record as `{...(inputData ?? {}), ...after}`
  *    — spelled `inputDoc` here until #5671 dropped that alias read — so a
  *    declared column the write never mentioned was an ABSENT key, and the
@@ -239,12 +241,62 @@
  *    `{...(inputData ?? {}), ...after}` seed) describes code that no longer
  *    exists.
  *
- *    What keeps the row excluded is the SAME clause-3 reason the
- *    `readonlyWhen` row states: the gate's actual widening is tracked
- *    separately (#4811), not folded into this seam's own PR.
- *    (The flattened-scope ambiguity is real for a *bare-identifier* checker —
- *    flow inputs shadow record fields, and a node's `outputVariable` can
- *    overwrite either — but that is a different, unbuilt pass.)
+ *    What the wiring (`validate-expressions.ts`, the flow walk) decides, and
+ *    why each part is the way it is:
+ *
+ *      1. **Which flows.** Trigger kind `record_change` (the spec's
+ *         `resolveFlowTriggerKind`) on a declared `objectName` — the one
+ *         entrance that materializes. Every other entrance hands a record
+ *         nothing makes total (an `api` flow's request body, a `type: 'flow'`
+ *         action's empty record, a `map` item), so on a flow with no record
+ *         trigger the inversion in the table above is live and the gate stays
+ *         off. A record-triggered flow ALSO launched from such an entrance is
+ *         still judged: on its trigger runs `has()` alone is the trap, and the
+ *         guard safe on both bindings, `has(record.x) && record.x != null`,
+ *         passes this gate.
+ *      2. **Bare names.** The motivating fault was bare (`budget > 200000`):
+ *         `seedRunVariables` spreads the record's fields to top level, nulls
+ *         included, wherever no variable holds the name. So a bare name is
+ *         judged as `record.<name>` when the flow's bound set is provable
+ *         (`flowCelRootScope`) and the name is not one of its declared
+ *         variables or node ids (`collectFlowVariableNames`) — those win, and
+ *         a flow whose nodes can bind names nobody declared leaves its bare
+ *         names unjudged. Guarding either spelling guards both.
+ *      3. **The start condition gates every run.** `execute()` evaluates it
+ *         before any node, whatever the entrance, so what it proves non-null
+ *         is presumed at every edge and `decision` branch of the flow
+ *         ({@link provenNonNullKeys}); an author does not re-guard downstream.
+ *         **The two doors disagree on a BARE start guard, and the runtime
+ *         publish gate is the stricter one.** `os validate` sees the flow's
+ *         entrances, so where the bound set is provable a bare
+ *         `budget != null` start condition proves `record.budget` (point 2)
+ *         and an edge comparing `record.budget > 200000` passes. The runtime
+ *         publish gate judges the written flow alone
+ *         (`perWriteSnapshotEntrance`): the bound set is not provable there,
+ *         no bare name is judged, the bare guard proves nothing, and the same
+ *         edge is refused. The stricter side stands: with the bound set not
+ *         provable, a bare name is not provably the field, and deriving the
+ *         presumption from it would be unsound. Nobody has measured a sound
+ *         way for that door to stand down on such a finding instead, so it
+ *         does not. Spell the start guard `record.budget != null` and
+ *         both doors accept the flow. Pinned in
+ *         `validate-expressions.flow-null-guards.test.ts`.
+ *      4. **Outcome `run-fails`, not `fail-closed`.** `evaluateCondition`
+ *         throws on the fault (ADR-0032 §1c) and the record-change trigger
+ *         isolates the write, so the run fails and the write lands.
+ *
+ *    Not reached: `previous` is bound to `null` on a create leg
+ *    (`seedRunVariables`), so on a `record-after-write` flow
+ *    `previous.x != null` itself faults there; the full guard is
+ *    `previous != null && previous.x != null`. The gate still reports the
+ *    unguarded `previous.x` (it faults on the update leg's null), and
+ *    `previous != null` alone is not accepted as guarding `previous.x`. The
+ *    message names that full guard for a `previous.` operand
+ *    ({@link PREVIOUS_GUARD_CLAUSE}), on every surface: a validation rule
+ *    and a hook condition bind `previous` to `null` on an insert too.
+ *    Other declared predicate slots (a `screen` field's `visibleWhen`) are
+ *    not judged: their fault does not take this outcome, and nobody has
+ *    measured what it does take.
  *  - **Field `expression`** (the slot `Field.formula({ expression: … })`
  *    writes; spelled `formula` here until #5026 renamed the read to the key
  *    `FieldSchema` actually declares). Excluded by product judgement, not by
@@ -270,6 +322,18 @@ export const NULL_GUARD_HINT =
   `Guard it with '!= null'` +
   ` — 'has(x)' does NOT do that: a declared field holding null is still PRESENT, so has(x) is true.`;
 
+/**
+ * The clause {@link nullGuardMessage} adds after {@link NULL_GUARD_HINT} for a
+ * `previous.<f>` operand, and only for one. An insert binds `previous` itself to
+ * `null` (`previousBinding` in the rule validator, `seedRunVariables` on a
+ * flow's create leg), so `previous.<f> != null` faults there too and the guard
+ * that holds on both legs names `previous` first. Kept out of the shared hint,
+ * which stays verbatim with the runtime's sentence.
+ */
+const PREVIOUS_GUARD_CLAUSE = (operand: string): string =>
+  ` On an insert \`previous\` is itself null, so \`${operand} != null\` alone faults there too:` +
+  ` guard it with \`previous != null && ${operand} != null\`.`;
+
 /** Ordering + arithmetic operators — the ones with no `null` overload. */
 const FAULTING_BINARY_OPS = new Set(['<', '<=', '>', '>=', '+', '-', '*', '/', '%']);
 
@@ -281,7 +345,32 @@ export interface NullGuardOptions {
   nullableFields: ReadonlySet<string>;
   /** Roots bound to the object's record shape. Defaults to `record`/`previous`. */
   roots?: readonly string[];
+  /**
+   * Names that, read BARE, are the bound record's field of the same name — a
+   * flow's flattened scope, where `seedRunVariables` spreads the trigger
+   * record's fields to top level wherever no variable already holds the name.
+   * The caller decides the set (the flow's declared variables and node ids
+   * subtracted, since those win); empty by default, so every other surface
+   * keeps judging `record.<f>` / `previous.<f>` alone. A bare `budget` and
+   * `record.budget` read the same value there, so a guard on either spelling
+   * guards both. A name a comprehension macro or `cel.bind` binds is that
+   * binding, never the field, inside the part it is bound in.
+   */
+  bareFields?: ReadonlySet<string>;
+  /**
+   * Guard keys already proven non-null before this predicate runs — the
+   * flow's start condition, which gates every run ({@link provenNonNullKeys}).
+   */
+  presumed?: ReadonlySet<string>;
 }
+
+/** How operands resolve: the record roots, and the bare names the scope flattens. */
+interface Resolver {
+  readonly roots: readonly string[];
+  readonly bare: ReadonlySet<string>;
+}
+
+const NO_BARE: ReadonlySet<string> = new Set();
 
 export interface NullGuardFinding {
   /** The operand as written, e.g. `record.end_date`. */
@@ -309,13 +398,22 @@ function isNullLiteral(node: unknown): boolean {
 }
 
 /**
- * `record.<field>` (or `previous.<field>`) → the field name; anything else —
- * a bare id, a nested traversal `record.account.region`, an index — → null.
+ * `record.<field>` (or `previous.<field>`) → the field name; a bare name the
+ * resolver flattens → that name; anything else — a nested traversal
+ * `record.account.region`, an index, any other bare id — → null.
  * Deliberately single-segment: a nested path is a lookup traversal whose
  * nullability this object's field list cannot decide.
+ *
+ * `key` is what a guard is matched on: a bare flattened `budget` IS
+ * `record.budget`, so both spellings share the key `record.budget`.
  */
-function fieldOf(node: unknown, roots: readonly string[]): { operand: string; field: string } | null {
+function fieldOf(node: unknown, r: Resolver): { operand: string; field: string; key: string } | null {
   if (!isNode(node)) return null;
+  if (node.op === 'id') {
+    const name = (node as AnyNode).args;
+    if (typeof name !== 'string' || !r.bare.has(name)) return null;
+    return { operand: name, field: name, key: `record.${name}` };
+  }
   if (node.op !== '.' && node.op !== '.?') return null;
   const args = node.args as unknown;
   if (!Array.isArray(args) || args.length < 2) return null;
@@ -323,8 +421,43 @@ function fieldOf(node: unknown, roots: readonly string[]): { operand: string; fi
   if (typeof seg !== 'string') return null;
   if (!isNode(recv) || recv.op !== 'id') return null;
   const root = (recv as AnyNode).args;
-  if (typeof root !== 'string' || !roots.includes(root)) return null;
-  return { operand: `${root}.${seg}`, field: seg };
+  if (typeof root !== 'string' || !r.roots.includes(root)) return null;
+  const operand = `${root}.${seg}`;
+  return { operand, field: seg, key: operand };
+}
+
+/** cel-js's comprehension macros: the receiver calls that bind their first argument in the rest. */
+const COMPREHENSION_MACROS: ReadonlySet<string> = new Set(['all', 'exists', 'exists_one', 'map', 'filter']);
+
+/**
+ * A comprehension macro (`list.exists(x, …)`) or `cel.bind(x, init, …)`: the
+ * name it binds, the parts evaluated OUTSIDE the binding, and the parts the
+ * name is bound in. `undefined` for any other node.
+ */
+function bindingScope(node: AnyNode): { name: string; outside: unknown[]; inside: unknown[] } | undefined {
+  if (node.op !== 'rcall' || !Array.isArray(node.args)) return undefined;
+  const [name, receiver, list] = node.args as [unknown, unknown, unknown];
+  if (typeof name !== 'string' || !Array.isArray(list)) return undefined;
+  const first = list[0];
+  const bound = isNode(first) && first.op === 'id' && typeof (first as AnyNode).args === 'string'
+    ? ((first as AnyNode).args as string)
+    : undefined;
+  if (!bound) return undefined;
+  if (COMPREHENSION_MACROS.has(name) && list.length >= 2) {
+    return { name: bound, outside: [receiver], inside: list.slice(1) };
+  }
+  if (name === 'bind' && isNode(receiver) && receiver.op === 'id' && (receiver as AnyNode).args === 'cel' && list.length === 3) {
+    return { name: bound, outside: [list[1]], inside: [list[2]] };
+  }
+  return undefined;
+}
+
+/** The resolver inside a binding of `name`: that name is the binding, not the record. */
+function shadow(r: Resolver, name: string): Resolver {
+  if (!r.bare.has(name) && !r.roots.includes(name)) return r;
+  const bare = new Set(r.bare);
+  bare.delete(name);
+  return { roots: r.roots.filter((root) => root !== name), bare };
 }
 
 /** Children of a node, whatever its arg shape. */
@@ -371,18 +504,18 @@ function intersect(a: ReadonlySet<string>, b: ReadonlySet<string>): Set<string> 
  * `isBlank` being *true* says nothing about non-nullness (it is true FOR null);
  * it appears in {@link falseGuards} instead.
  */
-function truthGuards(node: unknown, roots: readonly string[]): Set<string> {
+function truthGuards(node: unknown, roots: Resolver): Set<string> {
   if (!isNode(node)) return new Set();
   switch (node.op) {
     case '!=': {
       const [l, r] = (node.args as [unknown, unknown]) ?? [];
       if (isNullLiteral(r)) {
         const f = fieldOf(l, roots);
-        return f ? new Set([f.operand]) : new Set();
+        return f ? new Set([f.key]) : new Set();
       }
       if (isNullLiteral(l)) {
         const f = fieldOf(r, roots);
-        return f ? new Set([f.operand]) : new Set();
+        return f ? new Set([f.key]) : new Set();
       }
       return new Set();
     }
@@ -407,18 +540,18 @@ function truthGuards(node: unknown, roots: readonly string[]): Set<string> {
 }
 
 /** Operands proven non-null **when `node` evaluates false** (the `!`/`||` side). */
-function falseGuards(node: unknown, roots: readonly string[]): Set<string> {
+function falseGuards(node: unknown, roots: Resolver): Set<string> {
   if (!isNode(node)) return new Set();
   switch (node.op) {
     case '==': {
       const [l, r] = (node.args as [unknown, unknown]) ?? [];
       if (isNullLiteral(r)) {
         const f = fieldOf(l, roots);
-        return f ? new Set([f.operand]) : new Set();
+        return f ? new Set([f.key]) : new Set();
       }
       if (isNullLiteral(l)) {
         const f = fieldOf(r, roots);
-        return f ? new Set([f.operand]) : new Set();
+        return f ? new Set([f.key]) : new Set();
       }
       return new Set();
     }
@@ -438,23 +571,40 @@ function falseGuards(node: unknown, roots: readonly string[]): Set<string> {
       if (callName(node) !== 'isBlank') return new Set();
       const [only] = callArgs(node);
       const f = fieldOf(only, roots);
-      return f ? new Set([f.operand]) : new Set();
+      return f ? new Set([f.key]) : new Set();
     }
     default:
       return new Set();
   }
 }
 
-/** Collect every `has(record.<f>)` operand appearing anywhere in the tree. */
-function collectHasOperands(node: unknown, roots: readonly string[], out: Set<string>): void {
+/** Collect the guard key of every `has(record.<f>)` appearing anywhere in the tree. */
+function collectHasOperands(node: unknown, roots: Resolver, out: Set<string>): void {
   if (!isNode(node)) return;
   if (callName(node) === 'has') {
     for (const a of callArgs(node)) {
       const f = fieldOf(a, roots);
-      if (f) out.add(f.operand);
+      if (f) out.add(f.key);
     }
   }
   for (const child of childNodes(node)) collectHasOperands(child, roots, out);
+}
+
+/**
+ * The guard keys `source` proves non-null whenever it evaluates TRUE — for a
+ * predicate that gates everything after it, such as a flow's start condition
+ * (the engine evaluates it before any node, on every run, so a run that
+ * reaches an edge is a run on which it held). Empty for a source that does not
+ * parse. Feed the result to {@link NullGuardOptions.presumed}.
+ */
+export function provenNonNullKeys(
+  source: string,
+  opts: Pick<NullGuardOptions, 'roots' | 'bareFields'>,
+): Set<string> {
+  if (typeof source !== 'string' || !source.trim()) return new Set();
+  const ast = parseCelToAst(source);
+  if (!ast) return new Set();
+  return truthGuards(ast, { roots: opts.roots ?? DEFAULT_RECORD_ROOTS, bare: opts.bareFields ?? NO_BARE });
 }
 
 /**
@@ -487,22 +637,22 @@ export function findUnguardedNullableOperands(
 ): NullGuardFinding[] {
   if (typeof source !== 'string' || !source.trim()) return [];
   if (opts.nullableFields.size === 0) return [];
-  const roots = opts.roots ?? DEFAULT_RECORD_ROOTS;
+  const top: Resolver = { roots: opts.roots ?? DEFAULT_RECORD_ROOTS, bare: opts.bareFields ?? NO_BARE };
 
   const ast = parseCelToAst(source);
   if (!ast) return [];
 
   const hasOperands = new Set<string>();
-  collectHasOperands(ast, roots, hasOperands);
+  collectHasOperands(ast, top, hasOperands);
 
   const findings: NullGuardFinding[] = [];
   const seen = new Set<string>();
 
-  const report = (operandNode: unknown, operator: string, guards: ReadonlySet<string>): void => {
+  const report = (operandNode: unknown, operator: string, guards: ReadonlySet<string>, roots: Resolver): void => {
     const f = fieldOf(operandNode, roots);
     if (!f) return;
     if (!opts.nullableFields.has(f.field)) return;
-    if (guards.has(f.operand)) return;
+    if (guards.has(f.key)) return;
     // NUL separates the composite key's two halves (it can appear in neither a
     // field path nor an operator). Written as the `\u0000` ESCAPE, never as a raw
     // byte: a raw NUL makes grep/ripgrep treat the whole file as binary and
@@ -518,56 +668,65 @@ export function findUnguardedNullableOperands(
       operand: f.operand,
       field: f.field,
       operator,
-      hasOnlyGuard: hasOperands.has(f.operand),
+      hasOnlyGuard: hasOperands.has(f.key),
     });
   };
 
-  const visit = (node: unknown, guards: ReadonlySet<string>): void => {
+  const visit = (node: unknown, guards: ReadonlySet<string>, roots: Resolver): void => {
     if (!isNode(node)) return;
     const op = node.op as string;
 
     if (op === '&&') {
       const [l, r] = node.args as [unknown, unknown];
-      visit(l, guards);
+      visit(l, guards, roots);
       // Left-to-right: only the LEFT conjunct's proofs reach the right one.
-      visit(r, union(guards, truthGuards(l, roots)));
+      visit(r, union(guards, truthGuards(l, roots)), roots);
       return;
     }
     if (op === '||') {
       const [l, r] = node.args as [unknown, unknown];
-      visit(l, guards);
+      visit(l, guards, roots);
       // Reaching the right arm means the left one was FALSE.
-      visit(r, union(guards, falseGuards(l, roots)));
+      visit(r, union(guards, falseGuards(l, roots)), roots);
       return;
     }
     if (op === '?:') {
       const [c, t, f] = node.args as [unknown, unknown, unknown];
-      visit(c, guards);
-      visit(t, union(guards, truthGuards(c, roots)));
-      visit(f, union(guards, falseGuards(c, roots)));
+      visit(c, guards, roots);
+      visit(t, union(guards, truthGuards(c, roots)), roots);
+      visit(f, union(guards, falseGuards(c, roots)), roots);
       return;
     }
     if (op === 'call' && callName(node) === 'has') {
       // `has(x)` itself never faults — and it never counts as a guard either.
       return;
     }
+    const binding = bindingScope(node);
+    if (binding) {
+      // The bound name is the macro's element / `cel.bind`'s value inside the
+      // part it is bound in — never the record's field of the same name.
+      for (const part of binding.outside) visit(part, guards, roots);
+      const inner = shadow(roots, binding.name);
+      for (const part of binding.inside) visit(part, guards, inner);
+      return;
+    }
     if (FAULTING_BINARY_OPS.has(op)) {
       const [l, r] = node.args as [unknown, unknown];
-      report(l, op, guards);
-      report(r, op, guards);
-      visit(l, guards);
-      visit(r, guards);
+      report(l, op, guards, roots);
+      report(r, op, guards, roots);
+      visit(l, guards, roots);
+      visit(r, guards, roots);
       return;
     }
     if (op === '-_') {
-      report(node.args, '-', guards);
-      visit(node.args, guards);
+      report(node.args, '-', guards, roots);
+      visit(node.args, guards, roots);
       return;
     }
-    for (const child of childNodes(node)) visit(child, guards);
+    for (const child of childNodes(node)) visit(child, guards, roots);
   };
 
-  visit(ast, new Set<string>());
+  visit(ast, new Set<string>(opts.presumed ?? []), top);
   return findings;
 }
 
@@ -590,9 +749,20 @@ export type NullGuardOutcome =
    * its clause below still describes the `requiredWhen` runtime it was written
    * for — re-word it before a surface that genuinely skips adopts it.
    */
-  | 'fail-open';
+  | 'fail-open'
+  /**
+   * A record-triggered flow's start, edge or `decision` branch condition:
+   * `evaluateCondition` throws on the fault (ADR-0032 §1c, never a quiet
+   * `false`), so the RUN fails there, while the record-change trigger
+   * isolates the write that fired it — the write lands, the flow's work does
+   * not happen.
+   */
+  | 'run-fails';
 
 const OUTCOME_CLAUSE: Record<NullGuardOutcome, string> = {
+  'run-fails':
+    'so the flow run fails at this condition: the write that fired it still lands, and the work ' +
+    'the flow exists to do is not done',
   'fail-closed':
     'so the rule enforces nothing and the write is rejected fail-closed (a predicate that cannot ' +
     'evaluate refuses the write rather than being skipped)',
@@ -620,14 +790,17 @@ export function nullGuardMessage(
   outcome: NullGuardOutcome = 'fail-closed',
 ): string {
   const owner = objectName ? `'${objectName}'` : 'this object';
+  // A bare operand is a flattened field; its `has()` was spelled on the record.
+  const hasOperand = finding.operand.includes('.') ? finding.operand : `record.${finding.operand}`;
   const hasNote = finding.hasOnlyGuard
-    ? ` \`has(${finding.operand})\` does not guard it.`
+    ? ` \`has(${hasOperand})\` does not guard it.`
     : '';
   return (
     `${subject} applies \`${finding.operator}\` to \`${finding.operand}\`, which ${owner} declares ` +
     `as nullable (no \`required: true\`, no \`defaultValue\`).${hasNote} At runtime the operand is ` +
     `null, CEL has no \`${finding.operator}\` overload for null, and the whole predicate aborts — ` +
     `${OUTCOME_CLAUSE[outcome]}. ` +
-    `The predicate compares a value that is null. ${NULL_GUARD_HINT}`
+    `The predicate compares a value that is null. ${NULL_GUARD_HINT}` +
+    (finding.operand.startsWith('previous.') ? PREVIOUS_GUARD_CLAUSE(finding.operand) : '')
   );
 }

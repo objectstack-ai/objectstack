@@ -18,6 +18,7 @@ import {
   RequireOrganization,
   LoadingFallback,
   RedirectWithSplash,
+  withoutListStateParams,
 } from '@object-ui/app-shell';
 
 /**
@@ -27,10 +28,20 @@ import {
  * `window.location` — the Console is mounted under a `<base href>` basename in
  * every embedded deployment, so a window-derived path would carry the `/_console`
  * mount into a value that `LoginPage` then re-prefixes with it (objectui#4168).
+ *
+ * It never carries the list's `uf_*` state (objectstack#29174). Whoever signs in
+ * on that page may not be the person whose session just ended, and a filter
+ * value can be sensitive; this guard cannot tell a sign-out from an expiry, so
+ * it drops the state for both. The path and every other param are kept, byte
+ * for byte when there was no list state, and the list then opens on the
+ * signing-in user's own stored state or the view's default.
  */
 export function LoginRedirect() {
   const location = useLocation();
-  const redirect = location.pathname + location.search;
+  const params = new URLSearchParams(location.search);
+  const kept = withoutListStateParams(params).toString();
+  const returnSearch = kept === params.toString() ? location.search : kept ? `?${kept}` : '';
+  const redirect = location.pathname + returnSearch;
   const search = redirect && redirect !== '/' ? `?redirect=${encodeURIComponent(redirect)}` : '';
   // `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378): this element
   // replaces the `LoadingFallback` the SAME `AuthGuard` was rendering one state

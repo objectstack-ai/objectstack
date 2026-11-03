@@ -13,8 +13,9 @@
  * inset `object-gallery`. The rows are the ones this list read, inline; a tap
  * still reaches the host's `onRowClick` with the row.
  *
- * Controls: a related list that is NOT enlarged keeps the gallery on a phone,
- * and the enlarged tab at a desktop width keeps the table.
+ * Control: a related list that is NOT enlarged keeps the gallery on a phone.
+ * At a desktop width the enlarged tab takes the same `object-grid` branch
+ * since objectstack#28865 (`RelatedList.enlargedListGrid-28865.test.tsx`).
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -112,9 +113,10 @@ describe('the enlarged related tab on a phone draws the phone list card rows (ob
     await waitFor(() => expect(h.schema?.type).toBe('object-gallery'));
   });
 
-  it('CONTROL: the enlarged tab at a desktop width keeps the table', async () => {
+  it('the enlarged tab at a desktop width takes the same object-grid branch (objectstack#28865)', async () => {
     setWidth(1280);
     renderList({ enlarged: true });
-    await waitFor(() => expect(h.schema?.type).toBe('data-table'));
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(2));
+    expect(h.schema.type).toBe('object-grid');
   });
 });

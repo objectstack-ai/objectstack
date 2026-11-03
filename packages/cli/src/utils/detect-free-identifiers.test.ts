@@ -198,13 +198,16 @@ describe('detectFreeIdentifiers (#1876 — body self-containment)', () => {
   // membership of the two sets is not asserted here from knowledge — it is
   // measured inside the real sandbox by `sandbox-globals-probe.test.ts`.
   describe('reports host globals the sandbox does not provide', () => {
-    it('the card reproduction — Intl.DateTimeFormat', () => {
+    // The #14301 reproduction called `Intl.DateTimeFormat`, which the sandbox
+    // has provided since #28898 (below). The class it pinned is unchanged and
+    // is pinned on a member the sandbox still lacks.
+    it('the card reproduction — an Intl member the sandbox lacks', () => {
       const r = detectFreeIdentifiers(
-        "(ctx) => { const f = new Intl.DateTimeFormat('en-US'); ctx.input.label = f.format(new Date(ctx.input.at)); }",
+        "(ctx) => { const f = new Intl.NumberFormat('en-US'); ctx.input.label = f.format(ctx.input.amount); }",
       );
       expect(r.unparsed).toBe(false);
-      expect(r.free).toEqual(['Intl']);
-      expect(r.nodeOnly).toEqual(['Intl']);
+      expect(r.free).toEqual(['Intl.NumberFormat']);
+      expect(r.nodeOnly).toEqual(['Intl.NumberFormat']);
     });
 
     it('`nodeOnly` is a labelled SUBSET of `free`, not a second list', () => {
@@ -212,9 +215,35 @@ describe('detectFreeIdentifiers (#1876 — body self-containment)', () => {
       // are opposite — inline the helper, but a host global cannot be inlined
       // — and needs them together because the refusal names every name.
       const r = detectFreeIdentifiers('(ctx) => { ctx.x = slugify(ctx.name) + Intl.NumberFormat; }');
-      expect(r.free).toEqual(['Intl', 'slugify']);
-      expect(r.nodeOnly).toEqual(['Intl']);
+      expect(r.free).toEqual(['Intl.NumberFormat', 'slugify']);
+      expect(r.nodeOnly).toEqual(['Intl.NumberFormat']);
       expect(r.nodeOnly.every((n) => r.free.includes(n))).toBe(true);
+    });
+
+    // ── #28898 — `Intl` is judged per member ────────────────────────────────
+    it('Intl.DateTimeFormat is sandbox-provided, so a handler using only it has no free name', () => {
+      const r = detectFreeIdentifiers(
+        "(ctx) => { const f = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai' }); ctx.input.label = f.formatToParts(new Date(ctx.input.at)).map((p) => p.value).join(''); }",
+      );
+      expect(r.free).toEqual([]);
+      expect(r.nodeOnly).toEqual([]);
+    });
+
+    it('a use of the bare namespace cannot be judged, so it is reported — the safe direction', () => {
+      for (const source of [
+        '(ctx) => { const I = Intl; ctx.x = new I.DateTimeFormat().format(0); }',
+        "(ctx) => { ctx.x = new Intl['DateTimeFormat']().format(0); }",
+      ]) {
+        const r = detectFreeIdentifiers(source);
+        expect(r.free, source).toEqual(['Intl']);
+        expect(r.nodeOnly, source).toEqual(['Intl']);
+      }
+    });
+
+    it('a member neither set lists is reported as host-only, not waived', () => {
+      const r = detectFreeIdentifiers('(ctx) => { ctx.x = Intl.SomeFutureFormat; }');
+      expect(r.free).toEqual(['Intl.SomeFutureFormat']);
+      expect(r.nodeOnly).toEqual(['Intl.SomeFutureFormat']);
     });
 
     it('a sandbox-provided global is still waived — the positive control', () => {

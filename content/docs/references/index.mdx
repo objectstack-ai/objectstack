@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1594 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1605 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -21,9 +21,9 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 34 | 469 | REST contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 35 | 474 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 15 | 78 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
-| [Data Protocol](/docs/references/data) | 31 | 174 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
+| [Data Protocol](/docs/references/data) | 31 | 175 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 23 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 30 | 152 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
@@ -32,9 +32,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 6 | 37 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 37 | 287 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 39 | 292 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 175 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **205** | **1594** | 14 protocol modules |
+| **Total** | **208** | **1605** | 14 protocol modules |
 
 ---
 
@@ -63,7 +63,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **34 pages, 469 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **35 pages, 474 schemas**
 
 REST contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -90,13 +90,14 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`odata.zod.ts`](/docs/references/api/odata) | `ODataConfig`, `ODataError`, `ODataFilterFunction`, `ODataMetadata`, `ODataQuery`, `ODataResponse` |
 | [`package-api.zod.ts`](/docs/references/api/package-api) | `GetInstalledPackageRequest`, `ListInstalledPackagesRequest`, `PackageApiErrorCode`, `PackageInstallBody`, `PackageInstallManifest`, `PackageInstallRequest`, `PackageInstallResponse`, `PackagePathParams`, `PackageRollbackRequest`, `PackageUpgradeRequest`, `PackageUpgradeResponse`, `ResolveDependenciesRequest`, `ResolveDependenciesResponse`, `UninstallPackageApiRequest`, `UninstallPackageApiResponse`, `UploadArtifactRequest`, `UploadArtifactResponse` |
 | [`package-api-assembled.zod.ts`](/docs/references/api/package-api-assembled) | `AssembledInstalledPackage`, `GetInstalledPackageResponse`, `InstalledPackageAtEitherStage`, `ListInstalledPackagesResponse` |
-| [`package-lifecycle.zod.ts`](/docs/references/api/package-lifecycle) | `DiscardPackageDraftsResponse`, `DuplicatePackageResponse`, `EnsureCustomizationPackageRequest`, `EnsureCustomizationPackageResponse`, `GetPackageCustomizationsRequest`, `GetPackageCustomizationsResponse`, `ImportUnmanagedPackageRequest`, `ImportUnmanagedPackageResponse`, `ListPackageCommitsResponse`, `PackageExportManifest`, `PackagePublishResult`, `ReassignOrphanedMetadataResponse`, `RevertPackageCommitResponse`, `RollbackToPackageCommitResponse` |
+| [`package-lifecycle.zod.ts`](/docs/references/api/package-lifecycle) | `DiscardPackageDraftsResponse`, `DuplicatePackageResponse`, `EnsureCustomizationPackageRequest`, `EnsureCustomizationPackageResponse`, `GetPackageCustomizationsRequest`, `GetPackageCustomizationsResponse`, `ImportUnmanagedPackageRequest`, `ImportUnmanagedPackageResponse`, `ListPackageCommitsResponse`, `PackageExportBundle`, `PackageExportManifest`, `PackagePublishResult`, `ReassignOrphanedMetadataResponse`, `RevertPackageCommitResponse`, `RollbackToPackageCommitResponse` |
 | [`plugin-rest-api.zod.ts`](/docs/references/api/plugin-rest-api) | `ErrorHandlingConfig`, `OpenApiGenerationConfig`, `RequestValidationConfig`, `ResponseEnvelopeConfig`, `RestApiEndpoint`, `RestApiPluginConfig`, `RestApiRouteCategory`, `RestApiRouteRegistration`, `ValidationMode` |
 | [`protocol.zod.ts`](/docs/references/api/protocol) | `AiAgentCapabilities`, `AiAgentChatRequest`, `AiAgentSummary`, `AiAgentsResponse`, `AiChatRequest`, `AiChatResponse`, `AiCompleteRequest`, `AiConversation`, `AiMessage`, `AiModelsResponse`, `AiPendingAction`, `AiPendingActionStatus`, `AiStreamChunk`, `ApproveAiPendingActionResponse`, `AuditMetaItemRequest`, `AuditMetaItemResponse`, `AutomationActionsResponse`, `AutomationTriggerRequest`, `AutomationTriggerResponse`, `BatchDataRequest`, `BatchDataResponse`, `CheckPermissionRequest`, `CheckPermissionResponse`, `CloneDataResponse`, `CreateAiConversationRequest`, `CreateDataRequest`, `CreateDataResponse`, `CreateManyDataRequest`, `CreateManyDataResponse`, `DeleteDataRequest`, `DeleteDataResponse`, `DeleteManyDataRequest`, `DeleteManyDataResponse`, `DeleteMetaItemRequest`, `DeleteMetaItemResponse`, `DiffMetaItemResponse`, `DisablePackageRequest`, `DisablePackageResponse`, `EnablePackageRequest`, `EnablePackageResponse`, `FindDataRequest`, `FindDataResponse`, `FindReferencesToMetaResponse`, `FlowRegistration`, `FlowRegistrationRefusal`, `GetDataRequest`, `GetDataResponse`, `GetDiscoveryRequest`, `GetDiscoveryResponse`, `GetEffectivePermissionsRequest`, `GetEffectivePermissionsResponse`, `GetFieldLabelsRequest`, `GetFieldLabelsResponse`, `GetLocalesRequest`, `GetLocalesResponse`, `GetMetaDiagnosticsResponse`, `GetMetaItemCachedRequest`, `GetMetaItemCachedResponse`, `GetMetaItemLayeredRequest`, `GetMetaItemLayeredResponse`, `GetMetaItemRequest`, `GetMetaItemResponse`, `GetMetaItemsRequest`, `GetMetaItemsResponse`, `GetMetaTypesRequest`, `GetMetaTypesResponse`, `GetNotificationPreferencesRequest`, `GetNotificationPreferencesResponse`, `GetObjectPermissionsRequest`, `GetObjectPermissionsResponse`, `GetPackageRequest`, `GetPackageResponse`, `GetPresenceRequest`, `GetPresenceResponse`, `GetPublishedMetaItemResponse`, `GetRecordFieldAccessResponse`, `GetTranslationsRequest`, `GetTranslationsResponse`, `GetUiViewRequest`, `GetUiViewResponse`, `HistoryMetaItemRequest`, `HistoryMetaItemResponse`, `HttpFindQueryParams`, `InstallPackageRequest`, `InstallPackageResponse`, `ListAiConversationsRequest`, `ListAiConversationsResponse`, `ListAiPendingActionsRequest`, `ListAiPendingActionsResponse`, `ListDraftsResponse`, `ListNotificationsRequest`, `ListNotificationsResponse`, `ListPackagesRequest`, `ListPackagesResponse`, `MarkAllNotificationsReadRequest`, `MarkAllNotificationsReadResponse`, `MarkNotificationsReadRequest`, `MarkNotificationsReadResponse`, `MetadataAuthoringClient`, `MetadataAuthoringSurface`, `MetadataConflictError`, `Notification`, `NotificationPreferences`, `PublicFormSubmitResponse`, `PublishMetaItemRequest`, `PublishMetaItemResponse`, `PublishPackageDraftsRequest`, `PublishPackageDraftsResponse`, `RealtimeConnectRequest`, `RealtimeConnectResponse`, `RealtimeDisconnectRequest`, `RealtimeDisconnectResponse`, `RealtimeSubscribeRequest`, `RealtimeSubscribeResponse`, `RealtimeUnsubscribeRequest`, `RealtimeUnsubscribeResponse`, `RegisterDeviceRequest`, `RegisterDeviceResponse`, `RejectAiPendingActionResponse`, `RollbackMetaItemResponse`, `RuntimeAuthoringIssue`, `SaveMetaItemRequest`, `SaveMetaItemResponse`, `SearchAllHit`, `SearchAllPageHit`, `SearchAllResponse`, `SetPresenceRequest`, `SetPresenceResponse`, `UninstallPackageRequest`, `UninstallPackageResponse`, `UnregisterDeviceRequest`, `UnregisterDeviceResponse`, `UpdateAiConversationRequest`, `UpdateDataRequest`, `UpdateDataResponse`, `UpdateManyDataRequest`, `UpdateManyDataResponse`, `UpdateNotificationPreferencesRequest`, `UpdateNotificationPreferencesResponse`, `ValidateDataIssue`, `ValidateDataRequest`, `ValidateDataResponse` |
+| [`push-delivery.zod.ts`](/docs/references/api/push-delivery) | `PushDeliveryData`, `PushRoute` |
 | [`query-adapter.zod.ts`](/docs/references/api/query-adapter) | `ODataQueryAdapter`, `OperatorMapping`, `QueryAdapterConfig`, `QueryAdapterTarget`, `RestQueryAdapter` |
 | [`realtime.zod.ts`](/docs/references/api/realtime) | `RealtimeConfig`, `RealtimeEvent`, `RealtimeEventType`, `RealtimePresence`, `Subscription`, `SubscriptionEvent`, `TransportProtocol` |
 | [`realtime-shared.zod.ts`](/docs/references/api/realtime-shared) | `BasePresence`, `PresenceStatus`, `RealtimeRecordAction` |
-| [`record-page.zod.ts`](/docs/references/api/record-page) | `RecordPageActivityRequest`, `RecordPageApprovals`, `RecordPageAttachmentsRequest`, `RecordPageDiscussion`, `RecordPageDiscussionReactions`, `RecordPageExplainAnswer`, `RecordPageExplainOperation`, `RecordPagePartError`, `RecordPagePartRefusal`, `RecordPageRelatedAnswer`, `RecordPageRelatedRefusal`, `RecordPageRelatedRequest`, `RecordPageRelatedRows`, `RecordPageRequest`, `RecordPageResponse`, `RecordPageStreamRefusal`, `RecordPageStreamRows` |
+| [`record-page.zod.ts`](/docs/references/api/record-page) | `RecordPageActivityRequest`, `RecordPageApprovals`, `RecordPageAttachmentsRequest`, `RecordPageDiscussion`, `RecordPageDiscussionReactions`, `RecordPageExplainAnswer`, `RecordPageExplainOperation`, `RecordPagePartError`, `RecordPagePartRefusal`, `RecordPageRelatedAnswer`, `RecordPageRelatedRefusal`, `RecordPageRelatedRequest`, `RecordPageRelatedRows`, `RecordPageRequest`, `RecordPageResponse`, `RecordPageStreamRefusal`, `RecordPageStreamRows`, `RecordPageTimelineCount`, `RecordPageTimelineRequest` |
 | [`rest-server.zod.ts`](/docs/references/api/rest-server) | `BatchEndpointsConfig`, `CrudEndpointsConfig`, `CrudOperation`, `EndpointRegistry`, `GeneratedEndpoint`, `MetadataEndpointsConfig`, `RestApiConfig`, `RestServerConfig`, `RouteGenerationConfig` |
 | [`router.zod.ts`](/docs/references/api/router) | `ConflictResolutionStrategy`, `HttpMethod`, `RouteCategory`, `RouteDefinition`, `RouterConfig` |
 | [`sortability.zod.ts`](/docs/references/api/sortability) | `FieldSortability`, `ObjectSortability` |
@@ -134,7 +135,7 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 
 ## Data Protocol
 
-**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **31 pages, 174 schemas**
+**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **31 pages, 175 schemas**
 
 Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.
 
@@ -159,7 +160,7 @@ Objects, fields, queries, filters, datasources and drivers — the ObjectQL laye
 | [`external-catalog.zod.ts`](/docs/references/data/external-catalog) | `ExternalCatalog`, `ExternalColumn`, `ExternalTable` |
 | [`feed.zod.ts`](/docs/references/data/feed) | `FeedFilterMode`, `FeedItemType` |
 | [`field.zod.ts`](/docs/references/data/field) | `CurrencyConfig`, `Field`, `FieldMaskingKeep`, `FieldMaskingRule`, `FieldType`, `InlineGridColumn`, `LocationCoordinates`, `SelectOption`, `UniqueScope` |
-| [`field-value.zod.ts`](/docs/references/data/field-value) | `Address`, `AddressValue`, `CalendarDateValue`, `ClockTimeValue`, `FileLikeValue`, `FileReferenceIdValue`, `FileRefusedValue`, `FileValue`, `InstantValue`, `LocationValue`, `ReferenceIdValue` |
+| [`field-value.zod.ts`](/docs/references/data/field-value) | `Address`, `AddressValue`, `CalendarDateValue`, `ClockTimeValue`, `FileLikeValue`, `FileReferenceIdValue`, `FileRefusedValue`, `FileValue`, `InstantValue`, `LocationValue`, `ReferenceIdValue`, `ReferenceNameOnlyValue` |
 | [`filter.zod.ts`](/docs/references/data/filter) | `ComparisonOperator`, `EqualityOperator`, `FieldOperators`, `FieldReference`, `FilterArray`, `FilterCondition`, `NormalizedFilter`, `NowAnchor`, `QueryFilter`, `RangeOperator`, `SetOperator`, `SpecialOperator`, `StringOperator` |
 | [`hook.zod.ts`](/docs/references/data/hook) | `Hook`, `HookContext`, `HookEvent`, `HookRefusal` |
 | [`hook-body.zod.ts`](/docs/references/data/hook-body) | `ExpressionBody`, `HookBody`, `HookBodyCapability`, `ScriptBody` |
@@ -324,7 +325,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 287 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **39 pages, 292 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -355,6 +356,8 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`migration.zod.ts`](/docs/references/system/migration) | `AddFieldOperation`, `ChangeSet`, `CreateObjectOperation`, `DataMigrationFlag`, `DeleteObjectOperation`, `ExecuteSqlOperation`, `MigrationDependency`, `MigrationJournalEvent`, `MigrationOperation`, `ModifyFieldOperation`, `OrganizationOwnershipBirthMarker`, `RemoveFieldOperation`, `RenameObjectOperation` |
 | [`notification.zod.ts`](/docs/references/system/notification) | `NotificationChannel` |
 | [`object-storage.zod.ts`](/docs/references/system/object-storage) | `AccessControlConfig`, `BucketConfig`, `FileMetadata`, `LifecycleAction`, `LifecyclePolicyConfig`, `LifecyclePolicyRule`, `MultipartUploadConfig`, `ObjectMetadata`, `ObjectStorageConfig`, `PresignedUrlConfig`, `StorageAcl`, `StorageClass`, `StorageConnection`, `StorageProvider`, `StorageScope` |
+| [`push-config.zod.ts`](/docs/references/system/push-config) | `ApnsTransportConfig`, `FcmTransportConfig`, `PushServiceConfig`, `PushVendor` |
+| [`push-device.zod.ts`](/docs/references/system/push-device) | `UserDevice` |
 | [`registry-config.zod.ts`](/docs/references/system/registry-config) | `RegistryConfig`, `RegistrySyncPolicy`, `RegistryUpstream` |
 | [`search-engine.zod.ts`](/docs/references/system/search-engine) | `AnalyzerConfig`, `FacetConfig`, `SearchConfig`, `SearchIndexConfig`, `SearchProvider` |
 | [`security-context.zod.ts`](/docs/references/system/security-context) | `ComplianceAuditRequirement`, `ComplianceEncryptionRequirement`, `ComplianceFramework`, `DataClassification`, `DataClassificationPolicy`, `MaskingVisibilityRule`, `SecurityContextConfig`, `SecurityEventCorrelation` |

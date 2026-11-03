@@ -266,7 +266,44 @@
  *     a READING for the seat's report, never a verdict: the leg's landing
  *     was judged inside the run (the executor fails the action when the
  *     answer lists fewer than sent), so a login sent and absent here is
- *     another actor's later write, said on the row's line.
+ *     another actor's later write, said on the row's line;
+ *   - the four advisory rows are NOT read back here, by construction, and
+ *     that is no missed case. `advisory_report` and `advisory_create` carry
+ *     prose (`summary`, `description`, so each is content-creating for rule
+ *     ⑤) but no `body`, and the relay's byte-for-byte read-back cannot apply
+ *     to them: the seat cannot read an unpublished advisory, a report or a
+ *     draft, until it is the advisory's collaborator, and the
+ *     executor must not print the answer's text, which is the only other place
+ *     the stored bytes could come back from (`ops.mjs`, the advisory rows). It
+ *     is confirmed INSIDE the run — a 2xx carrying a `ghsa_id`, a draft's
+ *     reading state `draft` — and the run
+ *     names that id in an annotation this file reads and hands on as
+ *     `result.annotations.advisories` (`--json`: `advisories`), so the seat
+ *     follows with `advisory_collaborators_add` and then reads the advisory
+ *     with `advisory_read`. `advisory_collaborators_add` and `advisory_state` carry
+ *     no body and are confirmed inside the run on their own PATCH answer (every
+ *     login sent listed, the state asked for shown) after the executor's fences
+ *     on the advisory. A run that failed (a fence refused it, or the answer did
+ *     not show the result) is exit 5 like any failed run, ⛔ never re-sent;
+ *   - `advisory_read` has NO byte read-back either, and needs none: it writes
+ *     nothing. Its outcome is the sealed answer, and reading it back IS the
+ *     outcome. This file makes the read's key pair (`armAdvisoryReads`: one
+ *     X25519 pair per read action, the public half put in the action, the
+ *     private half a `KeyObject` held in this process's memory alone — never
+ *     exported, never written, never printed, and gone when the process exits;
+ *     a `public_key` already in the actions file is refused, because it would
+ *     mean a private key kept somewhere). After a `success` run it reads the
+ *     read's notice parts off the run's annotations (`readRunAnnotations`),
+ *     reassembles them (`assembleAdvisoryReads`: parts 1..n each exactly once)
+ *     and opens them with that key (`openRunAdvisoryReads`, `ops.mjs`'s
+ *     `openAdvisoryRead`) — handed on as `result.reads`. A read whose parts are
+ *     missing, ambiguous, tampered with or sealed for another key or read is
+ *     `unverified`, exit 6, and nothing of it is printed. ⛔ The opened text is
+ *     printed to THIS process's stdout and only with `--reveal`; never to
+ *     stderr, a log, a file or `--json`, which carries its byte count and
+ *     field names alone. A run that failed (a fence refused the read, the
+ *     seal failed or did not fit) is exit 5; a read writes nothing, so it may
+ *     be re-sent with a fresh key.
  *
  * ## The started run — the one outcome only the seat can name
  *
@@ -334,6 +371,12 @@
  *
  * ## The run's annotations — the numbers a seat CAN read
  *
+ * (An `advisory_report` or `advisory_create` that landed is annotated too, with its own message —
+ * `fleet-write action=<i> op=<op> ghsa_id=<id>`, spelled by
+ * `relayAdvisoryAnnotationMessage` and read by `parseRelayAdvisoryAnnotation`,
+ * the id and nothing else — and `readRunAnnotations` hands those rows on as
+ * `advisories`. Everything below is the card ops' half.)
+ *
  * `execute.mjs` prints, for every action whose op is in `ANNOTATED_OPS` (the
  * ops that create or move a card) and whose request LANDED, ONE workflow
  * command — a `notice` titled `fleet-write <op>` whose message is
@@ -383,14 +426,41 @@
  * The library path (`packRequest`) is not judged here: its callers are the tools above, each of which judges
  * its own body first.
  *
+ * ## A pull request's body, rewritten by the seat after round 1 — signed on its LAST line (#29145)
+ *
+ * The dev writes a PR body once, at `pr_create`; a later rewrite (a review's "bring the body to the new head") is
+ * the seat's, through an `issue_patch` on the pull's number. Its line 1 belongs to the attribution comment and
+ * the `Fixes #n` line, as at `pr_create`, so that body joins `pr_create` outside the first-line rule — the same
+ * scope the ruling above draws, extended from the create to the edit — and carries the signature at its other
+ * end instead: the LAST non-empty line is the trailer `<!-- signed: LANE#N · ACCOUNT · SESSION -->`
+ * (`PR_BODY_TRAILER_SHAPE`), whose inside parses with the same `readSignatureLine` (`readPrBodyTrailer`). An
+ * HTML comment because the body is rendered: a visible signature line would sit under the prose a maintainer
+ * reads. Three rules, in the order `main` applies them:
+ *
+ *   - an `issue_patch` body that opens with the signature passes exactly as before, whatever it targets — no read;
+ *   - one that carries neither the signature line nor the trailer is refused as usage (2) before anything is read,
+ *     the refusal naming both shapes — it is wrong whether its target is an issue or a pull request;
+ *   - one that carries only the trailer (`pullRequestBodyCandidates`) is judged by READING THE PLATFORM, never by
+ *     its content: `GET /repos/{repo}/issues/{issue}` (the read-back's own locator for this op) answering 200 with
+ *     a `pull_request` key passes; 200 without one is an ISSUE, whose body stays under the first-line rule —
+ *     usage (2); any other answer, or none, is PREREQUISITE NOT MET (3): ⛔ an unread target is never a pass.
+ *     The read runs after the packer and BEFORE the dry-run exit, so a dry run refuses what the send would; it
+ *     needs the token and the proxy route the send needs, and the process re-execs for it the way the send does.
+ *
+ * `comment_edit` takes no trailer: a comment is a post, never a pull request body. The stored body is the
+ * platform's, not this door's: an edit of a pull's body gets the bare footer block appended after the trailer
+ * (`platform-readings.md`, the edit side), so send no footer of your own.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0   the run completed with conclusion `success`, every body it wrote
  *       reads back as the bytes sent, and every run it started is listed.
- *   2   usage, the packed payload refused by the validator, or a seat's edit body
- *       carrying no signature line (nothing sent).
+ *   2   usage, the packed payload refused by the validator, a seat's edit body
+ *       carrying no signature line, or a trailer-signed `issue_patch` body whose
+ *       target the platform answers is an issue (nothing sent).
  *   3   PREREQUISITE NOT MET — no token, no session in dispatch mode, the
- *       dispatch route dead (401/407/0), or the run list unreadable.
+ *       dispatch route dead (401/407/0), the run list unreadable, or the target
+ *       of a trailer-signed `issue_patch` body unreadable (nothing sent).
  *   4   NOT STORED — the run succeeded and the read-back shows a body the board
  *       does not hold as sent (op, object and first differing byte printed).
  *       Go READ it; ⛔ do not retry.
@@ -403,19 +473,37 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
 // The roster's generator marker, IMPORTED so the one generated body this door exempts is named by its own writer.
 import { ROSTER_MARKER } from '../fleet-roster.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { DEFAULT_BATCH_GAP_MS, DEFAULT_BATCH_THRESHOLD, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
-import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, FIELDS, MAX_REQUEST_ID_CHARS, OPS, OP_NAMES, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
-import { PAYLOAD_ENV, refusalText, validatePayload } from './validate.mjs';
+import {
+  ADVISORY_READ_KEY_TYPE,
+  ADVISORY_READ_MAX_PARTS,
+  ADVISORY_READ_PART_CHARS,
+  CONTAINER_SESSION_ENV,
+  CONTAINER_SESSION_SHAPE,
+  FIELDS,
+  MAX_REQUEST_ID_CHARS,
+  OPS,
+  OP_NAMES,
+  RELAY_EVENT_TYPE,
+  RELAY_REPO,
+  SESSION_ENV,
+  SESSION_SHAPE,
+  TRANSPORTS,
+  TRANSPORT_ENV,
+  advisoryReadAad,
+  openAdvisoryRead,
+} from './ops.mjs';
+import { EVENT_PATH_ENV, refusalText, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_API = 'https://api.github.com';
@@ -658,21 +746,130 @@ export const SIGNED_EDIT_OPS = Object.freeze(['comment_edit', 'issue_patch']);
 /** The opening marker lines of the bodies a SCRIPT generates and rewrites whole — out of the signature's scope (header). */
 export const GENERATED_BODY_MARKERS = Object.freeze([ROSTER_MARKER]);
 
+/** The one edit op whose target may be a pull request, and so whose body may be signed on its last line instead (header). */
+export const PR_BODY_EDIT_OP = 'issue_patch';
+
+/** The trailer a seat's pull request body ends with, as a refusal prints it — placeholders only (header). */
+export const PR_BODY_TRAILER_SHAPE = '<!-- signed: LANE#N · ACCOUNT · SESSION -->';
+
+/** ONE trimmed line is the trailer's comment; its inside is captured for `readSignatureLine`, never re-spelled here. */
+const PR_BODY_TRAILER_LINE = /^<!--[ \t]*signed:[ \t]*(.*?)[ \t]*-->$/u;
+
+/**
+ * The trailer a body ends with, read off its LAST non-empty line: `{ line, shaped, signature }`, where `shaped`
+ * says the line is the trailer's comment and `signature` is `readSignatureLine`'s reading of its inside (null for a
+ * near miss); null for an empty body. Pure.
+ *
+ * @returns {{ line: string, shaped: boolean, signature: ReturnType<typeof readSignatureLine> } | null}
+ */
+export function readPrBodyTrailer(body) {
+  const lines = String(body ?? '').split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (line === '') continue;
+    const m = PR_BODY_TRAILER_LINE.exec(line);
+    return { line, shaped: m !== null, signature: m ? readSignatureLine(m[1]) : null };
+  }
+  return null;
+}
+
+/** Is this action an edit body the first-line rule judges — an edit op carrying a body, not a generated one? Pure. */
+function judgedEditBody(a) {
+  if (a === null || typeof a !== 'object' || !SIGNED_EDIT_OPS.includes(a.op) || typeof a.body !== 'string') return false;
+  return !GENERATED_BODY_MARKERS.some((marker) => a.body.trimStart().startsWith(marker));
+}
+
+/** Does this `issue_patch` body defer to the platform: no signature line first, a parsing trailer last? Pure. */
+function trailerSigned(a) {
+  return a.op === PR_BODY_EDIT_OP && signatureRefusal(a.body) !== null && readPrBodyTrailer(a.body)?.signature != null;
+}
+
+/** Why an `issue_patch` body's last line is no trailer — printed beside the first-line refusal (header). Pure. */
+function trailerWhy(body) {
+  const read = readPrBodyTrailer(body);
+  if (read === null) return { line: '(the body is empty)', why: 'there is no last line to carry the trailer' };
+  const line = read.line.length > 160 ? `${read.line.slice(0, 160)}…` : read.line;
+  return read.shaped
+    ? { line, why: "the last non-empty line is the trailer's comment, but its inside is not a signature — check the lane, the `#N` seat number, the login, the full session id, and that each separator is exactly ` · `" }
+    : { line, why: 'the last non-empty line is not the trailer' };
+}
+
 /**
  * The actions in a seat's stroke whose edit body opens with no signature line, each with `signatureRefusal`'s row —
- * empty when every `comment_edit` / `issue_patch` body is signed, generated, or absent. Pure.
+ * empty when every `comment_edit` / `issue_patch` body is signed, generated, or absent. An `issue_patch` body
+ * signed by its trailer instead is not a row: it waits for the platform read (`pullRequestBodyCandidates`); every
+ * other `issue_patch` row also carries `trailer`, why its last line is no trailer either. Pure.
  *
- * @returns {{ action: number, op: string, line: string, why: string }[]} — `action` is 1-based, as the read-back rows count.
+ * @returns {{ action: number, op: string, line: string, why: string, trailer?: { line: string, why: string } }[]} — `action` is 1-based, as the read-back rows count.
  */
 export function unsignedEditBodies(actions) {
   if (!Array.isArray(actions)) return [];
   const rows = [];
   actions.forEach((a, i) => {
-    if (a === null || typeof a !== 'object' || !SIGNED_EDIT_OPS.includes(a.op) || typeof a.body !== 'string') return;
-    if (GENERATED_BODY_MARKERS.some((marker) => a.body.trimStart().startsWith(marker))) return;
+    if (!judgedEditBody(a) || trailerSigned(a)) return;
     const row = signatureRefusal(a.body);
-    if (row !== null) rows.push({ action: i + 1, op: a.op, ...row });
+    if (row !== null) rows.push({ action: i + 1, op: a.op, ...row, ...(a.op === PR_BODY_EDIT_OP ? { trailer: trailerWhy(a.body) } : {}) });
   });
+  return rows;
+}
+
+/**
+ * The `issue_patch` actions whose body opens with no signature but ends with a parsing trailer — the ones only a
+ * platform read can pass, because only a pull request's body may be signed that way (header). Pure.
+ *
+ * @returns {{ action: number, op: string, issue: number, signature: { lane: string, seat: number, account: string, session: string, line: string } }[]}
+ */
+export function pullRequestBodyCandidates(actions) {
+  if (!Array.isArray(actions)) return [];
+  const rows = [];
+  actions.forEach((a, i) => {
+    if (judgedEditBody(a) && trailerSigned(a)) rows.push({ action: i + 1, op: a.op, issue: a.issue, signature: readPrBodyTrailer(a.body).signature });
+  });
+  return rows;
+}
+
+/** The first-line refusal, plus — for an `issue_patch` — the pull request alternative and why it did not hold. Pure. */
+export function editBodyRefusalText(row) {
+  const text = signatureRefusalText(row, { tool: 'fleet-write/dispatch', where: `action ${row.action} (${row.op})'s body` });
+  if (!row.trailer) return text;
+  return (
+    `${text}\n` +
+    `  2. [pull request] when the target is a pull request, its body may instead END with the trailer — ${row.trailer.why}\n` +
+    `      line:  ${row.trailer.line}\n` +
+    `      write: ${PR_BODY_TRAILER_SHAPE} — as the LAST non-empty line, alone; line 1 stays the attribution comment or the closing keyword.\n` +
+    '      The platform is read to confirm the target is a pull request; an issue body takes the first-line signature only.'
+  );
+}
+
+/**
+ * Is each trailer-signed `issue_patch` target a pull request? ONE `GET /repos/{repo}/issues/{issue}` per distinct
+ * number — the read-back's locator for this op — judged in three buckets (header): `pull` (200 with a
+ * `pull_request` key), `issue` (200 without one) and `unread` (any other answer, or none). Reads only, never
+ * paced; never throws.
+ *
+ * @returns {Promise<{ action: number, issue: number, verdict: 'pull'|'issue'|'unread', why: string }[]>}
+ */
+export async function readPullRequestTargets(candidates, { repo, api = DEFAULT_API, fetch, token = '' } = {}) {
+  const seen = new Map();
+  const rows = [];
+  for (const c of candidates) {
+    const path = `/repos/${repo}/issues/${c.issue}`;
+    if (!seen.has(c.issue)) seen.set(c.issue, await rest(api, path, {}, { fetch, token }));
+    const r = seen.get(c.issue);
+    const isObject = r.json !== null && typeof r.json === 'object' && !Array.isArray(r.json);
+    let verdict = 'unread';
+    let why = `GET ${path} answered ${r.status === 0 ? `nothing — ${r.detail}` : `HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`}, so whether ${repo}#${c.issue} is a pull request was not read`;
+    if (r.status === 200 && isObject && r.json.pull_request !== null && typeof r.json.pull_request === 'object') {
+      verdict = 'pull';
+      why = `GET ${path} answered 200 with a pull_request key: ${repo}#${c.issue} is a pull request`;
+    } else if (r.status === 200 && isObject) {
+      verdict = 'issue';
+      why = `GET ${path} answered 200 with no pull_request key: ${repo}#${c.issue} is an issue, and an issue body opens with the signature line — the trailer signs a pull request body only`;
+    } else if (r.status === 200) {
+      why = `GET ${path} answered 200 without a readable issue object, so whether ${repo}#${c.issue} is a pull request was not read`;
+    }
+    rows.push({ action: c.action, issue: c.issue, verdict, why });
+  }
   return rows;
 }
 
@@ -754,6 +951,13 @@ export const RUN_READ_BACK_WINDOW_MS = 60_000;
  * nothing is `unverified` — an object that was not found was not measured.
  * The self-test pins that this table names exactly `BODY_OPS`.
  */
+// ⛔ No locator for `advisory_read`: it has NO byte read-back, because it writes nothing — no body, no object. Its
+// read-back is the seat opening the sealed answer the run's notices carry with the key only this process holds
+// (`openRunAdvisoryReads`); an answer that does not open is `unverified` (header, "How the callers").
+// ⛔ No locator for `advisory_report`, on purpose — nor for `advisory_create`, the same shape: its prose rides `summary`
+// and `description`, never `body`, so it is not in `BODY_OPS`, and a byte-for-byte read-back cannot apply to it — the seat cannot read a private report before it
+// is a collaborator, and the executor must not print the answer that holds the stored bytes. Its confirmation is the
+// executor's (a 2xx carrying an id) and its id reaches the seat as an advisory annotation (header, "How the callers").
 export const READ_BACK_LOCATORS = Object.freeze({
   issue_patch: Object.freeze({ found: 'address', where: 'GET /repos/{repo}/issues/{issue}' }),
   comment_edit: Object.freeze({ found: 'address', where: 'GET /repos/{repo}/issues/comments/{comment_id}' }),
@@ -927,6 +1131,183 @@ export function parseRelayAnnotation(message) {
 }
 
 /**
+ * The ops whose landing the executor reports as an ADVISORY annotation — the
+ * two that file a finding, a private report or a draft advisory, whose id the
+ * seat needs for its next stroke (`advisory_collaborators_add`): the App files
+ * either, so the finding seat is no collaborator until that stroke lands. The message is
+ * `fleet-write action=<i> op=<op> ghsa_id=<id>` and names nothing else — an id
+ * exposes no content, and the run log is public (`ops.mjs`, the advisory rows).
+ */
+export const ADVISORY_ANNOTATED_OPS = Object.freeze(['advisory_report', 'advisory_create']);
+
+const RELAY_ADVISORY_ANNOTATION_SHAPE = new RegExp(`^${RELAY_ANNOTATION_PREFIX} action=([1-9][0-9]*) op=([a-z_]+) ghsa_id=(GHSA(?:-[0-9a-z]{4}){3})$`);
+
+/** The message of the one annotation the executor emits for a landed advisory report or draft. Pure. */
+export function relayAdvisoryAnnotationMessage({ action, op, ghsaId }) {
+  return `${RELAY_ANNOTATION_PREFIX} action=${action} op=${op} ghsa_id=${ghsaId}`;
+}
+
+/** An advisory annotation's `message` as `{ action, op, ghsaId }`, or null for anything else. Pure; never throws. */
+export function parseRelayAdvisoryAnnotation(message) {
+  const m = RELAY_ADVISORY_ANNOTATION_SHAPE.exec(typeof message === 'string' ? message : '');
+  if (!m || !ADVISORY_ANNOTATED_OPS.includes(m[2])) return null;
+  return { action: Number(m[1]), op: m[2], ghsaId: m[3] };
+}
+
+/**
+ * The ops whose answer comes back SEALED (`ops.mjs`, "The one row that READS an advisory") — derived from the table:
+ * the rows that require a `public_key`. The executor emits a read's sealed answer as notice parts, each
+ * `fleet-write action=<i> op=<op> part=<k>/<n> sealed=<chunk>` and nothing else — no id, no state, no field — and the
+ * seat opens them with the key it holds (`openRunAdvisoryReads`).
+ */
+export const ADVISORY_READ_OPS = Object.freeze(OP_NAMES.filter((op) => OPS[op].required.includes('public_key')));
+
+const RELAY_ADVISORY_READ_SHAPE = new RegExp(`^${RELAY_ANNOTATION_PREFIX} action=([1-9][0-9]*) op=([a-z_]+) part=([1-9][0-9]*)/([1-9][0-9]*) sealed=([A-Za-z0-9_-]{1,${ADVISORY_READ_PART_CHARS}})$`);
+
+/** The message of one notice part of a read's sealed answer. Pure. */
+export function relayAdvisoryReadAnnotationMessage({ action, op, part, of, sealed }) {
+  return `${RELAY_ANNOTATION_PREFIX} action=${action} op=${op} part=${part}/${of} sealed=${sealed}`;
+}
+
+/** A read part's `message` as `{ action, op, part, of, sealed }`, or null for anything else. Pure; never throws. */
+export function parseRelayAdvisoryReadAnnotation(message) {
+  const m = RELAY_ADVISORY_READ_SHAPE.exec(typeof message === 'string' ? message : '');
+  if (!m || !ADVISORY_READ_OPS.includes(m[2])) return null;
+  const part = Number(m[3]);
+  const of = Number(m[4]);
+  if (part > of || of > ADVISORY_READ_MAX_PARTS) return null;
+  return { action: Number(m[1]), op: m[2], part, of, sealed: m[5] };
+}
+
+/**
+ * Make each read's key pair, in THIS process (header, "How the callers"): one X25519 pair per `advisory_read`
+ * action, its public half put in the action as `public_key`, its private half a `KeyObject` kept in the returned
+ * `keys` map (action index → key) — ⛔ never exported, written or printed; it dies with the process. A `public_key`
+ * already in an action is REFUSED, never used: a key made elsewhere means a private key kept elsewhere. The value is
+ * never echoed. Returns `{ actions, keys, refused }`; `actions` is a new array, the file's own untouched. Pure but
+ * for the key generation, which `generate` stands in for in the self-test.
+ */
+export function armAdvisoryReads(actions, { generate = () => generateKeyPairSync(ADVISORY_READ_KEY_TYPE) } = {}) {
+  const keys = new Map();
+  const refused = [];
+  if (!Array.isArray(actions)) return { actions, keys, refused };
+  const armed = actions.map((a, i) => {
+    if (a === null || typeof a !== 'object' || Array.isArray(a) || !ADVISORY_READ_OPS.includes(a.op)) return a;
+    if (Object.hasOwn(a, 'public_key')) {
+      refused.push(
+        `fleet-write/dispatch: REFUSED — actions[${i}].public_key is set in the actions file: an ${a.op}'s key pair is made by this door for that one read, and its private half never leaves this process, so a key from a file (which means a private key kept somewhere) is refused, not used. Drop the key; the door makes one.`,
+      );
+      return a;
+    }
+    const pair = generate();
+    keys.set(i + 1, pair.privateKey);
+    return { ...a, public_key: pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+  });
+  return { actions: armed, keys, refused };
+}
+
+/**
+ * Each read action's sealed answer, reassembled from the run's parts: `[{ action, op, sealed, parts, why }]` in the
+ * stroke's order — `sealed` the parts 1..n joined, when every one is there EXACTLY once under one n (a part repeated
+ * with the same text is the same part); otherwise `sealed` null and `why` naming what is missing or ambiguous. A
+ * reader never picks between two answers. Pure.
+ */
+export function assembleAdvisoryReads(payload, parts) {
+  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+  const out = [];
+  for (const [i, a] of actions.entries()) {
+    if (!ADVISORY_READ_OPS.includes(a?.op)) continue;
+    const mine = (Array.isArray(parts) ? parts : []).filter((p) => p.action === i + 1 && p.op === a.op);
+    const row = { action: i + 1, op: a.op, sealed: null, parts: 0, why: '' };
+    if (mine.length === 0) {
+      out.push({ ...row, why: 'no part of its sealed answer is on the run' });
+      continue;
+    }
+    const counts = new Set(mine.map((p) => p.of));
+    if (counts.size > 1) {
+      out.push({ ...row, why: `its parts disagree on their count (${[...counts].sort((x, y) => x - y).join(', ')})` });
+      continue;
+    }
+    const of = mine[0].of;
+    const byPart = new Map();
+    let clash = false;
+    for (const p of mine) {
+      if (byPart.has(p.part) && byPart.get(p.part) !== p.sealed) clash = true;
+      byPart.set(p.part, p.sealed);
+    }
+    const missing = Array.from({ length: of }, (_, k) => k + 1).filter((k) => !byPart.has(k));
+    if (clash) out.push({ ...row, why: 'two different parts carry one part number' });
+    else if (missing.length) out.push({ ...row, why: `part(s) ${missing.join(', ')} of ${of} are not on the run` });
+    else out.push({ ...row, sealed: Array.from({ length: of }, (_, k) => byPart.get(k + 1)).join(''), parts: of });
+  }
+  return out;
+}
+
+/**
+ * Open each read with the key this process made for it (`keys`, from `armAdvisoryReads`): `[{ action, op, state,
+ * plaintext, bytes, fields, parts, why }]` — `state` `opened` with the plaintext, byte for byte what the executor
+ * sealed, its UTF-8 byte count and its top-level field names; or `unverified`, `plaintext` null, `why` saying why
+ * (no key in this process, parts missing, or an answer that does not open — tampered with, or sealed for another
+ * key or read). ⛔ Nothing here prints; the caller prints the plaintext on `--reveal` alone. Never throws.
+ */
+export function openRunAdvisoryReads(payload, parts, keys = new Map()) {
+  return assembleAdvisoryReads(payload, parts).map((r) => {
+    const shut = (why) => ({ action: r.action, op: r.op, state: 'unverified', plaintext: null, bytes: null, fields: null, parts: r.parts, why });
+    if (r.sealed === null) return shut(r.why);
+    const privateKey = keys.get(r.action);
+    if (!privateKey) return shut("this process holds no key for it — a read opens only in the process that made its key");
+    let plaintext;
+    try {
+      plaintext = openAdvisoryRead({ sealed: r.sealed, privateKey, aad: advisoryReadAad({ requestId: payload.request_id, action: r.action, ghsaId: payload.actions[r.action - 1].ghsa_id }) });
+    } catch (e) {
+      return shut(e.message);
+    }
+    let fields = null;
+    try {
+      const json = JSON.parse(plaintext);
+      if (json !== null && typeof json === 'object' && !Array.isArray(json)) fields = Object.keys(json);
+    } catch {
+      fields = null;
+    }
+    return { action: r.action, op: r.op, state: 'opened', plaintext, bytes: Buffer.byteLength(plaintext, 'utf8'), fields, parts: r.parts, why: '' };
+  });
+}
+
+/** The line a read's outcome earns on stderr — counts and field names, ⛔ never the text. Pure. */
+export function advisoryReadLine(row, { runId = '?', reveal = false } = {}) {
+  if (row.state === 'opened') {
+    return `fleet-write: run ${runId}'s notices carry action ${row.action} ${row.op}'s sealed answer in ${row.parts} part(s) — opened with this process's one-time key: ${row.bytes} byte(s), fields ${(row.fields ?? []).join(', ') || 'none'}. ${reveal ? 'The text follows on stdout.' : "Not printed: pass --reveal to print it to this process's stdout (never a file)."}`;
+  }
+  return `fleet-write: run ${runId}'s sealed answer for action ${row.action} ${row.op} is UNVERIFIED — ${row.why}; ⛔ nothing of it is printed. A read writes nothing, so it may be re-sent with a fresh key; a run whose parts do not open twice goes to the maintainer.`;
+}
+
+/**
+ * The parsed advisory rows a stroke may use: a row whose action index holds an action of its op, one id per
+ * action — two different ids for one action are neither, and both are `ignored`. Pure.
+ */
+export function matchRunAdvisories(payload, parsed) {
+  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+  const ignored = [];
+  const byAction = new Map();
+  for (const row of Array.isArray(parsed) ? parsed : []) {
+    const action = actions[row.action - 1];
+    if (!action || action.op !== row.op) {
+      ignored.push({ ...row, why: `the stroke's action ${row.action} is ${action ? action.op : 'absent'}, not ${row.op}` });
+      continue;
+    }
+    byAction.set(row.action, [...(byAction.get(row.action) ?? []), row]);
+  }
+  const rows = [];
+  for (const [action, list] of byAction) {
+    const distinct = new Set(list.map((r) => r.ghsaId));
+    if (distinct.size > 1) ignored.push(...list.map((r) => ({ ...r, why: `${distinct.size} different advisory ids name action ${action}` })));
+    else rows.push(list[0]);
+  }
+  rows.sort((a, b) => a.action - b.action);
+  return { rows, ignored };
+}
+
+/**
  * The parsed rows a stroke may use: a row whose action index holds an action
  * of its op, and whose url names the repository that op lands the card on.
  * Anything else is `ignored`, with why — and so are BOTH rows of an action
@@ -970,8 +1351,8 @@ export function checkRunIdOf(job) {
 // The batch gap — pure halves (the header's batch-gap section is the authority)
 // ---------------------------------------------------------------------------
 
-/** The `FIELDS` that carry authored prose — what a create of an issue, a pull or a comment sends and a list or a flag does not. */
-const PROSE_KEYS = Object.freeze(['title', 'body']);
+/** The `FIELDS` that carry authored prose — what a create of an issue, a pull, a comment or a private advisory report sends and a list or a flag does not. */
+const PROSE_KEYS = Object.freeze(['title', 'body', 'summary', 'description']);
 
 /** A value of a field's declared kind, for reading what an op's requests look like — never sent anywhere. */
 function probeValue(spec) {
@@ -1125,9 +1506,10 @@ async function listAll(api, path, t, maxPages = 10) {
 
 /**
  * The relay annotations on a run's check runs — its jobs, then each job's
- * check-run annotations, every message through `parseRelayAnnotation` (the
+ * check-run annotations, every message through `parseRelayAnnotation`,
+ * `parseRelayAdvisoryAnnotation` and `parseRelayAdvisoryReadAnnotation` (the
  * rest of the check run's annotations are ignored). Returns `{ state, parsed,
- * why }`: `read`, or `unread` naming the call that did not answer, with
+ * advisories, reads, why }`: `read`, or `unread` naming the call that did not answer, with
  * whatever was parsed before it. Reads only — never paced; never throws.
  */
 export async function readRunAnnotations(runId, deps = {}) {
@@ -1135,40 +1517,57 @@ export async function readRunAnnotations(runId, deps = {}) {
   const t = { fetch: deps.fetch, token: deps.token };
   const said = (r) => `${r.call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`;
   const jobs = await rest(api, `/repos/${RELAY_REPO}/actions/runs/${runId}/jobs?per_page=100`, {}, t);
-  if (jobs.status !== 200 || !Array.isArray(jobs.json?.jobs)) return { state: 'unread', parsed: [], why: said(jobs) };
+  if (jobs.status !== 200 || !Array.isArray(jobs.json?.jobs)) return { state: 'unread', parsed: [], advisories: [], reads: [], why: said(jobs) };
   const parsed = [];
+  const advisories = [];
+  const reads = [];
   for (const job of jobs.json.jobs) {
     const id = checkRunIdOf(job);
     if (id === null) continue;
     const r = await rest(api, `/repos/${RELAY_REPO}/check-runs/${id}/annotations?per_page=100`, {}, t);
-    if (r.status !== 200 || !Array.isArray(r.json)) return { state: 'unread', parsed, why: said(r) };
+    if (r.status !== 200 || !Array.isArray(r.json)) return { state: 'unread', parsed, advisories, reads, why: said(r) };
     for (const a of r.json) {
       const row = parseRelayAnnotation(a?.message);
       if (row) parsed.push(row);
+      const filed = parseRelayAdvisoryAnnotation(a?.message);
+      if (filed) advisories.push(filed);
+      const part = parseRelayAdvisoryReadAnnotation(a?.message);
+      if (part) reads.push(part);
     }
   }
-  return { state: 'read', parsed, why: '' };
+  return { state: 'read', parsed, advisories, reads, why: '' };
 }
 
 /**
  * The annotations a stroke's success run carries, matched to its actions and
  * said: one line per row, per ignored row, per annotated action no row names,
  * and one when the read did not answer. A stroke with no annotated op reads
- * nothing (`state: 'none'`). Returns `{ state, rows, ignored, why }`.
+ * nothing (`state: 'none'`). Returns `{ state, rows, ignored, advisories,
+ * reads, why }` — `reads` the parsed parts of a read's sealed answer, never
+ * logged here: `sendFleetWrite` opens them.
  */
 async function runAnnotationsFor(payload, run, deps) {
   const annotated = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => Object.hasOwn(ANNOTATED_OPS, a.op));
-  if (!annotated.length) return { state: 'none', rows: [], ignored: [], why: '' };
+  const filing = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => ADVISORY_ANNOTATED_OPS.includes(a.op));
+  const reading = payload.actions.some((a) => ADVISORY_READ_OPS.includes(a.op));
+  if (!annotated.length && !filing.length && !reading) return { state: 'none', rows: [], ignored: [], advisories: [], reads: [], why: '' };
   const read = await readRunAnnotations(run.id, deps);
   const { rows, ignored } = matchRunAnnotations(payload, read.parsed);
+  const filed = matchRunAdvisories(payload, read.advisories ?? []);
   const log = deps.log;
   for (const r of rows) log(`fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → ${r.repo}#${r.number} ${r.url} (the platform's own answer).`);
   for (const r of ignored) log(`fleet-write: run ${run.id}'s annotation for action ${r.action} ${r.op} (#${r.number}) is ignored — ${r.why}.`);
+  for (const r of filed.rows) log(`fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} (the platform's own answer) — add whoever works it with advisory_collaborators_add.`);
+  for (const r of filed.ignored) log(`fleet-write: run ${run.id}'s annotation for action ${r.action} ${r.op} is ignored — ${r.why}.`);
   if (read.state === 'unread') log(`fleet-write: run ${run.id}'s annotations could not be read — ${read.why}; a number no annotation above names is read from the board instead.`);
   for (const a of annotated) {
     if (!rows.some((r) => r.action === a.action)) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op} — its number is read from the board instead (the fallback).`);
   }
-  return { state: read.state, rows, ignored, why: read.why };
+  // A report has no fallback a seat can read: until it is a collaborator, the advisory is invisible to it.
+  for (const a of filing) {
+    if (!filed.rows.some((r) => r.action === a.action)) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s advisory id — the run's summary row holds it, which a seat container cannot read, and the seat cannot list the repository's advisories: ask the maintainer for the id; ⛔ do not re-send the ${a.op === 'advisory_create' ? 'draft' : 'report'}.`);
+  }
+  return { state: read.state, rows, ignored, advisories: filed.rows, reads: read.reads ?? [], why: read.why };
 }
 
 /**
@@ -1355,6 +1754,9 @@ export function runReadBackLine(row) {
  * body could not be read back) · `no-run` · `timeout` · `refused` (the dispatch itself). `readBack` is `readBackStroke`'s
  * answer, present once the run succeeded, and so is `annotations` — `{ state, rows, ignored, why }`, the run's
  * annotations matched to the stroke (`state` `none` when it carries no annotated op). Never throws on an HTTP status.
+ * `reads` is `openRunAdvisoryReads`' answer for an `advisory_read` stroke, opened with `deps.advisoryReadKeys` (the
+ * keys `armAdvisoryReads` made in this process); a read that does not open makes the state `unverified`. The log
+ * says a read's counts alone (`advisoryReadLine`); ⛔ the plaintext is in `reads` and nowhere else this prints.
  */
 export async function sendFleetWrite(payload, deps = {}) {
   const api = deps.api ?? DEFAULT_API;
@@ -1421,6 +1823,11 @@ export async function sendFleetWrite(payload, deps = {}) {
 
   // ── the run's annotations — the numbers it created or moved, where a seat CAN read them (header) ─────
   const annotations = await runAnnotationsFor(payload, run, { api, fetch: deps.fetch, token: deps.token, log });
+  // ── a read's sealed answer — opened with the key only this process holds; its read-back, and its only one (header) ─────
+  const reads = openRunAdvisoryReads(payload, annotations.reads ?? [], deps.advisoryReadKeys);
+  for (const row of reads) log(advisoryReadLine(row, { runId: run.id, reveal: deps.reveal === true }));
+  const unopened = reads.find((r) => r.state !== 'opened');
+  if (unopened) return { ...done, state: 'unverified', ok: false, annotations, reads, detail: `conclusion success, but UNVERIFIED — action ${unopened.action} (${unopened.op}): ${unopened.why}` };
 
   // ── read it back — the run's success is the executor's, not the write's ─────
   const readBack = await readBackStroke(payload, { dispatchedAt, annotations: annotations.rows }, { api, fetch: deps.fetch, token: deps.token, judge: deps.judge, sleep, log });
@@ -1430,13 +1837,13 @@ export async function sendFleetWrite(payload, deps = {}) {
   for (const row of runs.rows) log(runReadBackLine(row));
   if (readBack.state === 'not-stored') {
     const first = readBack.rows.find((r) => r.verdict === 'not-stored');
-    return { ...done, state: 'failure', ok: false, notStored: true, readBack, runs, annotations, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
+    return { ...done, state: 'failure', ok: false, notStored: true, readBack, runs, annotations, reads, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
   }
   if (readBack.state === 'unverified' || runs.state === 'unverified') {
     const first = [...readBack.rows, ...runs.rows].find((r) => r.verdict === 'unverified');
-    return { ...done, state: 'unverified', ok: false, readBack, runs, annotations, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
+    return { ...done, state: 'unverified', ok: false, readBack, runs, annotations, reads, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
   }
-  return { ...done, state: 'success', ok: true, readBack, runs, annotations, detail: `conclusion ${run.conclusion}` };
+  return { ...done, state: 'success', ok: true, readBack, runs, annotations, reads, detail: `conclusion ${run.conclusion}` };
 }
 
 /** The exit a tool takes from a result that is not `success`. */
@@ -1506,7 +1913,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the ceilings: no run in the start window, no completion in the ceiling — UNCONFIRMED, never retried': 7,
   'the read-back targets: every op the table lets carry a body — derived, each with a locator — and no other op is read back': 8,
   "the verdict: post-stamped's own classifier, imported — declared normalisations land, a split, lost or truncated byte is NOT STORED at its first differing byte, an unreadable body is unverified, the PR-create footer forgiven on pr_create alone": 13,
-  "the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's env text, the validator and the executor; a per-chunk decode is NOT STORED": 8,
+  "the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's event file, the validator and the executor; a per-chunk decode is NOT STORED": 8,
   'the read-back end to end: after a success run each body at its locator — a corrupted read-back exits 4 through the CLI, an unreadable or unfound one 6, a body-less stroke reads nothing, never a retry': 20,
   'the issue_create re-list: a list that lags the create reads back IDENTICAL on a bounded re-list; a real miss is still unfound (exit 6) after exactly the declared window; an unreadable re-list is unread; the create is never re-sent': 13,
   "the run's annotations: after a success run carrying an op that creates or moves a card its check-run annotations are read first — an issue_create they name read back AT that number with NO re-list; absent, unreadable, ignored or past the cap, the re-list as before; a stroke with no such op reads none": 14,
@@ -1517,12 +1924,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the release.yml refresh at the seat: the stroke packs with inputs refresh_version_pr true and travels in ONE dispatch; its started run is read back from release.yml's own run list; force, false, absent or any other input is refused before anything is sent, exit 2": 6,
   "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
   "the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone": 13,
+  "the pull request body at the seat's door: an issue_patch body signed only by its LAST-line trailer passes when the platform answers its target is a pull request, before the dry-run exit; an issue, an unread target and a trailer-less body are refused; comment_edit takes no trailer": 19,
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
   "the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 5,
+  "the advisory rows at the seat: a report, a draft, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id or package, published or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 14,
+  "advisory_read at the seat: the key pair made in this process per read — its public half in the action, its private half a KeyObject never exported, written or printed, and a key from the file refused; no byte read-back, said where the read-back is decided; the run's notice parts read back exactly, reassembled 1..n once each and opened with that key byte for byte, end to end through the real executor; what does not open is UNVERIFIED (6) with nothing printed; the text reaches this process's stdout on --reveal alone, never stderr or --json": 17,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
-// hierarchy link seat battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 24;
+// hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
+// battery, 26 → 27 with advisory_read's seat battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 27;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1821,7 +2232,7 @@ export async function selfTest() {
       }
       return { status: 404, headers, json: async () => ({ message: 'Not Found' }) };
     };
-    const drive = async (script, { file, ceilings, stroke = payload } = {}) => {
+    const drive = async (script, { file, ceilings, stroke = payload, keys } = {}) => {
       const seen = [];
       const logs = [];
       let nowMs = T0;
@@ -1839,6 +2250,7 @@ export async function selfTest() {
           },
           log: (l) => logs.push(l),
           ceilings: ceilings ?? { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] },
+          ...(keys ? { advisoryReadKeys: keys } : {}),
         });
         return { ...r, seen, logs, pace };
       } catch (e) {
@@ -1907,9 +2319,9 @@ export async function selfTest() {
       // The board after a batched stroke of comments: each one stored as sent, the batch gap apart — so it reads back clean.
       const board = (n) => ({ [`GET /repos/objectstack-ai/objectstack/issues/${ACTIONS[0].issue}/comments`]: { status: 200, json: comments(n).map((c, i) => ({ id: 501 + i, created_at: at(8_000 + i * GAP), body: c.body })) } });
       t(
-        'the content-creating ops, derived from the table: the creates of a comment, an issue and a pull, and the transfer that creates the card on its target — no edit, label, assignee, reviewer, flag, base sync or workflow dispatch',
+        'the content-creating ops, derived from the table: the creates of a comment, an issue, a pull, a private advisory report and a draft advisory, and the transfer that creates the card on its target — no edit, label, assignee, reviewer, flag, base sync, workflow dispatch, collaborator or state change',
         [[...CONTENT_CREATING_OPS].sort(), OP_NAMES.filter((op) => !CONTENT_CREATING_OPS.includes(op)).sort()],
-        [['comment', 'issue_create', 'pr_create', 'transfer'], OP_NAMES.filter((op) => !['comment', 'issue_create', 'pr_create', 'transfer'].includes(op)).sort()],
+        [['advisory_create', 'advisory_report', 'comment', 'issue_create', 'pr_create', 'transfer'], OP_NAMES.filter((op) => !['advisory_create', 'advisory_report', 'comment', 'issue_create', 'pr_create', 'transfer'].includes(op)).sort()],
       );
       t('…every op that creates or moves a card (ANNOTATED_OPS) is among them', Object.keys(ANNOTATED_OPS).every((op) => CONTENT_CREATING_OPS.includes(op)));
       const row = (first) => ({ required: ['title'], optional: [], requests: () => [first] });
@@ -2020,9 +2432,10 @@ export async function selfTest() {
     }
 
     // ── the round trip ──────────────────────────────────────────────────────
-    // The platform legs are MODELLED here, not measured: GitHub parses the wire, and the runner's `toJSON` is taken as
-    // the 2-space JSON the workflow's expression engine renders. Everything this repository executes is the real code.
-    battery("the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's env text, the validator and the executor; a per-chunk decode is NOT STORED");
+    // The platform legs are MODELLED here, not measured: GitHub parses the wire, and the runner's event file is taken
+    // as 2-space JSON of the event, its client_payload beside the event's own keys. Everything this repository
+    // executes is the real code — the validator reads that file through GITHUB_EVENT_PATH, as on the runner.
+    battery("the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's event file, the validator and the executor; a per-chunk decode is NOT STORED");
     {
       const { executeFleetWrite } = await import('./execute.mjs');
       const KIB16 = 16 * 1024;
@@ -2037,7 +2450,7 @@ export async function selfTest() {
       const streamsOf = (body) => {
         const p = packRequest({ repo: 'objectstack-ai/objectui', session: SESSION, actions: [{ op: 'issue_patch', issue: 11041, body }], requestId: 'fw-20260929T061500Z-abc123' }).payload;
         const wire = JSON.stringify({ event_type: RELAY_EVENT_TYPE, client_payload: p });
-        return { payload: p, wire, envText: JSON.stringify(JSON.parse(wire).client_payload, null, 2), exec: JSON.stringify({ body }) };
+        return { payload: p, wire, eventText: JSON.stringify({ action: RELAY_EVENT_TYPE, branch: 'main', client_payload: JSON.parse(wire).client_payload }, null, 2), exec: JSON.stringify({ body }) };
       };
       /** Every 16 KiB boundary of the stream falls on a UTF-8 continuation byte — inside a character, never between two. */
       const straddles = (text) => {
@@ -2049,19 +2462,21 @@ export async function selfTest() {
       for (let p = 0; p < 2000 && pad < 0; p++) {
         const body = build(p);
         const s = streamsOf(body);
-        if ([body, s.wire, s.envText, s.exec].every(straddles)) pad = p;
+        if ([body, s.wire, s.eventText, s.exec].every(straddles)) pad = p;
       }
       const BODY = build(Math.max(pad, 0));
       const SENT_BYTES = Buffer.from(BODY, 'utf8');
       const S = streamsOf(BODY);
-      t("a body of exactly the card's 41,699 bytes exists whose EVERY 16 KiB boundary — in the body, the dispatch wire, the runner's env text and the executor's request — falls inside a multi-byte character", [pad >= 0, SENT_BYTES.length, [BODY, S.wire, S.envText, S.exec].every(straddles)], [true, CARD_BYTES, true]);
-      t('…and every one of those streams crosses at least two such boundaries', [BODY, S.wire, S.envText, S.exec].map((x) => Buffer.byteLength(x, 'utf8') > 2 * KIB16), [true, true, true, true]);
+      t("a body of exactly the card's 41,699 bytes exists whose EVERY 16 KiB boundary — in the body, the dispatch wire, the runner's event file and the executor's request — falls inside a multi-byte character", [pad >= 0, SENT_BYTES.length, [BODY, S.wire, S.eventText, S.exec].every(straddles)], [true, CARD_BYTES, true]);
+      t('…and every one of those streams crosses at least two such boundaries', [BODY, S.wire, S.eventText, S.exec].map((x) => Buffer.byteLength(x, 'utf8') > 2 * KIB16), [true, true, true, true]);
       t('① pack → the dispatch wire → the platform\'s parse: byte for byte', Buffer.compare(Buffer.from(JSON.parse(S.wire).client_payload.actions[0].body, 'utf8'), SENT_BYTES), 0);
-      const child = spawnSync(process.execPath, [fileURLToPath(new URL('./validate.mjs', import.meta.url)), '--from-env', '--json'], { encoding: 'utf8', env: { ...process.env, [PAYLOAD_ENV]: S.envText, GITHUB_STEP_SUMMARY: '' }, maxBuffer: 1 << 24 });
+      const eventFile = join(dir, 'event-roundtrip.json');
+      writeFileSync(eventFile, S.eventText, 'utf8');
+      const child = spawnSync(process.execPath, [fileURLToPath(new URL('./validate.mjs', import.meta.url)), '--from-event', '--json'], { encoding: 'utf8', env: { ...process.env, [EVENT_PATH_ENV]: eventFile, GITHUB_STEP_SUMMARY: '' }, maxBuffer: 1 << 24 });
       const judged = child.status === 0 ? JSON.parse(child.stdout.trim().split('\n')[1]) : null;
-      t("② the runner's env text through FLEET_WRITE_PAYLOAD into validate.mjs --from-env, in its own process: byte for byte", [child.status, judged ? Buffer.compare(Buffer.from(judged.actions[0].body, 'utf8'), SENT_BYTES) : null], [0, 0], child.stderr.slice(-300));
+      t("② the runner's event file through GITHUB_EVENT_PATH into validate.mjs --from-event, in its own process: byte for byte", [child.status, judged ? Buffer.compare(Buffer.from(judged.actions[0].body, 'utf8'), SENT_BYTES) : null], [0, 0], child.stderr.slice(-300));
       let captured = null;
-      const execRun = await executeFleetWrite({ payload: JSON.parse(S.envText), sender: 'os-support-ai', token: TOKEN }, {
+      const execRun = await executeFleetWrite({ payload: JSON.parse(S.eventText).client_payload, sender: 'os-support-ai', token: TOKEN }, {
         fetch: async (url, init) => {
           if (init?.method === 'PATCH') captured = init.body;
           const json = new URL(url).pathname.endsWith('/permission') ? { permission: 'write', role_name: 'write' } : { number: 11041 };
@@ -2304,6 +2719,223 @@ export async function selfTest() {
       t('a success run: ONE dispatch carrying the action as judged, and no read beyond the relay run\'s own — nothing read back at the target, the executor\'s read-back landed it — exit 0', [sent.length, sent[0]?.body?.client_payload?.actions, landed.state, landed.readBack?.state, landed.runs?.state, beyondTheRelayRun.map((s) => s.call), exitForResult(landed)], [1, [RERUN], 'success', 'none', 'none', [], EXIT_OK], landed.logs.join(' | '));
       const fenced = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke: packed.payload });
       t('⛔ a run that failed — the relay refused at a fence, or the re-run did not read back — is exit 5 after ONE dispatch, never re-sent and never a direct write', [fenced.state, exitForResult(fenced), fenced.seen.filter((s) => s.call === DISPATCH).length, fenced.seen.filter((s) => s.call !== DISPATCH && !s.call.startsWith('GET ')).length], ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]);
+    }
+
+    // ── the advisory rows at the seat ───────────────────────────────────────
+    battery("the advisory rows at the seat: a report, a draft, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id or package, published or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      // A made-up id: the fixture names no real advisory.
+      const GHSA = 'GHSA-abcd-2345-wxyz';
+      const MARKER = 'ADVISORY MARKER: never in a seat line';
+      const REPORT = { op: 'advisory_report', summary: `${MARKER} — summary`, description: `${MARKER} — description`, severity: 'low', cwe_ids: ['CWE-79'] };
+      const DRAFT = { op: 'advisory_create', summary: `${MARKER} — summary`, description: `${MARKER} — description`, packages: ['@objectstack/rest'], severity: 'low', cwe_ids: ['CWE-863'] };
+      const ADD = { op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators: ['os-dev-a'] };
+      const MOVE = { op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'draft' };
+      const pack = (actions) => packRequest({ repo: REPO, session: SESSION, actions, requestId: 'fw-test-1' });
+      const packed = [REPORT, ADD, MOVE, DRAFT].map((a) => pack([a]));
+      t('each row packs as ONE action carrying exactly its keys, in a stroke of its own', packed.map((p) => [p.ok, p.payload?.actions]), [REPORT, ADD, MOVE, DRAFT].map((a) => [true, [a]]), packed.flatMap((p) => p.errors).join(' | '));
+      const refused = (actions) => {
+        const p = pack(actions);
+        return { ok: p.ok, payload: p.payload, errors: p.errors };
+      };
+      const cases = [
+        [[REPORT, { op: 'comment', issue: 1, body: 'x' }], 'actions[1] is `comment` in a stroke that carries a `advisory_report`'],
+        [[ADD, MOVE], 'in a stroke that carries a `advisory_collaborators_add`'],
+        [[{ ...ADD, ghsa_id: `${GHSA}/cve` }], "actions[0].ghsa_id must be one repository advisory's id"],
+        [[{ ...MOVE, advisory_state: 'published' }], 'actions[0].advisory_state is "published", refused by name'],
+        [[{ ...REPORT, vulnerabilities: [{ package: MARKER }] }], 'actions[0].vulnerabilities is not a key `advisory_report` takes'],
+        [[{ ...REPORT, severity: MARKER }], 'actions[0].severity must be one of'],
+        [[DRAFT, REPORT], 'actions[1] is `advisory_report` in a stroke that carries a `advisory_create`'],
+        [[{ ...DRAFT, packages: [MARKER] }], 'actions[0].packages[0] must be an npm package name'],
+        [[{ ...DRAFT, vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }] }], 'actions[0].vulnerabilities is not a key `advisory_create` takes'],
+      ];
+      const judged = cases.map(([actions, needle]) => {
+        const p = refused(actions);
+        return [!p.ok && p.payload === null, p.errors.some((e) => e.includes(needle)), p.errors.some((e) => e.includes('ADVISORY MARKER'))];
+      });
+      t('⛔ refused at the packer, before anything is sent: a report beside a comment, two advisory rows together, a malformed id, published, a vulnerabilities key and a severity carrying prose, a draft beside a report, a package that is prose and a draft carrying its own vulnerabilities — each named, and ⛔ no refusal echoes the marker', judged, cases.map(() => [true, true, false]));
+      const reportStroke = packed[0].payload;
+      const pacing = strokePacing(reportStroke);
+      const draftStroke = packed[3].payload;
+      t('derived from the table: the report and the draft create content but are no body op, no run op and no card annotation — an advisory annotation instead — with no read-back locator and no read-back target; the two id rows are none of these; each stroke is ONE write, never batched', [['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_state'].map((op) => [CONTENT_CREATING_OPS.includes(op), BODY_OPS.includes(op), RUN_OPS.includes(op), Object.hasOwn(ANNOTATED_OPS, op), ADVISORY_ANNOTATED_OPS.includes(op), op in READ_BACK_LOCATORS]), readBackTargets(reportStroke), readBackTargets(draftStroke), pacing.writes, pacing.batched, strokePacing(draftStroke).writes, strokePacing(draftStroke).batched], [[[true, false, false, false, true, false], [true, false, false, false, true, false], [false, false, false, false, false, false], [false, false, false, false, false, false]], [], [], 1, false, 1, false]);
+      const own = readReal(SELF_PATH, 'utf8');
+      const at = own.indexOf('export const READ_BACK_LOCATORS');
+      t('⛔ the read-back that cannot apply is said WHERE the read-back is decided: the lines above READ_BACK_LOCATORS name advisory_report and advisory_create and why', [at > 0, own.slice(Math.max(0, at - 700), at).includes('No locator for `advisory_report`, on purpose'), own.slice(Math.max(0, at - 700), at).includes('nor for `advisory_create`')], [true, true, true]);
+      // The advisory annotation: one spelling, read back exactly.
+      const NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: GHSA });
+      t('the advisory annotation is one spelling the reader reads back exactly — and nothing else: a card op\'s message, an id row, a malformed id, trailing text or null', [NOTE, parseRelayAdvisoryAnnotation(NOTE), [relayAnnotationMessage({ action: 1, op: 'issue_create', number: 9, url: `https://github.test/${REPO}/issues/9` }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_state', ghsaId: GHSA }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: 'GHSA-ABCD-2345-WXYZ' }), `${NOTE} ${MARKER}`, null].map(parseRelayAdvisoryAnnotation)], [`fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`, { action: 1, op: 'advisory_report', ghsaId: GHSA }, [null, null, null, null, null]]);
+      t('…and a row is used only when its action is that op, one id per action — another op at the index, or two different ids, ignored', [matchRunAdvisories(reportStroke, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }]).rows.length, matchRunAdvisories(packed[1].payload, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }]).ignored.length, matchRunAdvisories(reportStroke, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }, { action: 1, op: 'advisory_report', ghsaId: 'GHSA-wxyz-2345-abcd' }]).rows.length], [1, 1, 0]);
+      const withNote = { path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_report', message: NOTE };
+      const filed = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, withNote] }) }, { stroke: reportStroke });
+      const sent = filed.seen.filter((s) => s.call === DISPATCH);
+      const atTarget = filed.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`));
+      t('⭐ a filed report: ONE dispatch carrying it as judged, nothing read back at the target, and the run\'s advisory annotation handed on as the id to follow with — said in one line — exit 0', [sent.length, sent[0]?.body?.client_payload?.actions, filed.state, filed.readBack?.state, atTarget.length, filed.annotations?.advisories, filed.logs.some((l) => l.includes(`advisory ${GHSA}`) && l.includes('advisory_collaborators_add')), exitForResult(filed)], [1, [REPORT], 'success', 'none', 0, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }], true, EXIT_OK], filed.logs.join(' | '));
+      const unnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: reportStroke });
+      t('a filed report no annotation names: still exit 0 — the run confirmed it — no id handed on, and one line saying where the id is and that the report is never re-sent', [unnamed.state, unnamed.annotations?.advisories, unnamed.logs.some((l) => l.includes("action 1 advisory_report's advisory id") && l.includes('do not re-send')), exitForResult(unnamed)], ['success', [], true, EXIT_OK], unnamed.logs.join(' | '));
+      const DRAFT_NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_create', ghsaId: GHSA });
+      const drafted = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, { ...withNote, title: 'fleet-write advisory_create', message: DRAFT_NOTE }] }) }, { stroke: draftStroke });
+      t('⭐ a created draft: ONE dispatch carrying it as judged, nothing read back at the target, and the run\'s advisory annotation — its own spelling, read back exactly — handed on as the id to follow with; exit 0', [DRAFT_NOTE, parseRelayAdvisoryAnnotation(DRAFT_NOTE), drafted.seen.filter((s) => s.call === DISPATCH).map((s) => s.body?.client_payload?.actions), drafted.state, drafted.readBack?.state, drafted.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, drafted.annotations?.advisories, drafted.logs.some((l) => l.includes(`advisory ${GHSA}`) && l.includes('advisory_collaborators_add')), exitForResult(drafted)], [`fleet-write action=1 op=advisory_create ghsa_id=${GHSA}`, { action: 1, op: 'advisory_create', ghsaId: GHSA }, [[DRAFT]], 'success', 'none', 0, [{ action: 1, op: 'advisory_create', ghsaId: GHSA }], true, EXIT_OK], drafted.logs.join(' | '));
+      const draftUnnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: draftStroke });
+      t('a created draft no annotation names: still exit 0, no id handed on, and one line saying to ask the maintainer and never to re-send the draft', [draftUnnamed.annotations?.advisories, draftUnnamed.logs.some((l) => l.includes("action 1 advisory_create's advisory id") && l.includes('do not re-send the draft')), exitForResult(draftUnnamed)], [[], true, EXIT_OK], draftUnnamed.logs.join(' | '));
+      const idRows = [];
+      for (const p of packed.slice(1, 3)) {
+        const r = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: p.payload });
+        idRows.push([r.state, r.readBack?.state, r.annotations?.state, r.seen.filter((s) => s.call === DISPATCH).length, r.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, exitForResult(r)]);
+      }
+      t('the two id rows: ONE dispatch each, no annotation read and nothing read back — the executor\'s PATCH answer landed them — exit 0', idRows, [0, 1].map(() => ['success', 'none', 'none', 1, 0, EXIT_OK]));
+      const failed = [];
+      for (const p of packed) {
+        const r = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke: p.payload });
+        failed.push([r.state, exitForResult(r), r.seen.filter((s) => s.call === DISPATCH).length, r.seen.filter((s) => s.call !== DISPATCH && !s.call.startsWith('GET ')).length]);
+      }
+      t('⛔ a run that failed — a fence refused it, or the answer did not show the result — is exit 5 after ONE dispatch for each row, never re-sent and never a direct write', failed, [0, 1, 2, 3].map(() => ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]));
+      t('⛔ no seat line of those runs carries the report\'s or the draft\'s text', [filed, unnamed, drafted, draftUnnamed].some((r) => r.logs.some((l) => l.includes('ADVISORY MARKER'))), false);
+      // The CLI hands the id on in --json, beside the card annotations.
+      writeFileSync(join(dir, 'advisory-report.json'), JSON.stringify([REPORT]), 'utf8');
+      let nowMs = T0;
+      const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+      const out = [];
+      const [log, err] = [console.log, console.error];
+      console.log = (l) => out.push(String(l));
+      console.error = () => {};
+      let code;
+      try {
+        code = await main(['--repo', REPO, '--actions-file', join(dir, 'advisory-report.json'), '--request-id', 'fw-test-1', '--json'], {
+          env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+          send: { fetch: platform({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [withNote] }) }, [], clock), pace: paceFor(join(dir, `pace-cli-${paceCase++}.jsonl`)), now: clock.now, sleep: async (ms) => { nowMs += ms; }, log: () => {}, ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+        });
+      } finally {
+        [console.log, console.error] = [log, err];
+      }
+      const json = out.length ? JSON.parse(out[out.length - 1]) : null;
+      t('the CLI: exit 0, and --json hands the advisory id on as advisories, the card annotations empty', [code, json?.advisories, json?.annotations], [EXIT_OK, [{ action: 1, op: 'advisory_report', ghsa_id: GHSA }], []]);
+    }
+
+    // ── advisory_read at the seat ───────────────────────────────────────────
+    battery("advisory_read at the seat: the key pair made in this process per read — its public half in the action, its private half a KeyObject never exported, written or printed, and a key from the file refused; no byte read-back, said where the read-back is decided; the run's notice parts read back exactly, reassembled 1..n once each and opened with that key byte for byte, end to end through the real executor; what does not open is UNVERIFIED (6) with nothing printed; the text reaches this process's stdout on --reveal alone, never stderr or --json");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      // A made-up id: the fixture names no real advisory.
+      const GHSA = 'GHSA-abcd-2345-wxyz';
+      const MARKER = 'ADVISORY MARKER: never in a seat line';
+      const { createPublicKey } = await import('node:crypto');
+      const { executeFleetWrite } = await import('./execute.mjs');
+      const { ADVISORY_READ_FIELDS, ADVISORY_READ_OPEN_FAILED, advisoryReadParts, sealAdvisoryRead } = await import('./ops.mjs');
+      const READ = { op: 'advisory_read', ghsa_id: GHSA };
+      const served = {
+        ghsa_id: GHSA, cve_id: null, url: `https://api.github.test/repos/${REPO}/security-advisories/${GHSA}`, html_url: `https://github.test/${REPO}/security/advisories/${GHSA}`,
+        summary: `${MARKER} — the summary, 漢字 and 🎉`, description: `${MARKER} — the description\nline two, a quote " and a backslash \\`, severity: 'high', state: 'draft',
+        vulnerabilities: [{ package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: `< 9.9.9 ${MARKER}`, patched_versions: null, vulnerable_functions: [] }],
+        cwe_ids: ['CWE-79'], credits: [{ login: 'os-dev-z', type: 'finder' }], collaborating_users: [{ login: 'os-dev-a' }], collaborating_teams: [], private_fork: null,
+      };
+      const picked = JSON.stringify(Object.fromEntries(ADVISORY_READ_FIELDS.filter((f) => Object.hasOwn(served, f)).map((f) => [f, served[f]])));
+      // The key pair: made here, its public half in the action, its private half a KeyObject the map holds.
+      const armed = armAdvisoryReads([READ, { op: 'comment', issue: 1, body: 'x' }]);
+      const key = armed.keys.get(1);
+      t('the key pair is made HERE, per read: the read gains a public_key the validator accepts, the private half is a KeyObject held in memory by action index, other actions and the file\'s own array are untouched', [armed.refused, Object.keys(armed.actions[0]), armed.actions[0].public_key.length, validatePayload({ request_id: 'fw-test-1', repo: REPO, session: SESSION, actions: [armed.actions[0]] }).ok, [...armed.keys.keys()], key?.type, key?.asymmetricKeyType, armed.actions[1], Object.hasOwn(READ, 'public_key')], [[], ['op', 'ghsa_id', 'public_key'], 60, true, [1], 'private', 'x25519', { op: 'comment', issue: 1, body: 'x' }, false]);
+      const twice = [armAdvisoryReads([READ]), armAdvisoryReads([READ])];
+      t('⛔ a fresh pair every time: two arms of one read never share a key, and the public half sent is the private half\'s own', [twice[0].actions[0].public_key === twice[1].actions[0].public_key, createPublicKey(key).export({ format: 'der', type: 'spki' }).toString('base64') === armed.actions[0].public_key], [false, true]);
+      const own = readReal(SELF_PATH, 'utf8');
+      const body = own.slice(0, own.indexOf('export async function selfTest'));
+      t("⛔ the private key is never exported, written or printed: this file's code (above its self-test) never exports a private key, its one static fs import reads alone — no write exists to reach a file — and the keys travel in a Map that is no module state", [/privateKey\s*\.\s*export\s*\(/.test(body), /^import \{ readFileSync \} from 'node:fs';$/m.test(body), /^import [^\n]*\b(writeFileSync|appendFileSync|createWriteStream)\b[^\n]*from 'node:fs'/m.test(body), /^(?:export )?(?:const|let) [A-Za-z]*[Kk]eys? = new Map/m.test(body)], [false, true, false, false]);
+      const supplied = armAdvisoryReads([{ ...READ, public_key: MARKER }]);
+      t("⛔ a public_key already in the actions file is REFUSED, never used — a key made elsewhere means a private key kept elsewhere — and the refusal never echoes it", [supplied.refused.length, supplied.keys.size, supplied.refused[0]?.includes('actions[0].public_key is set in the actions file'), supplied.refused.some((l) => l.includes('ADVISORY MARKER'))], [1, 0, true, false]);
+      // Derived from the table.
+      const stroke = packRequest({ repo: REPO, session: SESSION, actions: [armed.actions[0]], requestId: 'fw-test-1' }).payload;
+      t('derived from the table: advisory_read is the one op whose answer comes back sealed — no body op, no run op, no content, no card or advisory annotation, no read-back locator or target, and ZERO writes in its stroke', [ADVISORY_READ_OPS, [BODY_OPS, RUN_OPS, CONTENT_CREATING_OPS, ADVISORY_ANNOTATED_OPS].map((list) => list.includes('advisory_read')), Object.hasOwn(ANNOTATED_OPS, 'advisory_read'), 'advisory_read' in READ_BACK_LOCATORS, readBackTargets(stroke), strokePacing(stroke).writes], [['advisory_read'], [false, false, false, false], false, false, [], 0]);
+      const at = own.indexOf('export const READ_BACK_LOCATORS');
+      t("⛔ that advisory_read has NO byte read-back is said WHERE the read-back is decided, and in the header's account of the callers", [own.slice(Math.max(0, at - 1200), at).includes('No locator for `advisory_read`: it has NO byte read-back, because it writes nothing'), own.includes('`advisory_read` has NO byte read-back either, and needs none: it writes')], [true, true]);
+      // The parts: one spelling, read back exactly.
+      const full = 'A'.repeat(4000);
+      const PART = relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_read', part: 10, of: 10, sealed: full });
+      t("a part is one spelling the reader reads back exactly, inside the runner's 4,096-character cut at its longest — and nothing else: another op, part 0, a part past its count, a count past ten, a chunk outside base64url or over 4,000 characters, trailing text, a filed advisory's message and null", [PART.length <= 4096, parseRelayAdvisoryReadAnnotation(PART), ['advisory_report', 'comment'].map((op) => parseRelayAdvisoryReadAnnotation(relayAdvisoryReadAnnotationMessage({ action: 1, op, part: 1, of: 1, sealed: 'AA' }))), ['part=0/1', 'part=2/1', 'part=1/11', 'part=11/11'].map((p) => parseRelayAdvisoryReadAnnotation(`fleet-write action=1 op=advisory_read ${p} sealed=AA`)), ['AA+', 'AA=', 'A A', `${full}A`].map((sealed) => parseRelayAdvisoryReadAnnotation(relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_read', part: 1, of: 1, sealed }))), parseRelayAdvisoryReadAnnotation(`${relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_read', part: 1, of: 1, sealed: 'AA' })} x`), parseRelayAdvisoryReadAnnotation(relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: GHSA })), parseRelayAdvisoryReadAnnotation(null)], [true, { action: 1, op: 'advisory_read', part: 10, of: 10, sealed: full }, [null, null], [null, null, null, null], [null, null, null, null], null, null, null]);
+      const p = (part, of, sealed, action = 1, op = 'advisory_read') => ({ action, op, part, of, sealed });
+      t('reassembly: parts 1..n each EXACTLY once under one n — out of order is joined in order, a part repeated with the same text is the same part; a missing part, two texts under one number, counts that disagree or no part at all are no answer, said; another action\'s or op\'s parts are not this one\'s', [assembleAdvisoryReads(stroke, [p(2, 2, 'CD'), p(1, 2, 'AB'), p(1, 2, 'AB')]), ...[[p(1, 3, 'AB'), p(3, 3, 'EF')], [p(1, 2, 'AB'), p(1, 2, 'XY'), p(2, 2, 'CD')], [p(1, 2, 'AB'), p(2, 3, 'CD')], [], [p(1, 1, 'AB', 2), p(1, 1, 'AB', 1, 'advisory_report')]].map((parts) => assembleAdvisoryReads(stroke, parts)[0].why)], [[{ action: 1, op: 'advisory_read', sealed: 'ABCD', parts: 2, why: '' }], 'part(s) 2 of 3 are not on the run', 'two different parts carry one part number', 'its parts disagree on their count (2, 3)', 'no part of its sealed answer is on the run', 'no part of its sealed answer is on the run']);
+      // ⭐ End to end: the REAL executor reads and seals, its notice lines become the run's annotations, the seat opens them.
+      const PERM_A = `GET /repos/${REPO}/collaborators/os-dev-a/permission`;
+      const A_GET = `GET /repos/${REPO}/security-advisories/${GHSA}`;
+      const executed = async (payload, answer = { status: 200, json: served }) => {
+        const lines = [];
+        const answers = { [PERM_A]: { status: 200, json: { permission: 'write', role_name: 'write' } }, [A_GET]: answer };
+        const r = await executeFleetWrite({ payload, sender: 'os-dev-a', token: TOKEN }, {
+          fetch: async (url, init) => {
+            const a = answers[`${init?.method ?? 'GET'} ${new URL(url).pathname}`] ?? { status: 404, json: { message: 'Not Found' } };
+            return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => a.json };
+          },
+          log: (l) => lines.push(l),
+        });
+        // What the runner turns each notice command into: an annotation whose message is the command's data.
+        const notes = lines.filter((l) => l.startsWith('::notice ')).map((l) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_read', message: l.slice(l.indexOf('::', 2) + 2) }));
+        return { ...r, notes };
+      };
+      const relayed = await executed(stroke);
+      const runOf = (notes, keys = armed.keys, extra = {}) => drive({ runs: () => [RUN('completed', 'success')], notes: () => notes, ...extra }, { stroke, keys });
+      const ok = await runOf({ status: 200, json: [RUNNER_NOTICE, ...relayed.notes] });
+      const sentRead = ok.seen.filter((s) => s.call === DISPATCH);
+      t("⭐ END TO END — the real executor's notices opened by the key this process made: ONE dispatch carrying the armed public key, nothing read at the target, success, exit 0, and the text opened BYTE FOR BYTE the GET's fields", [relayed.exit, relayed.notes.length, sentRead.length, sentRead[0]?.body?.client_payload?.actions?.[0]?.public_key === armed.actions[0].public_key, ok.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, ok.state, exitForResult(ok), ok.reads?.map((r) => [r.state, r.parts, r.fields]), ok.reads?.[0]?.plaintext === picked, Buffer.compare(Buffer.from(ok.reads?.[0]?.plaintext ?? '', 'utf8'), Buffer.from(picked, 'utf8'))], [0, 1, 1, true, 0, 'success', EXIT_OK, [['opened', 1, [...ADVISORY_READ_FIELDS.filter((f) => Object.hasOwn(served, f))]]], true, 0]);
+      t('⛔ …and the seat\'s lines say the counts and the field names, and that --reveal prints the text — never the marker, never the id', [ok.logs.some((l) => /action 1 advisory_read's sealed answer in 1 part\(s\) — opened with this process's one-time key: \d+ byte\(s\), fields ghsa_id, cve_id, state/.test(l) && l.includes('pass --reveal')), ok.logs.some((l) => l.includes('ADVISORY MARKER') || l.includes(GHSA))], [true, false]);
+      // ⛔ What does not open is UNVERIFIED, exit 6, and prints nothing of it.
+      const stranger = armAdvisoryReads([READ]);
+      const otherSeal = await executed(packRequest({ repo: REPO, session: SESSION, actions: stranger.actions, requestId: 'fw-test-1' }).payload);
+      const tampered = relayed.notes.map((n) => ({ ...n, message: n.message.replace(/sealed=(.)/, (m, c) => `sealed=${c === 'A' ? 'B' : 'A'}`) }));
+      const big = await executed(stroke, { status: 200, json: { ...served, description: `${MARKER} ${'y'.repeat(9_000)}` } });
+      const unread = [
+        await runOf({ status: 200, json: relayed.notes }, new Map()),
+        await runOf({ status: 200, json: [RUNNER_NOTICE] }),
+        await runOf({ status: 200, json: big.notes.slice(1) }),
+        await runOf({ status: 200, json: tampered }),
+        await runOf({ status: 200, json: otherSeal.notes }),
+        await runOf({ status: 500, json: { message: 'down' } }),
+      ];
+      t('⛔ UNVERIFIED, exit 6, plaintext null and nothing of it printed: no key in this process (a re-run elsewhere cannot open it), no part on the run, a part missing, a part tampered with, parts sealed to another seat\'s key, and annotations that cannot be read', [big.notes.length > 1, unread.map((r) => [r.state, exitForResult(r), r.reads?.[0]?.state, r.reads?.[0]?.plaintext ?? null, r.logs.some((l) => l.includes('ADVISORY MARKER') || l.includes(GHSA))])], [true, unread.map(() => ['unverified', EXIT_UNCONFIRMED, 'unverified', null, false])]);
+      t("…each saying why: no key, no part, the part missing, and the one sentence for an answer that does not open", [unread[0].reads[0].why.startsWith('this process holds no key for it'), unread[1].reads[0].why, unread[2].reads[0].why.startsWith('part(s) 1 of '), unread[3].reads[0].why, unread[4].reads[0].why, unread[5].reads[0].why], [true, 'no part of its sealed answer is on the run', true, ADVISORY_READ_OPEN_FAILED, ADVISORY_READ_OPEN_FAILED, 'no part of its sealed answer is on the run']);
+      const refusedRun = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke, keys: armed.keys });
+      t('⛔ a run that failed — a fence refused the read, the seal failed or did not fit — is exit 5 after ONE dispatch, nothing opened; a read writes nothing, so a fresh key may send it again', [refusedRun.state, exitForResult(refusedRun), refusedRun.seen.filter((s) => s.call === DISPATCH).length, refusedRun.reads ?? null], ['failure', EXIT_PLATFORM_REFUSAL, 1, null]);
+      // The CLI: the plaintext on stdout, and only with --reveal.
+      writeFileSync(join(dir, 'advisory-read.json'), JSON.stringify([READ]), 'utf8');
+      writeFileSync(join(dir, 'advisory-read-keyed.json'), JSON.stringify([{ ...READ, public_key: MARKER }]), 'utf8');
+      const cli = async (args) => {
+        let nowMs = T0;
+        const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+        const seen = [];
+        // The run's notices as the executor would emit them, sealed to whatever key the CLI made and dispatched.
+        const notes = () => {
+          const sent = seen.find((s) => s.call === DISPATCH)?.body?.client_payload;
+          const action = sent?.actions?.[0];
+          if (!action?.public_key) return { status: 200, json: [] };
+          const sealed = sealAdvisoryRead({ plaintext: picked, publicKey: action.public_key, aad: advisoryReadAad({ requestId: sent.request_id, action: 1, ghsaId: action.ghsa_id }) });
+          const parts = advisoryReadParts(sealed);
+          return { status: 200, json: parts.map((chunk, k) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_read', message: relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_read', part: k + 1, of: parts.length, sealed: chunk }) })) };
+        };
+        const out = [];
+        const errs = [];
+        const [log, err] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = (l) => errs.push(String(l));
+        let code;
+        try {
+          code = await main(args, {
+            env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+            send: { fetch: platform({ runs: () => [RUN('completed', 'success')], notes }, seen, clock), pace: paceFor(join(dir, `pace-cli-${paceCase++}.jsonl`)), now: clock.now, sleep: async (ms) => { nowMs += ms; }, log: (l) => errs.push(String(l)), ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+          });
+        } finally {
+          [console.log, console.error] = [log, err];
+        }
+        return { code, out, errs, seen };
+      };
+      const base = ['--repo', REPO, '--actions-file', join(dir, 'advisory-read.json'), '--request-id', 'fw-test-1'];
+      const quiet = await cli([...base, '--json']);
+      const quietJson = quiet.out.length ? JSON.parse(quiet.out[quiet.out.length - 1]) : null;
+      t('⛔ the CLI without --reveal: exit 0, stdout ONE --json line whose advisory_reads carry the state, counts and field names alone — the text printed NOWHERE, stdout or stderr', [quiet.code, quiet.out.length, quietJson?.advisory_reads?.map((r) => [r.action, r.op, r.state, r.bytes === Buffer.byteLength(picked, 'utf8'), r.parts, r.why]), [...quiet.out, ...quiet.errs].some((l) => l.includes('ADVISORY MARKER'))], [EXIT_OK, 1, [[1, 'advisory_read', 'opened', true, 1, null]], false]);
+      const loud = await cli([...base, '--reveal']);
+      t('⭐ the CLI with --reveal: exit 0, and the opened text is THIS process\'s stdout, byte for byte the GET\'s fields — and still never a stderr line', [loud.code, loud.out, loud.errs.some((l) => l.includes('ADVISORY MARKER'))], [EXIT_OK, [picked], false]);
+      const loudJson = await cli([...base, '--reveal', '--json']);
+      t('…with --json beside it, the text is its own stdout line and the --json line still carries none of it', [loudJson.code, loudJson.out.length, loudJson.out[0] === picked, loudJson.out[1]?.includes('ADVISORY MARKER'), JSON.parse(loudJson.out[1] ?? '{}').advisory_reads?.[0]?.state], [EXIT_OK, 2, true, false, 'opened']);
+      const keyed = await cli(['--repo', REPO, '--actions-file', join(dir, 'advisory-read-keyed.json'), '--request-id', 'fw-test-1']);
+      writeFileSync(join(dir, 'comment-reveal.json'), JSON.stringify([{ op: 'comment', issue: 19701, body: 'x' }]), 'utf8');
+      const misplaced = await cli(['--repo', REPO, '--actions-file', join(dir, 'comment-reveal.json'), '--request-id', 'fw-test-1', '--reveal']);
+      t('⛔ refused before anything is sent, exit 2: a public_key in the actions file (never echoed), and --reveal on a stroke carrying no advisory_read', [keyed.code, keyed.seen.length, keyed.errs.some((l) => l.includes('ADVISORY MARKER')), misplaced.code, misplaced.seen.length], [EXIT_USAGE, 0, false, EXIT_USAGE, 0]);
     }
 
     // ── the hierarchy link at the seat ──────────────────────────────────────
@@ -2559,6 +3191,87 @@ export async function selfTest() {
       })());
     }
 
+    // ── the pull request body at the seat's door ───────────────────────────
+    battery("the pull request body at the seat's door: an issue_patch body signed only by its LAST-line trailer passes when the platform answers its target is a pull request, before the dry-run exit; an issue, an unread target and a trailer-less body are refused; comment_edit takes no trailer");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const SIG = `domain:devx#2 · marchtian · ${SESSION}`;
+      const TRAILER = `<!-- signed: ${SIG} -->`;
+      const ATTRIBUTION = '<!-- claude-projects-attribution: {"github_login":"marchtian"} -->';
+      const PR_BODY = `${ATTRIBUTION}\nFixes #29145\n\n## What changes\n\nRewritten for the new head.\n\n${TRAILER}\n`;
+      const ROWS = (actions) => unsignedEditBodies(actions).map((r) => `${r.action}:${r.op}`);
+      const CANDS = (actions) => pullRequestBodyCandidates(actions).map((r) => `${r.action}:${r.issue}`);
+      t('the trailer parses with the existing signature reader: the same four parts as the bare line', [readPrBodyTrailer(PR_BODY)?.shaped, readPrBodyTrailer(PR_BODY)?.signature], [true, readSignatureLine(SIG)]);
+      t('…trailing blank lines are not the last line, and spaces inside the comment are trimmed', readPrBodyTrailer(`x\n<!--signed:   ${SIG}   -->\n\n\n`)?.signature?.session, SESSION);
+      t('⛔ the trailer on an EARLIER line is not one: the last non-empty line decides', readPrBodyTrailer(`${TRAILER}\nMore prose`)?.signature ?? null, null);
+      t('⛔ a bare signature on the last line, or the comment around a near miss, is no trailer — the near miss still reads as shaped', [readPrBodyTrailer(`x\n${SIG}`)?.shaped, readPrBodyTrailer(`x\n<!-- signed: domain:devx#2 · marchtian -->`)?.shaped, readPrBodyTrailer(`x\n<!-- signed: domain:devx#2 · marchtian -->`)?.signature], [false, true, null]);
+      t('a trailer-only issue_patch body is a candidate for the platform read, and not a first-line refusal', [CANDS([{ op: 'issue_patch', issue: 29200, body: PR_BODY }]), ROWS([{ op: 'issue_patch', issue: 29200, body: PR_BODY }])], [['1:29200'], []]);
+      t('⛔ comment_edit takes no trailer: still refused, never a candidate', [CANDS([{ op: 'comment_edit', comment_id: 7, body: `Edited.\n${TRAILER}` }]), ROWS([{ op: 'comment_edit', comment_id: 7, body: `Edited.\n${TRAILER}` }])], [[], ['1:comment_edit']]);
+      t('a first-line-signed issue_patch body needs no read — the trailer beside it changes nothing', [CANDS([{ op: 'issue_patch', issue: 3, body: `${SIG}\nSeat post\n${TRAILER}` }]), ROWS([{ op: 'issue_patch', issue: 3, body: `${SIG}\nSeat post\n${TRAILER}` }])], [[], []]);
+      const unsignedRow = unsignedEditBodies([{ op: 'issue_patch', issue: 29200, body: `${ATTRIBUTION}\nFixes #29145\n\nProse.\n` }])[0];
+      t('a body with neither is refused without a read, and its refusal names BOTH shapes — the first line and the trailer', [unsignedRow?.trailer?.why, editBodyRefusalText(unsignedRow).includes('LANE#N · ACCOUNT · SESSION'), editBodyRefusalText(unsignedRow).includes(PR_BODY_TRAILER_SHAPE), editBodyRefusalText(unsignedRow).includes('as the LAST non-empty line')], ['the last non-empty line is not the trailer', true, true, true]);
+      t("…a near-miss trailer is named as one; a comment_edit row carries no trailer alternative", [unsignedEditBodies([{ op: 'issue_patch', issue: 1, body: 'x\n<!-- signed: domain:devx#2 · marchtian -->' }])[0]?.trailer?.why.startsWith("the last non-empty line is the trailer's comment"), editBodyRefusalText(unsignedEditBodies([{ op: 'comment_edit', comment_id: 7, body: 'Edited.' }])[0]).includes(PR_BODY_TRAILER_SHAPE)], [true, false]);
+      // The platform, faked at fetch: GET /repos/{repo}/issues/{n} answers from `store`, and every request is recorded.
+      const readFake = (store) => {
+        const seen = [];
+        const fetch = async (url, init) => {
+          const path = new URL(url).pathname;
+          seen.push(`${init?.method ?? 'GET'} ${path}`);
+          const answer = store[path];
+          if (answer === undefined) throw new Error('connect ECONNREFUSED (fixture)');
+          return { status: answer.status, headers: { get: () => null }, json: async () => answer.json };
+        };
+        return { fetch, seen, api: 'https://api.github.test' };
+      };
+      const PULL = { status: 200, json: { number: 29200, pull_request: { url: 'https://api.github.test/repos/x/pulls/29200' } } };
+      const ISSUE = { status: 200, json: { number: 29145 } };
+      const read = async (store, cands) => {
+        const f = readFake(store);
+        return { rows: await readPullRequestTargets(cands, { repo: REPO, api: f.api, fetch: f.fetch, token: TOKEN }), seen: f.seen };
+      };
+      const asPull = await read({ [`/repos/${REPO}/issues/29200`]: PULL }, [{ action: 1, issue: 29200 }, { action: 2, issue: 29200 }]);
+      t('a pull request is READ: 200 with a pull_request key is pull — ONE GET per distinct number, no write method', [asPull.rows.map((r) => r.verdict), asPull.seen], [['pull', 'pull'], [`GET /repos/${REPO}/issues/29200`]]);
+      const asIssue = await read({ [`/repos/${REPO}/issues/29145`]: ISSUE }, [{ action: 1, issue: 29145 }]);
+      t('an issue is READ: 200 with no pull_request key is issue, the reason naming the first-line rule', [asIssue.rows[0].verdict, asIssue.rows[0].why.includes('no pull_request key')], ['issue', true]);
+      const asUnread = await read({ [`/repos/${REPO}/issues/1`]: { status: 404, json: { message: 'Not Found' } }, [`/repos/${REPO}/issues/2`]: { status: 200, json: [] } }, [{ action: 1, issue: 1 }, { action: 2, issue: 2 }, { action: 3, issue: 3 }]);
+      t('⛔ 404, a 200 that is no issue object, and no answer are all UNREAD — never pull, never issue', [asUnread.rows.map((r) => r.verdict), asUnread.rows[0].why.includes('HTTP 404'), asUnread.rows[2].why.includes('ECONNREFUSED')], [['unread', 'unread', 'unread'], true, true]);
+      // The CLI, in process, on a DRY RUN: the read deps stand in for the platform.
+      const cliRead = async (actions, store, envExtra = {}) => {
+        const file = join(dir, `prbody-${paceCase++}.json`);
+        writeFileSync(file, JSON.stringify(actions), 'utf8');
+        const f = readFake(store);
+        const out = [];
+        const err = [];
+        const [log, error] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = (l) => err.push(String(l));
+        try {
+          const code = await main(['--repo', REPO, '--actions-file', file, '--request-id', 'fw-test-1', '--dry-run'], { env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION, ...envExtra }, read: { api: f.api, fetch: f.fetch } });
+          return { code, out: out.join('\n'), err: err.join('\n'), seen: f.seen };
+        } finally {
+          [console.log, console.error] = [log, error];
+        }
+      };
+      const signedPr = await cliRead([{ op: 'issue_patch', issue: 29200, body: PR_BODY }], { [`/repos/${REPO}/issues/29200`]: PULL });
+      t('⭐ a signed pull request body passes on a DRY RUN: the target read once, exit 0, the payload printed with the body exactly as written', [signedPr.code, signedPr.seen, signedPr.code === EXIT_OK ? JSON.parse(signedPr.out).client_payload.actions[0].body : null], [EXIT_OK, [`GET /repos/${REPO}/issues/29200`], PR_BODY], signedPr.err.slice(-300));
+      const trailerIssue = await cliRead([{ op: 'issue_patch', issue: 29145, body: `Card prose\n${TRAILER}` }], { [`/repos/${REPO}/issues/29145`]: ISSUE });
+      t('⭐ an ISSUE body with only the trailer is still refused: usage (2), the refusal naming the issue and the first-line shape, no payload', [trailerIssue.code, trailerIssue.err.includes('is an issue') && trailerIssue.err.includes('LANE#N · ACCOUNT · SESSION'), trailerIssue.out.includes('"event_type"')], [EXIT_USAGE, true, false], trailerIssue.err.slice(-300));
+      const unreadable = await cliRead([{ op: 'issue_patch', issue: 29200, body: PR_BODY }], { [`/repos/${REPO}/issues/29200`]: { status: 503, json: { message: 'down' } } });
+      t('⭐ an unreadable target refuses: PREREQUISITE NOT MET (3) naming the status, no payload — never a pass', [unreadable.code, unreadable.err.includes('HTTP 503') && unreadable.err.includes('PREREQUISITE NOT MET'), unreadable.out.includes('"event_type"')], [EXIT_PREREQUISITE, true, false], unreadable.err.slice(-300));
+      const noToken = await cliRead([{ op: 'issue_patch', issue: 29200, body: PR_BODY }], { [`/repos/${REPO}/issues/29200`]: PULL }, { GITHUB_TOKEN: '', GH_TOKEN: '' });
+      t('…and with no token the target cannot be read: exit 3 before any request', [noToken.code, noToken.seen], [EXIT_PREREQUISITE, []]);
+      const unsignedPr = await cliRead([{ op: 'issue_patch', issue: 29200, body: `${ATTRIBUTION}\nFixes #29145\n\nProse.\n` }], { [`/repos/${REPO}/issues/29200`]: PULL });
+      t('⭐ an unsigned pull request body is refused: usage (2), the refusal naming the trailer shape, ZERO reads', [unsignedPr.code, unsignedPr.err.includes(PR_BODY_TRAILER_SHAPE), unsignedPr.seen], [EXIT_USAGE, true, []], unsignedPr.err.slice(-300));
+      const mixed = await cliRead([{ op: 'issue_patch', issue: 29200, body: PR_BODY }, { op: 'issue_patch', issue: 3, body: `${SIG}\nSeat post` }], { [`/repos/${REPO}/issues/29200`]: PULL });
+      t('a stroke beside a first-line-signed issue body reads only the trailer-signed target and packs both', [mixed.code, mixed.seen, mixed.code === EXIT_OK ? JSON.parse(mixed.out).client_payload.actions.length : null], [EXIT_OK, [`GET /repos/${REPO}/issues/29200`], 2], mixed.err.slice(-300));
+      t('structural: the platform read runs in main after the packer and BEFORE the dry-run exit', (() => {
+        const src = readReal(SELF_PATH, 'utf8');
+        const body = src.slice(src.lastIndexOf('export async function main('));
+        const at = body.indexOf('readPullRequestTargets(candidates');
+        return at > body.indexOf('packRequest(') && at < body.indexOf('if (opts.dryRun)');
+      })());
+    }
+
     // ── the no-run conformance ──────────────────────────────────────────────
     battery('the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen');
     {
@@ -2713,6 +3426,9 @@ export async function selfTest() {
       "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent; " +
       "a started workflow run read back from the target's run list within a bounded window, UNCONFIRMED (6) when it is not there; " +
       "a batched stroke waited for as long as the runner is told to pause, and one the relay job cannot hold refused before it leaves; " +
+      "an advisory report or draft never read back, by construction, its id handed on from the run's advisory annotation; " +
+      "an advisory read whose one-time key pair this process made and never let out, its sealed answer reassembled from the run's notices and opened byte for byte, " +
+      'UNVERIFIED (6) when it does not open, and printed to stdout on --reveal alone; ' +
       'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
   );
   selfTestReachedVerdict = true;
@@ -2724,7 +3440,7 @@ export async function selfTest() {
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv) {
-  const opts = { repo: null, actionsFile: null, session: null, requestId: null, dryRun: false, json: false, selfTest: false, help: false, route: false, errors: [] };
+  const opts = { repo: null, actionsFile: null, session: null, requestId: null, dryRun: false, json: false, reveal: false, selfTest: false, help: false, route: false, errors: [] };
   const args = [...argv];
   const value = (flag) => {
     const v = args.shift();
@@ -2741,6 +3457,7 @@ export function parseArgs(argv) {
     else if (a === '--route') opts.route = true;
     else if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--json') opts.json = true;
+    else if (a === '--reveal') opts.reveal = true;
     else if (a === '--repo') opts.repo = value(a);
     else if (a === '--actions-file') opts.actionsFile = value(a);
     else if (a === '--session') opts.session = value(a);
@@ -2761,6 +3478,7 @@ const USAGE = [
   'usage:',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json [--session session_…] [--request-id id] [--json]',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json --dry-run',
+  '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file read.json [--reveal]   # one advisory_read: { op, ghsa_id }',
   '  node scripts/pm/fleet-write/dispatch.mjs --route        # ONE JSON line: the transport this environment resolves to, and why',
   '  node scripts/pm/fleet-write/dispatch.mjs --self-test',
   '',
@@ -2769,7 +3487,12 @@ const USAGE = [
   `  ⛔ Never as a prefix on the command line: the seats' allow rules are literal command prefixes. The dispatch always`,
   `  goes to ${RELAY_REPO}; --repo names the target.`,
   '  A comment_edit or issue_patch body opens with the seat\'s signature line, LANE#N · ACCOUNT · SESSION, or the file is',
-  '  refused (2) before anything is packed; the fleet roster\'s generated body is the one exemption.',
+  '  refused (2) before anything is packed; the fleet roster\'s generated body is the one exemption. A pull request\'s',
+  `  issue_patch body may instead end with ${PR_BODY_TRAILER_SHAPE} on its last non-empty line: the target is then`,
+  '  read from the platform, a dry run included — an issue refused (2), an unread target refused (3).',
+  '  An advisory_read names ghsa_id alone: this process makes its one-time key pair, sends the public half, and opens',
+  '  the sealed answer with the private half, which never leaves memory. --reveal prints the opened text to stdout, and',
+  '  nothing else ever prints it; a public_key in the actions file is refused (2).',
   `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
   `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
@@ -2836,10 +3559,24 @@ export async function main(argv, deps = {}) {
   // packer or a dry run, so the refusal does not depend on the environment.
   const unsigned = unsignedEditBodies(actions);
   if (unsigned.length > 0) {
-    for (const row of unsigned) console.error(signatureRefusalText(row, { tool: 'fleet-write/dispatch', where: `action ${row.action} (${row.op})'s body` }));
+    for (const row of unsigned) console.error(editBodyRefusalText(row));
     console.error('fleet-write/dispatch: nothing was sent.');
     return EXIT_USAGE;
   }
+  // A read's one-time key pair, made HERE, in memory (header, "How the callers"): the public half goes in the action;
+  // the private half stays in `armed.keys` and dies with this process. A process re-executed through the proxy below
+  // makes its own; this one's is discarded with it.
+  const armed = armAdvisoryReads(actions);
+  if (armed.refused.length > 0) {
+    for (const line of armed.refused) console.error(line);
+    console.error('fleet-write/dispatch: nothing was sent.');
+    return EXIT_USAGE;
+  }
+  if (opts.reveal && armed.keys.size === 0) {
+    console.error("fleet-write/dispatch: --reveal prints an advisory_read's opened answer, and this stroke carries no advisory_read. Nothing was sent.");
+    return EXIT_USAGE;
+  }
+  actions = armed.actions;
   const session = opts.session ?? sessionFrom(env);
   if (!session || !SESSION_SHAPE.test(session)) {
     console.error(
@@ -2852,6 +3589,33 @@ export async function main(argv, deps = {}) {
     console.error(refusalText(packed.errors));
     console.error('fleet-write/dispatch: nothing was sent.');
     return EXIT_USAGE;
+  }
+  // A trailer-signed issue_patch body passes only on a pull request — READ from the platform, never judged from the
+  // body, and before the dry-run exit so a dry run refuses what the send would (header).
+  const candidates = pullRequestBodyCandidates(actions);
+  if (candidates.length > 0) {
+    const readToken = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+    if (!readToken) {
+      console.error(`fleet-write/dispatch: PREREQUISITE NOT MET — action ${candidates[0].action} (issue_patch)'s body is signed by its trailer, which passes only on a pull request, and with no GITHUB_TOKEN / GH_TOKEN in the environment the target cannot be read. Nothing was sent.`);
+      return EXIT_PREREQUISITE;
+    }
+    if (!deps.read) {
+      const rearmedForRead = rearmThroughProxy(argv);
+      if (rearmedForRead !== null) return rearmedForRead;
+    }
+    const targets = await readPullRequestTargets(candidates, { repo: opts.repo, token: readToken, ...(deps.read ?? {}) });
+    const issues = targets.filter((r) => r.verdict === 'issue');
+    const unread = targets.filter((r) => r.verdict === 'unread');
+    for (const r of targets) {
+      if (r.verdict === 'pull') console.error(`fleet-write/dispatch: action ${r.action} (issue_patch)'s body is signed by its trailer — ${r.why}.`);
+      else console.error(`fleet-write/dispatch: ${r.verdict === 'issue' ? 'REFUSED' : 'PREREQUISITE NOT MET'} — action ${r.action} (issue_patch)'s body opens with no signature line and is signed only by its trailer: ${r.why}.`);
+    }
+    if (issues.length > 0 || unread.length > 0) {
+      if (issues.length > 0) console.error(`  An issue body opens with the signature line: ${SEAT_SIGNATURE_SHAPE}.`);
+      if (unread.length > 0) console.error('  ⛔ An unread target is never a pass: re-run once the read answers, or sign the body on its first line.');
+      console.error('fleet-write/dispatch: nothing was sent.');
+      return issues.length > 0 ? EXIT_USAGE : EXIT_PREREQUISITE;
+    }
   }
   if (opts.dryRun) {
     console.error(`fleet-write/dispatch: DRY RUN — nothing sent. This is the request POST /repos/${RELAY_REPO}/dispatches would carry:`);
@@ -2868,7 +3632,9 @@ export async function main(argv, deps = {}) {
     if (rearmed !== null) return rearmed;
   }
   const tool = 'scripts/pm/fleet-write/dispatch.mjs';
-  const result = await sendFleetWrite(packed.payload, { token, ...(deps.send ?? {}) });
+  const result = await sendFleetWrite(packed.payload, { token, advisoryReadKeys: armed.keys, reveal: opts.reveal, ...(deps.send ?? {}) });
+  // ⛔ The opened text reaches THIS process's stdout, and only on --reveal — never stderr, a log, a file or --json.
+  if (opts.reveal) for (const r of result.reads ?? []) if (r.state === 'opened') console.log(r.plaintext);
   if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, tool));
   if (result.notStored) console.error(notStoredText(result, tool));
   if (result.state === 'unverified') console.error(unverifiedText(result, tool));
@@ -2883,6 +3649,9 @@ export async function main(argv, deps = {}) {
         dispatched_at: new Date(result.dispatchedAt).toISOString(),
         read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null, found_by: r.foundBy ?? null, assignees: r.assignees ?? null, assignees_missing: r.assigneesMissing ?? null })),
         annotations: (result.annotations?.rows ?? []).map((a) => ({ action: a.action, op: a.op, number: a.number, url: a.url })),
+        advisories: (result.annotations?.advisories ?? []).map((a) => ({ action: a.action, op: a.op, ghsa_id: a.ghsaId })),
+        // A read's outcome, its counts and field names alone — ⛔ never its text, which --reveal alone prints, above.
+        advisory_reads: (result.reads ?? []).map((r) => ({ action: r.action, op: r.op, state: r.state, bytes: r.bytes, fields: r.fields, parts: r.parts, why: r.why || null })),
         runs: (result.runs?.rows ?? []).map((r) => ({ action: r.action, op: r.op, workflow: r.workflow, verdict: r.verdict, class: r.cls, candidates: r.candidates ?? 0, run: r.run ? { id: r.run.id, url: r.run.url, status: r.run.status, conclusion: r.run.conclusion, created_at: r.run.created_at, actor: r.run.actor } : null })),
       }),
     );

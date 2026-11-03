@@ -631,9 +631,39 @@ describe('migrateCredential (#8155)', () => {
     const result = await h.service.migrateCredential('warehouse');
 
     expect(result.status).toBe('refused');
-    expect(result.reason).toContain('could not be resolved');
+    expect(result.reason).toBe(
+      "Datasource 'warehouse' already references a stored secret, but it could not be resolved or "
+        + 'decrypted (a missing `sys_secret` row, or a changed encryption key). Removing the inline '
+        + 'credential would leave this datasource with no working credential at all.',
+    );
+    expect(result.remedy).toContain('replaces the unresolvable reference');
     // The inline copy is the only working credential left — it stays.
     expect(h.store.get('warehouse')!.config?.password).toBe('hunter2');
+  });
+
+  it('refuses to drop the inline copy when the existing ref decrypts to an empty value, and says it is empty', async () => {
+    // A row sealed empty before the admin doors refused an empty `secret`
+    // resolves to ''. The outcome is the same refusal; the cause is named as
+    // an empty credential, in the connect path's wording, not blamed on a
+    // missing row or a changed key.
+    const h = makeHarness({
+      seed: [legacyRow({ external: { credentialsRef: 'sys_secret://sealed-empty' } })],
+      readBackOverride: async () => '',
+    });
+    const result = await h.service.migrateCredential('warehouse');
+
+    expect(result.status).toBe('refused');
+    expect(result.reason).toBe(
+      "Datasource 'warehouse' already references a stored secret, but credential "
+        + "'sys_secret://sealed-empty' is empty (its sys_secret row holds an empty value). Removing the "
+        + 'inline credential would leave this datasource with no working credential at all.',
+    );
+    expect(result.reason).not.toContain('could not be resolved');
+    expect(result.reason).not.toContain('encryption key');
+    expect(result.remedy).toContain("set the datasource's secret again");
+    // Same outcome as the missing-row branch: nothing written, inline copy kept.
+    expect(h.store.get('warehouse')!.config?.password).toBe('hunter2');
+    expect(h.ops).toEqual(['readSecret']);
   });
 
   it('refuses when the host has no readable secret store', async () => {

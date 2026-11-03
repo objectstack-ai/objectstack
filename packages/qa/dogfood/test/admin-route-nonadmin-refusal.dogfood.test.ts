@@ -272,6 +272,12 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { userId: targetUserId, managerId: null },
       note: 'the gate runs ahead of any body read, so the member 403 holds even on an empty body; the admin gets 200 from the idempotent clear',
     },
+    // ── ADR-0095 D3 — the platform-admin roster (a read; no body is read) ───
+    'POST /api/v1/auth/admin/list-platform-admins': {
+      bucket: 'objectstack-gate',
+      body: {},
+      note: 'a read: the gate runs first, then the handler confirms the caller\'s own standing; the admin gets 200 with the roster',
+    },
     // ── #9653: the /admin/sso/* bridges, gated ahead of their delegation ────
     //
     // The ADR-0068 gate runs BEFORE the bridge re-dispatches into better-auth,

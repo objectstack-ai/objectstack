@@ -204,10 +204,14 @@ describe('extractHookBody', () => {
   // object. Refusing here routes it through the SAME path as #1876: the
   // callable is still bundled and still runs in-process, only the unrunnable
   // body is declined.
-  it('refuses a handler referencing Intl, with the reason named (#14301)', () => {
+  //
+  // [#28898] The sandbox now provides `Intl.DateTimeFormat`, so the reported
+  // handler lowers (pinned below); the class is pinned on `Intl.NumberFormat`,
+  // a member the sandbox still lacks.
+  it('refuses a handler referencing an Intl member the sandbox lacks, with the reason named (#14301)', () => {
     const fn = (ctx: any) => {
-      const f = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC' });
-      ctx.input.due_label = f.format(new Date(ctx.input.due_at));
+      const f = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+      ctx.input.due_label = f.format(ctx.input.amount);
     };
     let err: any;
     try {
@@ -217,10 +221,10 @@ describe('extractHookBody', () => {
     }
     expect(err, 'the handler must be REFUSED, not lowered').toBeDefined();
     expect(err.kind).toBe('free-identifiers');
-    expect(err.freeIdentifiers).toEqual(['Intl']);
+    expect(err.freeIdentifiers).toEqual(['Intl.NumberFormat']);
     // The classification the refusing rule already had, carried beside the
     // prose rather than buried in it — `os lint` reads this, not the sentence.
-    expect(err.nodeOnlyIdentifiers).toEqual(['Intl']);
+    expect(err.nodeOnlyIdentifiers).toEqual(['Intl.NumberFormat']);
     // The reason NAMES the identifier and the remedy, and the remedy is not
     // the module-scope one: there is nothing to inline `Intl` from.
     expect(err.message).toContain('Intl');
@@ -228,6 +232,18 @@ describe('extractHookBody', () => {
     expect(err.message).toContain('string handler ref');
     expect(err.message).toContain('validation rule');
     expect(err.message).not.toContain('Module-scope helpers/imports');
+  });
+
+  // [#28898] The #14301 reproduction itself: the sandbox provides
+  // `Intl.DateTimeFormat` (host-backed, the whole constructor), so a handler
+  // formatting a date in a zone is self-contained and lowers.
+  it('extracts a handler using Intl.DateTimeFormat (#28898)', () => {
+    const fn = (ctx: any) => {
+      const f = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC' });
+      ctx.input.due_label = f.format(new Date(ctx.input.due_at));
+    };
+    const ext = extractHookBody(fn as any, "hook 'stamp_due_label'");
+    expect(ext.source).toContain('Intl.DateTimeFormat');
   });
 
   // The reverse leg: the sibling globals the sandbox DOES provide must still
@@ -278,8 +294,8 @@ describe('extractHookBody', () => {
     } catch (e) {
       err = e;
     }
-    expect(err.freeIdentifiers).toEqual(['Intl', 'moduleScopeHelper']);
-    expect(err.nodeOnlyIdentifiers).toEqual(['Intl']);
+    expect(err.freeIdentifiers).toEqual(['Intl.NumberFormat', 'moduleScopeHelper']);
+    expect(err.nodeOnlyIdentifiers).toEqual(['Intl.NumberFormat']);
     // Each half gets ITS remedy; neither is printed for the other.
     expect(err.message).toContain('not available in the hook sandbox');
     expect(err.message).toContain('module-scope helpers/imports');

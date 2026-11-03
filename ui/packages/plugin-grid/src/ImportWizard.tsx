@@ -360,9 +360,15 @@ export interface ImportWizardProps {
     label: string;
     type: string;
     required?: boolean;
+    /** The object schema's `defaultValue`, static or an expression, passed
+     *  through as declared. The wizard reads only whether one is declared
+     *  ({@link importFillsDefault}) and never evaluates it: the create fills
+     *  it, so a required field carrying one need not come from the file. */
+    defaultValue?: unknown;
     /** Allowed values for select/enum fields. Accepts option objects or bare
-     *  strings. */
-    options?: Array<{ label?: string; value?: string | number } | string>;
+     *  strings. An option marked `default: true` is the field's default when it
+     *  declares no `defaultValue`, as the create reads it. */
+    options?: Array<{ label?: string; value?: string | number; default?: boolean } | string>;
     /** The object schema's `multiple` flag: a `select` / `radio` / `lookup` /
      *  `user` / `file` / `image` field flagged `multiple: true` stores a list.
      *  "Match on" reads it, as the server does, to leave such a field out
@@ -622,6 +628,29 @@ function isMatchKeyField(field: Pick<ImportTargetField, 'type' | 'multiple'>): b
   return !isMultiValueField({ type: field.type, multiple: field.multiple === true });
 }
 
+/**
+ * Whether the create fills this field when a row leaves it out or blank. It
+ * asks what the engine's insert defaulting asks: a declared `defaultValue`
+ * (`null` and absent declare none; an expression counts, whatever it reads),
+ * else an option marked `default: true` that carries a value. Presence only:
+ * the value, and an expression's result, are the server's.
+ */
+function importFillsDefault(field: Pick<ImportTargetField, 'defaultValue' | 'options'>): boolean {
+  if (field.defaultValue != null) return true;
+  return (field.options ?? []).some(
+    (o) => typeof o === 'object' && o !== null && o.default === true && o.value != null,
+  );
+}
+
+/**
+ * Whether a create needs this field's value from the file: it is required and
+ * the create has no default to fill it with. The mapping step's missing-field
+ * check and the preview's blank-cell check both ask this.
+ */
+function importRequiresValue(field: ImportTargetField): boolean {
+  return field.required === true && !importFillsDefault(field);
+}
+
 /** The only comma a numeric cell may carry: a thousands grouping of its integer part. */
 const THOUSANDS_GROUPED_INTEGER = /^[+-]?\d{1,3}(?:,\d{3})+(?![\d,])[^,]*$/;
 
@@ -759,7 +788,7 @@ function checkImportCell(
   opts: CellCheckOptions,
 ): CellRefusal | undefined {
   const value = cell.trim();
-  if (value === '') return field.required && opts.requireValues ? { code: 'required' } : undefined;
+  if (value === '') return importRequiresValue(field) && opts.requireValues ? { code: 'required' } : undefined;
   const { type } = field;
   if (BOOLEAN_VALUE_TYPES.has(type)) {
     return BOOLEAN_IMPORT_TOKENS.has(value.toLowerCase()) ? undefined : { code: 'invalid_boolean', value };
@@ -883,6 +912,9 @@ function validateRow(row: string[], mappedCols: MappedCol[], rowIndex: number, k
       errors.push({ row: rowIndex, field: col.field.name, message: `Invalid ${col.field.type} value: "${refusal.value}"` });
       continue;
     }
+    // A blank cell of a defaulted field is left out, so the create fills the
+    // default, as the server import does; an empty string would be stored.
+    if (raw.trim() === '' && importFillsDefault(col.field)) continue;
     record[col.field.name] = raw;
   }
   return { record, errors };
@@ -1741,7 +1773,7 @@ const StepMapping: React.FC<{
                     <SelectItem value="__skip__">{t('grid.import.skip')}</SelectItem>
                     {fields.map((f) => (
                       <SelectItem key={f.name} value={f.name} disabled={usedFields.has(f.name) && mapping[idx] !== f.name}>
-                        {f.label}{f.required ? ' *' : ''}{f.matchOnly ? ` ${t('grid.import.matchOnlyField')}` : ''}
+                        {f.label}{importRequiresValue(f) ? ' *' : ''}{f.matchOnly ? ` ${t('grid.import.matchOnlyField')}` : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -2486,7 +2518,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
 
   const missingRequired = useMemo(() => {
     const mapped = new Set(Object.values(mapping));
-    return fields.filter((f) => f.required && !mapped.has(f.name));
+    return fields.filter((f) => importRequiresValue(f) && !mapped.has(f.name));
   }, [fields, mapping]);
   // objectui#12303 — the "Can't continue" hint's id, so the Next it disables
   // is described by it. A saved mapping lets the server own the columns, so

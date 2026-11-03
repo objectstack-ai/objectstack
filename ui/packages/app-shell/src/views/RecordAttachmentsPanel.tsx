@@ -519,6 +519,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
             <Button
               variant="outline"
               size="sm"
+              className="h-11 sm:h-9"
               disabled={uploading}
               onClick={() => inputRef.current?.click()}
             >

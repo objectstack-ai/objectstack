@@ -17,6 +17,17 @@
  *      the window and shows the server's words; a URL that is not http(s) is
  *      never navigated to.
  *   4. **disconnect** — only behind a confirmation; Cancel sends nothing.
+ *   5. **an installer-supplied OAuth client** (`clientSource: 'installer'`,
+ *      ADR-0143 D2.1's 2026-11-02 amendment) — Connect asks for the client
+ *      id and secret before any window opens or anything is sent, and the
+ *      begin carries `{ clientId, clientSecret }`; the secret input is empty on
+ *      every opening and the secret never reaches the page's DOM; the form
+ *      shows the redirect URI the status read answered, with a copy button,
+ *      and says there is none when the read answers none (nothing guessed);
+ *      a reconnect shows the stored client and keeps it by default with a
+ *      begin that has no body, and replacing it sends the new client; a
+ *      disconnect re-reads the status, so the next Connect still shows the
+ *      URI; no other instance shows the form.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -227,6 +238,8 @@ describe('disconnect', () => {
     answer('DELETE', door('hubspot'), { status: 200, body: envelope(state('hubspot')) });
     renderPage();
     await screen.findByTestId('connection-row-hubspot');
+    // The status read after the disconnect answers what the server now holds.
+    answer('GET', door('hubspot'), { status: 200, body: envelope(state('hubspot')) });
 
     fireEvent.click(within(row('hubspot')).getByRole('button', { name: 'Disconnect' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
@@ -248,5 +261,201 @@ describe('disconnect', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('nothing to revoke');
+  });
+});
+
+describe('an installer-supplied OAuth client', () => {
+  const SECRET = 'dummy-installer-secret-NEVER-RENDERED';
+  const installer = { name: 'docusign', label: 'DocuSign', provider: 'openapi', auth: { type: 'oauth2', grant: 'authorization_code', clientSource: 'installer' } };
+  const begun = envelope({ connector: 'docusign', organizationId: 'org_1', authorizationUrl: AUTH_URL, expiresAt: new Date(Date.now() + 600_000).toISOString() });
+  /** The server's derivation, deliberately on another origin than the page: the form shows it as answered. */
+  const REDIRECT = 'https://public.acme.example/api/v1/automation/connectors/oauth/callback';
+  const stored = {
+    status: 'reconnect_required' as const,
+    statusReason: 'the refresh token was refused',
+    connectedAt: '2026-10-30T08:00:00.000Z',
+    client: { source: 'installer' as const, clientId: 'installer-client-1', hasSecret: true },
+    redirectUri: REDIRECT,
+  };
+
+  beforeEach(() => {
+    answer('GET', META, { status: 200, body: { type: 'connector', items: [...declared, installer] } });
+    answer('GET', door('docusign'), { status: 200, body: envelope(state('docusign', { redirectUri: REDIRECT })) });
+  });
+
+  const form = () => screen.getByTestId('connector-client-form');
+  const secretInput = () => within(form()).getByLabelText('Client secret') as HTMLInputElement;
+  const idInput = () => within(form()).getByLabelText('Client ID') as HTMLInputElement;
+
+  it('Connect asks for the client before any window opens or anything is sent, and the begin carries it', async () => {
+    renderPage();
+    await screen.findByTestId('connection-row-docusign');
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Connect' }));
+
+    expect(await screen.findByTestId('connector-client-form')).toBeInTheDocument();
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(sent('POST', door('docusign'))).toHaveLength(0);
+    expect(idInput().value).toBe('');
+    expect(secretInput().value).toBe('');
+    expect(secretInput()).toHaveAttribute('type', 'password');
+    expect(secretInput()).toHaveAttribute('autocomplete', 'new-password');
+    expect(within(form()).getByRole('button', { name: 'Continue to sign-in' })).toBeDisabled();
+
+    answer('POST', door('docusign'), { status: 200, body: begun });
+    fireEvent.change(idInput(), { target: { value: ' installer-client-1 ' } });
+    fireEvent.change(secretInput(), { target: { value: SECRET } });
+    fireEvent.click(within(form()).getByRole('button', { name: 'Continue to sign-in' }));
+
+    await waitFor(() => expect(fakeWindow!.location.href).toBe(AUTH_URL));
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(fakeWindow!.opener).toBeNull();
+    const posts = sent('POST', door('docusign'));
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(posts[0].body as string)).toEqual({ clientId: 'installer-client-1', clientSecret: SECRET });
+    await waitFor(() => expect(screen.queryByTestId('connector-client-form')).toBeNull());
+    expect(document.body.innerHTML).not.toContain(SECRET);
+  });
+
+  it('a public client (no secret) sends only its id', async () => {
+    answer('POST', door('docusign'), { status: 200, body: begun });
+    renderPage();
+    await screen.findByTestId('connection-row-docusign');
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Connect' }));
+    fireEvent.change(idInput(), { target: { value: 'public-client' } });
+    fireEvent.click(within(form()).getByRole('button', { name: 'Continue to sign-in' }));
+    await waitFor(() => expect(sent('POST', door('docusign'))).toHaveLength(1));
+    expect(JSON.parse(sent('POST', door('docusign'))[0].body as string)).toEqual({ clientId: 'public-client' });
+  });
+
+  it('a refused begin keeps the form open with the server\'s words, and the secret is gone from it', async () => {
+    const refusal = "Connector instance 'docusign': `clientId` must be the client id the vendor issued, a non-empty text of at most 512 characters. Nothing was connected.";
+    answer('POST', door('docusign'), { status: 400, body: errorEnvelope('VALIDATION_ERROR', refusal) });
+    renderPage();
+    await screen.findByTestId('connection-row-docusign');
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Connect' }));
+    fireEvent.change(idInput(), { target: { value: 'installer-client-1' } });
+    fireEvent.change(secretInput(), { target: { value: SECRET } });
+    fireEvent.click(within(form()).getByRole('button', { name: 'Continue to sign-in' }));
+
+    expect(await within(form()).findByRole('alert')).toHaveTextContent('Nothing was connected.');
+    expect(fakeWindow!.close).toHaveBeenCalled();
+    expect(idInput().value).toBe('installer-client-1');
+    expect(secretInput().value).toBe('');
+    expect(document.body.innerHTML).not.toContain(SECRET);
+  });
+
+  it('a reconnect keeps the stored client by default: no client fields, and the begin sends no body', async () => {
+    answer('GET', door('docusign'), { status: 200, body: envelope(state('docusign', stored)) });
+    answer('POST', door('docusign'), { status: 200, body: begun });
+    renderPage();
+    expect(await screen.findByTestId('connection-client-docusign')).toHaveTextContent('OAuth client installer-client-1, secret stored');
+
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Reconnect' }));
+    const kept = await screen.findByTestId('connector-client-stored');
+    expect(kept).toHaveTextContent('Stored client: installer-client-1');
+    expect(kept).toHaveTextContent('A client secret is stored with it.');
+    expect(within(form()).queryByLabelText('Client ID')).toBeNull();
+    expect(within(form()).queryByLabelText('Client secret')).toBeNull();
+    expect(screen.getByTestId('connector-client-redirect-uri')).toHaveTextContent(REDIRECT);
+
+    fireEvent.click(within(form()).getByRole('button', { name: 'Continue to sign-in' }));
+    await waitFor(() => expect(fakeWindow!.location.href).toBe(AUTH_URL));
+    const posts = sent('POST', door('docusign'));
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toBeUndefined();
+  });
+
+  it('replacing the stored client shows the fields (id prefilled, secret empty) and sends the new client', async () => {
+    answer('GET', door('docusign'), { status: 200, body: envelope(state('docusign', stored)) });
+    answer('POST', door('docusign'), { status: 200, body: begun });
+    renderPage();
+    await screen.findByTestId('connection-client-docusign');
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Reconnect' }));
+    fireEvent.click(await within(form()).findByRole('button', { name: 'Replace the stored client' }));
+
+    expect(idInput().value).toBe('installer-client-1');
+    expect(secretInput().value).toBe('');
+    fireEvent.change(idInput(), { target: { value: 'installer-client-2' } });
+    fireEvent.change(secretInput(), { target: { value: SECRET } });
+    fireEvent.click(within(form()).getByRole('button', { name: 'Continue to sign-in' }));
+    await waitFor(() => expect(sent('POST', door('docusign'))).toHaveLength(1));
+    expect(JSON.parse(sent('POST', door('docusign'))[0].body as string)).toEqual({ clientId: 'installer-client-2', clientSecret: SECRET });
+    expect(document.body.innerHTML).not.toContain(SECRET);
+  });
+
+  it('shows the redirect URI exactly as the status read answered it, and Copy copies that value', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    renderPage();
+    await screen.findByTestId('connection-row-docusign');
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Connect' }));
+    expect(await screen.findByTestId('connector-client-redirect-uri')).toHaveTextContent(REDIRECT);
+    expect(screen.queryByTestId('connector-client-redirect-missing')).toBeNull();
+    fireEvent.click(within(form()).getByRole('button', { name: 'Copy' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(REDIRECT));
+    expect(await within(form()).findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+  });
+
+  it('a status read with no redirect URI says the deployment has none, and nothing is guessed', async () => {
+    answer('GET', door('docusign'), { status: 200, body: envelope(state('docusign')) });
+    renderPage();
+    await screen.findByTestId('connection-row-docusign');
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Connect' }));
+    expect(await screen.findByTestId('connector-client-redirect-missing')).toHaveTextContent('has no redirect URI');
+    expect(screen.queryByTestId('connector-client-redirect-uri')).toBeNull();
+    expect(within(form()).queryByRole('button', { name: 'Copy' })).toBeNull();
+    expect(form().textContent).not.toContain('/oauth/callback');
+    expect(form().textContent).not.toContain(window.location.origin);
+  });
+
+  it('a disconnect re-reads the status, so the next Connect still shows the redirect URI', async () => {
+    answer('GET', door('docusign'), { status: 200, body: envelope(state('docusign', stored)) });
+    // The revoke answer carries the status alone, never the redirect URI.
+    answer('DELETE', door('docusign'), { status: 200, body: envelope(state('docusign')) });
+    renderPage();
+    await screen.findByTestId('connection-client-docusign');
+    answer('GET', door('docusign'), { status: 200, body: envelope(state('docusign', { redirectUri: REDIRECT })) });
+    const readsBefore = sent('GET', door('docusign')).length;
+
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Disconnect' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }));
+    await waitFor(() => expect(within(row('docusign')).getByText('Not connected')).toBeInTheDocument());
+    expect(sent('GET', door('docusign')).length).toBe(readsBefore + 1);
+
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Connect' }));
+    expect(await screen.findByTestId('connector-client-redirect-uri')).toHaveTextContent(REDIRECT);
+    expect(screen.queryByTestId('connector-client-stored')).toBeNull();
+    expect(idInput().value).toBe('');
+  });
+
+  it('Cancel sends nothing, and the next opening starts with an empty secret', async () => {
+    renderPage();
+    await screen.findByTestId('connection-row-docusign');
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Connect' }));
+    fireEvent.change(secretInput(), { target: { value: SECRET } });
+    fireEvent.click(within(form()).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByTestId('connector-client-form')).toBeNull());
+    fireEvent.click(within(row('docusign')).getByRole('button', { name: 'Connect' }));
+    expect(secretInput().value).toBe('');
+    expect(sent('POST', door('docusign'))).toHaveLength(0);
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('no other instance shows the form: a declared or dynamically registered client connects at once, with no body', async () => {
+    answer('POST', door('notion'), { status: 200, body: envelope({ connector: 'notion', organizationId: 'org_1', authorizationUrl: AUTH_URL, expiresAt: new Date(Date.now() + 600_000).toISOString() }) });
+    renderPage();
+    await screen.findByTestId('connection-row-notion');
+    fireEvent.click(within(row('notion')).getByRole('button', { name: 'Connect' }));
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('connector-client-form')).toBeNull();
+    await waitFor(() => expect(sent('POST', door('notion'))).toHaveLength(1));
+    expect(sent('POST', door('notion'))[0].body).toBeUndefined();
+
+    fakeWindow!.closed = true;
+    await waitFor(() => expect(within(row('hubspot')).getByRole('button', { name: 'Reconnect' })).toBeEnabled());
+    fireEvent.click(within(row('hubspot')).getByRole('button', { name: 'Reconnect' }));
+    expect(screen.queryByTestId('connector-client-form')).toBeNull();
+    expect(screen.queryByTestId('connection-client-hubspot')).toBeNull();
   });
 });

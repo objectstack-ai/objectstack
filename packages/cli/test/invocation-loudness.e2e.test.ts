@@ -93,6 +93,7 @@ let linkDir: string;
 let barrel: Run;
 let barrelViaSymlink: Run;
 let unknownFlag: Run;
+let missingValue: Run;
 let version: Run;
 
 beforeAll(async () => {
@@ -101,11 +102,12 @@ beforeAll(async () => {
   const link = join(linkDir, 'index.ts');
   symlinkSync(BARREL, link);
 
-  // Sequential on purpose: four cold tsx starts, each loading every command
+  // Sequential on purpose: five cold tsx starts, each loading every command
   // module, in a container several agents share.
   barrel = await runTsx([BARREL], dir);
   barrelViaSymlink = await runTsx([link], dir);
   unknownFlag = await runTsx([CLI, 'dev', '--no-ui'], dir);
+  missingValue = await runTsx([CLI, 'dev', '-d'], dir);
   version = await runTsx([CLI, '--version'], dir);
 }, RUN_TIMEOUT_MS);
 
@@ -165,6 +167,26 @@ describe('[#10111] an unknown flag on `dev`', () => {
 
   it('keeps stdout empty', () => {
     expect(unknownFlag.stdout).toBe('');
+  });
+});
+
+describe('[#28931] a flag given without its value on `dev`', () => {
+  // oclif throws this one as a plain `CLIError` from inside its parser, not a
+  // `CLIParseError`, so it used to exit 2 with oclif's one line and no banner.
+  it('keeps exit 2 and oclif’s own line', () => {
+    expect(missingValue.code).toBe(2);
+    expect(missingValue.stderr).toContain('Error: Flag --database expects a value');
+  });
+
+  it('puts the INVOCATION ERROR line FIRST on stderr', () => {
+    const line = firstLine(missingValue.stderr);
+    expect(line).toContain('objectstack: INVOCATION ERROR — Flag --database expects a value');
+    expect(line).toContain('The command never ran');
+    expect(line).toContain('Invoked as: objectstack dev -d');
+  });
+
+  it('keeps stdout empty', () => {
+    expect(missingValue.stdout).toBe('');
   });
 });
 

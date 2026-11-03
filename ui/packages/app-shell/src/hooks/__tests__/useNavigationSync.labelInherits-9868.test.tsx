@@ -76,7 +76,9 @@ describe('objectui#9868 — the create sites write unnamed entries with NO label
       const { created } = useNavigationWrites();
       useEffect(() => {
         void (async () => {
-          await created('page', 'my_page', { name: 'my_page' });
+          // A page kind that renders without a record: a record page joins no
+          // app's navigation (objectstack#29182).
+          await created('page', 'my_page', { name: 'my_page', type: 'app' });
           await created('dashboard', 'my_dash', { name: 'my_dash', label: 'My Dashboard' });
         })();
         // Once, on mount: the two creates are the case.

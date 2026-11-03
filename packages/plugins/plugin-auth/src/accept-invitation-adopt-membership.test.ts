@@ -515,3 +515,81 @@ describe('#24750 — invite-member refuses an unknown role with the ADR-0112 cod
     expect(membersOf(engine, DEFAULT_ORG, colleague.userId)[0]!.role).toBe('member');
   });
 });
+
+describe('#29158 — invite-member refuses a blank role 400 ROLE_NOT_FOUND, like an unknown one', () => {
+  // better-auth's role check splits the role list and drops empty entries, so a
+  // blank role yields no unknown role and the vendor would store it verbatim
+  // (`sys_invitation.role = ''`); under a wall, accepting that invitation writes
+  // a membership with no organization role. The framework's
+  // `beforeCreateInvitation` refuses it before any row exists — and never
+  // defaults it to `member`.
+  beforeEach(() => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const BLANK_ROLES: ReadonlyArray<[string, unknown]> = [
+    ['an empty string', ''],
+    ['a whitespace-only string', '   '],
+    ['an empty entry at the end of a role list', 'member,'],
+    ['an empty entry at the start of a role list', ',admin'],
+    ['an empty entry in a role array', ['member', '']],
+    ['an empty role array', []],
+  ];
+
+  for (const [label, role] of BLANK_ROLES) {
+    it(`${label} is refused 400 ROLE_NOT_FOUND, the message says the role is empty, and no invitation row exists`, async () => {
+      const { engine, manager, owner } = await bootWithOwner();
+      const email = 'qa-blank-role@example.com';
+
+      const res = await post(
+        manager,
+        '/organization/invite-member',
+        { email, role, organizationId: DEFAULT_ORG },
+        owner.cookie,
+      );
+      const text = await res.clone().text();
+      expect(res.status, text).toBe(400);
+      const body: any = await res.json();
+      expect(body.code).toBe('ROLE_NOT_FOUND');
+      expect(body.message).toMatch(/^ROLE_NOT_FOUND: the invitation role is empty/);
+      expect(invitationsFor(engine, email)).toHaveLength(0);
+    });
+  }
+
+  it('a delegated admin\'s blank role answers ROLE_NOT_FOUND too — the blank refusal runs before the role cap', async () => {
+    const { engine, manager } = await bootWithOwner();
+    const delegate = await signUp(manager, engine, 'delegate.blank@example.com');
+    setRole(engine, DEFAULT_ORG, delegate.userId, 'delegated_admin');
+
+    const res = await post(
+      manager,
+      '/organization/invite-member',
+      { email: 'qa-delegate-blank@example.com', role: '', organizationId: DEFAULT_ORG },
+      delegate.cookie,
+    );
+    const text = await res.clone().text();
+    expect(res.status, text).toBe(400);
+    expect(((await res.json()) as any).code).toBe('ROLE_NOT_FOUND');
+    expect(invitationsFor(engine, 'qa-delegate-blank@example.com')).toHaveLength(0);
+  });
+
+  it('CONTROL: a named role is unchanged — the owner invites an admin, 200 and the role stored as sent', async () => {
+    const { engine, manager, owner } = await bootWithOwner();
+
+    const ok = await post(
+      manager,
+      '/organization/invite-member',
+      { email: 'qa-list@example.com', role: 'admin', organizationId: DEFAULT_ORG },
+      owner.cookie,
+    );
+    expect(ok.status, await ok.clone().text()).toBe(200);
+    const rows = invitationsFor(engine, 'qa-list@example.com');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.role).toBe('admin');
+  });
+});

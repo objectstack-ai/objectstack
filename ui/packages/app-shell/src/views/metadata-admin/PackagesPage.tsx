@@ -83,7 +83,7 @@ import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { refusedItemsText } from '../../preview/publishRefusal.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { duplicatePackage, isSpecPackageId } from '../studio-design/packages-io.js';
+import { duplicatePackage, forgetPackageListReads, isSpecPackageId } from '../studio-design/packages-io.js';
 import { PackageIdInput } from '../studio-design/PackageIdInput.js';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { getRuntimeConfig } from '../../runtime-config.js';
@@ -187,10 +187,17 @@ type UncheckedPackageRow = Omit<InstalledPackageRow, 'source' | 'writable'> & {
 const API = '/api/v1/packages';
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  // objectstack#29119 — every write this page sends (publish, revert, discard,
+  // delete, adopt, enable/disable, import) may change the package list, so the
+  // list reads from before it are forgotten however it ends, the session's
+  // held list the app → Studio entries read included.
+  const writes = (init?.method ?? 'GET').toUpperCase() !== 'GET';
   const res = await fetch(path, {
     credentials: 'include',
     headers: { Accept: 'application/json', ...(init?.headers || {}) },
     ...init,
+  }).finally(() => {
+    if (writes) forgetPackageListReads();
   });
   const text = await res.text();
   const payload = text ? JSON.parse(text) : null;

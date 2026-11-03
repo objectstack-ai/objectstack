@@ -639,6 +639,23 @@ export function useObjectLabel() {
     },
 
     /**
+     * Resolve the translated label of the dismiss button on the dialog an
+     * action opens before it runs — its confirm dialog or its param dialog —
+     * from its declared `cancelText` (`@objectstack/spec` `ActionSchema`), what
+     * dismissing keeps ("Keep invitation").
+     * Convention: `{ns}.objects.{objectName}._actions.{actionName}.cancelText`;
+     * with no key object, `{ns}.globalActions.{actionName}.cancelText`. Falls
+     * back to the metadata's literal string; undefined when nothing resolves,
+     * so the dialog keeps its default "Cancel".
+     */
+    actionCancelText: (objectName: string | undefined, actionName: string | undefined, fallback?: string) => {
+      const fb = fallback ?? '';
+      if (!actionName) return fb || undefined;
+      const resolved = resolve(actionSuffixes(objectName, actionName, 'cancelText'), fb);
+      return resolved || undefined;
+    },
+
+    /**
      * Resolve the translated reason a greyed action gives — its declared
      * `disabledReason` (objectstack#26619), shown while its `disabled`
      * predicate is TRUE. Convention:

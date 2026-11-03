@@ -288,8 +288,12 @@ export const ConnectorOAuth2GrantSchema = z.enum(['authorization_code', 'client_
   .describe('OAuth2 grant (RFC 6749): `authorization_code` (an administrator connects once; PKCE S256 always) or `client_credentials` (no user step).');
 export type ConnectorOAuth2Grant = z.input<typeof ConnectorOAuth2GrantSchema>;
 
-/** The `oauth2` instance keys both grants share (ADR-0143 D2.1). */
-function oauth2SharedShape() {
+/**
+ * The `oauth2` instance keys both grants share (ADR-0143 D2.1). `clientIdNote`
+ * is the grant's own sentence on where else a client may come from, so each
+ * grant's reference row says only what holds for it.
+ */
+function oauth2SharedShape(clientIdNote: string) {
   return {
     type: z.literal('oauth2'),
     tokenUrl: z.string().url().optional().describe(
@@ -299,9 +303,7 @@ function oauth2SharedShape() {
     resource: z.string().url().optional().describe(
       'Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience).',
     ),
-    clientId: z.string().min(1).optional().describe(
-      'OAuth2 client id (not a secret). Required (except `provider: \'mcp\'` over http, where the provider may register a client dynamically).',
-    ),
+    clientId: z.string().min(1).optional().describe(`OAuth2 client id of a pre-registered client (not a secret). ${clientIdNote}`),
   };
 }
 
@@ -321,6 +323,34 @@ const OAUTH2_GUIDANCE: Readonly<Record<string, string>> = {
  * connection record and refreshes per dispatch (ADR-0143 D3, D4). PKCE with
  * `S256` always, with no switch to turn it off. `credentialRef` (the client
  * secret) is optional: a public client has none.
+ *
+ * The OAuth client comes from one of three places (ADR-0143 D2.1, amended
+ * 2026-11-02):
+ *
+ *  - **The definition** — a pre-registered `clientId`, and the `credentialRef`
+ *    of its secret. Whoever publishes the package fixes the client, so the
+ *    vendor accepts it only on deployments whose callback that client's owner
+ *    registered: an app built by the organization that also deploys it (a
+ *    private app), or an MCP server without dynamic registration whose client
+ *    the same author registered.
+ *  - **The installer** — `clientSource: 'installer'`. The administrator of
+ *    each deployment registers their own client with the vendor, against that
+ *    deployment's callback, and enters its id and secret on the instance's
+ *    connection, where a dynamically registered client is kept too (D3). The
+ *    definition names no client: a `credentialRef` without its `clientId` is
+ *    refused below, and a `clientId` beside `clientSource` is refused by
+ *    `DeclarativeConnectorEntrySchema` with the other client-key rules. This
+ *    is the form for an app installed on deployments its publisher never sees.
+ *    The automation service's connect door takes the client from the
+ *    administrator and keeps it in the connection record.
+ *  - **Dynamic registration** — neither, on `provider: 'mcp'` over http: the
+ *    provider runs the MCP authorization flow and registers a client per
+ *    connection.
+ *
+ * A packaged `clientId` stays accepted. Refusing it would narrow what a
+ * private app may write today, and the schema cannot tell a private app from
+ * a listing; the rule that an open-edition listing ships no client of its
+ * publisher's belongs to the listing's review.
  */
 export const ConnectorInstanceOAuth2AuthorizationCodeAuthSchema = lazySchema(() => strictObject({
   surface: "this `oauth2` connector auth (`grant: 'authorization_code'`)",
@@ -329,16 +359,30 @@ export const ConnectorInstanceOAuth2AuthorizationCodeAuthSchema = lazySchema(() 
   // A different word for the same intent, out of reach of edit distance.
   aliases: { audience: 'resource' },
 }, {
-  ...oauth2SharedShape(),
+  ...oauth2SharedShape(
+    "Required, except where the client comes from elsewhere: `provider: 'mcp'` over http may register one dynamically, "
+      + "and with `clientSource: 'installer'` the administrator enters it on the connection, so it is not named here.",
+  ),
   grant: z.literal('authorization_code').describe('An administrator connects once; the platform refreshes the grant per dispatch.'),
   authorizationUrl: z.string().url().optional().describe(
     'Authorization endpoint. Required (except `provider: \'mcp\'` over http, which discovers it).',
   ),
+  clientSource: z.enum(['installer']).optional().describe(
+    "Where the OAuth client comes from. `'installer'`: the administrator of each deployment registers their own client "
+      + "with the vendor, against that deployment's callback, and enters its id and secret on the instance's connection, "
+      + "so the definition names no `clientId` and no `credentialRef`. Omit it to name a pre-registered `clientId` here, or "
+      + "to let `provider: 'mcp'` over http register a client. The connection keeps the client encrypted, and every "
+      + 'authorization, code exchange and refresh of that connection uses it (ADR-0143 D2.1).',
+  ),
   credentialRef: z.string().min(1).optional().describe(
-    'Secrets-layer reference resolved to the client secret of a pre-registered client (requires `clientId`). Omit for a public client. Never an inline secret.',
+    'Secrets-layer reference resolved to the client secret of a pre-registered client (requires `clientId`). Omit for a '
+      + "public client, and with `clientSource: 'installer'`, where the administrator enters the secret on the connection. "
+      + 'Never an inline secret.',
   ),
 }).refine(dependentRequired({ credentialRef: ['clientId'] }), {
-  message: 'A client secret belongs to a pre-registered client: declare its `clientId` beside `credentialRef`, or omit both on `provider: \'mcp\'` over http to let the provider register a client.',
+  message: 'A client secret belongs to a pre-registered client: declare its `clientId` beside `credentialRef`, or omit both, '
+    + "either on `provider: 'mcp'` over http to let the provider register a client, or with `clientSource: 'installer'`, "
+    + 'where the administrator enters the client and its secret on the connection.',
   path: ['credentialRef'],
 }));
 export type ConnectorInstanceOAuth2AuthorizationCodeAuth = z.input<typeof ConnectorInstanceOAuth2AuthorizationCodeAuthSchema>;
@@ -358,10 +402,16 @@ export const ConnectorInstanceOAuth2ClientCredentialsAuthSchema = lazySchema(() 
     authorizationUrl: "Not authorable on `grant: 'client_credentials'` — that grant has no authorization step; the client "
       + "exchanges its credentials at `tokenUrl` directly. Delete the key, or use `grant: 'authorization_code'` if an "
       + 'administrator should connect the instance.',
+    clientSource: "Not authorable on `grant: 'client_credentials'` — an installer-supplied client is entered on the "
+      + "instance's connection, and only an `authorization_code` instance keeps one. Here the client is `clientId` with "
+      + "the `credentialRef` naming its secret, which the installing administrator sets in the secrets layer. Delete the "
+      + "key, or use `grant: 'authorization_code'` if an administrator should connect the instance with their own client.",
   },
   aliases: { audience: 'resource' },
 }, {
-  ...oauth2SharedShape(),
+  ...oauth2SharedShape(
+    "Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically).",
+  ),
   grant: z.literal('client_credentials').describe('No user step: the client exchanges its own credentials for a token.'),
   credentialRef: z.string().min(1).optional().describe(
     'Secrets-layer reference resolved to the client secret; declared together with `clientId` (a `client_credentials` client is confidential). Never an inline secret.',
@@ -377,16 +427,18 @@ export type ConnectorInstanceOAuth2ClientCredentialsAuth = z.input<typeof Connec
  * RFC 6749 grant — {@link ConnectorOAuth2GrantSchema} is the closed list.
  *
  * Carries what the grant needs and no secret: the client secret is a
- * `credentialRef`; the access token, a refresh token and a dynamically
- * registered client are runtime state in the instance's connection record
- * (D3), obtained and refreshed per dispatch (D4).
+ * `credentialRef`; the access token, a refresh token, a dynamically
+ * registered client and an installer-supplied client (`clientSource:
+ * 'installer'`) are runtime state in the instance's connection record (D3),
+ * obtained and refreshed per dispatch (D4).
  *
  * Which endpoints and client keys are required depends on where the instance
  * points, so that rule lives on `DeclarativeConnectorEntrySchema`, which sees
  * the provider: `tokenUrl`, `clientId` and (for `authorization_code`)
  * `authorizationUrl` are required, except on `provider: 'mcp'` over an http
  * transport, where the provider discovers the endpoints and registers a client
- * through the MCP authorization flow.
+ * through the MCP authorization flow. An `authorization_code` instance that
+ * declares `clientSource: 'installer'` names no `clientId` on any provider.
  *
  * How a pre-registered client authenticates at the token endpoint
  * (`client_secret_basic` or `client_secret_post`) is not a key here: D2.1

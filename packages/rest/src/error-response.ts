@@ -37,7 +37,7 @@
  *                   decorate a SUCCESSFUL write (#3431). They travelled with the
  *                   block because they are the rest of "what this boundary puts
  *                   on the wire", and splitting them out would have created a
- *                   third module for two functions.
+ *                   third module for two functions (and the small reader beside them).
  *
  * Export surface: `mapDataError` is the only member this code has ever been
  * public in, and `rest-server.ts` re-exports it from here unchanged — the three
@@ -1157,21 +1157,42 @@ export function handleRouteError(res: any, error: any, object?: string): void {
  * nothing was dropped. The same events also ride the response body's
  * `droppedFields` (the structured/cross-origin-safe channel).
  */
-function droppedFieldsHeaderValue(events: DroppedFieldsEvent[] | undefined): string {
-    if (!events?.length) return '';
-    return events
-        .flatMap((e) => e.fields.map((f) => `${f};reason=${e.reason}`))
-        .join(', ');
+function droppedFieldsHeaderValue(events: readonly DroppedFieldsEvent[]): string {
+    // Each token once: a bulk answer's events repeat a field across rows (or
+    // ops), and the header cannot say which row dropped it, so it names the
+    // union. A single-record answer never repeats a token, so its value is
+    // what it always was.
+    const tokens = new Set<string>();
+    for (const e of events) {
+        if (!Array.isArray(e?.fields)) continue;
+        for (const f of e.fields) tokens.add(`${f};reason=${e.reason}`);
+    }
+    return [...tokens].join(', ');
+}
+
+/** The events of one `droppedFields` member, or none when it is absent or not a list. */
+function droppedFieldsOf(carrier: unknown): readonly DroppedFieldsEvent[] {
+    const events = (carrier as { droppedFields?: unknown } | null | undefined)?.droppedFields;
+    return Array.isArray(events) ? events as DroppedFieldsEvent[] : [];
 }
 
 /**
- * Set the `X-ObjectStack-Dropped-Fields` header from a data-write protocol
- * result, tolerating both the Hono-style `res.header(name, value)` used
- * elsewhere in this file and the node/Express-style `res.setHeader`. No-ops when
- * the result carried no drops (or the response object supports neither method).
+ * Set the `X-ObjectStack-Dropped-Fields` header from a data-write answer,
+ * tolerating both the Hono-style `res.header(name, value)` used elsewhere in
+ * this file and the node/Express-style `res.setHeader`. No-ops when nothing was
+ * dropped (or the response object supports neither method).
+ *
+ * Every 2xx REST write answer whose body carries `droppedFields` calls this,
+ * once, before it answers. `result` is the answer whose own `droppedFields`
+ * member is read: single create / update, clone, createMany (whose member is
+ * already the rows' union), the cross-object `/batch`. A door whose body reports
+ * per row (`results[i].droppedFields`: per-object batch, updateMany, import)
+ * passes those rows as `rows`, and the header names the union of their events,
+ * each token once; the body keeps the per-row report.
  */
-export function applyDroppedFieldsHeader(res: any, result: unknown): void {
-    const header = droppedFieldsHeaderValue((result as { droppedFields?: DroppedFieldsEvent[] } | null)?.droppedFields);
+export function applyDroppedFieldsHeader(res: any, result: unknown, rows?: readonly unknown[]): void {
+    const events = [...droppedFieldsOf(result), ...(Array.isArray(rows) ? rows.flatMap(droppedFieldsOf) : [])];
+    const header = droppedFieldsHeaderValue(events);
     if (!header) return;
     if (typeof res?.header === 'function') res.header('X-ObjectStack-Dropped-Fields', header);
     else if (typeof res?.setHeader === 'function') res.setHeader('X-ObjectStack-Dropped-Fields', header);

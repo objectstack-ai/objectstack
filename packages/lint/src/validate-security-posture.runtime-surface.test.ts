@@ -45,8 +45,8 @@
 //    (batch #203 item 3, letter B, 「203 同意」) REFUSED the other way out of
 //    that state: retiring `allowRuntimeCreate` on the two types would close
 //    Studio's own app designer, a shipped tenant capability, so the rules are
-//    made real on every door instead (`docs/NORTH-STAR.md` 〈优先级〉 4
-//    「声明了的…在运行时兑现」; ADR-0010). The snapshot did NOT grow to carry
+//    made real on every door instead (`docs/NORTH-STAR.md` 〈Priority〉 4,
+//    "declared … honoured at runtime"; ADR-0010). The snapshot did NOT grow to carry
 //    `positions` / `apps`: this rule resolves no references across
 //    collections, so mapping the two write types was the whole unblock.
 //
@@ -312,7 +312,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // other way out of that state — retiring `allowRuntimeCreate` on the two
     // types would close Studio's own app designer, a shipped tenant
     // capability — and ruled the rules real on every door instead
-    // (`docs/NORTH-STAR.md` 〈优先级〉 4 「声明了的…在运行时兑现」; ADR-0010).
+    // (`docs/NORTH-STAR.md` 〈Priority〉 4, "declared … honoured at runtime"; ADR-0010).
     //
     // So the premise the old pin rested on is gone, not relaxed: the only rule
     // that judges these two collections is `security-role-word`, and it now

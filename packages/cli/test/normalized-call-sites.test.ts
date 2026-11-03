@@ -140,6 +140,10 @@ const SITES: Readonly<Record<string, { reads: Reads; why: string }>> = {
     reads: 'packages',
     why: 'replays the conversion chain over the AUTHORED stack and over each `packages[i].manifest` body as a stack, reporting a body\'s edits under that body\'s own path, which `--write` traces to the `composeStacks` input that authored it. A folded union would report paths no source file holds. Measured on a two-package `preserve` app in `migrate-meta-composed.test.ts`.',
   },
+  'migrate/meta.ts :: readReplayedNothing(normalized': {
+    reads: 'packages',
+    why: 'the `--json` face of the empty-range answer (#28947). Its only stack read is the widest-range probe, which replays the chain through `applyMetaMigrationsToPackages` (row above), so a package body\'s edits are counted. The human run reads the same function off `report.normalized`.',
+  },
   'migrate/meta.ts :: planProtocolRange(normalized': {
     reads: 'top-level',
     why: 'reads the handshake range off `manifest`, where the load seam reads it (`AppPlugin`: `bundle.manifest || bundle`); a `preserve` artifact keeps `manifest` at the top level.',

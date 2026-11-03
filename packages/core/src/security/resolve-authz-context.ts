@@ -398,11 +398,23 @@ async function tryFind(
    * formulas named (none, for a list of stored columns).
    */
   fields?: readonly string[],
+  /**
+   * [#29281] The order to read in. Omitted asks for none — every read but the
+   * membership completion read ({@link readOrganizationMembersToCompletion}),
+   * which pages by id and so must say so rather than trust a driver's default.
+   */
+  orderBy?: ReadonlyArray<{ readonly field: string; readonly order: 'asc' | 'desc' }>,
 ): Promise<any[]> {
   if (!ql || typeof ql.find !== 'function') return [];
   try {
     const context = organizationId ? { isSystem: true, tenantId: organizationId } : { isSystem: true };
-    let rows = await ql.find(object, { where, limit, context, ...(fields ? { fields: [...fields] } : {}) } as any);
+    let rows = await ql.find(object, {
+      where,
+      limit,
+      context,
+      ...(fields ? { fields: [...fields] } : {}),
+      ...(orderBy ? { orderBy: orderBy.map((o) => ({ ...o })) } : {}),
+    } as any);
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
   } catch (err) {
@@ -927,6 +939,134 @@ function grantAppliesInTenant(organizationId: string | null, tenantId: string | 
  * grant row adds it here; the read returns nothing it does not name.
  */
 const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'valid_until'] as const;
+
+/**
+ * [#29281] The bound of the first leg's `sys_member` read for the active
+ * organization — the read the fellow-org peer list (`org_user_ids`, §5) is
+ * built from — and the signal that the list is not complete yet. A read that
+ * comes back UNDER it is the organization's whole membership. A read that
+ * comes back AT it is a first page, not a membership (the reading
+ * {@link countPositionHolders} gives its own reads), and
+ * {@link readOrganizationMembersToCompletion} reads the rest.
+ *
+ * It used to be the list: a read at the bound was taken as the membership, so
+ * in an organization of more than 1,000 members the members past the 1,000th
+ * `sys_member.id` were missing from `org_user_ids` with no signal, and every
+ * ordinary member's `sys_user` reads — a people picker's search, a read by id,
+ * a lookup label — lost them (the ids are random, so which members vanished was
+ * arbitrary and moved as members joined). Unchanged as a bound, so an
+ * organization under it issues byte-identically the one read it always did.
+ */
+const ORG_MEMBERS_FIRST_READ_ROWS = 1000;
+
+/**
+ * [#29281] The completion read's page and the columns it asks for: the cursor
+ * (`id`) and the one value §5 keeps (`user_id`) — a read naming no columns
+ * computes the object's formula fields for every row. 10,000 is the bound
+ * {@link countPositionHolders} already reads this object at. Measured on
+ * driver-sql over better-sqlite3 in process, median of three: 20,000 members
+ * took 3 reads / 44 ms at this page against 21 reads / 219 ms at the first
+ * read's 1,000 rows with every column; 40,000 took 5 reads / 100 ms.
+ */
+const ORG_MEMBERS_PAGE_ROWS = 10000;
+const ORG_MEMBER_PAGE_COLUMNS = ['id', 'user_id'] as const;
+const ORG_MEMBER_PAGE_ORDER = [{ field: 'id', order: 'asc' }] as const;
+
+/**
+ * [#29281] The organizations, per engine, whose membership this process has
+ * already said outgrew {@link ORG_MEMBERS_FIRST_READ_ROWS} — so
+ * {@link warnOrganizationMembersOutgrewFirstRead} speaks once per organization,
+ * not once per request. Keyed weakly by the engine, so it holds nothing past
+ * the engine's life.
+ */
+const membersOutgrewFirstReadSaid = new WeakMap<object, Set<string>>();
+
+/**
+ * [#29281] Say, once per organization and engine, that the active
+ * organization's membership outgrew the first read and was read to completion.
+ *
+ * `warn`, not `error`: nothing was lost — the list is complete, and every
+ * member is visible exactly as they would be under the bound. What the operator
+ * is told is the COST: every request in this organization reads its whole
+ * membership before it runs, and every `sys_user` read in it binds one
+ * parameter per member, so a SQL backend refuses that read outright once the
+ * membership passes the backend's bound-parameter limit (measured on
+ * better-sqlite3: 32,000 members served, 40,000 refused `too many SQL
+ * variables`). That refusal is the read's own loud failure, handed to the
+ * caller; this line is what lets an operator connect it to the organization's
+ * size.
+ *
+ * `console.warn` and not an injected logger, for the reason the API-key line
+ * gives: this resolver is kernel-agnostic and takes no host wiring.
+ */
+function warnOrganizationMembersOutgrewFirstRead(ql: unknown, organizationId: string, members: number, reads: number): void {
+  if (ql === null || typeof ql !== 'object') return;
+  let said = membersOutgrewFirstReadSaid.get(ql);
+  if (!said) membersOutgrewFirstReadSaid.set(ql, (said = new Set<string>()));
+  if (said.has(organizationId)) return;
+  said.add(organizationId);
+  console.warn(
+    `[security] Organization ${organizationId} has ${members} members, more than the `
+    + `${ORG_MEMBERS_FIRST_READ_ROWS} its first membership read returns: the fellow-org peer list `
+    + `(org_user_ids) that scopes sys_user reads was read to completion in ${reads} more read(s). `
+    + 'The list is complete, and every request in this organization pays that read; each sys_user read '
+    + 'in it binds one parameter per member, so a SQL backend refuses it once the membership passes the '
+    + "backend's bound-parameter limit. Said once per organization.",
+  );
+}
+
+/**
+ * [#29281] Every `sys_member` row of `organizationId`, read in pages of
+ * {@link ORG_MEMBERS_PAGE_ROWS} ordered by `id`, each page resuming after the
+ * last id the one before it returned (a keyset, so no row is skipped or read
+ * twice as a page boundary moves). Called only when the first leg's read came
+ * back at {@link ORG_MEMBERS_FIRST_READ_ROWS}; it starts over from the first
+ * id rather than after that read's last row, because that read asked for no
+ * order and its 1,000 rows need not be the 1,000 lowest ids.
+ *
+ * Loud, never short: a page that fails throws `tryFind`'s
+ * {@link AuthzStoreUnavailableError}, and a page that repeats a row an earlier
+ * page returned — a driver that did not honour the cursor — throws the same
+ * error rather than loop or answer a list it cannot vouch for. The id is
+ * required where it is used: every row of a FULL page carries one, because the
+ * next page must not repeat it and the last one is the cursor; a short page is
+ * the membership's tail, and nothing is read after it.
+ */
+async function readOrganizationMembersToCompletion(ql: any, organizationId: string): Promise<any[]> {
+  const members: any[] = [];
+  const seen = new Set<unknown>();
+  let after: unknown;
+  let reads = 0;
+  for (;;) {
+    const where = after === undefined
+      ? { organization_id: organizationId }
+      : { organization_id: organizationId, id: { $gt: after } };
+    const page = await tryFind(ql, 'sys_member', where, ORG_MEMBERS_PAGE_ROWS, undefined, ORG_MEMBER_PAGE_COLUMNS, ORG_MEMBER_PAGE_ORDER);
+    reads += 1;
+    const full = page.length >= ORG_MEMBERS_PAGE_ROWS;
+    for (const row of page) {
+      const id = row?.id;
+      const hasId = id !== undefined && id !== null && id !== '';
+      if ((hasId && seen.has(id)) || (!hasId && full)) {
+        throw new AuthzStoreUnavailableError('sys_member', new Error(
+          `The organization ${organizationId} membership read by id cannot continue past page ${reads}: `
+          + `${hasId ? `it returned the row ${String(id)} again, so the driver did not honour the cursor` : 'a row of a full page carries no id to resume after'}. `
+          + 'The membership cannot be read to completion.',
+        ));
+      }
+      if (hasId) seen.add(id);
+      members.push(row);
+    }
+    if (!full) break;
+    after = page[page.length - 1].id;
+  }
+  // A membership of exactly the bound filled the first read without outgrowing
+  // it: its list was already complete, and there is nothing to say.
+  if (members.length > ORG_MEMBERS_FIRST_READ_ROWS) {
+    warnOrganizationMembersOutgrewFirstRead(ql, organizationId, members.length, reads);
+  }
+  return members;
+}
 
 /**
  * [ADR-0131 D4] The permission set a stored `sys_user_permission_set` grant
@@ -1706,7 +1846,7 @@ export async function resolveUserAuthzGrants(
     needsUserRow ? getUserRow() : Promise.resolve(undefined),
     tryFind(ql, 'sys_member', { user_id: userId }, 200),
     tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
-    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, 1000) : Promise.resolve([] as any[]),
+    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, ORG_MEMBERS_FIRST_READ_ROWS) : Promise.resolve([] as any[]),
     tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100, undefined, GRANT_ROW_COLUMNS),
   ]);
 
@@ -1778,8 +1918,21 @@ export async function resolveUserAuthzGrants(
   }
 
   // 5. Fellow-org user IDs so RLS can scope identity tables to collaborators.
+  //    [#29281] EVERY member of the active organization: Leg 1's read is the
+  //    membership only when it came back under its bound; at the bound it is a
+  //    first page and the membership is read to completion here. Under the
+  //    bound nothing more is read.
+  //
+  //    The completion's rows are UNIONED with Leg 1's, never put in their
+  //    place: a completion that comes back with fewer members than Leg 1
+  //    already held (a snapshot older than Leg 1's on another connection) would
+  //    otherwise shorten the list below what the first read alone answered.
+  //    The union cannot add a non-member — both reads are filtered to the
+  //    active organization — so the list is never shorter than Leg 1's.
   if (tenantId) {
-    const orgMembers = orgMembersLeg; // (read in Leg 1 above)
+    const orgMembers = orgMembersLeg.length >= ORG_MEMBERS_FIRST_READ_ROWS
+      ? [...orgMembersLeg, ...await readOrganizationMembersToCompletion(ql, tenantId)]
+      : orgMembersLeg; // (read in Leg 1 above)
     const ids = new Set<string>(
       orgMembers
         .map((m) => m.user_id ?? m.userId)

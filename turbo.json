@@ -40,7 +40,8 @@
         "$TURBO_ROOT$/ui/scripts/test-shard-*",
         "$TURBO_ROOT$/ui/scripts/vite-*.ts",
         "$TURBO_ROOT$/ui/apps/console/vitest.config.ts",
-        "$TURBO_ROOT$/ui/apps/console/vite.config.ts"
+        "$TURBO_ROOT$/ui/apps/console/vite.config.ts",
+        "$TURBO_ROOT$/ui/packages/mobile/src/serviceWorkerSource.ts"
       ]
     },
     "test:repo": {
@@ -342,7 +343,9 @@
         "$TURBO_ROOT$/packages/rest/src/analytics-nested-relation-filter.test.ts",
         "$TURBO_ROOT$/packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts",
         "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts",
-        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts"
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts",
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts",
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-non-date-bucket.test.ts"
       ]
     },
     "@objectstack/lint#test": {
@@ -606,6 +609,7 @@
         "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-settings/src/settings-route-ledger.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/personal-view-route-ledger.ts",
         "$TURBO_ROOT$/packages/spec/src/automation/**",
         "$TURBO_ROOT$/packages/spec/src/data/**",
         "$TURBO_ROOT$/examples/app-showcase/**",
@@ -674,7 +678,8 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs"
+        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
       ]
     },
     "@objectstack/downstream-contract#test": {

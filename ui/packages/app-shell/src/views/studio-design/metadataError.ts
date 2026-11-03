@@ -1124,8 +1124,11 @@ export interface HeldListItem {
  * Each issue is placed on the item of the outermost list its path enters; an
  * issue on no list item, or on a list `skip` names by its first key, is not
  * this rule's. An item is held only when every issue placed on it names an
- * unset input directly below it; one issue on the item itself, or on an input
- * it gives a value, makes it finished but wrong.
+ * input left unset at some depth below it: directly (a filter's `field`), or
+ * inside an input it has begun to fill (a filter's `optionsFrom` given its
+ * `object` but not yet its `valueField`, objectstack#29006). The input named
+ * is the item's own, the row its form shows. One issue on the item itself, or
+ * on a value it gives that the spec refuses, makes it finished but wrong.
  */
 export function listItemHeldInput(
   body: SentBody,
@@ -1154,7 +1157,17 @@ export function listItemHeldInput(
     if (items.get(key) === null) continue;
     const item = (value as unknown[])[index];
     const input = path[at + 1];
-    if (input === undefined || !isSentBody(item) || !itemInputUnset(item[input])) {
+    // Walk down from the item until a value it leaves unset; a step through a text or number it gives meets none.
+    let below: unknown = item;
+    let unset = false;
+    for (const step of path.slice(at + 1)) {
+      if (Array.isArray(below) && /^\d+$/.test(step)) below = below[Number(step)];
+      else if (isSentBody(below)) below = below[step];
+      else break;
+      unset = itemInputUnset(below);
+      if (unset) break;
+    }
+    if (input === undefined || !isSentBody(item) || !unset) {
       items.set(key, null);
       continue;
     }
@@ -1261,15 +1274,45 @@ const REPORT_CHART_INPUT_KEYS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * objectstack#29022 — a report switched to Joined before its first block,
+ * held. The type picker sends `type: 'joined'` and clears the container's
+ * selection (objectui#10746), so the body carries no `blocks`, and
+ * `ReportSchema` refuses it at `blocks` itself ("a `joined` report needs
+ * `blocks`"): no item of the list exists for {@link listItemHeldInput} to
+ * hold. Held while the list is missing or empty and that is the spec's only
+ * refusal; an added block is then judged as a list item. Named by the report
+ * form's label for the list, which "Show me" focuses.
+ */
+function joinedReportHeld(draft: SentBody, locale: string): StudioHeld<MetadataSelection | null> | null {
+  if (draft.type !== 'joined') return null;
+  const blocks = draft.blocks;
+  if (blocks !== undefined && !(Array.isArray(blocks) && blocks.length === 0)) return null;
+  const parsed = ReportSchema.safeParse(draft);
+  // Only when that is all it refuses: any other issue is finished but wrong work, whose refusal stays on screen.
+  if (parsed.success || !parsed.error.issues.every((issue) => issue.path.length === 1 && issue.path[0] === 'blocks')) {
+    return null;
+  }
+  const rows = (getReportForm()?.sections ?? []).flatMap((section) =>
+    'fields' in section && Array.isArray(section.fields) ? section.fields : [],
+  );
+  const list = formRowLabel(formRowOf(rows, 'blocks'), 'blocks', locale);
+  return { clause: tFormat('engine.studio.held.reportJoinedNeedsBlock', locale, { list }), target: null, input: list };
+}
+
+/**
  * The edit the Interfaces pillar holds for `draft`, the report its leaf
  * autosave would send, or `null`: the first item of one of its list properties
  * `ReportSchema` refuses only for inputs it leaves unset, named by the report
- * form's labels; else its chart, refused only for unset inputs, named by the
- * chart panel's own label. Both are placed on the report's properties.
+ * form's labels; else a joined report with no block yet
+ * ({@link joinedReportHeld}); else its chart, refused only for unset inputs,
+ * named by the chart panel's own label. All are placed on the report's
+ * properties.
  */
 export function reportHeldEdit(draft: SentBody, locale: string): StudioHeld<MetadataSelection | null> | null {
   const item = listItemHeldInput(draft, ReportSchema);
   if (item) return heldListItem(item, getReportForm(), locale);
+  const joined = joinedReportHeld(draft, locale);
+  if (joined) return joined;
   const key = objectHeldInput(draft, ReportSchema, 'chart');
   if (key === null) return null;
   const labelKey = REPORT_CHART_INPUT_KEYS[key];

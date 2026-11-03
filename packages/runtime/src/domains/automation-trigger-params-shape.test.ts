@@ -46,7 +46,10 @@ const FLOW = 'showcase_notify_owner';
 function makeDispatcher() {
     const execute = vi.fn(async () => ({ success: true, output: {} }));
     const getFlow = vi.fn(async (name: string) => (name === FLOW ? { name } : null));
-    const services: Record<string, unknown> = { automation: { execute, getFlow } };
+    // The caller reads the launched row (`a record launch` below): a door that
+    // starts a flow on a record loads it in the caller's own scope first.
+    const protocol = { getData: async ({ object, id }: any) => ({ object, id, record: { id } }) };
+    const services: Record<string, unknown> = { automation: { execute, getFlow }, protocol };
     const resolve = (name: string) => services[name];
     const kernel: any = {
         getService: resolve,

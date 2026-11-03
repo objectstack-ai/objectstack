@@ -31,7 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
-import { SchemaRenderer, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -80,6 +80,9 @@ import {
   resolveAffordance,
   isDeadlineSettled,
   isActionSwitchedOff,
+  ActionRunner,
+  type ActionDef,
+  type ActionResult,
   type FilterNode,
 } from '@object-ui/core';
 import { useSafeFieldLabel } from '@object-ui/react';
@@ -408,6 +411,26 @@ type FieldReadPolicy = ReturnType<typeof usePermissions>;
  * so the field the card reads and the field the request carries cannot drift
  * apart. The value is `ObjectGallery`'s own default, so the cover is unchanged.
  */
+/**
+ * The action context a component reading `useAction()` gets when no
+ * `ActionProvider` is above it: a local runner, in the shape `useAction()`'s
+ * own fallback returns. The enlarged grid's routed context
+ * (`enlargedGridActions`) hands every dispatch that is not this list's row
+ * action to it, so the grid behaves under the routed context exactly as it
+ * would have without one.
+ */
+function localActionContext(runner: ActionRunner): React.ContextType<typeof ActionCtxReact> & object {
+  return {
+    execute: (action) => runner.execute(action),
+    executeChain: (actions, mode) => runner.executeChain(actions, mode),
+    loading: false,
+    error: null,
+    result: null,
+    runner,
+    updateContext: (ctx) => runner.updateContext(ctx),
+  };
+}
+
 const MOBILE_GALLERY_COVER_FIELD = 'image';
 
 /**
@@ -512,7 +535,7 @@ export const RelatedToolbarButton: React.FC<{
       variant={action.variant === 'primary' ? 'default' : 'outline'}
       size="sm"
       onClick={(e) => { e.stopPropagation(); void onToolbarAction(action); }}
-      className="gap-1 h-9 sm:h-7 text-xs shadow-none"
+      className="gap-1 h-11 sm:h-7 text-xs shadow-none"
       data-testid={`related-toolbar-action-${action.name}`}
     >
       {/* Dynamic icon resolution from Lucide, not component creation during render */}
@@ -577,17 +600,6 @@ const LOAD_FAILED_COPY: Record<LoadErrorKind, { title: [string, string]; message
 };
 
 /**
- * The server's sentence for a failed read, or `null` when the server did not
- * answer (a network failure carries no status, and its text is the browser's,
- * not the server's).
- */
-function serverSentence(err: unknown): string | null {
-  const e = err as { httpStatus?: unknown; status?: unknown; statusCode?: unknown } | null;
-  const answered = [e?.httpStatus, e?.status, e?.statusCode].some((s) => typeof s === 'number');
-  return answered ? extractWriteErrorMessage(err) : null;
-}
-
-/**
  * The one line a related list draws when its read FAILED (objectstack#26415),
  * in place of the "no related records" it used to draw. The refusal kinds say
  * the shared fixed sentence and never the server's text (a refused read does
@@ -607,11 +619,14 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
   const kind = classifyLoadError(error);
   const copy = LOAD_FAILED_COPY[kind];
   const refused = kind === 'forbidden';
+  // The server's own words when it answered — the rule the list page and the
+  // record page share (`answeredLoadFailure`, objectstack#29704).
+  const answer = copy.message ? null : answeredLoadFailure(error);
   const message =
     (refused ? null : declaredUserMessage(error))
     ?? (copy.message
       ? t(copy.message[0], { defaultValue: copy.message[1] })
-      : serverSentence(error)
+      : answer?.message
         ?? t('list.loadErrorMessage', { defaultValue: 'Something went wrong while loading this data. Check your connection and try again.' }));
   const Icon = kind === 'network' || kind === 'rejected' ? AlertTriangle : ShieldAlert;
   return (
@@ -627,11 +642,16 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
       <Icon className={cn('h-4 w-4 shrink-0', refused ? 'text-muted-foreground' : 'text-destructive/70')} aria-hidden />
       <span className="font-medium">{t(copy.title[0], { defaultValue: copy.title[1] })}</span>
       <span className="min-w-0 text-muted-foreground">{message}</span>
+      {answer?.code && (
+        <code data-testid="related-list-load-failed-code" className="rounded bg-muted px-1 font-mono text-xs text-muted-foreground">
+          {answer.code}
+        </code>
+      )}
       {kind !== 'api-disabled' && !refused && (
         <Button
           variant="outline"
           size="sm"
-          className="ml-auto h-7 gap-1 text-xs shadow-none"
+          className="ml-auto h-11 sm:h-7 gap-1 text-xs shadow-none"
           data-testid="related-list-load-failed-retry"
           onClick={(e) => { e.stopPropagation(); onRetry(); }}
         >
@@ -2728,28 +2748,45 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const viewSchema = React.useMemo(() => {
     if (schema) return schema;
 
+    // objectstack#28865 (#27524 item 9) — the ENLARGED tab is the child
+    // object's list face, on a desktop as on a phone (objectstack#28484): the
+    // list page's grid, `object-grid`, over the rows this list already read.
+    // The grid draws the row height and density, the name link, the row
+    // actions and (under 768 px) the phone list's card rows. Resolved through
+    // the registry: `plugin-grid` depends on this package, so it cannot be
+    // imported here.
+    //
+    // This list stays the source of truth for everything the rows came from.
+    // Its window, page and sort reach the grid on the grid's HOST channel
+    // (`enlargedGridHost`, the React props `plugin-list`'s `ListView` hands
+    // it), never as node keys; the filter box, the chips, 新建 and 导出 stay
+    // in this list's toolbar; its own pager stays the one pager, so the
+    // grid's is off.
+    if (enlargedFace && (type === 'grid' || type === 'table')) {
+      return {
+        type: 'object-grid',
+        objectName: api,
+        data: { provider: 'value', items: paginatedData },
+        columns: effectiveColumns
+          .map((c: any) => c.accessorKey || columnIdentity(c))
+          .filter(Boolean),
+        showSearch: false,
+        showPagination: false,
+        // The host's row actions (`list_item`, and `record_related` inside a
+        // parent record), already localized — the non-author host key the
+        // console's object page hands the same grid. A dispatch from them is
+        // routed back to `onRowAction` (`enlargedGridActions`).
+        ...(hasCustomRowActions && onRowAction ? { rowActionDefs: rowActions } : {}),
+        onRowClick: handleRowClick,
+      };
+    }
+
     // Mobile: render grid/table data as a card gallery — single-column,
     // tap-friendly, visually consistent with the standalone gallery view.
     // Reuses the registered `object-gallery` schema so we don't ship a
     // duplicate renderer. Falls back to the data-table on desktop and
     // when explicit `type='list'` is requested (legacy path).
     if (isMobile && (type === 'grid' || type === 'table')) {
-      // objectstack#28484 — the ENLARGED tab's phone cards are the phone
-      // list's card rows (`object-grid`'s card face: the name, one subtitle
-      // line, one status chip) at the body's full width, over the rows this
-      // list already read. Resolved through the registry: `plugin-grid`
-      // depends on this package, so it cannot be imported here.
-      if (enlargedFace) {
-        return {
-          type: 'object-grid',
-          objectName: api,
-          data: { provider: 'value', items: paginatedData },
-          columns: effectiveColumns
-            .map((c: any) => c.accessorKey || columnIdentity(c))
-            .filter(Boolean),
-          onRowClick: handleRowClick,
-        };
-      }
       const titleField = effectiveColumns[0]?.accessorKey || columnIdentity(effectiveColumns[0]);
       const visibleFields = effectiveColumns
         .slice(1, 4)
@@ -2826,6 +2863,80 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         return { type: 'div', children: 'No view configured' };
     }
   }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort]);
+
+  const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
+
+  /**
+   * objectstack#28865 — the enlarged face's grid, driven by this list on the
+   * grid's host channel: the React props `ObjectGrid` reads when a host owns
+   * the rows (`ObjectGridExternalPaginationProps`), the channel `plugin-list`'s
+   * `ListView` uses. Spread on `SchemaRenderer` as props, never node keys.
+   *
+   *  - `manualPagination` with this list's page and count: `data` IS the page
+   *    this list holds, so the grid neither slices nor re-pages it. The grid's
+   *    pager is off (`showPagination: false` on the node); this list's pager
+   *    answers a window whose total the server did not send (`hasMore`), which
+   *    a pager over a row count cannot.
+   *  - `sort` / `onSortChange` are this list's sort (objectui#3106), in BOTH
+   *    of its modes: windowed it is the server's `$orderby`; while the filter
+   *    box has text the list sorts its in-memory rows itself. Under a host
+   *    sort the grid offers no header sort on a relational column (the stored
+   *    value is an id, not the name the cell shows), in either mode.
+   *  - `objectFields`: the definition this list already read, so no column
+   *    paints withheld while the grid reads its own (objectui#10657).
+   *  - `onEdit` / `onDelete`: this list's row Edit and its confirm-then-delete.
+   */
+  const enlargedGridHost = React.useMemo(() => {
+    if (!enlargedGrid) return undefined;
+    const heldBefore = currentPage * (effectivePageSize || 0);
+    const rowCount = windowed
+      ? total ?? heldBefore + relatedData.length + (hasMore ? 1 : 0)
+      : sortedData.length;
+    return {
+      manualPagination: true,
+      rowCount,
+      page: currentPage + 1,
+      pageSize: Math.max(1, effectivePageSize || paginatedData.length),
+      onPageChange: (page: number) => setCurrentPage(Math.max(0, page - 1)),
+      sort: activeSort,
+      onSortChange: handleTableSort,
+      ...(objectSchema?.fields ? { objectFields: objectSchema.fields } : {}),
+      ...(onRowEdit ? { onEdit: onRowEdit } : {}),
+      ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
+    };
+  }, [enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow]);
+
+  /**
+   * objectstack#28865 — where a row action the enlarged grid dispatches goes.
+   *
+   * The grid runs a row action def through the surrounding action runner with
+   * the row under `params._rowRecord` and no object of its own: on the record
+   * page that runner's object is the PARENT's, and nothing tells this list to
+   * read its rows again afterwards. The host that handed this list its row
+   * actions also handed it `onRowAction`, which dispatches against the child
+   * object and its row and signals the child object changed — the path the
+   * row menu of the table this face drew before took. So a dispatch carrying
+   * one of THIS list's action defs and a row goes there; every other dispatch
+   * (a bulk action, anything the grid runs without a row) reaches the
+   * surrounding runner unchanged — or, with no `ActionProvider` above, the
+   * local runner the grid's own `useAction()` would have made.
+   */
+  const outerActions = React.useContext(ActionCtxReact);
+  const enlargedGridActions = React.useMemo(() => {
+    if (!enlargedGrid || !hasCustomRowActions || !onRowAction) return null;
+    const surrounding = outerActions ?? localActionContext(new ActionRunner());
+    const execute = async (action: ActionDef): Promise<ActionResult> => {
+      const params = action?.params as Record<string, unknown> | undefined;
+      const row = params?._rowRecord;
+      const def = row && typeof action?.name === 'string'
+        ? rowActions!.find((candidate) => candidate.name === action.name)
+        : undefined;
+      if (!def) return surrounding.execute(action);
+      await onRowAction(def, row);
+      return { success: true };
+    };
+    return { ...surrounding, execute };
+  }, [enlargedGrid, hasCustomRowActions, rowActions, onRowAction, outerActions]);
 
   const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
@@ -3024,7 +3135,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         aria-busy={pendingRows > 0 || undefined}
       >
         <div
-          className="group/panel-head relative flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
+          className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
           data-related-panel-head=""
         >
           {open ? (
@@ -3037,7 +3148,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             // lands on the header and the click never reaches the button.
             <button
               type="button"
-              className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex min-w-0 cursor-pointer items-center gap-1.5 self-stretch rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               style={{ transform: 'none' }}
               title={viewAll}
               data-related-panel-open=""
@@ -3072,7 +3183,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 w-6 p-0 text-muted-foreground"
+                className="h-11 w-11 p-0 sm:h-6 sm:w-6 text-muted-foreground"
                 disabled={newDisabled}
                 aria-label={t('detail.new')}
                 data-testid="related-list-new"
@@ -3085,7 +3196,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 w-6 p-0 text-muted-foreground"
+                className="h-11 w-11 p-0 sm:h-6 sm:w-6 text-muted-foreground"
                 disabled={addBusy}
                 aria-label={add.label || t('detail.add', { defaultValue: 'Add' })}
                 onClick={(e) => { e.stopPropagation(); setAddError(null); setPickerOpen(true); }}
@@ -3104,7 +3215,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           Array.from({ length: pendingRows }, (_, index) => (
             <div
               key={index}
-              className="flex h-8 items-center gap-2 border-t border-border px-3"
+              className="flex min-h-11 sm:h-8 sm:min-h-0 items-center gap-2 border-t border-border px-3"
               data-related-card-row-pending=""
             >
               <Skeleton className="h-3 w-2/3 rounded" />
@@ -3122,7 +3233,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             return (
               <div
                 key={row?.id ?? index}
-                className="flex h-8 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
+                className="flex min-h-11 sm:h-8 sm:min-h-0 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
                 data-related-card-row=""
               >
                 {/* objectstack#27604 — hovering the name (or Space on it)
@@ -3139,7 +3250,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                   {handleRowClick ? (
                     <button
                       type="button"
-                      className="min-w-0 truncate text-left text-primary hover:underline"
+                      className="min-h-11 min-w-0 truncate text-left text-primary hover:underline sm:min-h-0"
                       onClick={(e) => handleRowClick(row, e)}
                     >
                       {name}
@@ -3165,6 +3276,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // tab names the list, and its count is the 全部 chip's.
   if (enlargedFace) {
     const shownCount = filterActive ? filteredData.length : recordCount;
+    // objectstack#28865 — one count: while the 全部 chip is on and nothing
+    // narrows the rows, the chip already says how many there are, so the
+    // line under the toolbar does not say it again. A chip that narrows (我的,
+    // 逾期) or a filter text keeps the line's count, which is then a
+    // different number from the chip's.
+    const countOnChip = chips.length > 1 && enlargedChip === 'all' && !filterActive && allCount !== null && allCount === shownCount;
     const chipLabel: Record<EnlargedChip, string> = {
       all: t('detail.relatedChipAll', { defaultValue: 'All' }),
       mine: t('detail.relatedChipMine', { defaultValue: 'Mine' }),
@@ -3221,7 +3338,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               onChange={(e) => setFilterText(e.target.value)}
               placeholder={t('detail.relatedFilter', { title, defaultValue: 'Filter {{title}}…' })}
               aria-label={t('detail.relatedFilter', { title, defaultValue: 'Filter {{title}}…' })}
-              className="h-8 pl-8 text-sm"
+              className="h-11 sm:h-8 pl-8 text-sm"
               data-related-enlarged-filter=""
             />
           </div>
@@ -3236,7 +3353,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                     variant={on ? 'secondary' : 'ghost'}
                     size="sm"
                     aria-pressed={on}
-                    className="h-8 gap-1.5 px-2.5 text-xs shadow-none"
+                    className="h-11 sm:h-8 gap-1.5 px-2.5 text-xs shadow-none"
                     onClick={() => setEnlargedChip(chip.id)}
                     data-related-chip={chip.id}
                   >
@@ -3259,7 +3376,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 size="sm"
                 disabled={addBusy}
                 onClick={() => { setAddError(null); setPickerOpen(true); }}
-                className="h-8 gap-1 text-xs shadow-none"
+                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
@@ -3272,7 +3389,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 disabled={newDisabled}
                 data-testid="related-list-new"
                 onClick={() => onNew()}
-                className="h-8 gap-1 text-xs shadow-none"
+                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {t('detail.new')}
@@ -3284,7 +3401,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 size="sm"
                 disabled={exportState.busy}
                 onClick={handleExport}
-                className="h-8 gap-1 text-xs shadow-none"
+                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
                 data-related-enlarged-export=""
               >
                 <Download className="h-3.5 w-3.5" />
@@ -3308,19 +3425,29 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           </div>
         ) : (
           <>
-            <div className="text-xs text-muted-foreground" data-related-enlarged-status="">
-              {t('detail.relatedRows', { count: shownCount, defaultValue: '{{count}} rows' })}
-              {showPagination && ` · ${t('detail.pageOf', { current: currentPage + 1, total: totalPages })}`}
-            </div>
+            {(!countOnChip || showPagination) && (
+              <div className="text-xs text-muted-foreground" data-related-enlarged-status="">
+                {[
+                  countOnChip ? null : t('detail.relatedRows', { count: shownCount, defaultValue: '{{count}} rows' }),
+                  showPagination ? t('detail.pageOf', { current: currentPage + 1, total: totalPages }) : null,
+                ].filter(Boolean).join(' · ')}
+              </div>
+            )}
             <div className={cn('min-w-0', loading && 'pointer-events-none opacity-60 transition-opacity')}>
-              <SchemaRenderer schema={viewSchema} />
+              {enlargedGridActions ? (
+                <ActionCtxReact.Provider value={enlargedGridActions}>
+                  <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
+                </ActionCtxReact.Provider>
+              ) : (
+                <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
+              )}
             </div>
             {showPagination && (
               <div className="flex items-center justify-end gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1 text-xs"
+                  className="h-11 sm:h-7 gap-1 text-xs"
                   disabled={currentPage === 0}
                   onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
                 >
@@ -3330,7 +3457,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1 text-xs"
+                  className="h-11 sm:h-7 gap-1 text-xs"
                   disabled={!canGoNext}
                   onClick={() => setCurrentPage((p) => (canGoNext ? p + 1 : p))}
                 >
@@ -3422,7 +3549,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 size="sm"
                 disabled={addBusy}
                 onClick={(e) => { e.stopPropagation(); setAddError(null); setPickerOpen(true); }}
-                className="gap-1 h-9 sm:h-7 text-xs shadow-none"
+                className="gap-1 h-11 sm:h-7 text-xs shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
@@ -3432,7 +3559,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-9 w-9 p-0 sm:h-7 sm:w-7 text-muted-foreground"
+                className="h-11 w-11 p-0 sm:h-7 sm:w-7 text-muted-foreground"
                 aria-label={t('detail.relatedCardEnlarge', { defaultValue: 'Enlarge' })}
                 data-related-card-enlarge=""
                 onClick={(e) => { e.stopPropagation(); enlargeRelated(ownRelationshipId); }}
@@ -3451,7 +3578,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 disabled={newDisabled}
                 data-testid="related-list-new"
                 onClick={(e) => { e.stopPropagation(); onNew(); }}
-                className="gap-1 h-9 sm:h-7 text-xs shadow-none"
+                className="gap-1 h-11 sm:h-7 text-xs shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {t('detail.new')}
@@ -3473,7 +3600,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               placeholder={t('detail.filterPlaceholder')}
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              className="h-8 text-sm"
+              className="h-11 sm:h-8 text-sm"
             />
           </div>
         )}
@@ -3517,7 +3644,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                   key={field}
                   variant={isActive ? 'secondary' : 'ghost'}
                   size="sm"
-                  className="gap-1 h-7 text-xs"
+                  className="gap-1 h-11 sm:h-7 text-xs"
                   onClick={() => handleSort(field)}
                 >
                   <ArrowUpDown className="h-3 w-3" />
@@ -3549,7 +3676,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs gap-1"
+              className="h-11 sm:h-7 text-xs gap-1"
               disabled={currentPage === 0}
               onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
             >
@@ -3562,7 +3689,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs gap-1"
+              className="h-11 sm:h-7 text-xs gap-1"
               disabled={!canGoNext}
               onClick={() => setCurrentPage((p) => (canGoNext ? p + 1 : p))}
             >
@@ -3585,7 +3712,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onViewAll(); }}
-              className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1 transition-colors sm:min-h-0"
             >
               {t('detail.viewAll')}
               <ExternalLink className="h-3 w-3" />

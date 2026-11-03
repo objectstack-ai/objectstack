@@ -331,3 +331,75 @@ describe('#8671 — anti-vacuity: ablate the redactor', () => {
         expect(label.to).toBe('B');
     });
 });
+
+describe('the connector history diff withholds root keys the entry shape does not declare', () => {
+    const ROOT_V1 = 'TEST_PLACEHOLDER_ROOT_KEY_V1';
+    const ROOT_V2 = 'TEST_PLACEHOLDER_ROOT_KEY_V2';
+    const connector = (label: string, extra: Record<string, unknown>) => ({
+        name: 'vendor_api',
+        label,
+        type: 'api',
+        provider: 'rest',
+        providerConfig: { baseUrl: 'https://api.vendor.example/v1' },
+        auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' },
+        ...extra,
+    });
+    const BUILTIN_CONNECTOR_REDACTOR = getMetadataTypeRedactor('connector')!;
+    afterEach(() => registerMetadataTypeRedactor('connector', BUILTIN_CONNECTOR_REDACTOR));
+
+    async function connectorDiff(from: number, to: number) {
+        const { engine, tables } = makeStubEngine();
+        const base = { organization_id: null, type: 'connector', name: 'vendor_api' };
+        const bodies = [
+            connector('Vendor', {}),
+            connector('Vendor', { apiKey: ROOT_V1 }),
+            connector('Vendor API', { apiKey: ROOT_V2 }),
+        ];
+        bodies.forEach((body, i) => {
+            tables.sys_metadata_history!.push({
+                ...base,
+                id: `h_${i + 1}`,
+                version: i + 1,
+                event_seq: i + 1,
+                operation_type: i === 0 ? 'create' : 'update',
+                metadata: JSON.stringify(body),
+                checksum: hashSpec(body),
+                recorded_at: new Date(i + 1).toISOString(),
+            });
+        });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        return await protocol.diffMetaItem({ type: 'connector', name: 'vendor_api', fromVersion: from, toVersion: to }) as any;
+    }
+
+    const holdsRootValue = (payload: unknown) =>
+        allStrings(payload).some((s) => s.includes(ROOT_V1) || s.includes(ROOT_V2));
+
+    it('withholds undeclared root keys on read: the history diff, all three buckets', async () => {
+        const changed = await connectorDiff(2, 3);
+        const rotated = entry(changed.changed, 'apiKey') as any;
+        // The change is still reported; neither value is served.
+        expect(rotated).toBeDefined();
+        expect(rotated.from).toBeUndefined();
+        expect(rotated.to).toBeUndefined();
+        expect((entry(changed.changed, 'label') as any).to).toBe('Vendor API');
+        expect(holdsRootValue(changed)).toBe(false);
+
+        const added = await connectorDiff(1, 2);
+        expect(entry(added.added, 'apiKey')).toBeDefined();
+        expect((entry(added.added, 'apiKey') as any).value).toBeUndefined();
+        expect(holdsRootValue(added)).toBe(false);
+
+        const removed = await connectorDiff(2, 1);
+        expect(entry(removed.removed, 'apiKey')).toBeDefined();
+        expect((entry(removed.removed, 'apiKey') as any).value).toBeUndefined();
+        expect(holdsRootValue(removed)).toBe(false);
+    });
+
+    it('ABLATION — with an identity `connector` redactor the diff serves the values again', async () => {
+        registerMetadataTypeRedactor('connector', (item) => ({ item, redactedKeys: [] }));
+        const res = await connectorDiff(2, 3);
+        const rotated = entry(res.changed, 'apiKey') as any;
+        expect(rotated.from).toBe(ROOT_V1);
+        expect(rotated.to).toBe(ROOT_V2);
+    });
+});

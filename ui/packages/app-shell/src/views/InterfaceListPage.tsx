@@ -14,8 +14,9 @@
  *   • end users get exactly the `userFilters` the author enabled;
  *   • the visualization comes from `appearance.allowedVisualizations`
  *     (a single entry renders no switcher);
- *   • `userActions` toggles map onto the toolbar — advanced filtering and
- *     view management are absent by default.
+ *   • `userActions` toggles map onto the toolbar with the published defaults
+ *     of `UserActionsConfigSchema` — an author withholds a control by
+ *     writing `false` for it.
  *
  * Every member `ListView` reads is either relayed by the `schema` memo below
  * or answered as deliberately not relayed, with its reason, in
@@ -576,17 +577,26 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       // off here and hardcoded on in ObjectDataPage: two surfaces, two opposite
       // policies, neither author-controllable. They are author-controllable now.
       //
-      // Interface mode stays closed BY DEFAULT — the advanced filter builder,
-      // density and the view-management tools are present only when the author
-      // opted in — but "closed by default" is expressed as a default here, not
-      // as an unreachable constant.
+      // Each toggle reads the published default of `UserActionsConfigSchema`,
+      // the one schema a page's `interfaceConfig.userActions` and a list
+      // view's `userActions` share: search, sort, filter, rowHeight, group and
+      // hideFields are on unless the author writes `false`; rowColor is off
+      // unless the author writes `true`. A page with no `userActions` block, a
+      // stored page that was never parsed, and a parsed block that omits a key
+      // therefore draw the same toolbar. Reading the on-by-default four as
+      // `=== true` drew a control only after a parse had materialised the
+      // default, so the same page opened with a different toolbar depending
+      // on how it reached the console. A curated page keeps a control closed
+      // by writing `false` for it. ADR-0047 as amended 2026-11-02: the rest of
+      // interface mode (quick filters, the visualization lock, user-created
+      // views, export) stays closed.
       userActions: {
         search: userActions.search !== false,
         sort: userActions.sort !== false,
-        filter: userActions.filter === true,
-        rowHeight: userActions.rowHeight === true,
-        group: userActions.group === true,
-        hideFields: userActions.hideFields === true,
+        filter: userActions.filter !== false,
+        rowHeight: userActions.rowHeight !== false,
+        group: userActions.group !== false,
+        hideFields: userActions.hideFields !== false,
         rowColor: userActions.rowColor === true,
       },
       allowExport: false,

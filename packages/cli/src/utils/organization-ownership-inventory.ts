@@ -353,6 +353,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_metadata_activation', census: P1, fate: 'column-drop', citation: `${D7}, D6, D14 (C0): the tenant-less activation ledger` },
   { object: 'sys_presence', census: P1, fate: 'column-drop', citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}` },
   {
+    object: 'sys_user_device',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: tenancy.enabled: false and no organization_id field; ${D7}: a push device belongs to its user, ` +
+      'never to an organization (spec UserDeviceSchema, rule a)',
+  },
+  {
     object: 'sys_platform_setting',
     census: PMAIN,
     fate: 'column-drop',
@@ -795,6 +803,10 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   // Exchange rates (`@objectstack/platform-objects`, #27185): an organization's
   // administrators author its own rate table; no parent row anchors a rate.
   { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // A reader's own named list views (`@objectstack/platform-objects`, ruling
+  // 6570568131 on #28971): user data on the preference template, each row in
+  // its owner's organization; no parent row anchors a view.
+  { object: 'sys_personal_view', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_import_job', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_user_preference', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
 

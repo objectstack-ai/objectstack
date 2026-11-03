@@ -571,6 +571,11 @@ the server resolves your declaration by name and derives the handler key from
 it. Rename the underlying function freely; as long as the declaration's
 `target` follows, the public URL is unchanged.
 
+A body `recordId` names one record by its id, a string or a number. Any other
+value is refused `400 VALIDATION_FAILED` naming `recordId`, before the declared
+param contract, the record load and dispatch, for every action type. An absent,
+`null` or empty `recordId` is the record-less call.
+
 Failures speak HTTP — the status code is the signal (#3962):
 
 - **400** — the action ran and **rejected** (a business rule said no, or

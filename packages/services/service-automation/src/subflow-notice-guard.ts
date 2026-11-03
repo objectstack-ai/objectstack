@@ -19,9 +19,12 @@
  * is repeated here rather than exported from `@objectstack/spec`, which keeps
  * no internal entry: the order prefers that to a new public helper.
  *
- * Only top-level `subflow` / `map` nodes are read, the ones
- * {@link AutomationEngine.subflowTargets} answers, so the gate and the
- * re-judge read the same calls.
+ * Only top-level `subflow` / `map` nodes are read, here and in a child: a
+ * call inside a region body cannot suspend the run, because a region cannot
+ * carry a durable pause and the run fails at its boundary instead (#28846).
+ * The re-judge finds its callers through
+ * {@link AutomationEngine.subflowTargets}, which reads every region depth, so
+ * it re-asks a superset of the flows this reading can move.
  */
 
 import { FLOW_PAUSE_CAPABLE_NODE_TYPES, collectFlowGraphs } from '@objectstack/spec/automation';
@@ -189,20 +192,30 @@ export function transitiveSubflowCallers(
 }
 
 /**
+ * Where `child` suspends, as the arming gate's sentences name it: the pausing
+ * node, and the flow that holds it with the calls that reach it when that is
+ * not `child` itself. Shared by the save-notice half and the region half
+ * (#28897), so the two never name the same pause differently.
+ */
+export function describeSuspendingNode(child: string, suspends: SuspendingNode): string {
+    const where = suspends.flow === child
+        ? ''
+        : ` of '${suspends.flow}'${suspends.through.length > 2
+            ? `, which it reaches through ${suspends.through.slice(1, -1).map((f) => `'${f}'`).join(', ')}`
+            : ''}`;
+    return `\`${suspends.type}\` node '${suspends.id}'${where}`;
+}
+
+/**
  * The sentence the warn and the `/_status` reason share, in the #28806 shape:
  * the notice, the call node, where the child suspends, and the two moves that
  * make the flow armable.
  */
 export function describeSubflowNoticeTrap(trap: SubflowNoticeTrap): string {
     const { noticeId, callNode, child, suspends } = trap;
-    const where = suspends.flow === child
-        ? ''
-        : ` of '${suspends.flow}'${suspends.through.length > 2
-            ? `, which it reaches through ${suspends.through.slice(1, -1).map((f) => `'${f}'`).join(', ')}`
-            : ''}`;
     return (
         `its \`save_notice\` node '${noticeId}' is reached after \`${callNode.type}\` node '${callNode.id}', whose ` +
-        `child flow '${child}' can suspend the run at \`${suspends.type}\` node '${suspends.id}'${where}. A suspended ` +
+        `child flow '${child}' can suspend the run at ${describeSuspendingNode(child, suspends)}. A suspended ` +
         `run resumes after the write has already answered, so on that path the node is refused by name at run time, ` +
         `and after an approval the decision cannot finish its run. Move the \`save_notice\` ahead of ` +
         `'${callNode.id}', or tell the person after it with a \`notify\` node`

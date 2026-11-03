@@ -111,7 +111,12 @@ export interface RestRouteLedgerEntry {
    * routes rather than measuring a gate. Deriving the answer from source
    * syntax instead was measured and rejected: scanning all 80 registration
    * sites in `rest-server.ts` for `enforceAuth` — TWO spellings, 72 direct
-   * `this.routeManager.register(` sites plus 8 `registerPerItemRoute(` calls
+   * `this.routeManager.register(` sites plus 8 `registerPerItemRoute(` calls (9 today, measured
+   * on #29035: 1 bundle + 2 writes + 6 history, now living in
+   * `meta-app-bundle-routes.ts`, `meta-item-write-routes.ts` and
+   * `meta-item-history-routes.ts`; `rest-server.ts` holds only the helper's
+   * definition. The 80/51/29 reading below is the original measurement and
+   * was not re-taken)
    * through the per-item family's switch-carrying helper — reads 51 gated / 29
    * ungated, and 22 of those 29 are FALSE: a wrapping `guardedRouteManager`
    * gates 19 of them with no `enforceAuth` at the call site, and one registrar
@@ -230,7 +235,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // [#27627] The app metadata bundle — see meta-app-bundle-routes.ts.
   { route: 'GET /api/v1/meta/app/:appId/bundle', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getAppBundle',
     responseSchema: 'AppMetadataBundleResponseSchema',
-    note: 'The app metadata bundle: the app and the objects, views, pages and dashboards its navigation reaches (objects: navigation, then one hop of inbound relationships), each member the item chain\'s answer of its own GET /meta/:type/:name as the same caller (createMetaItemAnswer, the uncached arm\'s fetch), a refused member absent, a refused app the whole answer. Answers BARE, so the named schema is the whole body; per-caller weak ETag over the served body (the /meta reads\' shared validator), private, no-cache, 304 on If-None-Match. meta-app-bundle-routes.test.ts parses the body against the named schema on the mount' },
+    note: 'The app metadata bundle: the app and the objects, views, pages and dashboards its navigation reaches (objects: navigation plus one hop of inbound relationships, in object-list order), each member the item chain\'s answer of its own GET /meta/:type/:name as the same caller (createMetaItemAnswer, the uncached arm\'s fetch), a refused member absent, a refused app the whole answer. Answers BARE, so the named schema is the whole body; per-caller weak ETag over the served body (the /meta reads\' shared validator), private, no-cache, 304 on If-None-Match. meta-app-bundle-routes.test.ts parses the body against the named schema on the mount' },
   // [#5882] The three-layer diagnostic projection, promoted from the
   // `?layers=true` flag on the row below to a path of its own so that one path
   // answers one response shape. `responseSchema` is filled because this mount

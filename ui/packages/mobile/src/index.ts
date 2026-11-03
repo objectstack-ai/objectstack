@@ -15,6 +15,7 @@
  * - PWA utilities (manifest generation, service worker registration)
  * - Mobile-aware component wrappers
  * - Pull-to-refresh and infinite scroll support
+ * - Native shell mode: `useNativeHost` and typed `window.ObjectStackNative` calls
  * 
  * @packageDocumentation
  */
@@ -35,7 +36,7 @@ export { usePullToRefresh, type PullToRefreshOptions } from './usePullToRefresh.
 export { MobileProvider, type MobileProviderProps } from './MobileProvider.js';
 export { ResponsiveContainer, type ResponsiveContainerProps } from './ResponsiveContainer.js';
 export { generatePWAManifest } from './pwa.js';
-export { registerServiceWorker, type ServiceWorkerConfig } from './serviceWorker.js';
+export { registerServiceWorker, cacheLoadedResources, type ServiceWorkerConfig } from './serviceWorker.js';
 export {
   createOfflineQueue,
   IndexedDbOfflineQueue,
@@ -52,9 +53,41 @@ export {
 } from './createOfflineDataSource.js';
 export {
   getServiceWorkerSource,
+  SERVICE_WORKER_CACHE_URLS_MESSAGE,
   type ServiceWorkerSourceOptions,
+  type ServiceWorkerStrategy,
 } from './serviceWorkerSource.js';
 export { BREAKPOINTS } from './breakpoints.js';
+export {
+  useNativeHost,
+  useNativeHostRouting,
+  type UseNativeHostRoutingOptions,
+} from './useNativeHost.js';
+export {
+  NATIVE_HOST_GLOBAL,
+  NATIVE_NAVIGATE_EVENT,
+  NATIVE_CONNECTION_REMOVED_EVENT,
+  getNativeHost,
+  isInAppRoute,
+  nativeGetPushToken,
+  nativeHaptic,
+  nativeOpenExternal,
+  nativeNavigate,
+  nativeResetServer,
+  nativeScan,
+  nativeShowConnectionSwitcher,
+  nativeHostCan,
+  postNativeReady,
+  postNativeRouteChanged,
+  type ObjectStackNative,
+  type NativeCallResult,
+  type NativeConnectionRemovedEvent,
+  type NativeHapticKind,
+  type NativeHostMethod,
+  type NativePushToken,
+  type NativeSafeArea,
+  type NativeScanOptions,
+} from './nativeHost.js';
 
 // Re-export types for convenience
 export type {

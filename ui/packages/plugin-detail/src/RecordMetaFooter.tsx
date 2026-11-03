@@ -16,6 +16,7 @@ import { useDisplayLocale } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { hasCellValue } from './emptiness';
 import { useDefaultRecordPage } from './defaultRecordPage';
+import { deriveHighlightFields } from './synth/buildDefaultPageSchema';
 
 /**
  * The record's reassignable owner column — the canonical injected
@@ -37,6 +38,14 @@ export interface RecordMetaFooterProps {
   objectSchema?: any;
   /** Object name for future i18n hooks (currently unused). */
   objectName?: string;
+  /**
+   * The fields the page's highlight strip actually draws, handed over by the
+   * host that draws it. The meta line leaves the owner out only when this
+   * list carries `owner_id`, so a strip cut short (a phone's header) never
+   * hides the owner from both places. Omitted, the strip is taken to be the
+   * object's declared highlights, as `deriveHighlightFields` reads them.
+   */
+  drawnHighlightFields?: readonly string[];
   className?: string;
 }
 
@@ -219,6 +228,7 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
   data,
   objectSchema,
   objectName: _objectName,
+  drawnHighlightFields,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -246,7 +256,14 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
   const hasUpdated =
     !!(updatedAt || updatedBy) && !(updateIsSameAsCreate && (sameUser || !updatedBy));
 
-  const owner = v3MetaLine ? actorOrNone(data[OWNER_FIELD]) : undefined;
+  // The owner is named ONCE on the page (objectstack#28868): when the
+  // highlight strip the page draws carries the owner field, the strip names it
+  // and this line leaves it out. The host that draws the strip says which
+  // fields it drew; without that, the strip is the object's declared
+  // highlights, read by the one function every reader of the strip asks.
+  const stripFields = drawnHighlightFields ?? deriveHighlightFields(objectSchema, null);
+  const stripNamesOwner = stripFields.includes(OWNER_FIELD);
+  const owner = v3MetaLine && !stripNamesOwner ? actorOrNone(data[OWNER_FIELD]) : undefined;
   const recordId = v3MetaLine && hasCellValue(data.id) ? String(data.id) : undefined;
 
   if (!hasCreated && !hasUpdated && !owner && !recordId) return null;

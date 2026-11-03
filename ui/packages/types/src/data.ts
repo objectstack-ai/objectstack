@@ -422,6 +422,15 @@ export interface RecordPagePayload {
   activity?: { total: number; records: Record<string, any>[] } | { error: RecordPagePartRefusal };
   /** The record's newest attachments and their count, or their read's refusal (objectstack#28470). */
   attachments?: { total: number; records: Record<string, any>[] } | { error: RecordPagePartRefusal };
+  /**
+   * The size of the record's 动态 stream over the sources the request named
+   * (objectstack#28737), or the refusal of a comment or activity read. The
+   * total counts the sources' rows, so it is an upper bound of the entries the
+   * 动态 panel draws, not their number: the panel draws fewer where its
+   * `showCompleted` / `types` configuration filters entries out, and where a
+   * ledger row has no displayable diff and so draws no entry.
+   */
+  timeline?: { total: number } | { error: RecordPagePartRefusal };
 }
 
 /**

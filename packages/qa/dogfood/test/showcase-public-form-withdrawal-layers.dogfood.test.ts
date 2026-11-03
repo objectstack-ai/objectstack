@@ -27,13 +27,19 @@
 //     at the same /meta door (#26571);
 //   - open environment-wide (control): both doors accept, and the row lands in
 //     the organization the doors resolve.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the editor's save goes into the showcase's `.custom` pair, declaring the form
+// it overrides; the anonymous doors serve the pair's override.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 const VIEW = '/meta/view/showcase_inquiry.contact';
+const BASE = 'com.example.showcase';
 const SYS = { isSystem: true } as const;
 
 describe('showcase: a public form withdrawal at any metadata layer holds', () => {
@@ -72,7 +78,7 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
   const save = async (allowAnonymous: boolean) => {
     const body = structuredClone(published);
     body.config.sharing.allowAnonymous = allowAnonymous;
-    const res = await stack.apiAs(admin, 'PUT', VIEW, body);
+    const res = await stack.apiAs(admin, 'PUT', inPair(VIEW, BASE), declaredOverride(body, BASE, '0.1.0'));
     return { status: res.status, json: (await res.json()) as Record<string, any> };
   };
 
@@ -88,6 +94,7 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
       security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }),
     });
     admin = await stack.signIn();
+    await ensurePair(stack, admin, BASE);
     ql = await stack.kernel.getServiceAsync('objectql');
     const res = await stack.apiAs(admin, 'GET', VIEW);
     expect(res.status).toBe(200);

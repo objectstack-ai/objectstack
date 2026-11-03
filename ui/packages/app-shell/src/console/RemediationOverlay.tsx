@@ -59,18 +59,27 @@ export function RemediationOverlay() {
   // must not be shown the impersonated user's forms as if they were their own.
   const impersonating = Boolean(exit.impersonatedBy) || exit.stopping || restored;
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-background/95 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-xl">
-        {impersonating ? (
-          <ImpersonationExitPanel exit={exit} passwordPosture={passwordPosture} />
-        ) : passwordPosture ? (
-          <ChangePasswordForm
-            forcedReset={remediationRequired.code === 'PASSWORD_RESET_REQUIRED'}
-            message={remediationRequired.message}
-          />
-        ) : (
-          <MfaEnrollForm message={remediationRequired.message} />
-        )}
+    // The overlay scrolls: on a phone the authenticator step (QR code, backup
+    // codes, code field) is taller than what the keyboard leaves of the screen,
+    // and a fixed, centred card would cut off its top and its submit button.
+    // Below `sm` every control is a 44 px touch target.
+    <div className="fixed inset-0 z-[200] overflow-y-auto bg-background/95 backdrop-blur-sm">
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div
+          data-testid="remediation-card"
+          className="w-full max-w-md rounded-xl border bg-card p-6 shadow-xl max-sm:[&_button]:min-h-[44px] max-sm:[&_input]:min-h-[44px] max-sm:[&_summary]:leading-[44px]"
+        >
+          {impersonating ? (
+            <ImpersonationExitPanel exit={exit} passwordPosture={passwordPosture} />
+          ) : passwordPosture ? (
+            <ChangePasswordForm
+              forcedReset={remediationRequired.code === 'PASSWORD_RESET_REQUIRED'}
+              message={remediationRequired.message}
+            />
+          ) : (
+            <MfaEnrollForm message={remediationRequired.message} />
+          )}
+        </div>
       </div>
     </div>
   );

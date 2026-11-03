@@ -50,11 +50,18 @@ const DIRECTORY_SET = PermissionSetSchema.parse({
   objects: { sys_user: { allowRead: true, viewAllRecords: true }, [BOARD]: { allowRead: true } },
   systemPermissions: ['manage_users'],
 });
-/** The same directory with the email column withheld by field-level security. */
+/**
+ * The same directory with the email column withheld by field-level security.
+ * Every user row is reached by a row policy rather than `viewAllRecords`: a
+ * set holding View All on an object votes `readable: true` on every field of
+ * it (ADR-0066 D2 ⑧ as amended, ruling of record 6573563853), so its own mask
+ * could not withhold the email.
+ */
 const MASKED_DIRECTORY_SET = PermissionSetSchema.parse({
   name: 'qa_pp_directory_masked',
-  objects: { sys_user: { allowRead: true, viewAllRecords: true }, [BOARD]: { allowRead: true } },
+  objects: { sys_user: { allowRead: true }, [BOARD]: { allowRead: true } },
   fields: { 'sys_user.email': { readable: false, editable: false } },
+  rowLevelSecurity: [{ name: 'qa_pp_directory_rows', object: 'sys_user', operation: 'select', using: "id != ''" }],
   systemPermissions: ['manage_users'],
 });
 /** `manage_users` and nothing else: it may explain a user, and its read door returns it no user row. */

@@ -157,6 +157,9 @@ describe('the console document is served with a nonce-based content-security-pol
     expect(policy.get('base-uri')).toEqual(["'self'"]);
     expect(policy.get('frame-ancestors')).toEqual(["'self'"]);
     expect(policy.get('connect-src')).toEqual(["'self'", 'https://demotiles.maplibre.org']);
+    // The Console links its branded manifest as a `blob:` URL; without this
+    // the browser refuses it and the Console is not installable (#29155).
+    expect(policy.get('manifest-src')).toEqual(["'self'", 'blob:']);
   });
 
   it('stamps every <script> in the served document with the nonce the header names', async () => {

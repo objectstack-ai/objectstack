@@ -146,8 +146,8 @@ export async function installPackage(
     // while `defineStack()`, `os build`, `os validate` and the publish face
     // all refuse the same id. That is «declared ≠ enforced» on a PUBLISHED
     // contract, the shape Prime Directive #10 refuses outright and
-    // 北极星 clause 4 names in as many words:
-    // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+    // 北极星 clause 4 names in as many words: "what is wrong must be loudly
+    // refused with a prescription, never silently stored".
     //
     // ⭐ THE GATE IS ON THE PRIMITIVE, NOT ON ONE DOOR. #19473 landed the
     // same parse at `POST /packages`

@@ -167,12 +167,16 @@
  * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
  * row. The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
  * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
- * spending it; the sender gate's
+ * spending it; the four advisory rows that write (`advisory_report`,
+ * `advisory_create`, `advisory_collaborators_add` and `advisory_state`, below)
+ * are `repository-advisories: write`, and the one that reads (`advisory_read`,
+ * below) spends the same grant at `read` alone (its row's `grant`), the five
+ * rows spending it; the sender gate's
  * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
  * `PERMISSIONS` is that set and nothing wider. The workflow declares the five
  * grants every stroke gets as literal `permission-*` inputs on
- * `actions/create-github-app-token`, and the one grant a stroke gets only when
- * it spends it (`STROKE_SCOPED_PERMISSIONS`) as an input read from the
+ * `actions/create-github-app-token`, and the two grants a stroke gets only
+ * when it spends one (`STROKE_SCOPED_PERMISSIONS`) as inputs read from the
  * validator's output; `validate.mjs --self-test` pins both spellings equal to
  * this table.
  *
@@ -369,6 +373,207 @@
  * judgment; `execute.mjs --self-test` pins the reads, the one write, every
  * refusal and the landing.
  *
+ * ## The four rows that touch a security advisory — no advisory text on a public surface
+ *
+ * Private vulnerability reporting is on for this repository, and GitHub lets
+ * only an administrator, a security manager or an advisory's own
+ * collaborators see an unpublished advisory. A seat account must not write to
+ * GitHub itself (the suspension `fleet-token.mjs` records), so a seat files a
+ * finding and moves its state through the relay, and reads the advisory under
+ * its own account once it is a collaborator — a read a cloud seat turned out
+ * unable to make, so it reads through the relay too, sealed (`advisory_read`,
+ * the next section). The maintainer's scope, verbatim
+ * as the body of issue 29160 (the card that filed these rows) records it:
+ * 「按这个范围更新 #29160：上报正文经中继并读事件文件，加人、接受、关闭只改状态，读取用席位自己的账号，发布留给我。先测令牌。」
+ *
+ *   row                          request                                         the payload carries
+ *   `advisory_report`            `POST …/security-advisories/reports`            `summary`, `description`; optional `severity`, `cwe_ids`
+ *   `advisory_create`            `POST …/security-advisories`                    the report's keys, and `packages`
+ *   `advisory_collaborators_add` `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and logins
+ *   `advisory_state`             `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `draft` or `closed`
+ *
+ * `advisory_create` is the maintainer's naming of a second way in, verbatim
+ * as the body of issue 29410 records it: 「立一张 skills 卡，我现在就派发，然后你再试」.
+ * GitHub caps the NEW private reports an account files per day, and every
+ * relay report is filed as the one App, so the whole fleet's reports share
+ * one quota. Creating an advisory is the repository's own act, not a report:
+ * the endpoint takes the same `repository-advisories: write` grant and
+ * creates the advisory in `draft` directly — the state a report reaches only
+ * once accepted. That the App's token may create one, and that the cap on
+ * reports does not reach it, are documentation readings the first live run
+ * confirms (below).
+ *
+ * Publishing stays with the maintainer, by hand: `published` is refused BY
+ * NAME as a value (`ADVISORY_REFUSED_STATES`), and no body can carry it — the
+ * report's and the draft's bodies are the row's, holding no state (the
+ * endpoint creates a draft and takes none), and the two PATCH bodies are the
+ * executor's (`validate.mjs --self-test` pins all four). Listing advisories,
+ * editing an advisory's text, removing a collaborator, the CVE request and the
+ * temporary fork are out of reach of every row, and reading an advisory's text
+ * is one row's alone, which seals it (`advisory_read`, the next section):
+ * `REFUSED_PATH_FAMILIES` refuses each `security-advisories` path but one
+ * advisory's (`ADVISORY_PATH_SHAPE`), the reports endpoint
+ * (`ADVISORY_REPORTS_PATH_SHAPE`) and the bare collection
+ * (`ADVISORY_CREATE_PATH_SHAPE`), and the self-test pins that the
+ * collection is reached by `advisory_create`'s `POST` alone, never a `GET`.
+ * A draft names its affected packages and nothing else of them: each is one
+ * `vulnerabilities` entry, the npm ecosystem and the name
+ * (`ADVISORY_CREATE_ECOSYSTEM`, `NPM_PACKAGE_SHAPE`), with no version range,
+ * vulnerable function, credit, CVSS vector, CVE id or private fork.
+ *
+ * What may NOT cross. The relay's run log and step summary are public, so:
+ *
+ *   - the payload never rides a step's `env:` — GitHub prints a step's
+ *     environment into the log — and `validate.mjs` and `execute.mjs` read
+ *     `client_payload` from the event file (`$GITHUB_EVENT_PATH`) for EVERY
+ *     op, so a report's or a draft's `summary` and `description` travel in the
+ *     payload and are printed nowhere;
+ *   - a refusal names the key and the byte count and ⛔ never echoes a value:
+ *     `summary` and `description` are `str` fields, which never echo, and the
+ *     other advisory fields are `quiet` (`FIELDS`), so a value that fails is
+ *     described by its type and size alone — a value in the wrong key may be
+ *     prose;
+ *   - the executor prints no field of an advisory's answer but its id, its
+ *     `state` and the logins `collaborating_users` names, each only in its own
+ *     shape (`advisoryPrintable`), and the platform's `message` only when it
+ *     is one the relay knows (`ADVISORY_PLATFORM_MESSAGES`) — never a
+ *     summary, a description, a vulnerability, a credit, a CVE or CWE, a URL
+ *     or the answer's body. `advisoryReportLandedText`,
+ *     `advisoryCreateLandedText`, `advisoryLandedText`,
+ *     `advisoryStateLandedText` and `advisoryFenceText` are the only spellings
+ *     of an advisory row. An id exposes no content, but it is public in the log.
+ *     A draft's package names are `quiet` too: a refusal never echoes one.
+ *
+ * The executor's four paths (`execute.mjs`, in the shape of the hierarchy rows'):
+ *
+ *   - `advisory_report` is one POST of the row's body. It LANDS on a 2xx
+ *     whose answer carries a `ghsa_id` (`advisoryReportReadBack`); the row and
+ *     a notice annotation name that id, so the seat follows with
+ *     `advisory_collaborators_add` — the App is the submitter, so the finding
+ *     seat is not a collaborator on its own;
+ *   - `advisory_create` is one POST of the row's body to the collection, and
+ *     nothing is read first. It LANDS on a 2xx whose answer carries a
+ *     `ghsa_id` and reads state `draft` (`advisoryCreateReadBack`); a 2xx
+ *     without an id is UNCONFIRMED and one in another state FAILED, neither
+ *     ever re-sent. The row and a notice annotation name the id, so the seat
+ *     follows with `advisory_collaborators_add` exactly as after a report;
+ *   - `advisory_collaborators_add` reads the advisory first (`ADVISORY_FENCES`,
+ *     judged by `advisoryPreflight` on the executor's own `GET`) and refuses
+ *     with nothing sent unless the read answers 200 with the advisory the
+ *     action names in `triage` or `draft` (`ADVISORY_OPEN_STATES`). The logins
+ *     are compared case-insensitively (`advisoryCollaboratorPlan`): nothing
+ *     missing is a no-op with nothing sent; otherwise the PATCH sends the
+ *     EXISTING logins plus the missing ones, so the merge holds whether the
+ *     platform replaces the list or merges it. It LANDS only when the answer
+ *     lists every login sent (`advisoryReadBack`);
+ *   - `advisory_state` reads the advisory the same way and refuses an illegal
+ *     transition with nothing sent (`ADVISORY_TRANSITIONS`: `draft` only from
+ *     `triage`, `closed` only from `triage` or `draft`). Its PATCH body is
+ *     `{ state }` and nothing else, and it LANDS only when the answer shows
+ *     that state (`advisoryStateReadBack`).
+ *
+ * Each row travels `alone` and spends `repository-advisories: write`, a grant
+ * minted only for its stroke (`STROKE_SCOPED_PERMISSIONS`), so every other
+ * stroke's token stays as it was. Measured on 2026-11-02 with the relay's own
+ * mint action against a control token minted without the grant (run
+ * 41415522766, recorded in the card's body): the narrowed mint succeeds, and
+ * the grant is what opens an advisory's read and its PATCH (200 with it, 403
+ * without). The action warns `Unexpected input(s)
+ * 'permission-repository-advisories'` on such a run, because its `action.yml`
+ * does not declare the input, and it still passes it to the mint
+ * (`lib/get-permissions-from-inputs.js`): the warning is expected, and not one
+ * to "fix" by removing the input. The first live run after merge decides the
+ * rest: a valid report filed by the App and whom it records as the reporter,
+ * a real account added and whether the PATCH replaces the list, the two
+ * transitions by the App, and whether a report needs the grant at all (both
+ * tokens reached the reports endpoint's 422); for `advisory_create`, whether
+ * the App's token creates a draft at all, whether one `vulnerabilities` entry
+ * of an ecosystem and a name is the least the endpoint accepts, and whether
+ * three drafts land in one hour where reports stop at one a day. A refusal
+ * on any of them is a FAILED action carrying `ADVISORY_ACCESS_REMEDY`, and ⛔
+ * never a retry under an un-narrowed token: the reading goes to the maintainer.
+ *
+ * The sender gate does NOT change for these rows: write, maintain or admin on
+ * the target passes, by the maintainer's ruling, verbatim as the body of issue
+ * 29160 records it: 「所有车队账户都能发这个操作」. It is recorded here because
+ * of what it admits: any fleet account with write on the target can add
+ * itself to an advisory whose id it holds.
+ *
+ * ## The one row that READS an advisory — `advisory_read`, sealed to a key the seat alone holds
+ *
+ * The scope above has a seat read an advisory under its own account. The live
+ * run after 29160 merged showed a cloud seat cannot: its `gh` speaks with a
+ * token holding no repository-advisories permission (403, "Resource not
+ * accessible by integration"), and its egress proxy replaces every
+ * `Authorization` header. The App can read one, but only inside the relay's
+ * run, whose log, annotations and step summary anyone may read. So the read
+ * leaves the run as ciphertext alone, by the maintainer's naming, verbatim as
+ * the body of issue 29420 records it: 「按一次性密钥立卡」.
+ *
+ *   row             request                                          the payload carries
+ *   `advisory_read` `GET …/security-advisories/{id}`, and nothing else  `ghsa_id` and `public_key`
+ *
+ * The seat (`dispatch.mjs`) generates an X25519 key pair in its own process
+ * for each read, puts the public half in the action, and keeps the private
+ * half in memory — never exported, never written, gone when the process
+ * exits. No key is stored anywhere: not in the repository, not as a secret.
+ * `public_key` is its own closed kind (`FIELDS`, kind `x25519`): base64 SPKI
+ * DER of exactly `ADVISORY_READ_PUBLIC_KEY_CHARS` characters in its one
+ * spelling, a key a shared secret can be derived with — judged by
+ * `advisoryReadKeyFailure` before any request, a refusal naming the key and
+ * the byte count alone.
+ *
+ * The executor reads the advisory, judges `ADVISORY_READ_FENCES` on that
+ * answer, and seals `ADVISORY_READ_FIELDS` of it as the platform answered
+ * them (`advisoryReadPlaintext`) with `sealAdvisoryRead`: a fresh X25519 key
+ * of its own, HKDF-SHA256 over the shared secret, AES-256-GCM under a random
+ * nonce, with the request id, the action's index and the id as associated
+ * data, so a sealed answer opens for the read that asked for it and no other.
+ * Node's own `crypto`, and nothing else. The sealed answer leaves the run on
+ * ONE channel, the one a seat container can read: notice annotations on the
+ * job's check run, at most `ADVISORY_READ_MAX_PARTS` of
+ * `ADVISORY_READ_PART_CHARS` characters (`advisoryReadParts`), inside the
+ * runner's measured caps — ten notices a step and a message cut at 4,096
+ * characters (`actions/runner`, `ExecutionContext.cs`). An answer too large
+ * for them is a FAILED action naming byte counts alone. The seat reassembles
+ * the parts, opens them with its private key (`openAdvisoryRead`), and prints
+ * the text to its own stdout, and only on `--reveal`.
+ *
+ * ⛔ What crosses the public run: the HTTP status, the byte and part counts,
+ * and the ciphertext. NOT the id — the row's call is `ADVISORY_READ_CALL`, a
+ * placeholder where every other row prints its path — nor the state, the
+ * platform's `message` unless `ADVISORY_PLATFORM_MESSAGES` names it, or any
+ * field of the answer. A seal that fails is a FAILED action that prints
+ * nothing of the answer and emits no part. The action LANDS only on a 200
+ * whose answer passes every fence and whose seal succeeded and fit. It writes
+ * nothing, so `dispatch.mjs` has no byte read-back for it: opening the parts
+ * IS its read-back.
+ *
+ * The grant: the row's `grant` is `read`, so its stroke's token carries
+ * `repository-advisories: read` and never write. GitHub documents this GET
+ * under a read grant; what was measured is the write grant's read (run
+ * 41415522766, above), so the first live read is the measurement of record.
+ * A refusal there is a FAILED action carrying `ADVISORY_READ_ACCESS_REMEDY`:
+ * raising the row to write is the maintainer's ruling, ⛔ never a retry under
+ * a wider token.
+ *
+ * The sender gate is `target-write`, by the maintainer's ruling, verbatim as
+ * the body of issue 29644 records it: 「同意改成对仓库有写权限,立卡派发修复」.
+ * Every stroke passes the target-write gate before its first request
+ * (`execute.mjs`, the sender gate), and the executor then holds a read to the
+ * row's `senderGate`, a key of `ADVISORY_READ_SENDER_GATES`; `target-write`
+ * asks nothing more: write, maintain or admin on the target, the gate the
+ * four rows above keep. The ruling settles the question this row landed
+ * with, whether a read should instead need the sender on the advisory's own
+ * `collaborating_users`. That gate excluded no one, since a sender with write
+ * on the target can add itself to any advisory whose id it holds (above), and
+ * the first live reads were each refused at it (runs 41545143476,
+ * 41545259848 and 41546082963) for a sender the advisory's write-grant GET
+ * already listed (run 41546190167). Why the fence refused them is
+ * unmeasured; one hypothesis is that the read-grant answer omits
+ * `collaborating_users`. The table holds that one value, and any other, the
+ * retired `collaborator` among them, fails closed with nothing sealed.
+ *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
  * "The maximum number of top-level properties is 10. The total size of the
@@ -381,6 +586,8 @@
  * these ceilings BEFORE the dispatch leaves, so a payload the platform would
  * reject with a 422 is refused locally with the reason.
  */
+
+import { createCipheriv, createDecipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 
 import { GOVERNED_REPOS } from '../check-governed-merges.mjs';
 
@@ -718,6 +925,480 @@ export function subIssueLandedText({ mode, parentNumber, childNumber, childId, c
   return `#${childNumber} (id ${childId}) is no longer a sub-issue of #${parentNumber} · its list reads ${count} sub-issue(s)`;
 }
 
+/**
+ * One repository advisory's id (header: "The four rows that touch a security advisory"): `GHSA` and three groups
+ * of four lowercase letters or digits. It is spelled into a path, so the field kind `ghsa` admits this and nothing else.
+ */
+export const GHSA_ID_SHAPE = /^GHSA(-[0-9a-z]{4}){3}$/;
+/** The path of ONE advisory — one of the three `security-advisories` paths a row reaches (`REFUSED_PATH_FAMILIES`). */
+export const ADVISORY_PATH_SHAPE = /\/security-advisories\/GHSA(-[0-9a-z]{4}){3}$/;
+/** The private-report endpoint — the second, `advisory_report`'s POST. */
+export const ADVISORY_REPORTS_PATH_SHAPE = /\/security-advisories\/reports$/;
+/**
+ * The collection itself — the third, `advisory_create`'s POST, which creates a DRAFT. The same path answers the list
+ * to a `GET`; no row spells that verb on it (`validate.mjs --self-test` pins the verbs every row sends here).
+ */
+export const ADVISORY_CREATE_PATH_SHAPE = /^\/repos\/[^/]+\/[^/]+\/security-advisories$/;
+/** The one ecosystem a draft's `vulnerabilities` entry names: every package this fleet ships is an npm package. */
+export const ADVISORY_CREATE_ECOSYSTEM = 'npm';
+/** An npm package name, scoped or not, as the registry spells one — the only shape a draft's package takes. */
+export const NPM_PACKAGE_SHAPE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
+/** The states an advisory takes a collaborator in through the relay: an unpublished, open advisory's. */
+export const ADVISORY_OPEN_STATES = Object.freeze(['triage', 'draft']);
+/**
+ * The transitions `advisory_state` may make, as target → the states it may leave (header): accepting a report is
+ * `triage` → `draft`, and closing is `triage` or `draft` → `closed`. Its keys are the field's closed enum.
+ */
+export const ADVISORY_TRANSITIONS = Object.freeze({ draft: Object.freeze(['triage']), closed: Object.freeze(['triage', 'draft']) });
+/** The states `advisory_state` may ask for — exactly `ADVISORY_TRANSITIONS`' keys. */
+export const ADVISORY_SETTABLE_STATES = Object.freeze(Object.keys(ADVISORY_TRANSITIONS));
+/** A state refused BY NAME, with why — never reachable by any row, as a value or through a body (header). */
+export const ADVISORY_REFUSED_STATES = Object.freeze({ published: 'publishing stays with the maintainer, by hand, and no relay row reaches it' });
+/** The severities a report or a draft may carry — GitHub's own enum for both. */
+export const ADVISORY_SEVERITIES = Object.freeze(['critical', 'high', 'medium', 'low']);
+/** A weakness id as a report or a draft carries one, `CWE-` and a number. */
+export const CWE_ID_SHAPE = /^CWE-[1-9][0-9]{0,4}$/;
+/** GitHub's own login shape: what an advisory row prints of a login, and the only shape it prints one in. */
+export const LOGIN_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+/** An advisory state as the platform spells one: what an advisory row prints of a state. */
+export const ADVISORY_STATE_SHAPE = /^[a-z_]{1,20}$/;
+/**
+ * The platform `message`s an advisory row may quote on a refusal — a closed list, matched whole, because a
+ * message is part of the answer's body, and the row prints nothing of that body it has not named (header).
+ */
+export const ADVISORY_PLATFORM_MESSAGES = Object.freeze(['Not Found', 'Resource not accessible by integration', 'Validation Failed', 'Forbidden', 'Bad credentials', 'Requires authentication']);
+
+/**
+ * What an advisory row may print of a value: the value when it has `shape` — the id's, a state's or a login's —
+ * and otherwise a placeholder that names what the value failed to be, ⛔ never the value. So a field of an
+ * advisory's answer reaches a row only in the shape of one of the three it may print. Pure.
+ */
+export function advisoryPrintable(value, shape, what) {
+  return typeof value === 'string' && shape.test(value) ? value : `(not a${/^[aeiou]/.test(what) ? 'n' : ''} ${what})`;
+}
+
+/** The platform's `message` as an advisory row may quote it: ` (the platform: …)` for a listed one, else nothing. Pure. */
+export function advisoryPlatformText(message) {
+  return typeof message === 'string' && ADVISORY_PLATFORM_MESSAGES.includes(message) ? ` (the platform: ${message})` : '';
+}
+
+const printLogins = (logins) => (logins.length ? logins.map((l) => advisoryPrintable(l, LOGIN_SHAPE, 'login')).join(', ') : 'none');
+const twoXX = (answer) => Number.isInteger(answer?.status) && answer.status >= 200 && answer.status < 300;
+const advisoryShaped = (json) => isObject(json) && !Array.isArray(json);
+
+/** The logins an advisory answer's `collaborating_users` lists, in the platform's order; `[]` for none or `null`. Pure. */
+export function advisoryCollaboratorLogins(json) {
+  return Array.isArray(json?.collaborating_users) ? json.collaborating_users.map((u) => (typeof u?.login === 'string' ? u.login : null)).filter(Boolean) : [];
+}
+
+/** What a refused advisory request prints after its status (header): the reading goes to the maintainer, ⛔ never a wider token. */
+export const ADVISORY_ACCESS_REMEDY =
+  'the relay token carries repository-advisories write for this stroke alone, and what the App may do to a report, ' +
+  'a draft, its collaborators and its state is decided by the first live run — put this reading to the maintainer; ⛔ never ' +
+  're-send it under a wider or un-narrowed token';
+
+/**
+ * The fences on the advisory (the header's section), each judged on the executor's own `GET` of it — `ctx` is
+ * `{ ghsaId, answer, from, to }`: `answer` that read's `{ status, json }`, `from` the states the action may act
+ * in (`ADVISORY_OPEN_STATES` for the collaborators, `ADVISORY_TRANSITIONS[to]` for a state change) and `to` the
+ * state asked for, if any. A fence whose read did not answer an advisory FAILS, naming that — an unread fact is
+ * never a pass. `got` is built by `advisoryPrintable` alone: a fence sentence carries the id, the state and
+ * nothing else of the answer.
+ */
+const advisoryRead = (c) => c.answer?.status === 200 && advisoryShaped(c.answer.json);
+const fromOf = (c) => (Array.isArray(c.from) ? c.from : ADVISORY_OPEN_STATES);
+export const ADVISORY_FENCES = Object.freeze([
+  Object.freeze({
+    fence: 'read',
+    wants: () => "the advisory's own GET answering 200 with an advisory",
+    fails: (c) => (advisoryRead(c) ? null : `the advisory's GET answered HTTP ${c.answer?.status ?? 'none'}${c.answer?.status === 200 ? ' with no advisory' : ''}`),
+  }),
+  Object.freeze({
+    fence: 'advisory',
+    wants: () => 'the advisory the action names, by its ghsa_id',
+    fails: (c) => {
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      return c.answer.json.ghsa_id === c.ghsaId ? null : `the answer names ${advisoryPrintable(c.answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}`;
+    },
+  }),
+  Object.freeze({
+    fence: 'state',
+    wants: (c) => (c.to ? `a move to ${c.to} from ${fromOf(c).join(' or ')} alone` : `an unpublished advisory — state ${fromOf(c).join(' or ')}; never published, closed or withdrawn`),
+    fails: (c) => {
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      return fromOf(c).includes(c.answer.json.state) ? null : `the advisory reads state ${advisoryPrintable(c.answer.json.state, ADVISORY_STATE_SHAPE, 'advisory state')}`;
+    },
+  }),
+]);
+
+/** The fences `ctx` fails: `[{ fence, wants, got }]` in `ADVISORY_FENCES` order; `[]` when all hold. Pure. */
+export function advisoryFenceFailures(ctx = {}) {
+  return ADVISORY_FENCES.map((f) => ({ fence: f.fence, wants: f.wants(ctx), got: f.fails(ctx) })).filter((f) => f.got !== null);
+}
+
+/** The sentence an advisory fence refusal prints — every failing fence by name, what was read, what the relay writes to. Pure. */
+export function advisoryFenceText(failures) {
+  return failures.map((f) => `fence \`${f.fence}\`: ${f.got}, and the relay writes only to ${f.wants}`).join('; ');
+}
+
+/**
+ * The PATCH's list (the header's section): `existing` the logins `collaborating_users` reads, `requested` the
+ * action's. Answers `{ existing, missing, merged }` — `missing` the requested logins not already there, compared
+ * case-insensitively and each once, in the action's order and spelling; `merged` the existing logins as the
+ * platform lists them, then the missing ones: the whole list the PATCH sends, so an existing collaborator is
+ * never dropped by omission. `missing` empty is the no-op. Pure.
+ */
+export function advisoryCollaboratorPlan({ existing = [], requested = [] } = {}) {
+  const have = new Set(existing.map((l) => l.toLowerCase()));
+  const missing = [];
+  for (const login of requested) {
+    if (have.has(login.toLowerCase())) continue;
+    have.add(login.toLowerCase());
+    missing.push(login);
+  }
+  return { existing: [...existing], missing, merged: [...existing, ...missing] };
+}
+
+/**
+ * What LANDED means for `advisory_collaborators_add` (the header's section): the PATCH answered 2xx with an
+ * advisory whose `collaborating_users` lists every login sent — each `missing` one added, and each `existing` one
+ * kept. `answer` is the PATCH's `{ status, json }`. Answers `{ ok, listed, notAdded, dropped, why }`; `why` names
+ * logins alone. Pure.
+ */
+export function advisoryReadBack({ existing = [], missing = [], answer } = {}) {
+  const listed = advisoryCollaboratorLogins(answer?.json);
+  const has = (login) => listed.some((l) => l.toLowerCase() === login.toLowerCase());
+  const notAdded = missing.filter((l) => !has(l));
+  const dropped = existing.filter((l) => !has(l));
+  if (!twoXX(answer)) return { ok: false, listed, notAdded, dropped, why: `HTTP ${answer?.status ?? 'none'}` };
+  if (!advisoryShaped(answer.json)) return { ok: false, listed, notAdded, dropped, why: `HTTP ${answer.status}, but the answer is not an advisory, so no collaborator can be read back` };
+  const lacks = [
+    ...(notAdded.length ? [`${printLogins(notAdded)} not added`] : []),
+    ...(dropped.length ? [`${printLogins(dropped)} dropped — a collaborator before this PATCH and missing from its answer`] : []),
+  ];
+  if (lacks.length) return { ok: false, listed, notAdded, dropped, why: `HTTP ${answer.status}, but the answer lists ${printLogins(listed)} — ${lacks.join('; ')}` };
+  return { ok: true, listed, notAdded, dropped, why: '' };
+}
+
+/**
+ * The row a landed `advisory_collaborators_add` prints — the id, the state and the logins, and nothing else of
+ * the answer, each in its own shape (`advisoryPrintable`). `noop` an action that sent nothing: every login was
+ * already there. Pure.
+ */
+export function advisoryLandedText({ ghsaId, state, logins = [], added = [], noop = false }) {
+  const head = `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · collaborators ${printLogins(logins)}`;
+  return noop ? `no-op, nothing sent: ${head} — every login asked for is already a collaborator` : `${head} · added ${printLogins(added)}`;
+}
+
+/**
+ * What LANDED means for `advisory_state` (the header's section): the PATCH answered 2xx with the advisory the
+ * action names, in the state it asked for. Answers `{ ok, why }`; `why` carries the id and the state alone. Pure.
+ */
+export function advisoryStateReadBack({ ghsaId, to, answer } = {}) {
+  if (!twoXX(answer)) return { ok: false, why: `HTTP ${answer?.status ?? 'none'}` };
+  if (!advisoryShaped(answer.json)) return { ok: false, why: `HTTP ${answer.status}, but the answer is not an advisory, so its state cannot be read back` };
+  if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `HTTP ${answer.status}, but the answer names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
+  if (answer.json.state !== to) return { ok: false, why: `HTTP ${answer.status}, but the answer reads state ${advisoryPrintable(answer.json.state, ADVISORY_STATE_SHAPE, 'advisory state')}, not ${to}` };
+  return { ok: true, why: '' };
+}
+
+/** The row a landed `advisory_state` prints: the id and the move, nothing else. Pure. */
+export function advisoryStateLandedText({ ghsaId, from, to }) {
+  return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(from, ADVISORY_STATE_SHAPE, 'advisory state')} → ${advisoryPrintable(to, ADVISORY_STATE_SHAPE, 'advisory state')}`;
+}
+
+/**
+ * What LANDED means for `advisory_report` (the header's section): a 2xx whose answer carries a `ghsa_id` in its
+ * shape. Answers `{ ok, ghsaId, state, why }` — `ghsaId` null unless it has that shape; `why` carries the status
+ * alone. A 2xx without an id is NOT a landing and NOT a refusal: a report may have been filed, so ⛔ never re-sent.
+ * Pure.
+ */
+export function advisoryReportReadBack(answer) {
+  const json = answer?.json;
+  const ghsaId = advisoryShaped(json) && typeof json.ghsa_id === 'string' && GHSA_ID_SHAPE.test(json.ghsa_id) ? json.ghsa_id : null;
+  const state = advisoryShaped(json) ? json.state : null;
+  if (!twoXX(answer)) return { ok: false, ghsaId: null, state: null, why: `HTTP ${answer?.status ?? 'none'}` };
+  if (!ghsaId) return { ok: false, ghsaId, state, why: `HTTP ${answer.status}, but the answer carries no advisory id — UNCONFIRMED: a report may have been filed; ⛔ do not re-send, ask the maintainer to read the repository's reports` };
+  return { ok: true, ghsaId, state, why: '' };
+}
+
+/** The row a landed `advisory_report` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+export function advisoryReportLandedText({ ghsaId, state }) {
+  return `reported ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+}
+
+/** The one state a created advisory may answer in — the endpoint's default, and the only one a draft has. */
+export const ADVISORY_CREATED_STATE = 'draft';
+
+/**
+ * What LANDED means for `advisory_create` (the header's section): a 2xx whose answer carries a `ghsa_id` in its shape
+ * AND reads state `draft`. Answers `{ ok, ghsaId, state, why }`. A 2xx without an id is UNCONFIRMED — a draft may
+ * have been created, so ⛔ never re-sent; a 2xx whose id reads any other state is a FAILED action naming the id and
+ * that state, in their shapes alone. Pure.
+ */
+export function advisoryCreateReadBack(answer) {
+  const json = answer?.json;
+  const ghsaId = advisoryShaped(json) && typeof json.ghsa_id === 'string' && GHSA_ID_SHAPE.test(json.ghsa_id) ? json.ghsa_id : null;
+  const state = advisoryShaped(json) ? json.state : null;
+  if (!twoXX(answer)) return { ok: false, ghsaId: null, state: null, why: `HTTP ${answer?.status ?? 'none'}` };
+  if (!ghsaId) return { ok: false, ghsaId, state, why: `HTTP ${answer.status}, but the answer carries no advisory id — UNCONFIRMED: a draft advisory may have been created; ⛔ do not re-send, ask the maintainer to read the repository's draft advisories` };
+  if (state !== ADVISORY_CREATED_STATE) return { ok: false, ghsaId, state, why: `HTTP ${answer.status}, but ${ghsaId} reads state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')}, not ${ADVISORY_CREATED_STATE} — ⛔ do not re-send, put the id to the maintainer` };
+  return { ok: true, ghsaId, state, why: '' };
+}
+
+/** The row a landed `advisory_create` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+export function advisoryCreateLandedText({ ghsaId, state }) {
+  return `created ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+}
+
+// ---------------------------------------------------------------------------
+// `advisory_read` (header: "The one row that READS an advisory") — the key, the seal, the parts, the fences.
+// ---------------------------------------------------------------------------
+
+/** The one key type `public_key` names: X25519, as base64 SPKI DER. */
+export const ADVISORY_READ_KEY_TYPE = 'x25519';
+/** X25519's SPKI DER header: the 12 bytes before the 32-byte key, `MCowBQYDK2VuAyEA` in base64. */
+const X25519_SPKI_PREFIX = Buffer.from('302a300506032b656e032100', 'hex');
+const X25519_RAW_BYTES = 32;
+/** `public_key`'s length: 44 bytes of DER, 60 base64 characters with their one pad. */
+export const ADVISORY_READ_PUBLIC_KEY_CHARS = 60;
+/** `public_key`'s one spelling: the header, then the key, its last character's two spare bits clear, then the pad. */
+export const ADVISORY_READ_PUBLIC_KEY_SHAPE = /^MCowBQYDK2VuAyEA[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/;
+
+const allZero = (buf) => buf.every((b) => b === 0);
+
+/**
+ * Why `value` is not a `public_key`, or null when it is one: a string of exactly
+ * `ADVISORY_READ_PUBLIC_KEY_CHARS` characters in `ADVISORY_READ_PUBLIC_KEY_SHAPE`, parsed as an X25519 key, with
+ * which a trial derivation yields a non-zero secret — a low-order point, the all-zero key among them, is refused
+ * here. ⛔ The reason never carries the value: the validator prints it into a public log. Never throws.
+ */
+export function advisoryReadKeyFailure(value) {
+  if (typeof value !== 'string') return 'is not a string';
+  if (value.length !== ADVISORY_READ_PUBLIC_KEY_CHARS) return `is not ${ADVISORY_READ_PUBLIC_KEY_CHARS} characters long`;
+  if (!ADVISORY_READ_PUBLIC_KEY_SHAPE.test(value)) return 'is not an X25519 public key in base64 SPKI DER, its one spelling';
+  let key;
+  try {
+    key = createPublicKey({ key: Buffer.from(value, 'base64'), format: 'der', type: 'spki' });
+  } catch {
+    return 'does not parse as a public key';
+  }
+  if (key.asymmetricKeyType !== ADVISORY_READ_KEY_TYPE) return 'is not an X25519 key';
+  let shared = null;
+  try {
+    shared = diffieHellman({ privateKey: generateKeyPairSync(ADVISORY_READ_KEY_TYPE).privateKey, publicKey: key });
+    return allZero(shared) ? 'is a key no secret can be derived with (a low-order point)' : null;
+  } catch {
+    return 'is a key no secret can be derived with (a low-order point)';
+  } finally {
+    shared?.fill(0);
+  }
+}
+
+/** The sealed answer's format version — its first byte. */
+export const ADVISORY_READ_SEAL_VERSION = 1;
+/** The scheme, named once for a reader: what `sealAdvisoryRead` does and `openAdvisoryRead` undoes. */
+export const ADVISORY_READ_SCHEME = 'X25519 key agreement · HKDF-SHA256 · AES-256-GCM, a fresh ephemeral key and nonce per seal';
+const ADVISORY_READ_INFO = 'fleet-write:advisory_read:v1';
+const ADVISORY_READ_NONCE_BYTES = 12;
+const ADVISORY_READ_TAG_BYTES = 16;
+/** What a seal adds to the plaintext: the version byte, the ephemeral key, the nonce and the tag — 61 bytes. */
+export const ADVISORY_READ_SEAL_OVERHEAD = 1 + X25519_RAW_BYTES + ADVISORY_READ_NONCE_BYTES + ADVISORY_READ_TAG_BYTES;
+
+const rawX25519 = (key) => key.export({ format: 'der', type: 'spki' }).subarray(X25519_SPKI_PREFIX.length);
+const x25519FromRaw = (raw) => createPublicKey({ key: Buffer.concat([X25519_SPKI_PREFIX, raw]), format: 'der', type: 'spki' });
+/** The AES key, from the shared secret and both public keys; an all-zero secret is refused, never used. */
+function advisoryReadAesKey(shared, ephemeralRaw, recipientRaw) {
+  if (allZero(shared)) throw new Error('the shared secret is all zeros');
+  const info = Buffer.concat([Buffer.from(ADVISORY_READ_INFO, 'utf8'), ephemeralRaw, recipientRaw]);
+  return Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), info, 32));
+}
+
+/**
+ * The associated data a sealed answer is bound to: the request id, the action's index and the advisory's id. The
+ * seat knows all three, so it opens the answer to ITS read and no other; none of them is sent. Pure.
+ */
+export function advisoryReadAad({ requestId, action, ghsaId }) {
+  return Buffer.from(`${ADVISORY_READ_INFO} request=${requestId} action=${action} ghsa_id=${ghsaId}`, 'utf8');
+}
+
+/**
+ * Seal `plaintext` (a string, sealed as its UTF-8 bytes) to `publicKey` (a `public_key` value) under `aad`:
+ * version ‖ ephemeral X25519 key ‖ nonce ‖ ciphertext ‖ tag, as base64url without padding. The shared secret
+ * and the AES key are zeroed after use. Throws on any failure, with a message that carries nothing of the
+ * plaintext — and the executor prints its own fixed sentence, never the message.
+ */
+export function sealAdvisoryRead({ plaintext, publicKey, aad }) {
+  const recipient = createPublicKey({ key: Buffer.from(publicKey, 'base64'), format: 'der', type: 'spki' });
+  const ephemeral = generateKeyPairSync(ADVISORY_READ_KEY_TYPE);
+  const shared = diffieHellman({ privateKey: ephemeral.privateKey, publicKey: recipient });
+  const ephemeralRaw = rawX25519(ephemeral.publicKey);
+  let key = null;
+  try {
+    key = advisoryReadAesKey(shared, ephemeralRaw, rawX25519(recipient));
+    const nonce = randomBytes(ADVISORY_READ_NONCE_BYTES);
+    const cipher = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: ADVISORY_READ_TAG_BYTES });
+    cipher.setAAD(aad);
+    const body = Buffer.concat([cipher.update(Buffer.from(plaintext, 'utf8')), cipher.final()]);
+    return Buffer.concat([Buffer.from([ADVISORY_READ_SEAL_VERSION]), ephemeralRaw, nonce, body, cipher.getAuthTag()]).toString('base64url');
+  } finally {
+    shared.fill(0);
+    key?.fill(0);
+  }
+}
+
+/** Why a sealed answer did not open — the one sentence, which carries nothing of what was sealed. */
+export const ADVISORY_READ_OPEN_FAILED = 'the sealed answer does not open with this key — tampered, truncated, or sealed for another read';
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Open a sealed answer with `privateKey` (the seat's in-memory `KeyObject`) under `aad`: the plaintext string,
+ * byte for byte what was sealed. Throws `ADVISORY_READ_OPEN_FAILED` for anything else — a sealed answer that is
+ * not canonical base64url, of another version, too short, tampered with, sealed to another key or bound to
+ * another read. The private key is read, never exported.
+ */
+export function openAdvisoryRead({ sealed, privateKey, aad }) {
+  const box = typeof sealed === 'string' && /^[A-Za-z0-9_-]+$/.test(sealed) ? Buffer.from(sealed, 'base64url') : null;
+  if (!box || box.toString('base64url') !== sealed || box.length < ADVISORY_READ_SEAL_OVERHEAD || box[0] !== ADVISORY_READ_SEAL_VERSION) throw new Error(ADVISORY_READ_OPEN_FAILED);
+  const ephemeralRaw = box.subarray(1, 1 + X25519_RAW_BYTES);
+  const nonce = box.subarray(1 + X25519_RAW_BYTES, 1 + X25519_RAW_BYTES + ADVISORY_READ_NONCE_BYTES);
+  const body = box.subarray(1 + X25519_RAW_BYTES + ADVISORY_READ_NONCE_BYTES, box.length - ADVISORY_READ_TAG_BYTES);
+  const tag = box.subarray(box.length - ADVISORY_READ_TAG_BYTES);
+  let shared = null;
+  let key = null;
+  let opened = null;
+  try {
+    shared = diffieHellman({ privateKey, publicKey: x25519FromRaw(ephemeralRaw) });
+    key = advisoryReadAesKey(shared, ephemeralRaw, rawX25519(createPublicKey(privateKey)));
+    const decipher = createDecipheriv('aes-256-gcm', key, nonce, { authTagLength: ADVISORY_READ_TAG_BYTES });
+    decipher.setAAD(aad);
+    decipher.setAuthTag(tag);
+    opened = strictUtf8.decode(Buffer.concat([decipher.update(body), decipher.final()]));
+  } catch {
+    opened = null;
+  } finally {
+    shared?.fill(0);
+    key?.fill(0);
+  }
+  if (opened === null) throw new Error(ADVISORY_READ_OPEN_FAILED);
+  return opened;
+}
+
+/**
+ * The fields of an advisory's answer `advisory_read` seals, copied as the platform answered them — the text the
+ * card names (summary, description, vulnerabilities) and what places it (the ids, the state, the severity, the
+ * weakness ids, the credits). Not `collaborating_users`, whose user objects are kilobytes of URLs each, nor any
+ * URL, timestamp or private fork.
+ */
+export const ADVISORY_READ_FIELDS = Object.freeze(['ghsa_id', 'cve_id', 'state', 'severity', 'summary', 'description', 'vulnerabilities', 'cwe_ids', 'credits']);
+
+/** What is sealed: `ADVISORY_READ_FIELDS` of the answer that it carries, in that order, as one JSON text. Pure. */
+export function advisoryReadPlaintext(json) {
+  const picked = {};
+  for (const field of ADVISORY_READ_FIELDS) if (Object.hasOwn(json, field)) picked[field] = json[field];
+  return JSON.stringify(picked);
+}
+
+/** The characters one notice part carries — under the runner's 4,096-character cut, with room for its prefix. */
+export const ADVISORY_READ_PART_CHARS = 4000;
+/** The most parts a read emits — the runner keeps ten notices a step, and a read's stroke emits no other. */
+export const ADVISORY_READ_MAX_PARTS = 10;
+/** The most sealed characters a read can return, and so the largest answer: 40,000 characters, 29,939 bytes of plaintext. */
+export const ADVISORY_READ_MAX_SEALED_CHARS = ADVISORY_READ_PART_CHARS * ADVISORY_READ_MAX_PARTS;
+
+/** A sealed answer cut into its parts, in order; null when it is empty or over `ADVISORY_READ_MAX_SEALED_CHARS`. Pure. */
+export function advisoryReadParts(sealed) {
+  if (typeof sealed !== 'string' || sealed.length === 0 || sealed.length > ADVISORY_READ_MAX_SEALED_CHARS) return null;
+  const parts = [];
+  for (let at = 0; at < sealed.length; at += ADVISORY_READ_PART_CHARS) parts.push(sealed.slice(at, at + ADVISORY_READ_PART_CHARS));
+  return parts;
+}
+
+/**
+ * The sender gates a read may be held to (header) — the row's `senderGate` is a key of this table. One, by the
+ * maintainer's ruling: `target-write`, the gate every stroke already passed, write, maintain or admin on the
+ * target, and nothing more. The table stays so that a row naming any other value fails closed.
+ */
+export const ADVISORY_READ_SENDER_GATES = Object.freeze({
+  'target-write': 'a sender with write, maintain or admin on the target',
+});
+
+/**
+ * The fences on a read, each judged on the executor's own GET — `ctx` is `{ ghsaId, answer, gate }`. A fence
+ * whose read did not answer an advisory FAILS, naming that. ⛔ No sentence carries the answer's id, its state,
+ * any field of it or the gate's value: an answer naming another advisory is said to, and no more.
+ */
+const readGateOf = (c) => (Object.hasOwn(ADVISORY_READ_SENDER_GATES, c.gate) ? c.gate : null);
+export const ADVISORY_READ_FENCES = Object.freeze([
+  Object.freeze({
+    fence: 'read',
+    wants: () => "the advisory's own GET answering 200 with an advisory",
+    fails: (c) => (advisoryRead(c) ? null : `the advisory's GET answered HTTP ${c.answer?.status ?? 'none'}${c.answer?.status === 200 ? ' with no advisory' : ''}`),
+  }),
+  Object.freeze({
+    fence: 'advisory',
+    wants: () => 'the advisory the action names, by its ghsa_id',
+    fails: (c) => {
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      return c.answer.json.ghsa_id === c.ghsaId ? null : 'the answer names another advisory';
+    },
+  }),
+  Object.freeze({
+    fence: 'sender',
+    wants: (c) => ADVISORY_READ_SENDER_GATES[readGateOf(c)] ?? 'a sender gate the table names',
+    // `target-write` was judged before this GET, on the stroke (header), so it asks nothing of the answer; any other value is closed.
+    fails: (c) => (readGateOf(c) === 'target-write' ? null : 'the row names no sender gate the table knows, so no read is sealed'),
+  }),
+]);
+
+/** The read fences `ctx` fails: `[{ fence, wants, got }]` in `ADVISORY_READ_FENCES` order; `[]` when all hold. Pure. */
+export function advisoryReadFenceFailures(ctx = {}) {
+  return ADVISORY_READ_FENCES.map((f) => ({ fence: f.fence, wants: f.wants(ctx), got: f.fails(ctx) })).filter((f) => f.got !== null);
+}
+
+/** The sentence a read fence refusal prints — every failing fence, what was read, what the relay seals for. Pure. */
+export function advisoryReadFenceText(failures) {
+  return failures.map((f) => `fence \`${f.fence}\`: ${f.got}, and the relay seals only for ${f.wants}`).join('; ');
+}
+
+/** The call a read's row and log print — the path with the id left out, ⛔ never the path itself (header). Pure. */
+export function advisoryReadCall(repo) {
+  return `GET /repos/${repo}/security-advisories/{ghsa_id}`;
+}
+
+/** What a refused read prints after its status: the grant is the first live read's to measure, ⛔ never widened by hand. */
+export const ADVISORY_READ_ACCESS_REMEDY =
+  'the relay token carries repository-advisories READ for this stroke alone — GitHub documents this read under it, and the ' +
+  'first live read measures it; put this reading to the maintainer, whose ruling it is to raise the row to write — ⛔ never ' +
+  're-send it under a wider or un-narrowed token';
+
+/** What a read whose seal failed prints: nothing of the answer, and no part emitted. */
+export const ADVISORY_READ_SEAL_FAILED = 'the seal failed, so nothing of the answer was emitted — ⛔ the text never leaves another way; re-send the read with a fresh key';
+
+/**
+ * What a read whose GET never reached the platform prints — `rest` answers status 0 when the call threw before any
+ * answer — and the status its row carries in place of a number. The platform judged nothing, so there is no HTTP
+ * status to print and no grant to remedy (`ADVISORY_READ_ACCESS_REMEDY` is a refusal's, and none came); ⛔ nor the
+ * exception's message, which can carry the request's path and so the id.
+ */
+export const ADVISORY_READ_UNREACHED =
+  "REFUSED before any fence: the advisory's GET did not reach the platform (the runner's call threw before any answer), so no grant, " +
+  'advisory or sender was judged and nothing was sealed or emitted — re-send the read with a fresh key';
+export const ADVISORY_READ_UNREACHED_STATUS = 'not reached';
+
+/** What a read too large for the channel prints: the counts, and nothing of the answer. Pure. */
+export function advisoryReadOverCapText({ plaintextBytes, sealedChars }) {
+  return (
+    `the sealed answer is ${sealedChars} character(s) (${plaintextBytes} byte(s) of the answer), over the ${ADVISORY_READ_MAX_SEALED_CHARS} the run's ` +
+    `notices carry (${ADVISORY_READ_MAX_PARTS} of ${ADVISORY_READ_PART_CHARS}) — nothing was emitted; ⛔ the text never leaves another way, put the reading to the maintainer`
+  );
+}
+
+/** The row a landed read prints: counts alone — ⛔ no id, no state, no field. Pure. */
+export function advisoryReadLandedText({ plaintextBytes, sealedChars, parts }) {
+  return `sealed ${plaintextBytes} byte(s) of the answer to the seat's one-time key — ${sealedChars} character(s) in ${parts} notice part(s), which only that seat's process opens`;
+}
+
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
 export const TRANSPORTS = Object.freeze(['direct', 'dispatch', 'auto']);
@@ -754,6 +1435,16 @@ export const MAX_REF_BYTES = 255;
 /** Names per list-valued key; ten assignees is the platform's own cap, twenty labels is ours. */
 export const MAX_LABELS_PER_ACTION = 20;
 export const MAX_LOGINS_PER_ACTION = 10;
+/** A private report's `summary` — GitHub's own cap of 1,024 characters, held in bytes, which is never more. */
+export const MAX_ADVISORY_SUMMARY_BYTES = 1024;
+/** A private report's `description` — the body cap; GitHub's own is 65,535 characters, past the payload's ceiling. */
+export const MAX_ADVISORY_DESCRIPTION_BYTES = MAX_BODY_BYTES;
+/** Weakness ids per report, and the longest one (`CWE-` and five digits). */
+export const MAX_CWE_IDS = 10;
+export const MAX_CWE_ID_CHARS = 9;
+/** Packages per draft advisory — one `vulnerabilities` entry each — and the registry's own cap on a name. */
+export const MAX_ADVISORY_PACKAGES = 10;
+export const MAX_NPM_PACKAGE_CHARS = 214;
 
 /** The platform's ceilings on `client_payload`, quoted in the header. */
 export const CLIENT_PAYLOAD_MAX_TOP_LEVEL = 10;
@@ -781,7 +1472,23 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  *           short one (that is refused here, not by the platform's 422);
  *   `inputs` a JSON object naming at least one input, each value a JSON
  *           boolean (the one type an allowlisted input has) — its keys and
- *           values are then judged against the row's `closedInputs` entry.
+ *           values are then judged against the row's `closedInputs` entry;
+ *   `ghsa`  one repository advisory's id, `GHSA_ID_SHAPE` exactly — it is
+ *           spelled into a path; a refusal names the shape and never echoes
+ *           the value, which a public run log would otherwise carry;
+ *   `x25519` one X25519 public key, base64 SPKI DER in its one spelling,
+ *           judged by `advisoryReadKeyFailure` (header: "The one row that
+ *           READS an advisory") — a refusal names the key, the byte count and
+ *           what the value failed to be, and never echoes it.
+ *
+ * Two modifiers, both for the advisory rows (header: "The four rows that
+ * touch a security advisory"): `shape` holds each item of a `list` to a
+ * pattern, named by `itemWhat`; `quiet` makes an `enum` or `list` refusal
+ * describe a failing value by its type and size, ⛔ never echo it — a value in
+ * the wrong key may be an advisory's prose, and a refusal reaches the public
+ * run log. `named` is an `enum`'s values refused BY NAME, each with its
+ * reason. A `str` refusal never echoes, so `summary` and `description` need
+ * neither.
  */
 export const FIELDS = Object.freeze({
   issue: Object.freeze({ kind: 'int' }),
@@ -805,6 +1512,19 @@ export const FIELDS = Object.freeze({
   inputs: Object.freeze({ kind: 'inputs' }),
   // The child of a hierarchy link, by NUMBER — the executor resolves its REST id (header: "The two rows that write an issue's hierarchy").
   sub_issue: Object.freeze({ kind: 'int' }),
+  // The advisory rows' keys (header: "The four rows that touch a security advisory"). A report's or a draft's prose is
+  // `summary` and `description`, read from the event file and printed nowhere; every other key is quiet.
+  summary: Object.freeze({ kind: 'str', max: MAX_ADVISORY_SUMMARY_BYTES }),
+  description: Object.freeze({ kind: 'str', max: MAX_ADVISORY_DESCRIPTION_BYTES }),
+  severity: Object.freeze({ kind: 'enum', values: ADVISORY_SEVERITIES, quiet: true }),
+  cwe_ids: Object.freeze({ kind: 'list', max: MAX_CWE_IDS, itemMax: MAX_CWE_ID_CHARS, shape: CWE_ID_SHAPE, itemWhat: 'a weakness id, CWE- and a number', quiet: true }),
+  // A draft's affected packages, by npm name alone — each one `vulnerabilities` entry, never a version range.
+  packages: Object.freeze({ kind: 'list', max: MAX_ADVISORY_PACKAGES, itemMax: MAX_NPM_PACKAGE_CHARS, shape: NPM_PACKAGE_SHAPE, itemWhat: 'an npm package name', quiet: true }),
+  ghsa_id: Object.freeze({ kind: 'ghsa' }),
+  collaborators: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS, shape: LOGIN_SHAPE, itemWhat: 'a GitHub login', quiet: true }),
+  advisory_state: Object.freeze({ kind: 'enum', values: ADVISORY_SETTABLE_STATES, quiet: true, named: ADVISORY_REFUSED_STATES }),
+  // The seat's one-time public key for ONE read (header: "The one row that READS an advisory") — its own kind.
+  public_key: Object.freeze({ kind: 'x25519' }),
 });
 
 /**
@@ -819,21 +1539,28 @@ export const FIELDS = Object.freeze({
  * maintainer's ruling, comment 6104822731 (header). `actions: write` is spent
  * by the `workflow_dispatch` and `run_rerun_failed` rows alone, and minted
  * only for a stroke carrying one of them (`STROKE_SCOPED_PERMISSIONS`).
+ * `repository-advisories: write` is spent by the four advisory rows that
+ * write alone, and minted only for a stroke carrying one of them, the same
+ * way; `advisory_read` spends that grant at `read` (its row's `grant`), so a
+ * read's stroke is minted the lower level and never write.
  */
-export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write' });
+export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write', 'repository-advisories': 'write' });
 
 /**
  * The permissions minted ONLY for a stroke carrying an op that spends them —
  * `actions: write`, the `workflow_dispatch` and `run_rerun_failed` rows'
- * alone, each of which travels alone in its stroke. `validate.mjs`
+ * alone, and `repository-advisories`, the five advisory rows' alone — at
+ * write, or at the row's `grant` (`advisory_read`'s `read`); each of those
+ * rows travels alone in its stroke. `validate.mjs`
  * computes a stroke's permission set (`tokenPermissionsOf`) and writes each of
- * these to `$GITHUB_OUTPUT` as `permission_<name>=<level>` or empty; the
- * workflow's mint step reads that output for exactly these inputs, and
- * `actions/create-github-app-token` skips an empty `permission-*` input
- * (`lib/get-permissions-from-inputs.js`: an empty value returns the set
- * unchanged), so every other stroke's token carries the literal grants alone.
+ * these to `$GITHUB_OUTPUT` as `permission_<name>=<level>` or empty (a hyphen
+ * in the name spelled `_`); the workflow's mint step reads that output for
+ * exactly these inputs, and `actions/create-github-app-token` skips an empty
+ * `permission-*` input (`lib/get-permissions-from-inputs.js`: an empty value
+ * returns the set unchanged), so every other stroke's token carries the
+ * literal grants alone.
  */
-export const STROKE_SCOPED_PERMISSIONS = Object.freeze(['actions']);
+export const STROKE_SCOPED_PERMISSIONS = Object.freeze(['actions', 'repository-advisories']);
 
 const issues = (repo, n) => `/repos/${repo}/issues/${n}`;
 const pulls = (repo, n) => `/repos/${repo}/pulls/${n}`;
@@ -929,6 +1656,12 @@ export function transferRemedy(source, target) {
 /**
  * The closed op list. Each row:
  *   `permission`  the App permission the row spends (a key of `PERMISSIONS`);
+ *   `grant`       (optional) the level the row spends it at, when lower than
+ *                 `PERMISSIONS` holds — `advisory_read`'s `read` alone, on a
+ *                 stroke-scoped permission (header above);
+ *   `senderGate`  (optional) the sender gate a read is held to —
+ *                 `advisory_read`'s, a key of `ADVISORY_READ_SENDER_GATES`
+ *                 (header above); any other value fails closed;
  *   `required`    keys that must be present;
  *   `optional`    keys that may be; anything else on the action is refused;
  *   `atLeastOne`  (optional) of these keys, at least one must be present;
@@ -936,7 +1669,9 @@ export function transferRemedy(source, target) {
  *                 must reach — `transfer`'s alone (header above);
  *   `alone`       (optional) true for a row whose stroke carries exactly that
  *                 one action — `workflow_dispatch`'s and `run_rerun_failed`'s,
- *                 the two rows spending `actions: write` (header above);
+ *                 the two rows spending `actions: write`, and
+ *                 the five advisory rows', the ones spending
+ *                 `repository-advisories` (header above);
  *   `closedInputs` (optional) the per-workflow closed inputs —
  *                 `WORKFLOW_DISPATCH_INPUTS`, `workflow_dispatch`'s alone: the
  *                 action's `inputs` must be exactly the entry its `workflow`
@@ -959,7 +1694,7 @@ export function transferRemedy(source, target) {
  *                 the hierarchy rows' `issue` and `sub_issue`: an issue is
  *                 never its own sub-issue (header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, subIssue?, fromAnswer?, assigned?, labelled? }`
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, subIssue?, advisoryRead?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
@@ -974,7 +1709,16 @@ export function transferRemedy(source, target) {
  *                 executor reads before the write, whose `id` is the body it
  *                 sends, and whose listing it reads back after it
  *                 (`subIssuePreflight` / `confirmSubIssue`, execute.mjs) — it
- *                 carries no `body`, the id is the child's answer's; a `fromAnswer` descriptor names the
+ *                 carries no `body`, the id is the child's answer's; an
+ *                 `advisoryCollaborators` descriptor carries the advisory's id
+ *                 and the logins to add, whose fences the executor reads
+ *                 before the PATCH, whose merged list is the body it sends,
+ *                 and whose answer it reads back (`advisoryPreflight` /
+ *                 `confirmAdvisoryCollaborators`, execute.mjs) — it carries no
+ *                 `body` either; an `advisoryRead` descriptor carries the
+ *                 advisory's id and the seat's public key, whose GET the
+ *                 executor fences, seals and emits as notice parts and prints
+ *                 nothing else of (`advisoryReadAction`, execute.mjs); a `fromAnswer` descriptor names the
  *                 field of its action's FIRST request's answer that fills the
  *                 `answerPlaceholder` in its path (`fillFromAnswer`,
  *                 execute.mjs); an `assigned` descriptor lists the logins its
@@ -1169,6 +1913,82 @@ export const OPS = Object.freeze({
     alone: true,
     requests: (a, repo) => [{ verb: 'POST', path: `/repos/${repo}/actions/runs/${a.run_id}/rerun-failed-jobs`, rerunFailed: { runId: a.run_id } }],
   }),
+  // The four rows that touch a security advisory — see the header. Each travels alone, and its token alone carries
+  // `repository-advisories: write`, minted for that stroke only. The sender gate is unchanged, by the maintainer's
+  // ruling (the body of issue 29160): 「所有车队账户都能发这个操作」 — so any fleet account with write on the target
+  // can add itself to an advisory whose id it holds; an id exposes no content, but it is in the public run log.
+  // The report: ONE POST of its body, the only advisory body a row spells — no state, so never `published`. Its
+  // prose reaches the runner through the event file and is printed nowhere; the row and the annotation name the id.
+  advisory_report: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['summary', 'description']),
+    optional: Object.freeze(['severity', 'cwe_ids']),
+    alone: true,
+    requests: (a, repo) => [
+      {
+        verb: 'POST',
+        path: `/repos/${repo}/security-advisories/reports`,
+        body: { summary: a.summary, description: a.description, ...(a.severity !== undefined ? { severity: a.severity } : {}), ...(a.cwe_ids !== undefined ? { cwe_ids: [...a.cwe_ids] } : {}) },
+        advisoryReport: true,
+      },
+    ],
+  }),
+  // The draft: ONE POST of its body to the collection, which creates an advisory in `draft` — the endpoint's default
+  // and the only state it creates in, so the body names no state. Its prose rides the event file like a report's;
+  // each package is one `vulnerabilities` entry naming the npm ecosystem and the name, with no version range, credit,
+  // CVSS vector, CVE id or private fork. The row and the annotation name the id the platform gave it.
+  advisory_create: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['summary', 'description', 'packages']),
+    optional: Object.freeze(['severity', 'cwe_ids']),
+    alone: true,
+    requests: (a, repo) => [
+      {
+        verb: 'POST',
+        path: `/repos/${repo}/security-advisories`,
+        body: {
+          summary: a.summary,
+          description: a.description,
+          vulnerabilities: a.packages.map((name) => ({ package: { ecosystem: ADVISORY_CREATE_ECOSYSTEM, name } })),
+          ...(a.severity !== undefined ? { severity: a.severity } : {}),
+          ...(a.cwe_ids !== undefined ? { cwe_ids: [...a.cwe_ids] } : {}),
+        },
+        advisoryCreate: true,
+      },
+    ],
+  }),
+  // The collaborators: the id and the logins, no prose. The body `{ collaborating_users }` is the executor's — the
+  // existing logins plus the missing ones, after its fences on the advisory's own GET — never the action's.
+  advisory_collaborators_add: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['ghsa_id', 'collaborators']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryCollaborators: { ghsaId: a.ghsa_id, add: [...a.collaborators] } }],
+  }),
+  // The state: accept (`draft`) or close (`closed`), nothing else — `published` is refused by name. The body
+  // `{ state }` is the executor's, sent only after its own GET shows a transition `ADVISORY_TRANSITIONS` allows.
+  advisory_state: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['ghsa_id', 'advisory_state']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryState: { ghsaId: a.ghsa_id, to: a.advisory_state } }],
+  }),
+  // The one row that READS an advisory — see the header. ONE GET, nothing written; the executor seals the answer to the
+  // seat's one-time key and prints nothing of it, not even the id. It spends repository-advisories at READ alone and
+  // travels alone. ⚖ The sender gate is `target-write`, the gate the four rows above keep (`ADVISORY_READ_SENDER_GATES`),
+  // by the maintainer's ruling, verbatim: 「同意改成对仓库有写权限,立卡派发修复」 (the header says why). ⛔ The grant stays
+  // `read`: a read refused under it is the maintainer's to rule on, never a raise to write.
+  advisory_read: Object.freeze({
+    permission: 'repository-advisories',
+    grant: 'read',
+    senderGate: 'target-write',
+    required: Object.freeze(['ghsa_id', 'public_key']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'GET', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryRead: { ghsaId: a.ghsa_id, publicKey: a.public_key } }],
+  }),
 });
 
 export const OP_NAMES = Object.freeze(Object.keys(OPS));
@@ -1216,6 +2036,12 @@ export const REFUSED_PATH_FAMILIES = Object.freeze([
   /\/actions\/workflows\/[^/]+\/(enable|disable)$/,
   /\/actions\/(secrets|variables|permissions|runners|oidc)/,
   /\/releases/,
+  // Every `security-advisories` path but exactly ONE advisory's (`ADVISORY_PATH_SHAPE`), the private-report endpoint
+  // (`ADVISORY_REPORTS_PATH_SHAPE`) and the bare collection (`ADVISORY_CREATE_PATH_SHAPE`, the create of a draft):
+  // anything after the collection but those two, an advisory's CVE request and its temporary fork stay out of reach
+  // of any row. The collection's list is the same path under `GET`, which no row sends (the self-test pins the verbs);
+  // the one GET a row sends is `advisory_read`'s, of one advisory's path.
+  /\/security-advisories(?!\/(?:GHSA(-[0-9a-z]{4}){3}|reports)$|$)/,
   /^\/orgs\//,
   /^\/admin\//,
   /\/collaborators\//,

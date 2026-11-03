@@ -13,7 +13,9 @@
  * The card's reproduction: an object with no `highlightFields` and a group
  * `pro_details` gated by `record.kind == 'pro'`. On a `basic` record the body
  * hid the group (objectui#11630) and the derived strip drew
- * `pro_secret_note` with its value.
+ * `pro_secret_note` with its value. Since objectstack#28868 nothing is
+ * derived, so the fixture declares the strip it renders (`kind`); the legs
+ * still count a gated member across the whole page.
  *
  * Each leg renders the two nodes `buildDefaultPageSchema` emits for the
  * object — `record:highlights` and the Details tab's `record:details` — on
@@ -46,6 +48,7 @@ const GATE = "record.kind == 'pro'";
 const cardObject = (visibleWhen: unknown): any => ({
   name: OBJECT,
   label: 'QA Gate',
+  highlightFields: ['kind'],
   fields: {
     name: { type: 'text', label: 'Name' },
     kind: {

@@ -1662,7 +1662,7 @@ const UNPUBLISHED_EXEMPTIONS: Record<string, string> = {
   'list-view.name':
     'Unpublished by measurement (objectui#13047): read by nothing on a page `list-view` node. The node draws, queries and hands its view the same thing with and without it — the view\'s own `name` is its identity in metadata, which an embedded list has no use for.',
   'list-view.sharing':
-    'Unpublished by measurement (objectui#13047): `sharing.type` draws a Share button with no click handler, and the sharing config is enforced nowhere in the renderer. Publishing it would advertise a dead control (objectui#13047\'s report).',
+    'Unpublished by measurement (objectui#13047): the block draws a read-only lock indicator from `sharing.lockedBy` (its ownership `type` is retired, objectstack#29037) with no click handler, and the sharing config is enforced nowhere in the renderer. Publishing it would advertise a dead control (objectui#13047\'s report).',
 };
 
 /**

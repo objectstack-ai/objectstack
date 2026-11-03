@@ -35,17 +35,17 @@ export const NotificationReceipt = ObjectSchema.create({
     },
     description: 'Per-recipient × channel receipt; the source of truth for notification read-state.',
     // [ADR-0079] The record title is `state`, the one column `titleFormat`
-    // names: a single-field title migrates to `nameField` directly, with no
+    // named: a single-field title migrates to `nameField` directly, with no
     // formula. With no pointer declared, the registry's designate-only pass
     // stamped `nameField: 'id'` (the first title-eligible field; a `select` is
     // never DERIVED), so a renderer honouring ADR-0079's order (an explicit
     // `nameField` wins over `titleFormat`) drew the raw id as the record page's
     // H1. An explicit pointer is honoured whatever the field's type (ADR-0079
-    // D4). `titleFormat` stays for renderers that still read it first;
-    // `notification-display-title.test.ts` holds the two to the same text.
+    // D4). The retired `titleFormat` template beside it is gone (refused at
+    // save and by `os validate`); `notification-display-title.test.ts` holds
+    // the formula to the text that template drew.
     displayNameField: 'state',
     nameField: 'state', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-    titleFormat: '{state}',
     highlightFields: ['notification_id', 'user_id', 'channel', 'state', 'at'],
 
     fields: {

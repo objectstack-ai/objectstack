@@ -35,6 +35,7 @@
  */
 
 import { FeedFilterMode as FeedFilterModeEnum, FeedItemType as FeedItemTypeEnum } from '@objectstack/spec/data';
+import { RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES } from '@objectstack/spec/api';
 import { classifyLoadError } from '@object-ui/react';
 import type { FeedItem, FeedItemType } from '@object-ui/types';
 import type { FeedFilterMode } from '../RecordActivityTimeline';
@@ -144,10 +145,10 @@ export const ACTIVITY_TYPE_TO_FEED_TYPE: Readonly<Record<string, FeedItemType | 
   system: 'system',
   completed: 'task',
   scheduled: 'event',
-  commented: undefined,
-  mentioned: undefined,
-  login: undefined,
-  logout: undefined,
+  // objectstack#28737 — the types the stream draws no entry for are ONE
+  // definition with the record page payload's `timeline` count, which leaves
+  // the same ones out: `commented`, `mentioned`, `login`, `logout`.
+  ...Object.fromEntries(RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES.map((type) => [type, undefined])),
 };
 
 /**

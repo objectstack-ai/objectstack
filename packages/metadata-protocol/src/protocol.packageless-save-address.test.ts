@@ -35,9 +35,11 @@
  *  - CONTROL: a package-less row minted beside a package's row before the fix
  *    stays as it is, and a server-stated rewrite of that row (the
  *    stored-metadata migration passes `packageId: null`) still writes it;
- *  - an item a code package ships, with no stored row: the package-less save
- *    writes the package-unbound overlay and the read serves it, as before; with
- *    an overlay row already bound to the code package, it writes that row;
+ *  - [#28576, ADR-0146 D11] an item a code package ships: the package-less save
+ *    is refused naming the base's pair and the migration ceremony, with no
+ *    stored row or with an overlay row bound to the code package (stored
+ *    before [#28905] closed the save naming the package too), and writes
+ *    nothing;
  *  - the draft path: a package-less draft save still inherits the package
  *    (its own suite, `sys-metadata-repository.draft-package-inherit.test.ts`,
  *    holds the rest).
@@ -61,6 +63,8 @@
  * read doors run against it, and its write verbs route through the producer's
  * own dispatch predicates.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -158,9 +162,13 @@ function makeProtocol(artifacts: Array<{ type: string; item: Record<string, unkn
             // [#26708] Every package this file names is installed — an
             // authored base through the package door, the code package by its
             // boot — or a save naming it is refused before any rule here.
+            // [#28576] The code package declares a namespace and a SemVer
+            // version, so its pair can be ensured and `os migrate
+            // packageless-overlays` could move its rows: the close applies.
             getPackage: (id: string) => (id === INSTALLED_READ_ONLY
                 ? { manifest: { id, scope: 'cloud' } }
-                : [WRITABLE, OTHER_WRITABLE, 'com.qa.thirdapp', CODE_PACKAGE].includes(id) ? { manifest: { id } } : undefined),
+                : id === CODE_PACKAGE ? { manifest: { id, namespace: 'showcase', version: '0.1.0' } }
+                    : [WRITABLE, OTHER_WRITABLE, 'com.qa.thirdapp'].includes(id) ? { manifest: { id } } : undefined),
             isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
         },
@@ -419,37 +427,53 @@ describe('CONTROL: what the resolution leaves alone', () => {
     });
 });
 
-describe('an item a CODE package ships', () => {
-    it('with no stored row: the package-less save writes the package-unbound overlay, and the read serves it', async () => {
+describe('an item a CODE package ships: the package-less write is closed (ADR-0146 D11)', () => {
+    const PAIR = `${CODE_PACKAGE}.custom`;
+    const closed = (e: unknown) => {
+        expect(resolveThrownHttpError(e)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(String((e as Error).message)).toContain(`'${PAIR}'`);
+        expect(String((e as Error).message)).toContain('os migrate packageless-overlays');
+        // The REST door cuts a refusal's text at 500 characters
+        // (`CLIENT_MESSAGE_MAX`, `@objectstack/types`), and Setup shows it as
+        // sent: the whole sentence fits, the ceremony included.
+        expect(String((e as Error).message).length).toBeLessThan(500);
+    };
+
+    it('with no stored row: the package-less save is refused naming the pair, and nothing is written', async () => {
         const name = 'showcase_task_grid';
         const { protocol, rows } = makeProtocol([packagedView(name)]);
 
-        const saved = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Overlaid') });
+        const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Overlaid') }).then(() => undefined, (e: unknown) => e);
 
-        expect(saved.message).toBe(
-            `Saved customization overlay (env-wide, state=active) — type=view, name=${name} [seq=${saved.seq}]`,
-        );
-        expect(rows('view', name).map((r) => r.package_id ?? null)).toEqual([null]);
-        expect((await protocol.getMetaItem({ type: 'view', name })).item.label).toBe('Overlaid');
+        closed(refused);
+        expect(rows('view', name)).toEqual([]);
+        expect((await protocol.getMetaItem({ type: 'view', name })).item.label).not.toBe('Overlaid');
     });
 
-    it('with an overlay row bound to the code package: the package-less save writes that row', async () => {
+    it('with an overlay row bound to the code package: the package-less save is refused, and that row is untouched', async () => {
         const name = 'showcase_task_grid';
         // [#26708] The code package ships the object its view binds: a save
         // naming the (installed) package is judged against its closure.
-        const { protocol, rows } = makeProtocol([
+        const { protocol, rows, seedRow } = makeProtocol([
             packagedView(name),
             { type: 'object', item: { name: 'task', _packageId: CODE_PACKAGE, fields: { name: { type: 'text' } } } },
         ]);
-        // The overlay a save naming the package writes (ADR-0005: an overlay of
-        // a code-shipped item names the package it customizes).
-        await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Named'), packageId: CODE_PACKAGE });
+        // [#28905, ADR-0146 D1] A save naming the read-only code package is
+        // closed too now, naming the same pair
+        // (`protocol.named-base-overlay-write.test.ts` holds that close), so
+        // the row bound to the package is one stored before it, as an older
+        // build left it.
+        const named = await refusalOf(() => protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Named'), packageId: CODE_PACKAGE }));
+        expect(resolveThrownHttpError(named)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(String(named.message)).toContain(`'${PAIR}'`);
+        expect(rows('view', name)).toEqual([]);
+        seedRow({ type: 'view', name, package_id: CODE_PACKAGE, metadata: JSON.stringify(viewBody(name, 'Named')), checksum: 'sha-named' });
 
-        const saved = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Unnamed') });
+        const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Unnamed') }).then(() => undefined, (e: unknown) => e);
 
-        expect(saved.message).toContain(`package=${CODE_PACKAGE}`);
+        closed(refused);
         expect(rows('view', name).map((r) => r.package_id ?? null)).toEqual([CODE_PACKAGE]);
-        expect((await protocol.getMetaItem({ type: 'view', name })).item.label).toBe('Unnamed');
+        expect((await protocol.getMetaItem({ type: 'view', name })).item.label).toBe('Named');
     });
 });
 

@@ -173,6 +173,29 @@ export function serverHoldAt(
   return (valueAtPath(judged, path) ?? '') === text ? hits : NO_ERRORS;
 }
 
+/**
+ * objectstack#29311 — {@link verdictPreviewEntries} for a canvas whose page
+ * does not read the item again after an autosave (the Studio Interfaces
+ * pillar): an entry is kept while the body on screen still holds, at the
+ * entry's path, the value the verdict judged there, and dropped once the
+ * author has edited that value (a field reference renamed or removed). The
+ * verdict describes the judged body and no other, as {@link serverHoldAt}
+ * says; the next read brings the next one. An entry with no path describes
+ * the whole body and is kept. ⛔ No rule is restated: the entries are the
+ * server's, taken whole.
+ */
+export function verdictEntriesStillShown(
+  diagnostics: ServerDiagnostics | undefined,
+  judged: unknown,
+  shown: unknown,
+): Array<{ path?: string; message: string; severity: 'error' | 'warning' }> {
+  return verdictPreviewEntries(diagnostics).filter(
+    (entry) =>
+      !entry.path ||
+      JSON.stringify(valueAtPath(judged, entry.path)) === JSON.stringify(valueAtPath(shown, entry.path)),
+  );
+}
+
 /** {@link serverHoldAt} against the verdict and judged body the enclosing page provides. */
 export function useServerHoldAt(path: string | undefined, text: string): readonly ServerDiagnosticEntry[] {
   return serverHoldAt(React.useContext(DraftVerdictContext), React.useContext(DraftVerdictBodyContext), path, text);
