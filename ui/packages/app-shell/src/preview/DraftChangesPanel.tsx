@@ -1396,6 +1396,16 @@ export function savedToCustomizationText(t: Translate, baseLabel: string): strin
   });
 }
 
+/**
+ * objectstack#29691 — {@link savedToCustomizationText} as an element, for the
+ * Studio item header's note line, so the header reads the sheet's own words
+ * without a key of its own.
+ */
+export function SavedToCustomizationNote({ baseLabel, testId }: { baseLabel: string; testId?: string }) {
+  const { t } = useObjectTranslation();
+  return <span data-testid={testId}>{savedToCustomizationText(t, baseLabel)}</span>;
+}
+
 export function DraftChangesPanel({
   open,
   onOpenChange,
