@@ -146,6 +146,8 @@ beforeEach(() => {
       if (method === 'GET') srv.reads.push(`${path}${url.search}`);
       if (path === '/api/v1/packages') return json({ success: true, data: PACKAGES });
       if (path === `/api/v1/packages/${BASE}/customizations`) return json({ success: true, data: READ });
+      // The type registry: a permission set is written at runtime (the matrix's type gate).
+      if (path === '/api/v1/meta') return json([{ type: 'permission', allowRuntimeCreate: true }, { type: 'object' }]);
       if (path === '/api/v1/meta/_drafts') {
         const drafts =
           pkg === PAIR
