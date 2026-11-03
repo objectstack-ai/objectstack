@@ -633,10 +633,13 @@ function jsonText(value: unknown): string {
  */
 const VALIDATE_SITE_MAP: Record<
   string,
-  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType; optionLabels?: true }
+  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType; optionLabels?: true; faultOutcome?: 'fail-closed' }
 > = {
   formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
-  validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema },
+  // [#29904] A validation rule fails closed (a fault refuses the write), so the
+  // publish gate grades a text-vs-number comparison there an error; the tool
+  // answers what the gate will.
+  validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema, faultOutcome: 'fail-closed' },
   flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
@@ -1045,7 +1048,8 @@ export function registerObjectTools(
         description:
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
           'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
-          '(text/boolean fields misused in arithmetic, date-equality pitfalls), plus the fields and stdlib ' +
+          '(text/boolean fields misused in arithmetic, an error at a `validation` site, where it refuses ' +
+          'the write; date-equality pitfalls), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions).',
         inputSchema: strictToolInput(
@@ -1086,14 +1090,21 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot, optionLabels } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const { role, scope, slot, optionLabels, faultOutcome } = VALIDATE_SITE_MAP[site ?? 'formula'];
           // [#28715] The object's option-bearing fields, where the gate reads
           // them: `label(record.<field>)` on a declared field outside this list
           // is refused as `label-field-no-options` by the one validator.
           const optionFields = optionLabels && bridge.optionFieldsOf
             ? await bridge.optionFieldsOf(objectName)
             : null;
-          const hint = { objectName, fields, fieldTypes, scope, ...(optionFields ? { optionFields } : {}) } as const;
+          const hint = {
+            objectName,
+            fields,
+            fieldTypes,
+            scope,
+            ...(optionFields ? { optionFields } : {}),
+            ...(faultOutcome ? { faultOutcome } : {}),
+          } as const;
           // The gate's envelope verdict first: `validateExpression` treats a
           // blank source as "not authored" and answers ok, while the save gate
           // refuses it. Each issue is the spec schema's own (code and message),

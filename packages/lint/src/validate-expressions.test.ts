@@ -872,17 +872,108 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues).toHaveLength(0);
     });
 
-    it('warns on a validation predicate ordering a text field against a number', () => {
+    // [#29904] A validation rule fails closed: a predicate that cannot be
+    // evaluated refuses the write. So a text field ordered against a number
+    // there is an ERROR — every write whose value is not numeric text would be
+    // refused — where a formula's fault reads null and keeps the warning. The
+    // field is `required` so the nullable-comparison verdict stays out of it.
+    const typeMismatches = (issues: ReturnType<typeof validateStackExpressions>) =>
+      issues.filter(i => /^type mismatch/.test(i.message));
+
+    it('refuses a validation predicate ordering a required text field against a number (#29904)', () => {
       const issues = validateStackExpressions({
         objects: [{
           name: 'crm_lead',
-          fields: { title: { type: 'text' } },
+          fields: { title: { type: 'text', required: true } },
           validations: [{ name: 'r', condition: 'record.title > 5' }],
         }],
       });
-      const w = issues.filter(i => i.severity === 'warning');
-      expect(w).toHaveLength(1);
-      expect(w[0].message).toMatch(/record\.title/);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({ severity: 'error', path: 'objects[0].validations[0].condition' });
+      expect(issues[0].message).toMatch(/^type mismatch `string > int` — `record\.title` holds text/);
+      expect(issues[0].message).toMatch(/the write \(or the operation a hook guards\) is refused/);
+      expect(issues[0].message).toMatch(/`size\(record\.title\)`/);
+      expect(issues[0].message).not.toMatch(/evaluates to null/);
+    });
+
+    it('keeps the warning for the same comparison in a formula field, where the fault reads null (#29904)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_lead',
+          fields: {
+            title: { type: 'text', required: true },
+            big: { type: 'formula', expression: 'record.title > 5' },
+          },
+        }],
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].message).toMatch(/silently evaluates to null/);
+    });
+
+    it('refuses the type mismatch at every other fail-closed site (#29904)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_lead',
+          fields: {
+            title: { type: 'text', required: true },
+            active: { type: 'boolean', required: true },
+            due: { type: 'text', requiredWhen: 'record.title > 5', readonlyWhen: 'record.active > 0' },
+            tier: {
+              type: 'select',
+              options: [{ value: 'gold', label: 'Gold', visibleWhen: 'record.title >= 10' }],
+            },
+          },
+          validations: [
+            { name: 'w', type: 'script', condition: 'record.title == "x"', when: 'record.title < 3', message: 'm' },
+            {
+              name: 'c',
+              type: 'conditional',
+              when: 'record.title == "y"',
+              then: { name: 'c_then', type: 'script', condition: 'record.title * 2 > 1', message: 'm' },
+              message: 'm',
+            },
+          ],
+        }],
+        hooks: [{ name: 'h', object: 'crm_lead', events: ['beforeInsert'], condition: 'record.title > 1' }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.map(i => [i.where, i.severity])).toEqual([
+        ["object 'crm_lead' · validation 'w' when", 'error'],
+        ["object 'crm_lead' · validation rule 'c' then → 'c_then'", 'error'],
+        ["object 'crm_lead' · field 'due' requiredWhen", 'error'],
+        ["object 'crm_lead' · field 'due' readonlyWhen", 'error'],
+        ["object 'crm_lead' · field 'tier' option 'gold' visibleWhen", 'error'],
+        ["hook 'h' (crm_lead) condition", 'error'],
+      ]);
+      expect(found.find(i => /readonlyWhen/.test(i.where))!.message).toMatch(/holds a boolean/);
+    });
+
+    it('keeps the warning where a fault does not refuse a write: field visibleWhen, action visible (#29904)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_lead',
+          fields: { title: { type: 'text', required: true, visibleWhen: 'record.title > 5' } },
+          actions: [{ name: 'a', label: 'A', type: 'script', target: 'noop', visible: 'record.title > 5' }],
+        }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.length).toBeGreaterThan(0);
+      for (const i of found) expect(i.severity).toBe('warning');
+    });
+
+    it('leaves the nullable-comparison verdict as it was beside the type mismatch (#29904)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_lead',
+          fields: { qty: { type: 'number' } },
+          validations: [{ name: 'big', condition: 'record.qty > 1000' }],
+        }],
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+      expect(issues[0].message).toMatch(/declares as nullable/);
+      expect(typeMismatches(issues)).toEqual([]);
     });
 
     it('warns on a flattened flow condition doing arithmetic on a bare text field', () => {

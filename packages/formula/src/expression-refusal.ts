@@ -169,14 +169,17 @@ export interface ExpressionRefusalParams {
    */
   'date-duration-value': { readonly reference?: string };
   /**
-   * WARNING, never an error: a text or boolean field used with an arithmetic
-   * or ordering `operator` against a number.
+   * A text or boolean field used with an arithmetic or ordering `operator`
+   * against a number. A WARNING (the expression reads null) unless `outcome`
+   * is `'fail-closed'`: the site refuses the write it guards when the
+   * expression faults, and the verdict is an ERROR (#29904).
    */
   'type-mismatch': {
     readonly operands: string;
     readonly operator: string;
     readonly held: 'text' | 'boolean';
     readonly reference?: string;
+    readonly outcome?: 'fail-closed';
   };
   /**
    * WARNING, never an error: a bare identifier in a flattened condition that

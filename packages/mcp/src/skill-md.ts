@@ -268,7 +268,8 @@ create/update payload.
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions) and advisory warnings (text/boolean fields misused
-  in arithmetic), plus the fields and stdlib functions in scope. \`site\` is
+  in arithmetic; an error at a \`validation\` site, where it refuses the write),
+  plus the fields and stdlib functions in scope. \`site\` is
   \`formula\` | \`validation\` | \`flow_condition\` | \`template\` (default \`formula\`).
 - **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.

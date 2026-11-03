@@ -108,6 +108,16 @@ describe('validate_expression MCP tool (#1928)', () => {
     expect(r.warnings.some((w: any) => /type mismatch/i.test(w.message))).toBe(true);
   });
 
+  // [#29904] A validation rule fails closed, and the publish gate refuses the
+  // comparison there; the tool's `validation` site answers what the gate will.
+  it('errors on a text field ordered against a number at a validation site (#29904)', async () => {
+    const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'record.title > 5', site: 'validation' });
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e: any) => e.code)).toEqual(['type-mismatch']);
+    expect(r.errors[0].params.outcome).toBe('fail-closed');
+    expect(r.warnings).toHaveLength(0);
+  });
+
   it('validates a flattened flow condition (bare fields correct; type-soundness still applies)', async () => {
     const ok = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'stage == "won" && amount > 1000', site: 'flow_condition' });
     expect(ok.ok).toBe(true);
