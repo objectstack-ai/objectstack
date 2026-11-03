@@ -118,7 +118,7 @@ describe('[#29049] flow-region-shape-invalid', () => {
     it('a non-record entry is no flow and draws nothing; the flow after it keeps its own index', () => {
       const bad = flow('rgn_lead_time', guard(fanOut(false)));
       const findings = validateFlowRegionShape({ flows: [null, 'x', bad] });
-      expect(findings.map(({ path }) => path)).toEqual(['flows[2]']);
+      expect(findings.map(({ path }) => path)).toEqual(['flows[2].nodes[1]']);
     });
 
     it('a body with no string name is named by its path', () => {
