@@ -18,7 +18,7 @@ import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, formatDisplayNumber } from '@object-ui/i18n';
 import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
-import { useObjectTranslation } from '@object-ui/react';
+import { useObjectTranslation, classifyLoadError } from '@object-ui/react';
 import { SchemaRendererContext as _SchemaRendererContext } from '@object-ui/react';
 import { useRelatedRecordActions } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
@@ -43,6 +43,8 @@ import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCar
 type LookupCacheEntry =
   | { state: 'pending'; promise: Promise<void> }
   | { state: 'ok'; record: Record<string, unknown> | null | undefined; schema: unknown }
+  // The reader's own read was REFUSED (objectstack#29641): settled, not failed.
+  | { state: 'refused' }
   | { state: 'err' };
 const lookupNameCache: Map<string, LookupCacheEntry> = new Map();
 
@@ -244,8 +246,15 @@ export function isLikelyOpaqueId(v: unknown): boolean {
  *   answers a record hidden from this reader and a record that does not exist
  *   identically on purpose (existence non-disclosure, objectui#8631), so this
  *   state is that fused answer and nothing finer.
- * - `undefined` — anything else: not asked, still in flight, the read threw,
- *   or a record came back that no display field could name.
+ *   It is also the answer to a read the reader is REFUSED (objectstack#29641):
+ *   the target object's read gate answers the record GET with `403
+ *   PERMISSION_DENIED` (for an id that exists and for one that does not), which
+ *   the adapter throws rather than mapping to `null`. Read through the shared
+ *   `classifyLoadError` (`forbidden`), never from the message.
+ * - `undefined` — anything else: not asked, still in flight, the read failed
+ *   for any other reason (network, 5xx, 401: it may pass on a retry, so it
+ *   says nothing about the record), or a record came back that no display
+ *   field could name.
  */
 type LookupNameAnswer = { state: 'named'; name: string } | { state: 'absent' } | undefined;
 
@@ -324,8 +333,13 @@ function useLookupName(
         // heuristic alone can surface an autonumber over the real name.
         const schema = await fetchRefObjectSchema(dataSource, referenceTo!);
         lookupNameCache.set(cacheKey, { state: 'ok', record, schema });
-      } catch {
-        lookupNameCache.set(cacheKey, { state: 'err' });
+      } catch (err) {
+        // A refusal is the reader's settled answer, like a not-found; any
+        // other failure stays a failure (objectstack#29641).
+        lookupNameCache.set(
+          cacheKey,
+          classifyLoadError(err) === 'forbidden' ? { state: 'refused' } : { state: 'err' },
+        );
       }
       force((n) => n + 1);
     })();
@@ -335,6 +349,7 @@ function useLookupName(
 
   if (!isResolvable) return undefined;
   const entry = lookupNameCache.get(cacheKey);
+  if (entry?.state === 'refused') return { state: 'absent' };
   if (entry?.state !== 'ok') return undefined;
   if (entry.record == null) return { state: 'absent' };
   const name = resolveLookupRecordName(entry.record, entry.schema, displayField, policy, referenceTo);
@@ -2727,7 +2742,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
   const lookupAnswer = useLookupName(referenceTo, primaryPrimitiveId, displayField, perms);
   const resolvedName = lookupAnswer?.state === 'named' ? lookupAnswer.name : undefined;
   // The reader's own read of the first primitive answered "no record"
-  // (objectui#13335). Only that id gets the restricted face: in flight, a
+  // (objectui#13335) or was refused (objectstack#29641). Only that id gets the restricted face: in flight, a
   // failed read, an unnamed record and the entries never asked keep the
   // unresolved one below.
   const restrictedId = lookupAnswer?.state === 'absent' ? primaryPrimitiveId : undefined;
