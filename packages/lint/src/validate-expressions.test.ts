@@ -1004,7 +1004,34 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(found[0].message).toMatch(/`size\(title\)`/);
     });
 
-    it('keeps the warning on a flow that is not record-triggered, and on an inert node condition (#29926)', () => {
+    it('keeps the warning on a flow that is not record-triggered: start and edge conditions (#29926)', () => {
+      // No `triggerType` (the shape the pre-existing flattened-flow pin uses)
+      // and a `schedule` start: neither is `record_change`, so the ledger
+      // declares no outcome there and the verdict stays the warning.
+      for (const [name, startConfig] of [
+        ['plain_flow', {}],
+        ['sched_flow', { schedule: '0 * * * *' }],
+      ] as const) {
+        const issues = validateStackExpressions({
+          objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
+          flows: [{
+            name,
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', condition: 'title * 2 > 10', ...startConfig } },
+              { id: 'end', type: 'end' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'title > 5' }],
+          }],
+        });
+        const found = typeMismatches(issues);
+        expect(found.map(i => [i.where, i.severity]), name).toEqual([
+          [`flow '${name}' · node 'start' (start) condition`, 'warning'],
+          [`flow '${name}' · edge 'e1' (start→end) condition`, 'warning'],
+        ]);
+      }
+    });
+
+    it('keeps the warning on an inert node condition of a record-triggered flow (#29926)', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
         flows: [{
