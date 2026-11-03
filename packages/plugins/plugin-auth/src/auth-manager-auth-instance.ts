@@ -500,7 +500,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
             `${invitation ? 'Account-invitation' : 'Password-reset'} email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
           );
         }
-      }), (error) => logAfterResponseSendFailure(this.config.logger, 'password-reset', error)),
+      }), (error) => logAfterResponseSendFailure(this.config.logger, 'password-reset email', error)),
       // [#25060, ruling 1B on #25040] The mail half of "a sign-up for an
       // address that already has an account answers like a success". The
       // vendor calls this only when the address already has a row AND its
