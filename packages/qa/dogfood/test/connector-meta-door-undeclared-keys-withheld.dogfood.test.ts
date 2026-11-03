@@ -12,7 +12,9 @@
 //    reads, and on the published read of a package published twice (whose
 //    second snapshot nests the first). The stored rows are never touched.
 //  - CARRY-FORWARD: a save of the served form succeeds and keeps every stored
-//    value; a `retryConfig` the author removes is removed.
+//    value at the top level and in an `actions` element; a `retryConfig` sent
+//    back as served replaces the stored one whole, and one the author removes
+//    is removed.
 //  - CONTROL: an instance that names its secret with `credentialRef` saves,
 //    materializes and dispatches upstream with the reference resolved.
 //
@@ -272,11 +274,11 @@ describe('connector metadata doors: keys a connector does not declare are withhe
       ]);
     });
 
-    it('a `retryConfig` the author removes is removed; one sent back as served keeps its stored key', async () => {
+    it('a `retryConfig` sent back as served replaces the stored one whole; one the author removes is removed', async () => {
       const served = authorable((await read(admin, RETRY)).item);
-      const kept = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY}`, { ...served, label: 'CUK retry (edited)' });
-      expect(kept.status, await kept.clone().text()).toBe(200);
-      expect(bodyOf((await stored(RETRY))[0]).retryConfig.secret).toBe(PLACEHOLDERS.retry);
+      const replaced = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY}`, { ...served, label: 'CUK retry (edited)' });
+      expect(replaced.status, await replaced.clone().text()).toBe(200);
+      expect(bodyOf((await stored(RETRY))[0]).retryConfig).toEqual({ strategy: 'exponential_backoff', maxAttempts: 2 });
 
       const { retryConfig: _removed, ...withoutRetry } = served;
       const cleared = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY}`, withoutRetry);

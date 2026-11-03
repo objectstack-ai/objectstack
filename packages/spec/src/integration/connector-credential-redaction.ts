@@ -121,6 +121,19 @@
  *     judged. An element is never removed on its own, which would shift every
  *     later index; the carry-forward keeps the stored value at rest.
  *
+ *     **A key inside an object `retryConfig`: withheld and NOT carried
+ *     forward** (the maintainer's ruling 6593804783): each is named in
+ *     `notCarriedForwardKeys` as well as in `redactedKeys`, as item 1's are.
+ *     The authored `retryConfig` is closed, so every door refuses such a key,
+ *     and nothing at runtime reads one: the instance materialization parses
+ *     the stored policy with the open {@link RetryConfigSchema}, which drops
+ *     it, and hands the provider only the parsed policy. So a save that sends
+ *     `retryConfig` — the served form, `{}`, any object — replaces the stored
+ *     container whole, and the save names each key it dropped; a save that
+ *     leaves `retryConfig` out removes the container, as it always did. An
+ *     `actions` element's key, and a `retryConfig` that is not an object
+ *     (withheld whole), stay carried forward.
+ *
  * ## Cleared forms, and what is never touched
  *
  * A position holding nothing — `null`, `''`, or an empty map — is served as
@@ -324,19 +337,17 @@ function nestedKeys(): { retryConfig: ReadonlySet<string>; action: ReadonlySet<s
 }
 
 /**
- * Item 8: every key `retryConfig` and each `actions` element do not declare,
- * as item-relative paths (an `actions` hop is the element's index), or the
- * container itself when it is not the shape the entry declares.
+ * Item 8, the carried-forward half: every key each `actions` element does not
+ * declare, as item-relative paths (an `actions` hop is the element's index),
+ * or the container itself when `retryConfig` or `actions` is not the shape the
+ * entry declares. The keys of an object `retryConfig` are
+ * {@link undeclaredRetryConfigKeysOf}'s.
  */
 function undeclaredNestedKeysOf(item: Record<string, unknown>): string[][] {
   const declared = nestedKeys();
   const paths: string[][] = [];
   const retryConfig = item.retryConfig;
-  if (isPlainRecord(retryConfig)) {
-    for (const key of Object.keys(retryConfig)) if (!declared.retryConfig.has(key)) paths.push(['retryConfig', key]);
-  } else if (!isClearedForm(retryConfig)) {
-    paths.push(['retryConfig']);
-  }
+  if (!isPlainRecord(retryConfig) && !isClearedForm(retryConfig)) paths.push(['retryConfig']);
   const actions = item.actions;
   if (Array.isArray(actions) && actions.every(isPlainRecord)) {
     actions.forEach((action, index) => {
@@ -348,6 +359,19 @@ function undeclaredNestedKeysOf(item: Record<string, unknown>): string[][] {
     paths.push(['actions']);
   }
   return paths;
+}
+
+/**
+ * Item 8, the half NOT carried forward: every key an object `retryConfig`
+ * does not declare, as item-relative paths — withheld whatever its value (see
+ * the module note). `[]` when `retryConfig` is not an object
+ * ({@link undeclaredNestedKeysOf} withholds that whole, carried forward).
+ */
+function undeclaredRetryConfigKeysOf(item: Record<string, unknown>): string[][] {
+  const retryConfig = item.retryConfig;
+  if (!isPlainRecord(retryConfig)) return [];
+  const declared = nestedKeys().retryConfig;
+  return Object.keys(retryConfig).filter((key) => !declared.has(key)).map((key) => ['retryConfig', key]);
 }
 
 /**
@@ -419,9 +443,9 @@ function credentialUrlRewritesOf(
 
 /**
  * The built-in `connector` redactor: withholds the positions the module note
- * lists, names each in `redactedKeys` (dotted, sorted) and item 1's in
- * `notCarriedForwardKeys` too, and returns the input by reference when there
- * is nothing to withhold.
+ * lists, names each in `redactedKeys` (dotted, sorted) and item 1's and an
+ * object `retryConfig`'s undeclared keys in `notCarriedForwardKeys` too, and
+ * returns the input by reference when there is nothing to withhold.
  */
 export function redactConnectorItem(item: Record<string, unknown>): MetadataRedactionResult {
   let served = item;
@@ -435,9 +459,10 @@ export function redactConnectorItem(item: Record<string, unknown>): MetadataReda
     served = withoutKeyAt(served, path);
     redactedKeys.push(path.join('.'));
   }
-  // Item 1: an undeclared `auth` key, whatever its value, withheld and not
-  // carried forward — a save of the served form drops it.
-  for (const path of undeclaredAuthKeysOf(item)) {
+  // Item 1, and item 8's keys of an object `retryConfig`: an undeclared key,
+  // whatever its value, withheld and not carried forward — a save of the
+  // served form drops it.
+  for (const path of [...undeclaredRetryConfigKeysOf(item), ...undeclaredAuthKeysOf(item)]) {
     const { present } = readAt(served, path);
     if (!present) continue;
     served = withoutKeyAt(served, path);

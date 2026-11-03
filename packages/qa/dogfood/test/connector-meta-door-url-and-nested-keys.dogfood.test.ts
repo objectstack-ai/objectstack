@@ -21,8 +21,13 @@
 //    and to an administrator, in the item, layered and list reads. The stored
 //    row is never touched.
 //  - CARRY-FORWARD: a save of the served form keeps the stored values; an
-//    author's own edit of a served URL is stored as the author wrote it; a
-//    `retryConfig` the author removes is removed with its stored keys.
+//    author's own edit of a served URL is stored as the author wrote it. An
+//    explicit `retryConfig` — `{}` or the served form — replaces the stored
+//    one whole: a key it does not declare is gone from the next read of the
+//    stored row, and the answer names it, while a withheld header map on the
+//    same row is kept (CONTROL). A `retryConfig` the author leaves out is
+//    removed with its stored keys, as before (CONTROL), and one stored as a
+//    non-object is still kept at rest by a save that leaves it out (CONTROL).
 //
 // Every credential below is an obviously-fake placeholder, and every assertion
 // on one is its absence from what a door served or stored, or its presence at
@@ -41,6 +46,7 @@ const PLACEHOLDERS = {
   urlToken: 'TEST_PLACEHOLDER_CUN_URL_TOKEN',
   urlQuery: 'TEST_PLACEHOLDER_CUN_URL_QUERY',
   nested: 'TEST_PLACEHOLDER_CUN_NESTED',
+  header: 'TEST_PLACEHOLDER_CUN_HEADER',
   authEndpoint: 'TEST_PLACEHOLDER_CUN_AUTH_ENDPOINT',
   resolvedRef: 'TEST_PLACEHOLDER_CUN_RESOLVED_REFERENCE',
 } as const;
@@ -53,6 +59,9 @@ const DESCRIPTOR = 'cun_descriptor';
 const EXISTING = 'cun_existing';
 const OAUTH_ROW = 'cun_oauth_stored';
 const RETRY_ROW = 'cun_retry_stored';
+const RETRY_EMPTY = 'cun_retry_empty';
+const RETRY_OMIT = 'cun_retry_omit';
+const RETRY_MALFORMED = 'cun_retry_malformed';
 
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : Array.isArray(r?.value) ? r.value : []);
 const bodyOf = (row: any): Record<string, any> =>
@@ -184,10 +193,18 @@ describe('connector metadata doors: an authored connector keeps no credential in
       tokenUrl: `https://cun:${PLACEHOLDERS.authEndpoint}@auth.vendor.example.com/token`,
       authorizationUrl: `https://${PLACEHOLDERS.authEndpoint}@auth.vendor.example.com/authorize?region=eu`,
     }));
+    // Each also holds a withheld header map, carried forward: the control on the same save.
+    for (const name of [RETRY_ROW, RETRY_EMPTY, RETRY_OMIT]) {
+      await seedOver(name, instance(name, { retryConfig: { maxAttempts: 2 } }), instance(name, {
+        providerConfig: { baseUrl: `${upstreamUrl}/v1`, defaultHeaders: { Authorization: `Bearer ${PLACEHOLDERS.header}` } },
+        retryConfig: { maxAttempts: 2, secret: PLACEHOLDERS.nested },
+      }));
+    }
+    // Saved disabled: the pin is the door's answer, not a materialization of a policy no parse accepts.
     await seedOver(
-      RETRY_ROW,
-      instance(RETRY_ROW, { retryConfig: { maxAttempts: 2 } }),
-      instance(RETRY_ROW, { retryConfig: { maxAttempts: 2, secret: PLACEHOLDERS.nested } }),
+      RETRY_MALFORMED,
+      instance(RETRY_MALFORMED, { enabled: false }),
+      instance(RETRY_MALFORMED, { enabled: false, retryConfig: PLACEHOLDERS.nested }),
     );
   }, 180_000);
 
@@ -345,17 +362,53 @@ describe('connector metadata doors: an authored connector keeps no credential in
       expect(atRest.auth.authorizationUrl).toBe(`https://${PLACEHOLDERS.authEndpoint}@auth.vendor.example.com/authorize?region=eu`);
     });
 
-    it('a stored undeclared `retryConfig` key: kept on a save of the served form, cleared when the author removes `retryConfig`', async () => {
-      const served = authorable((await read(admin, RETRY_ROW)).item);
-      expect(served.retryConfig).toEqual({ maxAttempts: 2 });
-      const kept = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY_ROW}`, { ...served, label: 'CUN retry (edited)' });
-      expect(kept.status, await kept.clone().text()).toBe(200);
-      expect(bodyOf((await stored(RETRY_ROW))[0]).retryConfig).toEqual({ maxAttempts: 2, secret: PLACEHOLDERS.nested });
+    const HEADERS_AT_REST = () => ({ Authorization: `Bearer ${PLACEHOLDERS.header}` });
 
-      const { retryConfig: _removed, ...withoutRetry } = served;
-      const cleared = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY_ROW}`, withoutRetry);
-      expect(cleared.status, await cleared.clone().text()).toBe(200);
-      expect(bodyOf((await stored(RETRY_ROW))[0])).not.toHaveProperty('retryConfig');
+    it('`retryConfig: {}` replaces the stored one whole: the next read of the stored row no longer has the undeclared key', async () => {
+      expect(bodyOf((await stored(RETRY_EMPTY))[0]).retryConfig, 'guard the guard: the seeded row holds the key')
+        .toEqual({ maxAttempts: 2, secret: PLACEHOLDERS.nested });
+      const served = authorable((await read(admin, RETRY_EMPTY)).item);
+      expect(served.retryConfig).toEqual({ maxAttempts: 2 });
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY_EMPTY}`, { ...served, retryConfig: {} });
+      const text = await res.text();
+      expect(res.status, text.slice(0, 300)).toBe(200);
+      expect(JSON.parse(text).data.advisories, 'the save names the key it did not carry forward').toEqual([
+        expect.objectContaining({ rule: 'withheld-key-dropped', severity: 'warning', path: 'connectors[0].retryConfig.secret' }),
+      ]);
+      expect(text.includes(PLACEHOLDERS.nested), 'the answer names the key, never its value').toBe(false);
+      const atRest = bodyOf((await stored(RETRY_EMPTY))[0]);
+      expect(atRest.retryConfig).toEqual({});
+      // CONTROL, the same save: a withheld position outside `retryConfig` is still carried forward.
+      expect(atRest.providerConfig.defaultHeaders).toEqual(HEADERS_AT_REST());
+    });
+
+    it('a save of the served form replaces the stored `retryConfig` whole too', async () => {
+      const served = authorable((await read(admin, RETRY_ROW)).item);
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY_ROW}`, { ...served, label: 'CUN retry (edited)' });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const atRest = bodyOf((await stored(RETRY_ROW))[0]);
+      expect(atRest.label).toBe('CUN retry (edited)');
+      expect(atRest.retryConfig).toEqual({ maxAttempts: 2 });
+      expect(atRest.providerConfig.defaultHeaders).toEqual(HEADERS_AT_REST());
+    });
+
+    it('CONTROL: a save that leaves `retryConfig` out removes it with its stored keys, as before', async () => {
+      const { retryConfig: _removed, ...withoutRetry } = authorable((await read(admin, RETRY_OMIT)).item);
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY_OMIT}`, withoutRetry);
+      expect(res.status, await res.clone().text()).toBe(200);
+      const atRest = bodyOf((await stored(RETRY_OMIT))[0]);
+      expect(atRest).not.toHaveProperty('retryConfig');
+      expect(atRest.providerConfig.defaultHeaders).toEqual(HEADERS_AT_REST());
+    });
+
+    it('CONTROL: a `retryConfig` stored as a non-object is withheld whole and still carried forward by a save that leaves it out', async () => {
+      const served = authorable((await read(admin, RETRY_MALFORMED)).item);
+      expect(served).not.toHaveProperty('retryConfig');
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY_MALFORMED}`, { ...served, label: 'CUN retry malformed (edited)' });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const atRest = bodyOf((await stored(RETRY_MALFORMED))[0]);
+      expect(atRest.label).toBe('CUN retry malformed (edited)');
+      expect(atRest.retryConfig).toBe(PLACEHOLDERS.nested);
     });
   });
 });
