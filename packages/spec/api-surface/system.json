@@ -556,6 +556,7 @@
     "QueueConfigSchema (const)",
     "QuotaEnforcementResult (type)",
     "QuotaEnforcementResultSchema (const)",
+    "REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED (const)",
     "RPO (type)",
     "RPOParsed (type)",
     "RPOSchema (const)",
