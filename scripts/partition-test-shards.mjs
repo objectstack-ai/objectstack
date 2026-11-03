@@ -379,6 +379,19 @@ export function timingModeNote(event) {
 // and turned load-sensitive tests red in the merge queue until #26077 reverted
 // it. Pin 3d (WHOLE_LEG_CAP_SECONDS, LOAD_SENSITIVE_APART) holds that line.
 //
+// RE-DERIVED AT 2 (#29777), on the refresh of 2026-11-02 (PR #28978's
+// dataset, carried here byte for byte): the CLI shrank to 1432.04s. `spec`
+// (1008.78s) and `runtime` (987.16s) each run as two tasks, so the heaviest
+// other serial task is still `@objectstack/metadata-protocol`'s, now 566.50s,
+// and a slice must sit within 1.3 x 566.50 = 736.45s.
+//
+//   n = 1   1432.04s   2.53x                  the CLI IS the run's floor
+//   n = 2    716.02s   1.26x                  meets -- metadata-protocol is the floor
+//
+// The margin is 20s (finding #29826). The whole split is now balanced, so the
+// density cap equals the 8-shard mean; the slice that reads built declarations
+// is admitted by closureAllowance() (#29777 ruling B).
+//
 // ⛔ THE COUNT IS CONFIGURED; WHETHER A RUN SLICES IS DECIDED BY THAT RUN. A
 // pull_request or merge_group run splits its own affected set, so planShards()
 // asks, of the run's own list, whether a configured package is that run's
@@ -399,7 +412,7 @@ export function timingModeNote(event) {
 // a change to what that generator can DECODE, which is why the map it replaced
 // is kept below.
 export const FILE_SHARDED_PACKAGES = Object.freeze({
-  '@objectstack/cli': 4,
+  '@objectstack/cli': 2,
 });
 
 // THE MAP AS IT STOOD BEFORE ITS LAST CHANGE, read only by the generator's
@@ -427,9 +440,10 @@ export const FILE_SHARDED_PACKAGES = Object.freeze({
 // `test-core-run-summary-*`, #25771), so four days after that PR lands no
 // retained summary predates the change and this map decodes nothing.
 // The outgoing map of #22075's third round was empty -- the runs before it
-// carried no slice. #25870 raised the CLI from 3 slices to 4, so this holds 3.
+// carried no slice. #25870 raised the CLI from 3 slices to 4; #29777 lowered
+// it from 4 to 2, so this holds 4.
 export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
-  '@objectstack/cli': 3,
+  '@objectstack/cli': 4,
 });
 
 // ── THE SLICE THAT READS BUILT DECLARATIONS CARRIES THEIR CLOSURE (#25870) ──
