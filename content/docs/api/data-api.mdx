@@ -226,14 +226,17 @@ is limited:
 
 Over a limit is **refused, never clamped**, so a client paging by its own page
 size never skips rows. A page size over the maximum answers
-`400 QUERY_PAGE_SIZE_EXCEEDED`; `offset` plus page size over the budget answers
+`400 MAX_RECORDS_EXCEEDED`; `offset` plus page size over the budget answers
 `400 QUERY_ROW_BUDGET_EXCEEDED`. Both messages name the configured number, and
-neither request reaches the database. A list read that names no page size gets
-the default page, and `hasMore` / `total` say whether more rows exist. The same
-limits apply to `POST /analytics/query` and the dataset query that reports and
-dashboards read through. An analytics answer carries no `hasMore`, so one that
-names no `limit` and would answer more rows than the default page is refused
-with `QUERY_PAGE_SIZE_EXCEEDED` rather than cut.
+both are refused before the read runs. A list read that names no page size gets
+the default page, and `hasMore` / `total` say whether more rows exist. With a
+budget and no page size, a read that names no page size runs one row past what
+the budget leaves and is refused with `QUERY_ROW_BUDGET_EXCEEDED` if its answer
+holds more; that read does run first. The same limits apply to
+`POST /analytics/query` and the dataset query that reports and dashboards read
+through. An analytics answer carries no `hasMore`, so one that names no `limit`
+and would answer more rows than the default page runs one row past the default
+and is refused with `MAX_RECORDS_EXCEEDED` rather than cut.
 
 ### `GET /data/:object/:id`
 

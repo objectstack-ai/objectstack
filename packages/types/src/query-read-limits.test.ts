@@ -14,7 +14,7 @@ import {
   DATA_DEFAULT_PAGE_SIZE_ENV,
   DATA_MAX_PAGE_SIZE_ENV,
   DATA_QUERY_ROW_BUDGET_ENV,
-  QUERY_PAGE_SIZE_EXCEEDED,
+  MAX_RECORDS_EXCEEDED,
   QUERY_ROW_BUDGET_EXCEEDED,
   QueryPageSizeExceededError,
   QueryReadLimitError,
@@ -87,16 +87,16 @@ describe('planQueryReadWindow — the maximum page size refuses, never clamps', 
     expect(planQueryReadWindow(analytics({ limit: 10 }), limits)).toEqual({ limit: 10 });
   });
 
-  it('a limit over it is a 400 QUERY_PAGE_SIZE_EXCEEDED naming the spelling and the maximum', () => {
+  it('a limit over it is a 400 MAX_RECORDS_EXCEEDED naming the spelling and the maximum', () => {
     const { lines, logger } = recorder();
     const err = refusalOf(() => planQueryReadWindow(list({ limit: 201, limitParam: '$top' }), limits, logger));
     expect(err.status).toBe(400);
-    expect(err.code).toBe(QUERY_PAGE_SIZE_EXCEEDED);
+    expect(err.code).toBe(MAX_RECORDS_EXCEEDED);
     expect(err.limit).toBe(200);
     expect(err.message).toContain("Query parameter '$top' asks for 201 rows");
     expect(err.message).toContain('maximum page size is 200');
     expect(lines).toEqual([
-      '[data] read refused: code=QUERY_PAGE_SIZE_EXCEEDED surface=list object=crm_account rows=201 limit=200',
+      '[data] read refused: code=MAX_RECORDS_EXCEEDED surface=list object=crm_account rows=201 limit=200',
     ]);
   });
 
@@ -116,7 +116,7 @@ describe('planQueryReadWindow — the default page size', () => {
   it('an analytics read naming no limit runs one row past the default, as a probe', () => {
     const plan = planQueryReadWindow(analytics(), limits);
     expect(plan.limit).toBe(51);
-    expect(plan.probe).toEqual({ maxRows: 50, code: QUERY_PAGE_SIZE_EXCEEDED, limit: 50, maxPageSize: 200 });
+    expect(plan.probe).toEqual({ maxRows: 50, code: MAX_RECORDS_EXCEEDED, limit: 50, maxPageSize: 200 });
   });
 
   it('an analytics answer within the default is served; one past it is refused, never cut', () => {
@@ -125,7 +125,7 @@ describe('planQueryReadWindow — the default page size', () => {
     expect(() => assertQueryReadRows(request, plan, 50)).not.toThrow();
     const { lines, logger } = recorder();
     const err = refusalOf(() => assertQueryReadRows(request, plan, 51, logger));
-    expect(err.code).toBe(QUERY_PAGE_SIZE_EXCEEDED);
+    expect(err.code).toBe(MAX_RECORDS_EXCEEDED);
     expect(err.limit).toBe(50);
     expect(err.message).toContain('answers more than 50 rows');
     expect(err.message).toContain('Name a limit of at most 200 and page with offset');
@@ -179,7 +179,7 @@ describe('planQueryReadWindow — the row budget counts offset plus the rows ret
 describe('the refusal on the wire', () => {
   it('both codes are registered, so a door answers them verbatim at 400', () => {
     for (const [code, err] of [
-      [QUERY_PAGE_SIZE_EXCEEDED, new QueryPageSizeExceededError('over', 10)],
+      [MAX_RECORDS_EXCEEDED, new QueryPageSizeExceededError('over', 10)],
       [QUERY_ROW_BUDGET_EXCEEDED, new QueryRowBudgetExceededError('over', 10)],
     ] as const) {
       expect(ErrorCode.safeParse(code).success, code).toBe(true);

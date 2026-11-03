@@ -4,7 +4,7 @@ navTitle: Error Code Catalog
 description: Complete reference for all ObjectStack error codes with causes, fixes, and retry strategies
 ---
 
-ObjectStack uses a structured error system of **error categories** and **58 error codes reachable on the wire**, catalogued in full below (that count is pinned by `packages/spec/src/api/error-catalog-docs.test.ts` against the wire face). Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system of **error categories** and **57 error codes reachable on the wire**, catalogued in full below (that count is pinned by `packages/spec/src/api/error-catalog-docs.test.ts` against the wire face). Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
 
 This catalog documents the **wire face** — the codes a client can actually receive. That is not quite the
 `StandardErrorCode` enum: the enum also carries in-process spellings the REST door translates at the
@@ -367,17 +367,13 @@ result set — a response indistinguishable from a successful query.
 **Retry:** `no_retry`
 
 ### `MAX_RECORDS_EXCEEDED`
-**Cause:** The request attempts to create or return more records than the system limit.  
-**Fix:** Use pagination (`limit`/`offset` or cursor-based) for large datasets. Batch operations for bulk creates.  
-**Retry:** `no_retry`
-
-### `QUERY_PAGE_SIZE_EXCEEDED`
-**Cause:** The deployment sets `OS_DATA_MAX_PAGE_SIZE` and a list or analytics
-read named a `limit` (`$top`, `top` or `limit`) above it, or an analytics read
-that named no `limit` answered more rows than `OS_DATA_DEFAULT_PAGE_SIZE`. The
-message names the maximum (or the default).  
-**Fix:** Name a `limit` within the maximum and page with `offset`. See
-[Read limits a deployment may set](/docs/api/data-api#read-limits-a-deployment-may-set).  
+**Cause:** The request asked for more records than a request may carry. The data
+API answers it when the deployment sets `OS_DATA_MAX_PAGE_SIZE` and a list or
+analytics read named a `limit` (`$top`, `top` or `limit`) above it, and when an
+analytics read that named no `limit` would answer more rows than
+`OS_DATA_DEFAULT_PAGE_SIZE`. The message names the maximum (or the default).  
+**Fix:** Name a `limit` within the maximum and page with `offset` (or a cursor).
+See [Read limits a deployment may set](/docs/api/data-api#read-limits-a-deployment-may-set).  
 **Why it is an error and not a shorter page:** a clamped page is a different
 page from the one asked for, so a caller paging by its own `limit` would skip
 rows, and an analytics answer has no `hasMore` to say it was cut.  

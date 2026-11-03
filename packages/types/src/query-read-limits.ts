@@ -24,7 +24,9 @@
  * to say the chart was cut. So every limit here is a REFUSAL, `400`, naming
  * the limit, before the driver is asked:
  *
- * - a `limit` over the maximum page size → `QUERY_PAGE_SIZE_EXCEEDED`;
+ * - a `limit` over the maximum page size → the standard `MAX_RECORDS_EXCEEDED`
+ *   (a caller-side limit: the request asked for more rows than a request may
+ *   carry);
  * - `offset + limit` over the row budget → `QUERY_ROW_BUDGET_EXCEEDED`.
  *
  * A read that names no `limit` is where the default page size applies, and
@@ -36,7 +38,7 @@
  * - an ANALYTICS read (`analytics`: `/analytics/query`, the dataset doors that
  *   reports and dashboards read through) has no such signal. It runs with one
  *   row more than the default page size; an answer holding more rows than the
- *   default is refused with `QUERY_PAGE_SIZE_EXCEEDED`, telling the caller to
+ *   default is refused with `MAX_RECORDS_EXCEEDED`, telling the caller to
  *   name a `limit` and page with `offset`.
  * - a read with a row budget and no page size at all runs with one row more
  *   than the budget leaves after its `offset`; an answer over the budget is
@@ -56,9 +58,17 @@ export const DATA_MAX_PAGE_SIZE_ENV = 'OS_DATA_MAX_PAGE_SIZE';
 /** The most rows one query may walk: `offset` plus the rows it returns. */
 export const DATA_QUERY_ROW_BUDGET_ENV = 'OS_DATA_QUERY_ROW_BUDGET';
 
-/** Over the maximum page size, or an unpaged analytics answer larger than the default page. */
-export const QUERY_PAGE_SIZE_EXCEEDED = 'QUERY_PAGE_SIZE_EXCEEDED';
-/** `offset` plus the rows a query returns is over the row budget. */
+/**
+ * Over the maximum page size, or an unpaged analytics answer larger than the
+ * default page. The standard code (`errors.zod.ts`), not a new one: a caller-side
+ * limit, the request asked for more rows than a request may carry.
+ */
+export const MAX_RECORDS_EXCEEDED = 'MAX_RECORDS_EXCEEDED';
+/**
+ * `offset` plus the rows a query returns is over the row budget. Not
+ * `MAX_RECORDS_EXCEEDED`: the page asked for may be well within the maximum;
+ * it is how deep the query walks (`offset` plus the page) that is bounded.
+ */
 export const QUERY_ROW_BUDGET_EXCEEDED = 'QUERY_ROW_BUDGET_EXCEEDED';
 
 /** The three host numbers; an absent member is "no limit on this axis". */
@@ -82,7 +92,7 @@ export type QueryReadSurface = 'list' | 'analytics';
  * error-status conformance gate reads rather than a value computed at the throw.
  */
 export abstract class QueryReadLimitError extends Error {
-  abstract readonly code: typeof QUERY_PAGE_SIZE_EXCEEDED | typeof QUERY_ROW_BUDGET_EXCEEDED;
+  abstract readonly code: typeof MAX_RECORDS_EXCEEDED | typeof QUERY_ROW_BUDGET_EXCEEDED;
   abstract readonly status: 400;
   constructor(
     message: string,
@@ -96,7 +106,7 @@ export abstract class QueryReadLimitError extends Error {
 
 /** A `limit` over the maximum page size, or an unpaged analytics answer larger than the default page. */
 export class QueryPageSizeExceededError extends QueryReadLimitError {
-  readonly code: typeof QUERY_PAGE_SIZE_EXCEEDED = QUERY_PAGE_SIZE_EXCEEDED;
+  readonly code: typeof MAX_RECORDS_EXCEEDED = MAX_RECORDS_EXCEEDED;
   readonly status = 400;
 }
 
@@ -178,7 +188,7 @@ export interface QueryReadPlan {
    */
   readonly probe?: {
     readonly maxRows: number;
-    readonly code: typeof QUERY_PAGE_SIZE_EXCEEDED | typeof QUERY_ROW_BUDGET_EXCEEDED;
+    readonly code: typeof MAX_RECORDS_EXCEEDED | typeof QUERY_ROW_BUDGET_EXCEEDED;
     readonly limit: number;
     /** The maximum page size, when one is set — named in the refusal. */
     readonly maxPageSize?: number;
@@ -188,7 +198,7 @@ export interface QueryReadPlan {
 function refuse(
   request: QueryReadRequest,
   logger: QueryReadLimitLogger | undefined,
-  code: typeof QUERY_PAGE_SIZE_EXCEEDED | typeof QUERY_ROW_BUDGET_EXCEEDED,
+  code: typeof MAX_RECORDS_EXCEEDED | typeof QUERY_ROW_BUDGET_EXCEEDED,
   limit: number,
   rows: number,
   message: string,
@@ -198,7 +208,7 @@ function refuse(
     `[data] read refused: code=${code} surface=${request.surface} object=${request.object} `
     + `rows=${rows} limit=${limit}`,
   );
-  throw code === QUERY_PAGE_SIZE_EXCEEDED
+  throw code === MAX_RECORDS_EXCEEDED
     ? new QueryPageSizeExceededError(message, limit)
     : new QueryRowBudgetExceededError(message, limit);
 }
@@ -226,7 +236,7 @@ export function planQueryReadWindow(
 
   if (request.limit !== undefined) {
     if (maxPageSize !== undefined && request.limit > maxPageSize) {
-      refuse(request, logger, QUERY_PAGE_SIZE_EXCEEDED, maxPageSize, request.limit,
+      refuse(request, logger, MAX_RECORDS_EXCEEDED, maxPageSize, request.limit,
         `Query parameter '${param}' asks for ${request.limit} rows; this deployment's maximum page size `
         + `is ${maxPageSize}. The query was not run. Ask for at most ${maxPageSize} rows and page with offset.`);
     }
@@ -247,7 +257,7 @@ export function planQueryReadWindow(
       limit: defaultPageSize + 1,
       probe: {
         maxRows: defaultPageSize,
-        code: QUERY_PAGE_SIZE_EXCEEDED,
+        code: MAX_RECORDS_EXCEEDED,
         limit: defaultPageSize,
         ...(maxPageSize !== undefined ? { maxPageSize } : {}),
       },

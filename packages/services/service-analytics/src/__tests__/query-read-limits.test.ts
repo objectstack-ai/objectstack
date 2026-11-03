@@ -122,16 +122,16 @@ describe('analytics read limits — the default page size never cuts an answer s
     expect(answer.rows).toHaveLength(3);
   });
 
-  it('cube door: an unpaged answer past the default is a 400 QUERY_PAGE_SIZE_EXCEEDED, logged with the cube and counts', async () => {
+  it('cube door: an unpaged answer past the default is a 400 MAX_RECORDS_EXCEEDED, logged with the cube and counts', async () => {
     setLimits({ OS_DATA_DEFAULT_PAGE_SIZE: '3', OS_DATA_MAX_PAGE_SIZE: '10' });
     const cube = cubeService(4);
     const err = await refusal(() => cube.svc.query(baseQuery));
     expect(err.status).toBe(400);
-    expect(err.code).toBe('QUERY_PAGE_SIZE_EXCEEDED');
+    expect(err.code).toBe('MAX_RECORDS_EXCEEDED');
     expect(err.message).toContain('answers more than 3 rows');
     expect(err.message).toContain('Name a limit of at most 10');
     expect(cube.logger.warn).toHaveBeenCalledWith(
-      '[data] read refused: code=QUERY_PAGE_SIZE_EXCEEDED surface=analytics object=orders rows=4 limit=3',
+      '[data] read refused: code=MAX_RECORDS_EXCEEDED surface=analytics object=orders rows=4 limit=3',
     );
   });
 
@@ -144,7 +144,7 @@ describe('analytics read limits — the default page size never cuts an answer s
 
     const over = datasetService(4);
     const err = await refusal(() => over.svc.queryDataset(accounts, { dimensions: ['industry'], measures: ['account_count'] }, CTX));
-    expect(err.code).toBe('QUERY_PAGE_SIZE_EXCEEDED');
+    expect(err.code).toBe('MAX_RECORDS_EXCEEDED');
   });
 
   it('a caller\'s own limit within the maximum runs as asked, with no probe', async () => {
@@ -157,18 +157,18 @@ describe('analytics read limits — the default page size never cuts an answer s
 });
 
 describe('analytics read limits — the maximum page size and the row budget refuse before any strategy runs', () => {
-  it('a limit over the maximum: 400 QUERY_PAGE_SIZE_EXCEEDED on both doors, nothing run', async () => {
+  it('a limit over the maximum: 400 MAX_RECORDS_EXCEEDED on both doors, nothing run', async () => {
     setLimits({ OS_DATA_MAX_PAGE_SIZE: '10' });
     const cube = cubeService(1);
     const err = await refusal(() => cube.svc.query({ ...baseQuery, limit: 11 }));
     expect(err.status).toBe(400);
-    expect(err.code).toBe('QUERY_PAGE_SIZE_EXCEEDED');
+    expect(err.code).toBe('MAX_RECORDS_EXCEEDED');
     expect(err.message).toContain('maximum page size is 10');
     expect(cube.seen).toHaveLength(0);
 
     const ds = datasetService(1);
     const dsErr = await refusal(() => ds.svc.queryDataset(accounts, { dimensions: ['industry'], measures: ['account_count'], limit: 11 }, CTX));
-    expect(dsErr.code).toBe('QUERY_PAGE_SIZE_EXCEEDED');
+    expect(dsErr.code).toBe('MAX_RECORDS_EXCEEDED');
     expect(ds.statements).toHaveLength(0);
   });
 

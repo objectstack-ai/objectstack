@@ -153,7 +153,7 @@ describe('data API read limits on both list doors — sqlite', () => {
     expect(labelsOf((await query({ limit: 3 })).body)).toEqual(['a', 'b', 'c']);
   });
 
-  it('a limit over the maximum is a 400 QUERY_PAGE_SIZE_EXCEEDED naming the spelling and the maximum — no read, no clamp', async () => {
+  it('a limit over the maximum is a 400 MAX_RECORDS_EXCEEDED naming the spelling and the maximum — no read, no clamp', async () => {
     setLimits({ OS_DATA_MAX_PAGE_SIZE: '3' });
     const before = reads.n;
     for (const [name, run, param] of [
@@ -164,7 +164,7 @@ describe('data API read limits on both list doors — sqlite', () => {
     ] as const) {
       const res = await run();
       expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(400);
-      expect(res.body.code, name).toBe('QUERY_PAGE_SIZE_EXCEEDED');
+      expect(res.body.code, name).toBe('MAX_RECORDS_EXCEEDED');
       expect(res.body.error, name).toContain(`Query parameter '${param}' asks for 4 rows`);
       expect(res.body.error, name).toContain('maximum page size is 3');
     }
