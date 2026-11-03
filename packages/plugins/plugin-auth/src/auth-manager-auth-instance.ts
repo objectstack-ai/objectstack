@@ -382,8 +382,11 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           ? { resetPasswordTokenExpiresIn: this.config.emailAndPassword.resetPasswordTokenExpiresIn } : {}),
         ...(this.config.emailAndPassword?.autoSignIn != null
           ? { autoSignIn: this.config.emailAndPassword.autoSignIn } : {}),
-        ...(this.config.emailAndPassword?.revokeSessionsOnPasswordReset != null
-          ? { revokeSessionsOnPasswordReset: this.config.emailAndPassword.revokeSessionsOnPasswordReset } : {}),
+        // A completed password reset ends the account's other sessions, on
+        // every reset door, always — not a deployment option. An explicit
+        // `false` never reaches here: the manager refuses it at entry.
+        // `password-reset-ends-sessions.ts` holds the rule and the wiring.
+        revokeSessionsOnPasswordReset: true,
       // #14319 — better-auth calls this as `sendResetPassword(data, ctx.request)`.
       // [#23598] better-auth CATCHES what this callback throws
       // (`runInBackgroundOrAwait`) and still answers `{ status: true }`, so a
