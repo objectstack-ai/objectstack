@@ -168,6 +168,9 @@ function makeStubEngine() {
             listItems: (type: string) => (type === 'object' ? [servedTask] : []),
             // The read path's resolver: the SERVED object, extensions folded on.
             getObject: (name: string) => (name === 'task' ? servedTask : undefined),
+            // [#29435] The layered read's code layer: no package ships these
+            // views, so every one is a stored row with no code layer.
+            getItem: () => undefined,
             getPackage: (id: string) => (id === PKG ? { manifest: { id: PKG } } : undefined),
         },
     };
@@ -452,5 +455,58 @@ describe('a form ViewItem is judged on save and publish too (#29309)', () => {
         expect(saved).toMatchObject({ success: true });
         expect(formLayoutAdvisories(saved)).toEqual([]);
         expect(await readDiagnostics(protocol, item.name, 'active')).toEqual({ valid: true });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #29435 — the layered read (`?layers=true`) of the same form view.
+//
+// Measured on `origin/main` `7dae3b3c` before the fix: `getMetaItemLayered`
+// computed its `_diagnostics` with `computeMetadataDiagnostics` alone, so a
+// published form view naming `no_such_field` read `{ valid: true }` there
+// while `getMetaItem` of the same item carried the `form-field-unknown`
+// warning. Studio's Interfaces pillar and item editor read the layered answer
+// when no draft is pending.
+// ---------------------------------------------------------------------------
+
+async function readLayeredDiagnostics(protocol: ObjectStackProtocolImplementation, name: string) {
+    const read: any = await protocol.getMetaItemLayered({ type: 'view', name, packageId: PKG });
+    return read._diagnostics as Diagnostics;
+}
+
+describe('the layered read of a form view carries the same form-layout warnings (#29435)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it('a published form view naming an unknown field warns at the same path as getMetaItem', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const item = formItem('task.form', 'task', ['title', 'no_such_field']);
+        const expected = lintMessages(item, servedTask);
+        expect(expected).toHaveLength(1);
+
+        await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG, mode: 'draft' });
+        await protocol.publishMetaItem({ type: 'view', name: item.name, packageId: PKG } as any);
+
+        const single = await readDiagnostics(protocol, item.name, 'active');
+        const layered = await readLayeredDiagnostics(protocol, item.name);
+        expect(layered).toEqual({ valid: true, warnings: [{ path: 'config.sections.0.fields.1', message: expected[0] }] });
+        expect(layered).toEqual(single);
+    });
+
+    it('control: a published form naming only real fields (an extension field among them) reads { valid: true } with no warnings', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const item = formItem('task.form', 'task', ['title', 'status', 'region__c']);
+
+        await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG, mode: 'draft' });
+        await protocol.publishMetaItem({ type: 'view', name: item.name, packageId: PKG } as any);
+
+        expect(await readLayeredDiagnostics(protocol, item.name)).toEqual({ valid: true });
     });
 });
