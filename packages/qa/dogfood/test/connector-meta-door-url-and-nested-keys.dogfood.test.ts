@@ -372,7 +372,8 @@ describe('connector metadata doors: an authored connector keeps no credential in
       const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY_EMPTY}`, { ...served, retryConfig: {} });
       const text = await res.text();
       expect(res.status, text.slice(0, 300)).toBe(200);
-      expect(JSON.parse(text).data.advisories, 'the save names the key it did not carry forward').toEqual([
+      // The save names the key it did not carry forward.
+      expect(JSON.parse(text).advisories, text.slice(0, 600)).toEqual([
         expect.objectContaining({ rule: 'withheld-key-dropped', severity: 'warning', path: 'connectors[0].retryConfig.secret' }),
       ]);
       expect(text.includes(PLACEHOLDERS.nested), 'the answer names the key, never its value').toBe(false);
