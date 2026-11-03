@@ -417,5 +417,69 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Pending"
       }
     }
+  },
+  sys_user_device: {
+    label: "User Device",
+    pluralLabel: "User Devices",
+    description: "A user's push device: one row per app install, holding its vendor push token.",
+    fields: {
+      id: {
+        label: "Row ID"
+      },
+      device_id: {
+        label: "Device ID",
+        help: "Client-held device id, stable per app install. Unique per user."
+      },
+      user_id: {
+        label: "User",
+        help: "The user the device belongs to: the signed-in user who registered it."
+      },
+      vendor: {
+        label: "Vendor",
+        help: "Push vendor the token belongs to.",
+        options: {
+          apns: "APNs",
+          fcm: "FCM"
+        }
+      },
+      token: {
+        label: "Push Token",
+        help: "Vendor push token. Held by one device at a time."
+      },
+      platform: {
+        label: "Platform",
+        options: {
+          ios: "iOS",
+          android: "Android",
+          web: "Web"
+        }
+      },
+      app_id: {
+        label: "App ID",
+        help: "The iOS bundle ID or Android application ID the token was issued to."
+      },
+      locale: {
+        label: "Locale",
+        help: "Device locale that pushes to this device are rendered in."
+      },
+      name: {
+        label: "Device Name"
+      },
+      enabled: {
+        label: "Enabled",
+        help: "False once the vendor reported the token dead; nothing is delivered to a disabled device."
+      },
+      invalidated_at: {
+        label: "Invalidated At",
+        help: "When the vendor reported the token dead. Cleared by the registration that re-enables it."
+      },
+      last_seen_at: {
+        label: "Last Seen At",
+        help: "When the device last registered or refreshed."
+      },
+      created_at: {
+        label: "Created At"
+      }
+    }
   }
 };

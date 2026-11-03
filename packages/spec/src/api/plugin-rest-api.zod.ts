@@ -1204,17 +1204,18 @@ export const DEFAULT_NOTIFICATION_ROUTES: RestApiRouteRegistration = {
   category: 'notification',
   methods: [
     'listNotifications', 'markNotificationsRead', 'markAllNotificationsRead',
+    'registerDevice', 'unregisterDevice',
   ],
   authRequired: true,
-  // The device-registration and preferences endpoints are GONE from this table
-  // (#3899). `POST/DELETE /devices*` and `GET/PATCH /preferences` were removed
-  // as SERVER routes in #3612 — in fact they were never built ("the
-  // /notifications/devices and /notifications/preferences server routes that
-  // ADR-0012 describes were never built", packages/client/src/index.ts) — yet
-  // this table kept declaring them, requestSchema and all, so the catalog
-  // promised validation on routes that 404. Same disease, same cure as
-  // DEFAULT_AI_ROUTES (#3718). The `RegisterDevice*` / `*Preferences*` schemas
-  // in protocol.zod.ts remain exported as protocol-method contracts.
+  // The two device rows came back with their handlers (#29068): the device
+  // registry's `POST /devices` and `DELETE /devices/:deviceId` are served by
+  // the runtime's notifications domain and mounted by its dispatcher plugin,
+  // and `request-schema-gate.conformance.test.ts` walks this table against
+  // that dispatcher, so a row and its handler cannot land apart. They were
+  // removed in #3899 because nothing served them then (#3612: "never
+  // built"), the same cure as DEFAULT_AI_ROUTES (#3718). `/preferences` stays
+  // gone: no server route serves it, and its `*Preferences*` schemas in
+  // protocol.zod.ts remain exported as protocol-method contracts only.
   endpoints: [
     {
       method: 'GET',
@@ -1256,6 +1257,31 @@ export const DEFAULT_NOTIFICATION_ROUTES: RestApiRouteRegistration = {
       description: 'Marks all notifications as read for the current user',
       tags: ['Notifications'],
       responseSchema: 'MarkAllNotificationsReadResponseSchema',
+      cacheable: false,
+    },
+    {
+      method: 'POST',
+      path: '/devices',
+      handler: 'registerDevice',
+      category: 'notification',
+      public: false,
+      summary: 'Register or refresh a push device',
+      description: 'Registers the current user\'s push device, or refreshes it when its deviceId is already registered',
+      tags: ['Notifications'],
+      requestSchema: 'RegisterDeviceRequestSchema',
+      responseSchema: 'RegisterDeviceResponseSchema',
+      cacheable: false,
+    },
+    {
+      method: 'DELETE',
+      path: '/devices/:deviceId',
+      handler: 'unregisterDevice',
+      category: 'notification',
+      public: false,
+      summary: 'Unregister a push device',
+      description: 'Removes one of the current user\'s push devices; a device the user does not hold answers 404',
+      tags: ['Notifications'],
+      responseSchema: 'UnregisterDeviceResponseSchema',
       cacheable: false,
     },
   ],
