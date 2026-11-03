@@ -1,5 +1,531 @@
 # @objectstack/plugin-email
 
+## 18.3.0
+
+### Minor Changes
+
+- 2205863: feat(plugin-email): a mail template formats an amount in the record's own currency with `currency:@path`
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  `{{ planned_amount | currency:@currency_code }}` formats the amount in the currency whose ISO 4217 code the send's `data` holds at `currency_code`, so one template, in every locale row of its bundle, serves records in many currencies. With `currency_code: 'EUR'` it renders `€1,234.50` in `en-US`; with `'CNY'` it renders `CN¥1,234.50` in `en-US` and `¥1,234.50` in `zh-CN`. The path is resolved like a hole's own path, in all three faces, double- or triple-braced.
+  
+  The value at the path must be the code in three capital letters, as stored. A missing or `null` value, a lowercase code (`eur`) or any other value makes `renderTemplate` and `sendTemplate` throw `TEMPLATE_INVALID: email template NAME (locale=L): …`, naming the hole, the path and the value, and send nothing. The amount is never formatted in a default currency in its place.
+  
+  Unchanged: a literal code (`currency:EUR`) formats in that code, no argument formats in US dollars, and a bare path (`currency:currency_code`) is still refused with `TEMPLATE_INVALID`.
+- dabe771: feat(plugin-email)!: a mail template hole that chains a second formatter, or whose `currency` argument is not a literal ISO 4217 code, fails the render with `TEMPLATE_INVALID` instead of printing formatter syntax or US dollars
+  
+  Clause-②: no (narrowing) — `sendTemplate` and `renderTemplate` refuse a stored template whose `subject`, `body_text` or `body_html` writes a hole with a second formatter, or `{{ x | currency:ARG }}` with an `ARG` that is not three capital letters, both of which rendered before. No accept set is widened, and the package adds no export.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export changes: the renderer refuses a hole the authoring rule refuses, for a template that reached it without being judged. There is nothing for a migration to rewrite. -->
+  
+  **BREAKING** a render that printed a wrong currency now fails.
+  
+  - **Before, a chained hole.** `{{ actual_amount | default:0 | number:2 }}` rendered `0 | number:2` for an empty value and `71100` otherwise, in every face.
+  - **Before, a currency path.** `{{ planned_amount | currency:currency_code }}` with `currency_code = 'eur'` rendered `US$1,234.50` (zh-CN), `$1,234.50` (en-US) and `1 234,50 $US` (fr-FR), in every face.
+  - **Now.** The render throws `TEMPLATE_INVALID: email template NAME (locale=LOCALE): …`, naming the hole and the rule it breaks (one formatter per hole, or the literal-only currency code); `sendTemplate` sends nothing. The authoring doors refuse the same hole first (`email-template-hole-grammar`), so this is reached only by a template stored before that rule, until its next publish.
+  - **The grammar.** The renderer parses holes with `@objectstack/formula`'s `parseMailHole`, the grammar the authoring rule and the placement judge read; it keeps no copy of its own.
+  
+  **The remedy.** Republish the template with one formatter per hole and a literal currency code (`currency:EUR`), or format the amount in the caller and pass the formatted text as its own variable.
+- 79ed6f7: feat(formula, plugin-email, messaging, automation, ui)!: a template `currency` hole with no argument formats in the organization's default currency, and with none the render refuses it; nothing formats in US dollars by default any more (#26939)
+  
+  Clause-②: no (narrowing) — a mail send or render (`sendTemplate`, `renderTemplate`, and the messaging email and inbox channels on them), a flow text slot (notify, http, screen, end) and a templated formula evaluation refuse a `{{ amount | currency }}` hole with no argument when no default currency reaches the render, which they formatted in US dollars before. Authoring is unchanged: the hole is still accepted at save and publish. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/automation/email-templates.mdx`, `content/docs/automation/flows.mdx` and `content/docs/data-modeling/formulas.mdx` state the tenant default and the refusal; no skill under `skills/**` taught the dollar default (the formula skill names the formatter grammar only), so no skill line changes.
+  
+  <!-- adr-0087: registered template-currency-no-argument-tenant-default -->
+  
+  **BREAKING** semantic change of the `currency` formatter's no-argument form (`@objectstack/formula`), served by every template dialect: mail templates, flow text slots, and action / bulk-action confirm and success copy.
+  
+  - **Before.** `{{ amount | currency }}` formatted the amount in US dollars (`$1,234.50`) whatever currency the amount was in and whatever the organization's default currency was.
+  - **Now.** It formats in the organization's default currency, the `localization.currency` setting (Setup → Localization) that a currency field and a dashboard measure already display in: `CN¥1,234.50` for an `en-US` reader and `¥1,234.50` for a `zh-CN` reader when the default is CNY. Every server-side read goes through `resolveLocalizationContext` (`@objectstack/core`); the UI reads `useLocalization().currency`.
+  - **With no default currency.** The render refuses the hole by name and names the remedy: set the default, or write `currency:CODE` (a mail template's refusal also names `currency:@path`). A mail send or render fails with `TEMPLATE_INVALID` and nothing is sent; a messaging delivery records it as a permanent failure. A flow node with such a hole in a text slot fails with the refusal, which no fault edge routes. An action's confirm or success sentence is shown as written, the existing fallback for a sentence the template engine refuses.
+  - **How each host hands the default over.** `SendTemplateInput.currency` / `RenderTemplateInput.currency` (`@objectstack/spec/contracts`), filled by the messaging email and inbox channels from the delivery's organization, and by the auth mails (verification, password reset, invitations, magic link, notices) from the organization the mail names or, for identity mail, the deployment-wide setting (`@objectstack/plugin-auth`, once, on the email service it wires); `AutomationContext.currency`, seeded once at run setup from the run's tenant (`AutomationEngine.setTenantCurrencyResolver`, which the automation plugin wires), persisted with a suspended run and inherited by a subflow; `EvalContext.currency` in `@objectstack/formula`, a reserved channel like `locale`, never bound as a root; `ActionRunner.setTenantCurrency` in `@object-ui/core`, installed by the React action providers.
+  - **Unchanged.** `{{ amount | currency:EUR }}` formats in the code it names, with or without a default. A variable, field or root named `currency` is a value, never the default. Compile, `validateExpression` and the publish gates accept the no-argument form as before. A template with no no-argument currency hole needs no default.
+  - **Who sees it.** An organization with a default currency other than USD sees its own code where it saw dollars. An organization with no default currency that sends a mail, runs a flow or shows an action sentence with a no-argument `currency` hole now gets the refusal instead of dollars.
+  
+  **The remedy.** None where the amount is in the organization's default currency: set it in Setup → Localization. Where the amount is in one fixed currency, name it in the hole: `{{ amount | currency:USD }}`. Where a mail template shows each record's amount in that record's own currency, read the code from the send's data: `{{ amount | currency:@currency_code }}`.
+  
+  **Supersedes, in the same release.** The unreleased notes of the mail `currency:@path` and hole-grammar changes (`26660-currency-code-path-formula`, `26660-currency-code-path-plugin-email`, `26660-mail-hole-grammar-formula`, `26660-mail-hole-grammar`) describe a `currency` hole formatting in US dollars, and the first three say a hole with no argument still does. That was true when they were written; this entry moves it, and in this release a no-argument hole formats in the organization's default currency as described above.
+- 40320f1: feat(plugin-email)!: a mail template hole whose formatter the whitelist does not name fails the render with `TEMPLATE_INVALID` instead of printing the raw value
+  
+  Clause-②: no (narrowing) — `sendTemplate` and `renderTemplate` refuse a stored template whose `subject`, `body_text` or `body_html` writes a hole naming a formatter `TEMPLATE_FORMATTERS` does not hold (`{{ amount | curency:EUR }}`), which rendered the raw value before. No accept set is widened, and the package adds no export.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export changes: the renderer refuses a hole the authoring rule refuses, for a template that reached it without being judged. A conversion cannot know which formatter was meant, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** a render that printed a raw value where a formatted one was meant now fails.
+  
+  - **Before.** `{{ amount | curency:EUR }}` with `amount = 1234.5` rendered `1234.5` in every face, and `{{ due | dat:long }}` rendered the stored timestamp as written: the renderer's fallback for a formatter it did not know was the raw value.
+  - **Now.** The render throws `TEMPLATE_INVALID: email template NAME (locale=LOCALE): the hole … names the formatter 'curency', which is not a template formatter …`, listing the known formatters; `sendTemplate` sends nothing, and the messaging channels grade the failure permanent as they grade every `TEMPLATE_INVALID`. The authoring doors refuse the same hole first (`email-template-hole-grammar`), so this is reached only by a template stored before that rule, until its next publish.
+  - **The raw fallback is gone.** `renderTemplate` and `renderPlainTextTemplate` throw `TEMPLATE_INVALID` for such a hole too, when handed a body directly.
+  
+  **The remedy.** Republish the template with the formatter's name corrected to one the refusal lists.
+- b445807: feat(plugin-email)!: a mail template hole whose text after the `|` is not a formatter name fails the render with `TEMPLATE_INVALID` instead of being printed as written
+  
+  Clause-②: no (narrowing) — `sendTemplate` and `renderTemplate` refuse a stored template whose `subject`, `body_text` or `body_html` writes a path followed by `|` and text that is not a formatter name (`{{ due | date-long }}`, `{{ x | two words }}`), which they printed to the recipient as written before. The package adds no export.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export changes: the renderer refuses a hole the authoring rule refuses, for a template that reached it without being judged. A conversion cannot know which formatter was meant, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** a render that printed a hole as written now fails.
+  
+  - **Before.** `{{ due | date-long }}` rendered the text `{{ due | date-long }}` in every face. So did `{{ amount | currency :EUR }}` and `{{ note | default:it's }}`, though the in-app dialect formats both.
+  - **Now.** A formatter part that is not a formatter name makes the render throw `TEMPLATE_INVALID: email template NAME (locale=LOCALE): the hole … writes 'date-long' where the formatter name goes …`, stating the shape and listing the known formatters; `sendTemplate` sends nothing. The authoring doors refuse the same hole first (`email-template-hole-grammar`), so this is reached only by a template stored before that rule, until its next publish. `renderTemplate` and `renderPlainTextTemplate` throw it too when handed a body directly.
+  - **Read as in-app.** `{{ amount | currency :EUR }}` now renders `€1,234.50`, `{{ note | default:it's }}` renders `it's` for an empty value, and every double-quoted argument loses one enclosing quote mark at each end: `default:"n/a"` supplies `n/a`, `date:"long"` formats in the long style, `number:"2"` with two digits, `truncate:"80"` at 80, `default:""` supplies nothing, and `currency:"EUR"`, refused before, formats in EUR.
+  - **Still verbatim.** Brace text whose part before any `|` is not a path (`{{ not a path }}`, `{{}}`, `{{ | upper }}`) is the template's own text and renders as written.
+  
+  **The remedy.** Republish the template with the formatter written as one of the names the refusal lists, optionally followed by `:` and its argument.
+
+### Patch Changes
+
+- 5448585: fix(service-settings): Setup → Settings help says what a setting does in business words, and Country is a picker that shows names and stores the code
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An administrator in Setup → Settings read help written like code comments. It now names the effect, and the technical detail stays in the deployment docs.
+  
+  - **Authentication.** The help names the Self-registration audience by the labels the page shows (Invitation only, Allowlisted email domains, Open), not by their stored keys. It no longer quotes env var names (the email-verification override, the Google client ID and secret), the stack-config paths, the API-key error codes or permission-set API names; it says "set in the server configuration" instead.
+  - **Feature Flags.** The beta banner says a feature set in the server configuration is locked for the whole deployment, without quoting an env var.
+  - **Mail.** The durable-queue help no longer names the queue's object, and the Send-test-email result for a log-only provider says the message was "kept in the email log" (`@objectstack/plugin-email`).
+  - **Webhooks.** The `sys_webhook` description, shown as the Webhooks subtitle, says what a webhook is without `defineStack` / `defineWebhook()` or the auto-enqueuer (`@objectstack/plugin-webhooks`).
+  - **The inherited-value badge** names the layer "Organization" (组织 / 組織 / Organización) instead of "Tenant".
+  - **Country pickers.** Company → Country and Localization → Default country are `select`s whose options are every ISO 3166-1 alpha-2 code with its name, in each shipped locale (`Germany (DE)`, `德国 (DE)`). The stored value is still the code, a stored code is one of the options, and the `iso_3166_alpha2` value domain stays the enforcement boundary, so the set of accepted values is unchanged. The names come from `Intl.DisplayNames`; the codes come from the shared `ISO_3166_ALPHA2_CODES`.
+  
+  Every shipped pack (en, zh-CN, ja-JP, es-ES) carries the same wording.
+- e0dc077: fix(plugin-email): a templated email to a named locale folds it against the template's locales and tries the stack's declared fallback before en-US (#28880)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches the email template locale ladder.
+  
+  `sendTemplate` and `renderTemplate` used to try a named recipient locale exactly, then `en-US`, then fail with `TEMPLATE_NOT_FOUND`. A recipient whose tag differed from a template row only by region (`en-GB` against an `en` row, `zh-TW` against `zh-CN`) or by case got nothing, and the stack's `i18n.fallbackLocale` was never read, so those deliveries dead-lettered.
+  
+  With the built-in template loader, a call that names a locale now resolves, in order:
+  
+  1. that locale against the template's own locales by the platform's BCP-47 rules (`resolveBundleLocale`): exact, case-insensitive, base language (`en-GB` → `en`), then variant expansion (`zh-TW` → `zh-CN`), taking the first match in ascending tag order;
+  2. the stack's declared fallback (`i18n.fallbackLocale`, else `defaultLocale`, from the i18n service), folded the same way;
+  3. `en-US`;
+  4. `TEMPLATE_NOT_FOUND`, still a permanent failure.
+  
+  An exact match answers as before. A call that names no locale keeps its ladder (`en-US`, then the lowest tag) and does not read the declared fallback. A replacement `TemplateLoader` keeps the exact ladder: the fold is a capability of the built-in loader, and no exported type changes.
+- 73c2439: feat(plugin-email): every email template can read the deployment's address as `{{baseUrl}}`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The default template context gains a fixed `baseUrl` key beside `appName`, so a template can write an absolute link to a record or an app route: `{{baseUrl}}/crm_deal/{{deal.id}}`. It is resolved by the chain `os serve` uses for the deployment's address, env first: `OS_AUTH_URL` (or its legacy `BETTER_AUTH_URL`), then `OS_BASE_URL`, then `config.email.defaultTemplateContext.baseUrl`, then `http://localhost:<port>` (`OS_PORT`, `PORT`, `3000`). It never ends in a slash. A send that passes its own `baseUrl` in `data` still wins.
+  
+  No new config key and no spec change: the template context stays a free-form record. In `bodyHtml` the prefix may sit in element text but not inside an `href` (the hole-placement rule refuses that); pass a whole URL as a `type: 'url'` variable for an `<a>` link.
+- 5cdaf9a: fix(plugin-email): a malformed recipient address is the caller's `400 VALIDATION_FAILED`, not a `500` (#29152)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - A malformed address in `to`, `cc`, `bcc` or `replyTo` (an empty `to` string and one bad member of a list included) is now refused by `normalizeMessage` as `VALIDATION_FAILED: invalid recipient address in FIELD: ADDRESS` (`invalid reply-to address` for `replyTo`). `POST /api/v1/email/send` already answers that prefix with `400 { code: 'VALIDATION_FAILED' }`, so a caller-correctable input no longer answers `500 EMAIL_SEND_FAILED`.
+  - An unsendable configured sender (`OS_EMAIL_FROM`, Settings → Mail → From address) keeps its plain `Invalid email address` error and stays a server-side fault: it is not the caller's to fix.
+  - A display name that is not a string (a JSON body can carry any value there) is refused the same way instead of failing as a `TypeError` (500).
+  - Unchanged: the refused send still writes its `sys_email` row at `failed`, and internal senders (template sends, auth mail, messaging) still see the send reject.
+  - Nothing to do: no metadata, protocol or configuration changes.
+- 5d759b1: fix(rest)!: the REST email send door requires a send capability and bounds the sender, the custom headers, the organization and identity mail
+  
+  Clause-②: yes (narrowing) — the REST send door refuses callers and bodies it admitted (the breaking half), and the published `IEmailService` contract gains an optional `getDefaultFrom()` (a widening, the same move as `isConfigured()` on the same interface). No spec key, export or config field is removed or renamed.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches `POST /api/v1/email/send`, `client.email.send` or `IEmailService` (a `git grep` of `skills/` for each names nothing), so no skill line changes. The runtime-services page, `content/docs/kernel/runtime-services/email-service.mdx` ("Over HTTP"), states the four bounds in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authorization narrowing at one REST door, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped: SendEmailInput keeps every member, and a caller the bounds admit receives the same answer as before. There is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which HTTP callers and bodies the door serves. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id covers this door and this diff adds none (not registered or already-registered); and IEmailService, the one published interface that moves, gains an optional member and is referenced in code across the workspace (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing of `POST /api/v1/email/send`), shipped as `patch` because no metadata protocol moves.
+  
+  `POST /api/v1/email/send` (and its environment-scoped twin) now applies four bounds after the authentication floor and before anything is sent. Each refusal is `403 PERMISSION_DENIED` in the nested `{ error: { code, message } }` envelope, and the mail service is not called:
+  
+  - **Capability.** The caller must hold `manage_platform_settings`, the capability that already governs the mail settings namespace, the `sys_identity_email` log and the two body columns of `sys_email`. An authenticated caller without it is refused. The check runs before the provider lookup, so a refused caller gets `403` whether or not mail is wired.
+  - **Attribution.** `sentBy` is always the authenticated caller. A body that names another user is refused. A body that names the caller, or names no one, is stamped with the caller.
+  - **Sender.** The envelope sender is the deployment's configured sender (the Mail settings' From address, or `defaultFrom`). A `from` naming any other address is refused. A `from` naming the configured address is accepted, and the configured value is sent in its place. `headers` is accepted only as the contract's `Record<string, string>`: a plain object whose every key is a header field name and whose every value is a single-line string. Any other shape is refused, and so are custom `From`, `Sender` and `Return-Path` headers.
+  - **Organization.** The message is recorded under the caller's active organization: the door sets `organizationId` from the caller's execution context, and the service stamps it onto `sys_email.organization_id`. A body naming another organization is refused, and so is a body naming one when the caller has no active organization. `identityMail` is refused (any value but `false`): identity mail is sent by the server itself. `replyTo` is unchanged; it is the caller's Reply-To address and makes no claim about the sender.
+  
+  Server-internal sends (flows, notifications, auth mail) call `IEmailService.send` directly and are unchanged.
+  
+  `IEmailService` gains an optional `getDefaultFrom()` that returns the configured sender, and plugin-email's `EmailService` implements it. A service that does not implement it still sends through the door, but a caller `from` is refused because the sender cannot be checked.
+  
+  plugin-email's SMTP transport now hands nodemailer custom headers as an explicit list of name/value entries, one per key of the headers map, so every key is read as exactly one header name. A well-formed headers map puts the same headers on the wire as before.
+  
+  What changes for you: an integration that sends through the REST door needs a credential holding `manage_platform_settings`, and should leave `from`, `sentBy`, `organizationId` and `identityMail` out of the body, since the door supplies each of them. Custom headers are sent as a plain object of string values.
+- Updated dependencies [ce12ad2]
+- Updated dependencies [ea025d3]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [a8ec04d]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [0bf7aaf]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [f3d2845]
+- Updated dependencies [c946cb9]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [0c64014]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [1e01924]
+- Updated dependencies [2c0a97b]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [8ce974c]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [9b4d193]
+- Updated dependencies [aa46d14]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [76bf6c5]
+- Updated dependencies [1a95c74]
+- Updated dependencies [0c03ce2]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [bc02a77]
+- Updated dependencies [0aaad18]
+- Updated dependencies [67103cc]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [c594e1c]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [7b293c4]
+- Updated dependencies [3fb74b6]
+- Updated dependencies [86fb645]
+- Updated dependencies [c16040d]
+- Updated dependencies [b399cb8]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [8d208a4]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c708de6]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [92b7bbd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [bf03ebb]
+- Updated dependencies [2c3574c]
+- Updated dependencies [1335c6b]
+- Updated dependencies [bdb19ca]
+- Updated dependencies [d8c611d]
+- Updated dependencies [ec0316e]
+- Updated dependencies [8bb2417]
+- Updated dependencies [2ac698b]
+- Updated dependencies [d0df873]
+- Updated dependencies [462b4f9]
+- Updated dependencies [9a0c622]
+- Updated dependencies [138dacf]
+- Updated dependencies [7f4258f]
+- Updated dependencies [1ac1c24]
+- Updated dependencies [97ca257]
+- Updated dependencies [104cd1a]
+- Updated dependencies [f1d795b]
+- Updated dependencies [b3d1415]
+- Updated dependencies [078e581]
+- Updated dependencies [18e4ac1]
+- Updated dependencies [51058ef]
+- Updated dependencies [4df6292]
+- Updated dependencies [f125ce4]
+- Updated dependencies [b16ee8b]
+- Updated dependencies [86d0a8c]
+- Updated dependencies [d089dac]
+- Updated dependencies [3557366]
+- Updated dependencies [29c70ca]
+- Updated dependencies [b5e7ba5]
+- Updated dependencies [38a278b]
+- Updated dependencies [bb82da1]
+- Updated dependencies [85ea12f]
+- Updated dependencies [85f7a0d]
+- Updated dependencies [e9fb529]
+- Updated dependencies [7b55ea9]
+- Updated dependencies [4138ce8]
+- Updated dependencies [53dda03]
+- Updated dependencies [ba1f164]
+- Updated dependencies [20f052d]
+- Updated dependencies [9467a1b]
+- Updated dependencies [8b65633]
+- Updated dependencies [c268b72]
+- Updated dependencies [d68d129]
+- Updated dependencies [bd68248]
+- Updated dependencies [f72bc9e]
+- Updated dependencies [a20dcae]
+- Updated dependencies [5d46f43]
+- Updated dependencies [c9aaee9]
+- Updated dependencies [3d6f230]
+- Updated dependencies [7eb0b19]
+- Updated dependencies [8e6ab05]
+- Updated dependencies [e756782]
+- Updated dependencies [8209a2f]
+- Updated dependencies [aee9c47]
+- Updated dependencies [0e75081]
+- Updated dependencies [45b4922]
+- Updated dependencies [31204d1]
+- Updated dependencies [2c881fb]
+- Updated dependencies [1bdf674]
+- Updated dependencies [4b8cbe2]
+- Updated dependencies [5f99582]
+- Updated dependencies [63f962f]
+- Updated dependencies [df8d020]
+- Updated dependencies [6f09464]
+- Updated dependencies [772b356]
+- Updated dependencies [4008e62]
+- Updated dependencies [b64bb72]
+- Updated dependencies [b861525]
+- Updated dependencies [6903c93]
+- Updated dependencies [4b06a54]
+- Updated dependencies [ebbb5b8]
+- Updated dependencies [a81b7cb]
+- Updated dependencies [eeb3117]
+- Updated dependencies [a5fcd06]
+- Updated dependencies [56076fd]
+- Updated dependencies [fdb9a07]
+- Updated dependencies [57958aa]
+- Updated dependencies [59775a0]
+- Updated dependencies [744211f]
+- Updated dependencies [87956dc]
+- Updated dependencies [3482f3d]
+- Updated dependencies [a6a369e]
+- Updated dependencies [601832b]
+- Updated dependencies [5c4e752]
+- Updated dependencies [4ab2e7e]
+- Updated dependencies [589049b]
+- Updated dependencies [d0f308c]
+- Updated dependencies [4dc41e6]
+- Updated dependencies [eb05ea2]
+- Updated dependencies [55a4898]
+- Updated dependencies [f87239a]
+- Updated dependencies [2ae8c89]
+- Updated dependencies [a4daa85]
+- Updated dependencies [b64980a]
+- Updated dependencies [bbb98c4]
+- Updated dependencies [1bb9536]
+- Updated dependencies [2bf71ce]
+- Updated dependencies [c1af99c]
+- Updated dependencies [6f35b74]
+- Updated dependencies [99a6a78]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [3ac22c9]
+- Updated dependencies [ceef714]
+- Updated dependencies [b388cfe]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [cfd237f]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/formula@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes
