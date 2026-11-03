@@ -61,17 +61,22 @@ export function sendAfterResponseOnPublicDoor<D>(
   };
 }
 
+/**
+ * The host logger's shape (`AuthManagerOptions.logger`): `warn` is the channel
+ * every host logger guarantees, `error` the one it may carry.
+ */
 type FailureLogger = {
   error?: (message: string, meta?: unknown) => void;
-  warn?: (message: string, meta?: unknown) => void;
+  warn: (message: string, meta?: unknown) => void;
 };
 
 /**
  * The server-side record of a send that ran after the response and failed:
- * `error` when the host logger carries it, else `warn`, else the console —
- * the level better-auth's own background-task log used for the same failure
- * while the send ran inside the request. Called through the property, never an
- * extracted reference (a class-based logger needs its receiver).
+ * `error` when the host logger carries it, else its guaranteed `warn`, else —
+ * no host logger at all — the console: the level better-auth's own
+ * background-task log used for the same failure while the send ran inside the
+ * request. Called through the property, never an extracted reference (a
+ * class-based logger needs its receiver).
  */
 export function logAfterResponseSendFailure(logger: unknown, what: string, error: unknown): void {
   const message = `[AuthManager] ${what} email was not delivered: ${
