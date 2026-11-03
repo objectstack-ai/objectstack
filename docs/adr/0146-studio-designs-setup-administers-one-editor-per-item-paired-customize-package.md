@@ -421,7 +421,9 @@ from **one** resolution:
 2. **Within X's address, a declared override is served over the base's document.** The read that serves X's name — the
    package-less read, the read naming X (`?package=X`), the layered read (`packages/metadata-protocol/src/protocol.ts#getMetaItemLayered`: `code` = the base's
    document, `override` = the `.custom` item, `effective` = the served one), the list (`GET /api/v1/meta/:type`, scoped
-   to X or not) and the export of X's app surface — serves the **one** document the declaration selects, the `.custom` item that declares it. An item of the pair that
+   to X or not) and the export that carries X's customizations, the **pair's** export `GET /packages/X.custom/export`
+   (item 3; ⛔ never `GET /packages/X/export`, the base's own export, which item 3 keeps unchanged) — serves the **one**
+   document the declaration selects, the `.custom` item that declares it. An item of the pair that
    bears X's name **without** the declaration, and an item of any other dependent that bears X's name — declared or not —
    have no place under this record: each is refused when its package publishes ([D2](#d2)); until N-09 lands, item 1 keeps
    the code package the owner of X's address, so such a row is not served as X's (N-03). A same-named item of a package
