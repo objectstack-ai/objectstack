@@ -42,6 +42,26 @@ describe('objectui#11197 — AppPreview (read-only) draws a `doc` entry', () => 
     render(<AppPreview type="app" name="crm" draft={DRAFT} />);
     expect(screen.getByText('→ Accounts')).toBeTruthy();
   });
+
+  // objectstack-ai/objectstack#29678 — the runtime lands on a `doc` entry when
+  // no other entry lands, so the preview names it as the landing then.
+  it('names the first `doc` entry as the landing when no other entry lands', () => {
+    render(
+      <AppPreview
+        type="app" name="crm"
+        draft={{
+          name: 'crm',
+          label: 'CRM',
+          navigation: [
+            { id: 'nav_site', type: 'url', label: 'Website', url: 'https://example.com' },
+            { id: 'nav_help', type: 'doc', label: 'Help Centre', book: 'crm_manual' },
+            { id: 'nav_guide', type: 'doc', label: 'Lead guide', doc: 'crm_lead_guide' },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText('→ Help Centre')).toBeTruthy();
+  });
 });
 
 describe('objectui#11197 — AppNavCanvas (design mode) draws a `doc` entry', () => {
