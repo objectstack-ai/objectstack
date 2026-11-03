@@ -17,6 +17,13 @@
  * `[Automation] failed to register flow` and the boot goes on without it, so
  * its trigger never fires.
  *
+ * The finding is anchored on the container the refusal names (#29558): the
+ * engine throws a `FlowRegionShapeError` carrying the container's node id and
+ * its path inside the flow, and the finding's `path` and `where` are read off
+ * it, never off the sentence. The engine throws once, at a flow's first
+ * malformed region, so there is one container per finding and one finding per
+ * flow. Anything else it throws names no container; the flow stays the anchor.
+ *
  * ## ⛔ The verdict is the engine's — nothing here restates the region rules
  *
  * Each flow goes through the same two calls `registerFlow` makes: `FlowSchema`,
@@ -49,7 +56,7 @@
  * exported; region bodies ARE cycle-checked, by `validateControlFlow`.
  */
 
-import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
+import { FlowRegionShapeError, FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
 
 type AnyRec = Record<string, unknown>;
 
@@ -63,9 +70,15 @@ export interface FlowRegionShapeFinding {
   severity: 'error';
   /** Diagnostic rule id. */
   rule: string;
-  /** Human-readable location, e.g. `flow 'lead_time'`. */
+  /**
+   * Human-readable location: `flow 'lead_time' › node 'guard'` when the
+   * engine's refusal names the container at fault, else `flow 'lead_time'`.
+   */
   where: string;
-  /** Config path of the flow, e.g. `flows[0]`. */
+  /**
+   * Config path of the container at fault inside the flow, e.g.
+   * `flows[0].nodes[1].config.try.nodes[0]`, else of the flow, `flows[0]`.
+   */
   path: string;
   /** `Flow '<name>' would be refused at registration: ` and the engine's refusal. */
   message: string;
@@ -87,9 +100,7 @@ const SCHEMA_HINT =
  * names no container, and the flow stays the anchor.
  */
 function containerAtFault(err: unknown): { nodeId: string; path: readonly (string | number)[] } | undefined {
-  // PLACEHOLDER: reads the spec's FlowRegionShapeError once that export lands.
-  void err;
-  return undefined;
+  return err instanceof FlowRegionShapeError ? { nodeId: err.nodeId, path: err.path } : undefined;
 }
 
 /** `['nodes', 1, 'config', 'try']` → `.nodes[1].config.try`, the lint path spelling. */
