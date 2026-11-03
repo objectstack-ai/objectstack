@@ -672,8 +672,9 @@ describe('ObjectFieldInspector — summary roll-up editor', () => {
 
 describe('ObjectFieldInspector — delete behavior (objectstack#29807)', () => {
   // Radix Select reads pointer capture and scrollIntoView, which jsdom lacks.
-  for (const m of ['hasPointerCapture', 'setPointerCapture', 'releasePointerCapture'] as const) {
-    if (!Element.prototype[m]) Element.prototype[m] = m === 'hasPointerCapture' ? () => false : () => {};
+  const proto = Element.prototype as unknown as Record<string, unknown>;
+  for (const m of ['hasPointerCapture', 'setPointerCapture', 'releasePointerCapture']) {
+    if (!proto[m]) proto[m] = m === 'hasPointerCapture' ? () => false : () => {};
   }
   if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
 
