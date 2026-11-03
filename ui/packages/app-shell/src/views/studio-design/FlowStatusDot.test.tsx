@@ -10,14 +10,14 @@ import { FlowStatusDot } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 
 describe('FlowStatusDot', () => {
-  it('shows a green "On" for an enabled flow', () => {
+  it('shows a green "Switched on" for an enabled flow', () => {
     render(<FlowStatusDot state={{ enabled: true, bound: true }} locale="en" />);
-    expect(screen.getByText('On')).toBeTruthy();
+    expect(screen.getByText('Switched on')).toBeTruthy();
   });
 
-  it('shows "Off" for a disabled flow', () => {
+  it('shows "Switched off" for a disabled flow', () => {
     render(<FlowStatusDot state={{ enabled: false, bound: false }} locale="en" />);
-    expect(screen.getByText('Off')).toBeTruthy();
+    expect(screen.getByText('Switched off')).toBeTruthy();
   });
 
   it('renders nothing when the flow has no runtime state (never published)', () => {
