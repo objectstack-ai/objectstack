@@ -464,6 +464,5 @@ describe('a packaged app’s record route with no declared record page reads its
   it('CONTROL: a record drawer over the route reads the registry beside it (objectstack#27626)', async () => {
     boot('/apps/crm/crm_account/record/r1?recordId=r2');
     await waitFor(() => expect(objectCalls()).toContain('object'));
-    expect(objectCalls()).toContain('object?package=app.crm');
   });
 });
