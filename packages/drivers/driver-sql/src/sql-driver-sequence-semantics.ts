@@ -1,0 +1,586 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#29520 codemod] The
+ * "The sequence semantics a second face shares, stated once" section of
+ * `SqlDriver`: the bodies of `defineSequencesTable`, `autoNumberValueExists`,
+ * `autoNumberCounterKey`, `update`, `assertMergeLandedOnSuppliedIdentity`,
+ * `assertMergeLandedInWrittenOrganization`, `upsert` moved out of
+ * `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ *
+ * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
+ * method of the same name exactly as it stood: not re-indented, not
+ * formatted, not edited. The method stays on the class with its docblock and
+ * signature, so the published `dist/*.d.ts`, an instance spy and a subclass
+ * override are what they were; the docblock there is the contract.
+ *
+ * The bodies reach the class through {@link SequenceSemanticsHost}: exactly the
+ * `SqlDriver` members they read. Each method hands its body one literal of the
+ * members that body reads, plus a `.call`: methods go as closures that call
+ * them on the driver at call time (the builder factory as a bound reference),
+ * so a subclass override or an instance spy is still the one reached; fields
+ * and accessors go as GETTERS, read when the body reads them, as they were on
+ * the class.
+ *
+ * The module imports `sql-driver.ts` for types only, so the two modules form
+ * no evaluation cycle. `index.ts` re-exports nothing from this module.
+ */
+
+import type { DriverOptions } from '@objectstack/spec/data';
+import { isUnbackedConflictTargetError } from '@objectstack/types';
+import type { PhysicalIndex } from './schema-drift.js';
+import { withUpsertConflictClause } from './upsert-conflict-clause.js';
+import type { Knex } from 'knex';
+import { nanoid } from 'nanoid';
+import {
+  AUTONUMBER_COLLISION_RETRIES, DEFAULT_ID_LENGTH, isUpsertFenceRefusal, refuseCrossRowIdentityMerge,
+  refuseUnbackedConflictTarget, refuseUpsertConflictOutsideWrittenOrganization,
+} from './sql-driver-top-level.js';
+import type { AutoNumberReservation } from './sql-driver-top-level.js';
+import type { SqlDriver } from './sql-driver.js';
+
+/**
+ * The `SqlDriver` members the functions below read — every one of them, and
+ * no other. Each is typed AS the class member (an indexed access on the
+ * class), so a change to a member's signature on the class is a change here
+ * too. `readonly` members are the getters.
+ */
+export interface SequenceSemanticsHost {
+  applyTenantScope: SqlDriver['applyTenantScope'];
+  applyWriteColumnMap: SqlDriver['applyWriteColumnMap'];
+  assertConflictTargetBackedWithoutClause: SqlDriver['assertConflictTargetBackedWithoutClause'];
+  assertConflictTargetHonoured: SqlDriver['assertConflictTargetHonoured'];
+  assertMergeLandedInWrittenOrganization: SqlDriver['assertMergeLandedInWrittenOrganization'];
+  assertMergeLandedOnSuppliedIdentity: SqlDriver['assertMergeLandedOnSuppliedIdentity'];
+  auditMissingTenant: SqlDriver['auditMissingTenant'];
+  collidingAutoNumberReservations: SqlDriver['collidingAutoNumberReservations'];
+  fillAutoNumberFields: SqlDriver['fillAutoNumberFields'];
+  formatInput: SqlDriver['formatInput'];
+  formatOutput: SqlDriver['formatOutput'];
+  getBuilder: SqlDriver['getBuilder'];
+  injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
+  insertOnlyUpsertColumns: SqlDriver['insertOnlyUpsertColumns'];
+  readonly isMysql: SqlDriver['isMysql'];
+  keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
+  readonly knex: SqlDriver['knex'];
+  mergeLandsInWrittenOrganization: SqlDriver['mergeLandsInWrittenOrganization'];
+  readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  resolveSequenceTenantId: SqlDriver['resolveSequenceTenantId'];
+  resolveTenantField: SqlDriver['resolveTenantField'];
+  resyncSequenceToDataMax: SqlDriver['resyncSequenceToDataMax'];
+  rotatedUpdateById: SqlDriver['rotatedUpdateById'];
+  rotationShardsOf: SqlDriver['rotationShardsOf'];
+  rotationWriteTarget: SqlDriver['rotationWriteTarget'];
+  sequenceKeyHash: SqlDriver['sequenceKeyHash'];
+  stampInsertTimestamps: SqlDriver['stampInsertTimestamps'];
+  stampUpsertUpdatedAt: SqlDriver['stampUpsertUpdatedAt'];
+  stampsUpdatedAt: SqlDriver['stampsUpdatedAt'];
+  updateWithPresumedTimestamp: SqlDriver['updateWithPresumedTimestamp'];
+  updatedAtStamp: SqlDriver['updatedAtStamp'];
+  updatedAtStampIsPresumed: SqlDriver['updatedAtStampIsPresumed'];
+  upsertTenantGuard: SqlDriver['upsertTenantGuard'];
+}
+
+/** The body of `SqlDriver#defineSequencesTable`; the method's docblock there is its contract. */
+export function defineSequencesTable(this: Pick<SequenceSemanticsHost, 'knex'>, t: Knex.CreateTableBuilder): void {
+    t.string('key_hash', 64).notNullable().primary();
+    t.string('object').notNullable();
+    t.string('tenant_id').notNullable();
+    t.string('field').notNullable();
+    // Non-indexed, so it is free of the PK length limit — a long `{plan_no}`
+    // composite scope fits. 1024 is far above any realistic rendered prefix.
+    t.string('scope', 1024).notNullable().defaultTo('');
+    t.bigInteger('last_value').notNullable().defaultTo(0);
+    t.timestamp('updated_at').defaultTo(this.knex.fn.now());
+  }
+
+/** The body of `SqlDriver#autoNumberValueExists`; the method's docblock there is its contract. */
+export async function autoNumberValueExists(queryRunner: Knex | Knex.Transaction, reservation: AutoNumberReservation): Promise<boolean> {
+    let builder = queryRunner(reservation.tableName).select(reservation.field).where(reservation.field, reservation.value);
+    if (reservation.tenantField && reservation.tenantId !== null) {
+      builder = builder.where(reservation.tenantField, reservation.tenantId);
+    }
+    const hit = await builder.first();
+    return hit !== undefined && hit !== null;
+  }
+
+/** The body of `SqlDriver#autoNumberCounterKey`; the method's docblock there is its contract. */
+export function autoNumberCounterKey(this: Pick<SequenceSemanticsHost, 'resolveSequenceTenantId' | 'sequenceKeyHash'>, reservation: AutoNumberReservation): string {
+    const resolvedTenantId = this.resolveSequenceTenantId(
+      reservation.tenantField,
+      reservation.tenantId,
+      reservation.tableName,
+      reservation.field,
+    );
+    return this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
+  }
+
+/** The body of `SqlDriver#update`; the method's docblock there is its contract. */
+export async function update(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'auditMissingTenant' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'keepSuppliedUpdatedAt' | 'rotatedUpdateById' | 'rotationShardsOf' | 'stampsUpdatedAt' | 'updateWithPresumedTimestamp' | 'updatedAtStamp' | 'updatedAtStampIsPresumed'>, object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    this.auditMissingTenant(object, 'update', options);
+    const rotationShards = this.rotationShardsOf(object);
+    if (rotationShards) return this.rotatedUpdateById(object, rotationShards, id, data, options);
+    const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
+
+    // One definition of the statement, so the speculative attempt, the fenced
+    // retry and the plain path cannot drift in WHERE or tenant scope.
+    const issue = (payload: Record<string, any>, issueOptions?: DriverOptions): Promise<number> => {
+      const builder = this.getBuilder(object, issueOptions).where('id', id);
+      this.applyTenantScope(builder, object, issueOptions);
+      return builder.update(payload) as unknown as Promise<number>;
+    };
+
+    if (this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
+      // [#24835] A FRESH object, never `formatted`: `formatInput` and
+      // `applyWriteColumnMap` are copy-on-write, so for a patch that needs no
+      // coercion `formatted` IS the caller's `data`. Assigning the stamp onto it
+      // put `updated_at` into the caller's patch — which ObjectQL publishes as
+      // `DataEvent.changes` — and on Postgres/MySQL that value is a knex `Raw`
+      // holding the client, its pool and a timer, so every reader that
+      // serialises the event (the webhook outbox first) threw. `updateMany`'s
+      // shape, below.
+      const stamped = { ...formatted, updated_at: this.updatedAtStamp() };
+      if (this.updatedAtStampIsPresumed(object)) {
+        await this.updateWithPresumedTimestamp(object, stamped, options, issue);
+      } else {
+        await issue(stamped, options);
+      }
+    } else {
+      await issue(formatted, options);
+    }
+
+    const readback = this.getBuilder(object, options).where('id', id);
+    this.applyTenantScope(readback, object, options);
+    const updated = await readback.first();
+    return this.formatOutput(object, updated) || null;
+  }
+
+/** The body of `SqlDriver#assertMergeLandedOnSuppliedIdentity`; the method's docblock there is its contract. */
+export async function assertMergeLandedOnSuppliedIdentity(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject'>, object: string, writeTable: string, id: string | number, rivals: PhysicalIndex[], writtenTenant: unknown, options?: DriverOptions): Promise<void> {
+    const builder = this.getBuilder(writeTable, options);
+    // Scoped to the tenant this row was written under (see the docblock): the
+    // caller's org on an ordinary call, the explicitly named one on an admin
+    // cross-tenant write, and a no-op when neither exists. `tenantIds` is
+    // dropped deliberately — the group-union posture widens a READ to a
+    // membership set, and this is an identity probe for ONE row, not a read.
+    const tenantContext = options?.tenantId !== undefined && options?.tenantId !== null && options?.tenantId !== '';
+    const scopeOptions: DriverOptions = {
+      ...options,
+      tenantId:
+        tenantContext && typeof writtenTenant === 'string' && writtenTenant !== '' ? writtenTenant : options?.tenantId,
+      tenantIds: undefined,
+    };
+    this.applyTenantScope(builder, object, scopeOptions);
+    const landed = await builder.where('id', id).first('id');
+    if (landed) return;
+    const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
+    throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
+  }
+
+/** The body of `SqlDriver#assertMergeLandedInWrittenOrganization`; the method's docblock there is its contract. */
+export async function assertMergeLandedInWrittenOrganization(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'getBuilder' | 'physicalTableByObject'>, object: string, writeTable: string, mergeKeys: string[], matchOn: Record<string, unknown>, sent: Record<string, unknown>, guard: { column: string; value: unknown }, identity: { id: string | number; rivals: PhysicalIndex[] } | null, options?: DriverOptions): Promise<void> {
+    // The tenant scope of a ONE-row probe: the written tenant, with
+    // `tenantIds` dropped for #8807's reason (the group-union posture widens a
+    // READ to a membership set; this asks about one organization).
+    const scopeOptions: DriverOptions = { ...options, tenantId: String(guard.value), tenantIds: undefined };
+
+    const landedProbe = this.getBuilder(writeTable, options);
+    this.applyTenantScope(landedProbe, object, scopeOptions);
+    landedProbe.where(guard.column, guard.value as any);
+    for (const [column, value] of Object.entries(matchOn)) landedProbe.where(column, value as any);
+    if (await landedProbe.first('id')) return;
+
+    if (identity) {
+      for (const rival of identity.rivals) {
+        const probeable = rival.columns.length > 0 && rival.columns.every((c) => sent[c] !== undefined && sent[c] !== null);
+        if (!probeable) continue;
+        const rivalProbe = this.getBuilder(writeTable, options);
+        this.applyTenantScope(rivalProbe, object, scopeOptions);
+        rivalProbe.where(guard.column, guard.value as any);
+        for (const column of rival.columns) rivalProbe.where(column, sent[column] as any);
+        if (await rivalProbe.first('id')) {
+          const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
+          throw refuseCrossRowIdentityMerge(object, tableName, identity.id, identity.rivals);
+        }
+      }
+    }
+    throw refuseUpsertConflictOutsideWrittenOrganization(object, mergeKeys);
+  }
+
+/** The body of `SqlDriver#upsert`; the method's docblock there is its contract. */
+export async function upsert(this: Pick<SequenceSemanticsHost, 'applyTenantScope' | 'applyWriteColumnMap' | 'assertConflictTargetBackedWithoutClause' | 'assertConflictTargetHonoured' | 'assertMergeLandedInWrittenOrganization' | 'assertMergeLandedOnSuppliedIdentity' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertOnlyUpsertColumns' | 'isMysql' | 'knex' | 'mergeLandsInWrittenOrganization' | 'resolveTenantField' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps' | 'stampUpsertUpdatedAt' | 'upsertTenantGuard'>, object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
+    const { _id, ...rest } = data;
+    const toUpsert = { ...rest };
+
+    if (_id !== undefined && toUpsert.id === undefined) {
+      toUpsert.id = _id;
+    } else if (toUpsert.id === undefined) {
+      toUpsert.id = nanoid(DEFAULT_ID_LENGTH);
+    }
+
+    this.auditMissingTenant(object, 'upsert', options);
+    this.injectTenantOnInsert(object, toUpsert, options);
+
+    const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
+
+    // [#21185] The organization fence (ADR-0131 D8: the tenant predicate
+    // reaches every driver door, and the merge leg of an upsert was the one it
+    // did not). The conflict target is resolved against the WHOLE table — the
+    // primary key and a `unique: 'global'` column are installation-wide — so
+    // the row a tenant-scoped call collides with can belong to an organization
+    // the caller cannot read, and the merge leg used to write onto it, tenant
+    // column included. With a fence the merge may only land on a row whose
+    // stored tenant column equals the written one; a conflict anywhere else is
+    // refused with `UNIQUE_VIOLATION` and writes nothing. `null` for a call with
+    // no tenant context, which keeps the merge and relies on the tenant column
+    // being insert-only ({@link insertOnlyUpsertColumns}). See
+    // {@link upsertTenantGuard}.
+    const tenantGuard = this.upsertTenantGuard(object, toUpsert, options);
+
+    // [#8621, #8755, #8807] Pre-flight the conflict target — see
+    // {@link assertConflictTargetHonoured} for the mechanism and why it is
+    // MySQL-only. Two placement facts, both load-bearing:
+    //
+    //  - ⚠️ It now runs whether or not the CALLER named a target, and the
+    //    reasoning that used to stop at the caller-named case is superseded
+    //    rather than merely widened. That reasoning was *"a probe on the default
+    //    path could only ever confirm what the driver just built"*, and it was
+    //    right about the question #8621/#8755 were asking — "is `['id']` backed?"
+    //    has one possible answer on a table this driver created. #8807 asks a
+    //    different question of the same introspection — "does anything ELSE on
+    //    this table absorb a collision?" — and that one is genuinely unknown
+    //    until read. The read is cached per table
+    //    ({@link physicalKeyIndexes}), so the hot path pays it once, and the
+    //    verdict it returns is not a refusal: see below.
+    //  - It runs BEFORE the retry loop, therefore before
+    //    `fillAutoNumberFields`. Refusing after it would burn an autonumber
+    //    reservation for a statement that never executes — a visible gap in an
+    //    externally meaningful sequence, handed out for a rejected call.
+    const callerNamed = !!(conflictKeys && conflictKeys.length > 0);
+    const preflight = this.isMysql
+      ? await this.assertConflictTargetHonoured(object, mergeKeys, callerNamed)
+      : { verifyIdentity: false };
+
+    // [#8807] The primary-key-targeted merge on a table that carries a rival
+    // UNIQUE key: MySQL may land it on a row this call never identified, and
+    // nothing before the statement can tell whether it will. So the statement
+    // and the identity check run as ONE unit of work, and the check's failure
+    // is what rolls the wrong write back.
+    //
+    // The accept set moves for exactly the calls that corrupt data: a merge
+    // that lands on the supplied identity — every insert, and every legitimate
+    // re-upsert of the same row — passes the check untouched, because `id` is
+    // insert-only (#8622) and therefore a row merged on the primary key always
+    // still carries it.
+    const verifyIdentity = preflight.verifyIdentity === true;
+
+    // [#21185] MySQL's fence is a check after the statement, inside the same
+    // unit of work — `ON DUPLICATE KEY UPDATE` takes no `WHERE` — so it is owed
+    // whenever the call is fenced, not only when a rival UNIQUE key exists. See
+    // {@link assertMergeLandedInWrittenOrganization}.
+    const mysqlFence = this.isMysql && tenantGuard !== null;
+    const checkAfterStatement = verifyIdentity || mysqlFence;
+
+    // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is
+    // single-row, so a stale counter costs it exactly one burned number per
+    // call — the same shape `create()` had before #5495, for the same reason
+    // (no re-seed, no retry). `ON CONFLICT (mergeKeys) DO UPDATE` absorbs a
+    // conflict on the merge key only; the tenanted autonumber lives under a
+    // DIFFERENT unique index, so its violation is still raised and still
+    // reaches here. The remedy is therefore `create()`'s, verbatim: re-seed and
+    // re-issue, but only when the collision is provably this counter's
+    // ({@link collidingAutoNumberReservations}), and only outside a caller
+    // transaction (inside one the sequence UPDATE rolls back with the refused
+    // INSERT, so nothing is burned and there is nothing to repair — measured).
+    const mayRetry = options?.transaction === undefined;
+    // The row the last attempt SENT, in storage form: the read-back below
+    // looks the landed row up by its conflict-key values.
+    let sent: Record<string, any> = {};
+    for (let attempt = 0; ; attempt++) {
+      const reservations = await this.fillAutoNumberFields(object, toUpsert, options);
+
+      const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toUpsert));
+      sent = formatted;
+      this.stampInsertTimestamps(object, formatted);
+      // [#11176] …and the same slot filled on Postgres/MySQL, where the line
+      // above returns early. Without it `updated_at` is not in `formatted`, so
+      // it is not in the merge set built below, so the merge branch leaves the
+      // row reading its INSERT-time default forever. See
+      // {@link stampUpsertUpdatedAt} — no-op on SQLite (already filled) and on
+      // any object whose `updated_at` column this driver has not OBSERVED.
+      this.stampUpsertUpdatedAt(object, formatted);
+
+      // Rotation: conflict-merge is scoped to the CURRENT shard (telemetry is
+      // effectively append-only; a cross-shard upsert would need a probe-first
+      // strategy nothing on the platform requires today).
+      const writeTable = this.rotationWriteTarget(object) ?? object;
+      // `created_at` is insert-only — never overwrite it when an existing row is
+      // merged on conflict (the stamped/seeded value belongs to the original
+      // insert). [#7011] `auto_number` columns are insert-only for the same
+      // reason, and a stronger one: the number is an externally visible
+      // business identifier once assigned (`CASE-00001`), and
+      // `fillAutoNumberFields` above reserved a FRESH value before the
+      // statement could know it would merge — leaving these columns in the
+      // merge set rewrote the existing row's number on every merge-path upsert
+      // (measured on a healthy counter: create → CASE-00001, two upserts of
+      // the same id → CASE-00002 then CASE-00003, one row throughout). The
+      // exclusion is unconditional — an explicit payload value does not
+      // renumber on merge either; `update()` is the deliberate renumbering
+      // path. The reservation itself still happens on the merge path (a gap,
+      // not a rewrite) — that pre-burn half is #6943's reseed family, not
+      // this exclusion's.
+      //
+      // [#8622] `id` is insert-only for the SAME argument at its strongest.
+      // `upsert` mints a nanoid whenever the caller supplies none (just above),
+      // so the merge set carried `id = excluded.id` — the freshly minted id of
+      // the insert that LOST. On the default `['id']` conflict target that
+      // clause is a no-op (both sides are the same value), which is precisely
+      // why it stayed invisible; the moment `conflictKeys` names a business key
+      // the merged row's identity is silently replaced. Measured here on SQLite
+      // and live Postgres 16.13, and on live MySQL 8.0.46 in #8592 — a
+      // dialect-independent defect, because the mechanism is the merge set this
+      // driver builds, not anything a server decides:
+      //
+      //   upsert({email:'x@b.com', title:'first'},  ['email'])  -> id=rSxhabt0…
+      //   upsert({email:'x@b.com', title:'second'}, ['email'])  -> id=hXqcSC45…
+      //                                              ONE row, NEW primary key.
+      //
+      // `id` is what relationships, audit records, external id mappings and any
+      // client-held reference point at, so this dangles every one of them with
+      // no error on any dialect. The exclusion is unconditional for #7011's
+      // reason: an explicit payload `id` (or its `_id` alias, folded into `id`
+      // before `formatted` is built) does not re-key on merge either. `update()`
+      // is the deliberate path — it writes exactly the columns it is handed,
+      // `id` included.
+      //
+      // Everything else (incl. `updated_at`) merges as before, so an upsert
+      // that updates a row still advances `updated_at`. [#11176] That last
+      // clause used to hold on SQLite ONLY: it needs `updated_at` to BE in
+      // `formatted`, which before this card nothing put there on Postgres or
+      // MySQL. `stampUpsertUpdatedAt` above is what now makes the sentence true
+      // on all three.
+      const insertOnlyColumns = this.insertOnlyUpsertColumns(object);
+      const mergeColumns = Object.keys(formatted).filter((c) => !insertOnlyColumns.has(c));
+
+      // [#8622] Excluding `id` made a branch REACHABLE that could not fire
+      // before, and the bare `merge()` below is merge-ALL: it re-admits every
+      // insert-only column. Measured on live Postgres with an object whose only
+      // non-`id` column is an `auto_number` — `upsert({ id: seeded }, ['id'])`
+      // left `mergeColumns` empty and the merge-ALL fallback rewrote the row's
+      // `case_no` from `0003` to `0004`, defeating #7011's exclusion. (SQLite
+      // never reached it: `stampInsertTimestamps` puts a mergeable `updated_at`
+      // in the payload there. [#11176] `stampUpsertUpdatedAt` now does the same
+      // on Postgres and MySQL, so a TIMESTAMPED object no longer reaches this
+      // fallback on any dialect either — it is still reachable for an object
+      // with no observed `updated_at` column.)
+      //
+      // The remedy keeps the emitted SQL byte-identical to what `main` emits
+      // for this shape. Falling back to the CONFLICT-TARGET columns present in
+      // the payload is a provable no-op — a conflict means those columns matched,
+      // so `excluded.<target>` IS the stored value — and it reproduces exactly
+      // the `merge(['id'])` `main` produces here, because `id` was `main`'s only
+      // mergeable column in this case. So this PR's net behavioural delta on the
+      // degenerate path is nil rather than a #7011 regression.
+      //
+      // [#8740] When the payload carries no conflict-target column either, there
+      // is nothing the merge leg may write, and the statement is a plain INSERT
+      // with no conflict clause: a collision surfaces as the driver's own
+      // unique-violation error and the stored row is left as it was. This used
+      // to fall back to knex's bare `merge()`, which is merge-ALL on every
+      // dialect: it re-admitted every insert-only column the lines above
+      // exclude. ⛔ Not `ignore()` either: knex lowers it on MySQL to
+      // `insert ignore`, which swallows unrelated errors and drops the conflict
+      // target. See {@link withUpsertConflictClause}.
+      const noopMergeColumns = Object.keys(formatted).filter((c) => mergeKeys.includes(c));
+      const columnsToMerge = mergeColumns.length > 0 ? mergeColumns : noopMergeColumns;
+      // …and that plain INSERT still refuses a conflict target nothing backs,
+      // as every dialect does when there is something to merge.
+      if (columnsToMerge.length === 0) await this.assertConflictTargetBackedWithoutClause(object, writeTable, mergeKeys);
+
+      // [#21185] The fence for THIS attempt: the tenant column, and the value
+      // the row is written under in storage form (what the statement sends).
+      const fence = tenantGuard && {
+        column: tenantGuard.column,
+        value: formatted[tenantGuard.column] ?? tenantGuard.value,
+      };
+
+      // The statement, plus [#8807]'s identity check when one is owed. The
+      // builder is built HERE rather than above the comment block so it can be
+      // bound to whichever transaction this write runs on — the caller's, the
+      // one opened just below, or none at all. The emitted INSERT is otherwise
+      // unchanged.
+      const runStatement = async (writeOptions?: DriverOptions): Promise<void> => {
+        // Bound in two steps, not chained: this is the INSERT door, and
+        // `check:tenant-chokepoint` classifies a builder as a write by seeing
+        // `.insert` used on the BINDING. Collapsing these into one expression
+        // hides that from the gate and the door reads as an unscoped read —
+        // measured when this closure was first extracted. Insert-side tenancy
+        // is `injectTenantOnInsert`'s job (called above), which is exactly why
+        // this one is deliberately not scoped.
+        const builder = this.getBuilder(writeTable, writeOptions);
+        const insertion = builder.insert(formatted);
+        const { statement, merges } = withUpsertConflictClause(insertion, mergeKeys, columnsToMerge);
+        // [#21185] SQLite and PostgreSQL: the fence is a predicate INSIDE the
+        // merge statement — `… DO UPDATE SET … WHERE` the stored tenant column
+        // equals the written one — so a conflict on a row of another
+        // organization (or of none) leaves that row untouched, atomically, with
+        // no added round trip. The read-back below then finds no row under the
+        // written organization, and that is where the call refuses. NULL-safe
+        // on both (`IS` on SQLite, `IS NOT DISTINCT FROM` on PostgreSQL); the
+        // written value is never NULL here, so a stored NULL is "distinct", and
+        // a platform row with no organization is fenced off too. The target
+        // table is named by its bare physical name, which both dialects accept
+        // for the INSERT target in this clause, schema-qualified or not.
+        // MySQL takes no `WHERE` here; its fence runs after the statement. A
+        // plain INSERT ([#8740]) has no merge leg to fence.
+        await (merges && fence && !this.isMysql
+          ? statement.where(this.mergeLandsInWrittenOrganization(writeTable, fence.column))
+          : statement);
+        if (mysqlFence) {
+          // [#21185] One read, under the written tenant exactly; #8807's
+          // identity verdict rides on it when a rival key made one owed.
+          const matchOn: Record<string, unknown> = mergeKeys.every((k) => formatted[k] !== undefined && formatted[k] !== null)
+            ? Object.fromEntries(mergeKeys.map((k) => [k, formatted[k]]))
+            : { id: toUpsert.id };
+          await this.assertMergeLandedInWrittenOrganization(
+            object,
+            writeTable,
+            mergeKeys,
+            matchOn,
+            formatted,
+            fence!,
+            verifyIdentity ? { id: toUpsert.id, rivals: preflight.rivals ?? [] } : null,
+            writeOptions,
+          );
+        } else if (verifyIdentity) {
+          // The tenant the row was WRITTEN under, read off the payload after
+          // `injectTenantOnInsert` has run — the caller's org on an ordinary
+          // call, an explicitly supplied one on an admin cross-tenant write.
+          const tenantField = this.resolveTenantField(object);
+          await this.assertMergeLandedOnSuppliedIdentity(
+            object,
+            writeTable,
+            toUpsert.id,
+            preflight.rivals ?? [],
+            tenantField ? toUpsert[tenantField] : undefined,
+            writeOptions,
+          );
+        }
+      };
+
+      try {
+        if (checkAfterStatement && options?.transaction === undefined) {
+          // [#8807] No caller transaction, so the driver opens one: the check
+          // is only worth making if its failure can UNDO the write it judged,
+          // and an autocommitted statement is already permanent by the time the
+          // row can be read back. Scoped to the calls a check is owed on —
+          // `verifyIdentity`, and since #21185 every fenced MySQL call — so the
+          // ordinary upsert (SQLite, PostgreSQL, and a MySQL call with neither)
+          // keeps its single autocommitted round trip.
+          //
+          // Inside a caller transaction #8807's wrapper is deliberately NOT
+          // added: the statement is already transactional, and throwing hands
+          // the rollback decision to the owner of that transaction, exactly as
+          // the autonumber path above reasons about the same boundary.
+          await this.knex.transaction(async (trx) => {
+            await runStatement({ ...options, transaction: trx });
+          });
+        } else if (mysqlFence) {
+          // [#21185] …but the organization fence does not hand that decision
+          // over. A cross-organization merge is never the caller's to keep, so
+          // inside a caller transaction the statement and its check run in a
+          // nested transaction — a SAVEPOINT on MySQL — and the check's throw
+          // rolls back to it: the other organization's row is restored before
+          // the refusal reaches the caller, whatever the caller then does with
+          // its own transaction.
+          await (options!.transaction as Knex.Transaction).transaction(async (savepoint) => {
+            await runStatement({ ...options, transaction: savepoint });
+          });
+        } else {
+          await runStatement(options);
+        }
+        break;
+      } catch (error) {
+        // [#21185] The fence's refusal is final: it is not the server's error,
+        // so neither the unbacked-target recogniser nor the autonumber re-seed
+        // below has anything to say about it, and a retry would be refused the
+        // same way. The pair is this driver's own envelope; no dialect error
+        // carries it.
+        if (isUpsertFenceRefusal(error)) throw error;
+        // [#8445] Classified BEFORE the autonumber retry logic, for three
+        // reasons that all point the same way. It is not an autonumber
+        // collision — `collidingAutoNumberReservations` gates on
+        // `isUniqueViolationError`, and this error is not a unique violation:
+        // no index existed for anything to violate.
+        //
+        // ⚠️ [#8567] That gate does NOT agree, and this comment used to claim it
+        // did ("which is false for this error"). Measured on the real SQLite
+        // error: `isUniqueViolationError` returns TRUE, because SQLite's
+        // missing-index sentence ends `…PRIMARY KEY or UNIQUE constraint` and
+        // the shared vocabulary matches the word pair `unique constraint`
+        // wherever it appears. Filed as #8590. So the ORDERING here is
+        // load-bearing rather than merely tidy: move this line below the branch
+        // and the reservation probe really does run — querying the sequences
+        // table for a collision that cannot exist, then rethrowing the raw
+        // error. Recognising first is what makes that unreachable.
+        //
+        // It is also not transient — the same statement fails identically on
+        // every attempt, so a retry is a wasted round trip by construction. And
+        // it is the only placement that envelopes BOTH exits below: a refusal
+        // recognised after the branch would still escape raw whenever
+        // `mayRetry` is false.
+        if (isUnbackedConflictTargetError(error)) throw refuseUnbackedConflictTarget(object, mergeKeys, error);
+        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
+        const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
+        if (colliding.length === 0) throw error;
+        for (const reservation of colliding) {
+          await this.resyncSequenceToDataMax(reservation);
+          // Clear only what collided, so the next pass regenerates exactly
+          // those fields — a reservation that did NOT collide keeps its value
+          // rather than burning a second number for nothing. (Safe here in a
+          // way it is NOT for a batch: one row cannot collide with itself.
+          // See {@link bulkCreate}.)
+          delete toUpsert[reservation.field];
+        }
+      }
+    }
+
+    // [#21166] Read back the row the statement landed on, by the identity it
+    // MATCHED on: the conflict-key values. Reading it back by `toUpsert.id`
+    // answers the wrong row on exactly the call #8622 protects: a merge on a
+    // business key keeps the stored row's `id`, so the payload's `id` (or the
+    // nanoid minted above) names no row, the read finds nothing, and the
+    // fallback below answered the PAYLOAD. Measured on SQLite and live
+    // Postgres 16: the row stored as `row-a` answered `id: 'row-NEW'`, an id
+    // no stored row has. The conflict-key values name the landed row on both
+    // legs: the inserted row carries them, and the merged row is the one that
+    // matched them. A conflict key the row leaves empty cannot have matched
+    // (NULL never conflicts), so the statement inserted and the row carries
+    // `toUpsert.id`. On the default `['id']` target the two readings are the
+    // same query. The tenant scope is applied to either, as before.
+    const matchedOn = mergeKeys.every((k) => sent[k] !== undefined && sent[k] !== null);
+    const readback = this.getBuilder(object, options);
+    if (matchedOn) for (const k of mergeKeys) readback.where(k, sent[k]);
+    else readback.where('id', toUpsert.id);
+    if (tenantGuard) {
+      // [#21185] A fenced call reads back under the WRITTEN organization
+      // EXACTLY: the chokepoint scope for that tenant (`tenantIds` dropped, as
+      // for #8807's one-row probe), plus equality on the tenant column, which
+      // closes the scope's NULL-organization arm. A row the fence left alone —
+      // another organization's, or a platform row with none — is therefore not
+      // found, and that absence IS the refusal: the statement wrote nothing
+      // (SQLite / PostgreSQL), or rolled back (MySQL, where the same read ran
+      // inside the transaction first). Scoping to the caller's ACTIVE org
+      // instead would miss a row an admin really wrote under another
+      // organization and refuse a correct write.
+      const writtenTenant = sent[tenantGuard.column] ?? tenantGuard.value;
+      this.applyTenantScope(readback, object, { ...options, tenantId: String(writtenTenant), tenantIds: undefined });
+      readback.where(tenantGuard.column, writtenTenant);
+      const landed = await readback.first();
+      if (!landed) throw refuseUpsertConflictOutsideWrittenOrganization(object, mergeKeys);
+      return this.formatOutput(object, landed) || landed;
+    }
+    this.applyTenantScope(readback, object, options);
+    const result = await readback.first();
+    return this.formatOutput(object, result) || toUpsert;
+  }
