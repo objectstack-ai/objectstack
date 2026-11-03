@@ -112,6 +112,7 @@ import {
   type FieldsView,
   type FieldEntry,
 } from '../previews/object-fields-io.js';
+import { romanizeHan, useHanRomanizer, useWhenRomanizerLands } from '../romanizeHan.js';
 import {
   FIELD_TYPE_META,
   type FieldTypeId,
@@ -499,6 +500,23 @@ function offersReferenceNameVisible(type: string): boolean {
 }
 
 /**
+ * The `deleteBehavior` values the field panel offers on `type`: the rows the
+ * generic `field` form draws for the key (`field.form.ts`), so the two
+ * authoring surfaces agree. All three on a `lookup`, and on a `user` field,
+ * where a declared value takes effect when the user is deleted (objectstack#29253)
+ * and declaring nothing keeps the field out of the delete walk. Only
+ * `cascade` / `restrict` on a `master_detail`: `FieldSchema` refuses an
+ * authored `set_null` there, since a detail row cannot outlive its master.
+ * Empty on every other type, `tree` included: no row is drawn, and a retype
+ * to one drops the key.
+ */
+function offeredDeleteBehaviors(type: string): ReadonlyArray<string> {
+  if (type === 'lookup' || type === 'user') return ['set_null', 'cascade', 'restrict'];
+  if (type === 'master_detail') return ['cascade', 'restrict'];
+  return [];
+}
+
+/**
  * objectui#11786 — what the object write guard holds this field for: its
  * options (a choice type with no option source) or its target (a relationship
  * with no usable `reference`), else nothing. Asked of the guard itself, on the
@@ -794,6 +812,10 @@ export function ObjectFieldInspector({
   const name = String(selection.id);
   const idx = indexOfField(view, name);
   const entry = idx >= 0 ? view.entries[idx] : null;
+  // A Chinese Label derives the API name through its pinyin (`romanizeHan`);
+  // the dictionary starts loading as soon as the Label holds a Chinese
+  // character, so the keystrokes after it derive.
+  useHanRomanizer(typeof entry?.def.label === 'string' ? entry.def.label : '');
   // The formula editor's field picker lists siblings by the label every other
   // surface shows them with (the same resolver as `LabelTranslationHint`).
   const { fieldLabel } = useSafeFieldLabel();
@@ -1093,7 +1115,15 @@ export function ObjectFieldInspector({
     // The spec refuses `referenceNameVisible` off `lookup` / `user`, `false`
     // included, so a retype to any other type removes the key outright.
     const dropsNameVisible = 'referenceNameVisible' in def && !offersReferenceNameVisible(nextType);
-    if (keepsPicklist && !dropsKinds && !dropsNameVisible) {
+    // objectstack#29807 — the Delete Behavior row lives only where it is
+    // drawn, so a retype to a type without it removes the key, and a retype to
+    // `master_detail` removes an authored `set_null` the spec refuses there.
+    const nextDeleteBehaviors = offeredDeleteBehaviors(nextType);
+    const dropsDeleteBehavior =
+      'deleteBehavior' in def
+      && (nextDeleteBehaviors.length === 0
+        || (def.deleteBehavior === 'set_null' && !nextDeleteBehaviors.includes('set_null')));
+    if (keepsPicklist && !dropsKinds && !dropsNameVisible && !dropsDeleteBehavior) {
       patchDef(requireMaster ? { type: nextType, required: true } : { type: nextType });
       return;
     }
@@ -1102,6 +1132,7 @@ export function ObjectFieldInspector({
     if (!keepsPicklist) delete nextDef.picklist;
     if (dropsKinds) nextDef.options = withoutOptionKinds(def.options as unknown[]);
     if (dropsNameVisible) delete nextDef.referenceNameVisible;
+    if (dropsDeleteBehavior) delete nextDef.deleteBehavior;
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: nextDef };
     writeView({ shape: view.shape, entries: nextEntries });
@@ -1159,8 +1190,11 @@ export function ObjectFieldInspector({
   // toFieldNameLoose (prefix-stable, unlike slugify which trims trailing
   // underscores and would fight mid-word typing) — while the name is still
   // an auto-generated default and the user hasn't customised it. Mirrors the
-  // object/app Name behaviour. toFieldNameLoose returns '' for non-Latin
-  // labels, in which case the unique default name is kept. Pure — the
+  // object/app Name behaviour. A Chinese label derives through its pinyin
+  // (`romanizeHan`: `客户等级` → `kehu_dengji`); toFieldNameLoose returns ''
+  // for a label that still yields nothing (a Japanese one, or a Chinese one
+  // before the dictionary has landed), in which case the unique default name
+  // is kept. Pure — the
   // caller applies the label and (if any) the derived name in one write,
   // since two separate writeView() calls from the same stale `entry` closure
   // would have the second clobber the first.
@@ -1183,7 +1217,7 @@ export function ObjectFieldInspector({
       // that scheme too, or a type-typed rename right after add never derives.
       /^field_\d+$/.test(entry.name);
     if (!isAutoName) return null;
-    const derived = toFieldNameLoose(label);
+    const derived = toFieldNameLoose(romanizeHan(label));
     if (!derived || derived === entry.name) return null;
     if (view.entries.some((e, i) => i !== idx && e.name === derived)) return null;
     return derived;
@@ -1560,6 +1594,17 @@ export function ObjectFieldInspector({
           )}
           {/* A `user` field's target is always `sys_user`: no picker config, only this key. */}
           {type === 'user' && nameVisibleToggle}
+          {offeredDeleteBehaviors(type).length > 0 && (
+            <DisplayPatchLock>
+              <DeleteBehaviorField
+                value={typeof def.deleteBehavior === 'string' ? def.deleteBehavior : ''}
+                offered={offeredDeleteBehaviors(type)}
+                onCommit={(v) => (v ? patchDef({ deleteBehavior: v }) : unsetDefKey('deleteBehavior'))}
+                disabled={locked}
+                locale={locale}
+              />
+            </DisplayPatchLock>
+          )}
           {type === 'formula' && (
             <DisplayPatchLock>
               <CelPredicateField
@@ -2092,12 +2137,32 @@ function OptionsEditor({
     commit(next);
   };
   // Only a row this editor added derives its value from its label: renaming an
-  // authored option must never change the value its records store.
+  // authored option must never change the value its records store. A Chinese
+  // label derives through its pinyin (`romanizeHan`: `已完成` → `yi_wancheng`),
+  // the same rule as every Studio create door; without it the
+  // value stayed '' and the row was silently never saved.
+  const deriveValue = (label: string) => toFieldNameOrEmpty(romanizeHan(label));
   const updateLabel = (i: number, label: string) => {
     const row = rows[i];
     if (row?.kind !== 'option') return;
-    update(i, row.derive ? { label, value: toFieldNameOrEmpty(label) } : { label });
+    update(i, row.derive ? { label, value: deriveValue(label) } : { label });
   };
+  // A Chinese label typed before the pinyin dictionary landed left its row's
+  // value empty; once it lands, each such row still deriving takes its value.
+  useWhenRomanizerLands(
+    () => {
+      let changed = false;
+      const next = rows.map((r) => {
+        if (r.kind !== 'option' || !r.derive || r.option.value !== '' || !r.option.label) return r;
+        const value = deriveValue(r.option.label);
+        if (!value) return r;
+        changed = true;
+        return { ...r, option: { ...r.option, value } };
+      });
+      if (changed) commit(next);
+    },
+    ...rows.flatMap((r) => (r.kind === 'option' && r.derive ? [r.option.label ?? ''] : [])),
+  );
   const updateValue = (i: number, value: string) => {
     const next = [...rows];
     const row = next[i];
@@ -2557,6 +2622,50 @@ function ReferenceNameVisibleField({
       </label>
       <p id={helpId} className="text-[10px] leading-snug text-muted-foreground">
         {t('designer.field.lookup.referenceNameVisible.help', locale)}
+      </p>
+    </div>
+  );
+}
+
+/* ─────────────── Delete behavior (deleteBehavior) ─────────────── */
+
+/**
+ * objectstack#29807 — what deleting the referenced record does to this one.
+ * The label, help text and the `master_detail` option labels are the generic
+ * `field` form's rows for the same key. The leading "— None —" item writes the
+ * key as ABSENT (`unsetDefKey`), never `''` or `null`: "declares nothing" is
+ * its own outcome (the spec default on a `lookup`, staying out of the delete
+ * walk on a `user` field), not a blank value. A stored value the type does not
+ * offer (`set_null` authored on a `master_detail`) is drawn flagged by
+ * {@link InspectorSelectField}, so the author sees what the save refuses.
+ */
+function DeleteBehaviorField({
+  value,
+  offered,
+  onCommit,
+  disabled,
+  locale,
+}: {
+  value: string;
+  offered: ReadonlyArray<string>;
+  onCommit: (v: string) => void;
+  disabled?: boolean;
+  locale?: string;
+}) {
+  return (
+    <div className="space-y-1 border-t pt-2.5" data-testid="field-delete-behavior">
+      <InspectorSelectField
+        label={t('designer.field.deleteBehavior', locale)}
+        value={value}
+        options={[
+          { value: '', label: t('engine.form.none', locale) },
+          ...offered.map((v) => ({ value: v, label: t(`designer.field.deleteBehavior.${v}`, locale) })),
+        ]}
+        onCommit={onCommit}
+        disabled={disabled}
+      />
+      <p className="text-[10px] leading-snug text-muted-foreground">
+        {t('designer.field.deleteBehavior.help', locale)}
       </p>
     </div>
   );

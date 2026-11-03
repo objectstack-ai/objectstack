@@ -1461,7 +1461,7 @@
       "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1515,7 +1515,7 @@
           "evidence": "the test run output + the paired live reads (table sets, drafts, and the two refusals)"
         },
         {
-          "clause": "the auth floor holds and BOTH spellings answer it IDENTICALLY — the #9593 asymmetry this item recorded through rev 1 is CLOSED, so a federation 200 to an unentitled caller is a FAIL, not the documented behaviour: an anonymous caller is refused 401 UNAUTHENTICATED on BOTH spellings (admin: requireDatasourceAdmin/#9391; federation: refuseFederationRequest's shouldDenyAnonymous arm/#9686 — fail-closed, before any service lookup so an anonymous probe cannot learn what is wired), and an authenticated caller WITHOUT manage_platform_settings is refused 403 PERMISSION_DENIED naming the capability on BOTH spellings, keyed on that capability rather than on holding merely some grant. Federation READS (tables, draft) took FEDERATION_READ_CAPABILITY = manage_platform_settings in #9901 — maintainer ruling 2026-08-20, verbatim: 「其他接受你的建议。」— and validate joined them in #10255 (verbatim: 「同意你的意见。」); the family's WRITES (import, refresh-catalog — outside this item's probes) sit on FEDERATION_WRITE_CAPABILITY = manage_metadata above the same 401 floor",
+          "clause": "the auth floor holds and BOTH spellings answer it IDENTICALLY — the #9593 asymmetry this item recorded through rev 1 is CLOSED, so a federation 200 to an unentitled caller is a FAIL, not the documented behaviour: an anonymous caller is refused 401 UNAUTHENTICATED on BOTH spellings (admin: requireDatasourceAdmin/#9391; federation: refuseFederationRequest's shouldDenyAnonymous arm/#9686 — fail-closed, before any service lookup so an anonymous probe cannot learn what is wired), and an authenticated caller WITHOUT manage_platform_settings is refused 403 PERMISSION_DENIED naming the capability on BOTH spellings, keyed on that capability rather than on holding merely some grant. Federation READS (tables, draft) took FEDERATION_READ_CAPABILITY = manage_platform_settings in #9901 — maintainer ruling 2026-08-20, verbatim: 「其他接受你的建议。」— and validate joined them in #10255 (verbatim: 「同意你的意见。」); the family's WRITES (import, refresh-catalog — outside this item's probes) sit on FEDERATION_WRITE_CAPABILITY = manage_metadata AND this same FEDERATION_READ_CAPABILITY above the same 401 floor (seeing a datasource's remote structure needs the read capability on every route, writes included — maintainer ruling 2026-11-03, verbatim: 「两个写接口同时要求读权限 (Recommended)」)",
           "oracle": "api",
           "verify": "the four probes of step 8 against admin-routes.ts (401 floor then manage_platform_settings 403) and external-datasource-routes.ts refuseFederationRequest (the same two decisions out of ONE resolveExecutionContext call — anonymous first, then FEDERATION_READ_CAPABILITY); the agreement is pinned in the twin test's 'listRemoteTables twins agree on WHO may ask (#9686, #9593, #9901)' describe, whose two unentitled cases compare the two spellings' status AND code to each other rather than to a literal. Those cases compare status and code only: that the 403 message names manage_platform_settings is read off the live responses",
           "evidence": "the 401/403/200 responses"
@@ -1591,6 +1591,12 @@
           "date": "2026-10-31",
           "change": "acceptance[1].verify and fixtures.knownGaps[0] said a live ?schema=<x> on the SQLite fixture answers 200 with the full set. QA run #27438 measured 400 EXTERNAL_DATASOURCE_ERROR 'Cannot narrow the remote tables … named no schema for 2 of its 2 table(s)' on both spellings, and the empty and repeated forms still 200 with the full set. external-datasource-service.ts listRemoteTables throws unattributedSchemaFilterError (the #24664 fix) when a filter is in force and a table has no schema; the route reads only a string ?schema=, so a repeated key is no filter. Stronger: the verify now requires the refusal, and the full set no longer passes. Narrowing stays scored by the twin pin. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27438"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-03",
+          "change": "acceptance[4]: the family's writes (import, refresh-catalog) sit on BOTH capabilities now, not on FEDERATION_WRITE_CAPABILITY alone. Seeing a datasource's remote structure needs the read capability on every route, writes included (maintainer ruling 2026-11-03, verbatim: 「两个写接口同时要求读权限 (Recommended)」); the rule is federationCapabilityRefusal in external-datasource-routes.ts. This item's own probes (the two read twins) are unchanged",
+          "ref": "claude/sec-hardening-d"
         }
       ]
     },
@@ -2140,11 +2146,11 @@
       "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
-        "admin — authenticated, holding manage_platform_settings (federation reads: tables/validate) AND manage_metadata (federation writes: import/refresh-catalog, and the /meta write the UI import performs)",
+        "admin — authenticated, holding manage_platform_settings (federation reads: tables/validate) AND manage_metadata (federation writes: import/refresh-catalog, which require manage_platform_settings as well, and the /meta write the UI import performs)",
         "a second authenticated persona holding NO capability, plus an anonymous probe (for the floor clause)"
       ],
       "fixtures": {
@@ -2169,7 +2175,7 @@
         "Import: pick customers → ImportObjectDialog fires POST.../external/tables/customers/draft, renders the suggested name, any review flags, and the generated *.object.ts source; click 'Import as Object' and capture the PUT /api/v1/meta/object/<name> it performs (the UI's import door IS the metadata channel — api.ts importObjectDraft); confirm the object now exists over GET /api/v1/meta and answers a read-only /data query against the external rows",
         "the server-side import twin: POST /api/v1/datasources/showcase_external/external/tables/orders/import (a second, scratch import) → 201 { object }; confirm it too landed and is queryable; then delete/clean up both imported objects",
         "Validation tab: run validation; capture POST .../external/validate → { ok, results } (URL-scoped work, #10537) and compare the rendered per-object verdict rows against it; on the in-sync stock fixture expect all-green; if an induced-drift scratch copy is available, confirm each reported diff kind renders with its DIFF_LABEL text",
-        "the floor, both sides: replay tables + validate as the no-capability session (403 PERMISSION_DENIED naming manage_platform_settings) and import + refresh-catalog as the same session (403 naming manage_metadata — FEDERATION_WRITE_CAPABILITY), plus one anonymous probe of each family (401 UNAUTHENTICATED, decided before any service lookup); also probe the UI import door's floor: the no-capability session's PUT /api/v1/meta/object/<name> refuses 403 FORBIDDEN 'Saving a metadata item requires the `manage_metadata` capability.' (packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict, the item save door's sentence; 'Rewriting stored metadata …' is POST /meta/_migrate-stored's, and the federation routes answer PERMISSION_DENIED)",
+        "the floor, both sides: replay tables + validate as the no-capability session (403 PERMISSION_DENIED naming manage_platform_settings) and import + refresh-catalog as the same session (403 PERMISSION_DENIED naming manage_platform_settings AND manage_metadata — a write requires the read capability as well as FEDERATION_WRITE_CAPABILITY), plus one anonymous probe of each family (401 UNAUTHENTICATED, decided before any service lookup); also probe the UI import door's floor: the no-capability session's PUT /api/v1/meta/object/<name> refuses 403 FORBIDDEN 'Saving a metadata item requires the `manage_metadata` capability.' (packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict, the item save door's sentence; 'Rewriting stored metadata …' is POST /meta/_migrate-stored's, and the federation routes answer PERMISSION_DENIED)",
         "run the objectui api.test.ts 503 cases (acceptance[6]). ONLY on a deliberately unwired boot (see knownGaps), also drive the Tables tab into the 503 and record that the designed 'Federation is not enabled on this server.' state renders"
       ],
       "acceptance": [
@@ -2192,7 +2198,7 @@
           "evidence": "the network captures + the post-import meta/data reads"
         },
         {
-          "clause": "Refresh catalog round-trips: the header button fires POST .../external/refresh-catalog (a federation WRITE — manage_metadata floor), and the returned catalog.snapshotAt renders as the snapshot timestamp",
+          "clause": "Refresh catalog round-trips: the header button fires POST .../external/refresh-catalog (a federation WRITE — manage_metadata AND manage_platform_settings floor), and the returned catalog.snapshotAt renders as the snapshot timestamp",
           "oracle": "network",
           "verify": "the captured POST + the rendered timestamp (objectui ExternalDatasourcePanel.tsx: its handleRefresh callback, and the header's catalog.snapshotAt span; route at external-datasource-routes.ts)",
           "evidence": "the network capture + the header screenshot"
@@ -2204,7 +2210,7 @@
           "evidence": "the response + the rendered rows (and the unlabelled-kind capture if drift/outage was induced)"
         },
         {
-          "clause": "the floor holds on BOTH sides for all three newly-covered routes: anonymous → 401 UNAUTHENTICATED before any service lookup (#9686 shouldDenyAnonymous); the no-capability session → 403 PERMISSION_DENIED naming manage_platform_settings on validate (read) and manage_metadata on import/refresh-catalog (write, FEDERATION_WRITE_CAPABILITY); and the UI's own import door (PUT /meta/object) refuses the same session server-side — the dialog's success path must be unreachable for an unentitled operator by anything but pixels",
+          "clause": "the floor holds on BOTH sides for all three newly-covered routes: anonymous → 401 UNAUTHENTICATED before any service lookup (#9686 shouldDenyAnonymous); the no-capability session → 403 PERMISSION_DENIED naming manage_platform_settings on validate (read) and both manage_platform_settings and manage_metadata on import/refresh-catalog (write: FEDERATION_WRITE_CAPABILITY on top of the read capability); and the UI's own import door (PUT /meta/object) refuses the same session server-side — the dialog's success path must be unreachable for an unentitled operator by anything but pixels",
           "oracle": "api",
           "verify": "the probes of step 8 against refuseFederationRequest (external-datasource-routes.ts — 'read' for validate, 'write' for import/refresh) and the /meta manage_metadata gate (rest-server.ts)",
           "evidence": "the 401/403 responses, keyed by route and persona"
@@ -2284,6 +2290,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the auth-guard unit pin under acceptance[5] and negative[2]. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the mapping pass scored both partial from it, and the ref did not name it. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-03",
+          "change": "personas[0], steps[7], acceptance[3] and acceptance[5]: import and refresh-catalog require manage_platform_settings as well as manage_metadata. Seeing a datasource's remote structure needs the read capability on every route, writes included (maintainer ruling 2026-11-03, verbatim: 「两个写接口同时要求读权限 (Recommended)」), so the no-capability session's 403 on the writes names both capabilities. The admin persona already holds both; no step's expected success changes",
+          "ref": "claude/sec-hardening-d"
         }
       ]
     },

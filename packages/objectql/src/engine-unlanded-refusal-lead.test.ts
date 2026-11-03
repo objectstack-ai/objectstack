@@ -17,9 +17,14 @@
  *     so nothing written inside it was stored". Now, when the rollback threw,
  *     the lead says that nothing is known about what is stored.
  *
+ *     [#29527] …and that holds for a refusal an earlier conversion already
+ *     made: a cascade-stopped or hook-stopped refusal escaping the transaction
+ *     said "under a transaction that rolls back nothing was written". It is
+ *     re-led too, its `cause` kept.
+ *
  * Controls: a delete of the sub itself still answers `ERR_SUMMARY_RECOMPUTE`
  * with its own result; a transaction whose rollback succeeds still says it
- * rolled back.
+ * rolled back, and leaves a converted refusal exactly as it escaped.
  *
  * The driver rolls back for real (a snapshot per transaction), refuses every
  * write to `bucket` while `refuseBucket` is set (the roll-up recompute's parent
@@ -29,7 +34,14 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from './engine.js';
-import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal } from './summary-errors.js';
+import {
+  SummaryRecomputeError,
+  cascadeStoppedRefusal,
+  hookStoppedRefusal,
+  isUnlandedWriteRefusal,
+  rollbackFailedRefusal,
+  rolledBackRefusal,
+} from './summary-errors.js';
 
 type Row = Record<string, unknown>;
 
@@ -221,5 +233,59 @@ describe('ObjectQL.transaction never claims "rolled back" when its rollback thre
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(driver.rolledBack).toHaveLength(1);
     expect(ids(driver.rowsOf('sub'))).toEqual(['s1']);
+  });
+
+  it('[#29527] a cascade-stopped refusal escaping it, the rollback throwing: re-led, the clause about a rollback gone', async () => {
+    const { engine, driver } = await makeEngine();
+    driver.state.failRollback = true;
+    const err = await refusal(engine.transaction(async (trx: any) => engine.delete('line', { where: { id: 'l1' }, context: trx })));
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe('INTERNAL_ERROR');
+    expect(err.status).toBe(500);
+    expect(err.message.startsWith(
+      'The transaction did not complete, and its rollback failed too, so what was written inside it may or may not be stored.',
+    ), err.message).toBe(true);
+    expect(err.message).not.toContain('nothing was written');
+    expect(err.message).toContain('bucket.sub_count');
+    expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
+    expect(err.cause?.failures?.[0]?.childObject).toBe('sub');
+    expect(driver.rolledBack).toHaveLength(0);
+  });
+
+  it('[#29527] CONTROL the rollback succeeds: the cascade-stopped refusal escapes exactly as it was made', async () => {
+    const { engine, driver } = await makeEngine();
+    const err = await refusal(engine.transaction(async (trx: any) => engine.delete('line', { where: { id: 'l1' }, context: trx })));
+    expect(err.message.startsWith('The delete of "line" did not complete: its cascade stopped'), err.message).toBe(true);
+    expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
+    expect(driver.rolledBack).toHaveLength(1);
+  });
+
+  it('[#29527] every converted refusal is hedged when the rollback threw, and kept when it ran', () => {
+    const original = new SummaryRecomputeError([{ childObject: 'sub', parentObject: 'bucket', parentId: 'b1', field: 'sub_count', error: null }], true);
+    for (const converted of [cascadeStoppedRefusal(original, 'line'), hookStoppedRefusal(original, 'afterInsert', 'case', 'cleanup')] as any[]) {
+      const failed = rollbackFailedRefusal(converted) as any;
+      expect(failed.message.startsWith('The transaction did not complete, and its rollback failed too'), failed.message).toBe(true);
+      expect(failed.message).not.toContain('nothing was written');
+      expect(failed.cause).toBe(original);
+      expect(failed.code).toBe('INTERNAL_ERROR');
+      expect(failed.status).toBe(500);
+      expect(rolledBackRefusal(converted)).toBe(converted);
+    }
+    const other = new Error('something else');
+    expect(rollbackFailedRefusal(other)).toBe(other);
+  });
+});
+
+describe('[#29527] isUnlandedWriteRefusal answers the conversion and nothing else', () => {
+  it('a conversion, at every depth, is one; the original refusal, a plain error and a look-alike are not', () => {
+    const original = new SummaryRecomputeError([{ childObject: 'sub', parentObject: 'bucket', parentId: 'b1', field: 'sub_count', error: null }], true);
+    const inner = cascadeStoppedRefusal(original, 'line');
+    for (const e of [inner, cascadeStoppedRefusal(inner, 'acct'), hookStoppedRefusal(inner, 'beforeFind', 'case', 'h'), rollbackFailedRefusal(inner)]) {
+      expect(isUnlandedWriteRefusal(e)).toBe(true);
+    }
+    const lookAlike = Object.assign(new Error((inner as Error).message), { status: 500, code: 'INTERNAL_ERROR', cause: original });
+    for (const e of [original, new Error('x'), lookAlike, { ...(inner as object) }, undefined]) {
+      expect(isUnlandedWriteRefusal(e)).toBe(false);
+    }
   });
 });

@@ -34,6 +34,14 @@ import {
   nativeResetServer,
   nativeScan,
   nativeShowConnectionSwitcher,
+  nativePickImage,
+  nativeOpenFile,
+  nativeShare,
+  fileFromNativeFile,
+  nativeFileFromBlob,
+  NATIVE_FILE_MAX_BYTES,
+  nativeGetAppLock,
+  nativeOpenAppLockSettings,
   postNativeReady,
   postNativeRouteChanged,
   resetNativeHostEventsForTests,
@@ -55,6 +63,11 @@ const ALL_METHODS: NativeHostMethod[] = [
   'resetServer',
   'scan',
   'showConnectionSwitcher',
+  'pickImage',
+  'openFile',
+  'share',
+  'getAppLock',
+  'openAppLockSettings',
 ];
 
 function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackNative & {
@@ -75,6 +88,11 @@ function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackN
     resetServer: vi.fn(async () => null),
     scan: vi.fn(async () => 'ASSET-0042'),
     showConnectionSwitcher: vi.fn(async () => null),
+    pickImage: vi.fn(async () => ({ base64: 'aGVsbG8=', name: 'IMG_0001.jpg', mime: 'image/jpeg' })),
+    openFile: vi.fn(async () => null),
+    share: vi.fn(async () => null),
+    getAppLock: vi.fn(async () => ({ enabled: true, timeoutSeconds: 300 })),
+    openAppLockSettings: vi.fn(async () => null),
     ready: vi.fn<() => void>(),
     routeChanged: vi.fn<(route: string) => void>(),
   };
@@ -240,6 +258,11 @@ describe('typed call wrappers feature-detect and never throw', () => {
     ['resetServer', () => nativeResetServer()],
     ['scan', () => nativeScan()],
     ['showConnectionSwitcher', () => nativeShowConnectionSwitcher()],
+    ['pickImage', () => nativePickImage({ camera: true })],
+    ['openFile', () => nativeOpenFile({ base64: 'aGVsbG8=', name: 'a.txt', mime: 'text/plain' })],
+    ['share', () => nativeShare({ url: 'https://example.com/r/1' })],
+    ['getAppLock', () => nativeGetAppLock()],
+    ['openAppLockSettings', () => nativeOpenAppLockSettings()],
   ];
 
   it.each(calls)('%s resolves "unavailable" without a bridge', async (_method, call) => {
@@ -272,6 +295,29 @@ describe('typed call wrappers feature-detect and never throw', () => {
     expect(bridge.navigate).toHaveBeenCalledWith('/apps/crm');
     await expect(nativeShowConnectionSwitcher()).resolves.toEqual({ status: 'ok', value: null });
     expect(bridge.showConnectionSwitcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('the app-lock pair reads the setting and opens the native screen, with no arguments', async () => {
+    const bridge = fakeBridge();
+    install(bridge);
+    await expect(nativeGetAppLock()).resolves.toEqual({ status: 'ok', value: { enabled: true, timeoutSeconds: 300 } });
+    expect(bridge.getAppLock).toHaveBeenCalledWith();
+    await expect(nativeOpenAppLockSettings()).resolves.toEqual({ status: 'ok', value: null });
+    expect(bridge.openAppLockSettings).toHaveBeenCalledTimes(1);
+    expect(bridge.openAppLockSettings).toHaveBeenCalledWith();
+  });
+
+  it('openAppLockSettings refused while the app is locked resolves "failed" with the shell\'s message', async () => {
+    const bridge = fakeBridge();
+    bridge.openAppLockSettings = vi.fn(async () => {
+      throw Object.assign(new Error('The app is locked'), { code: 'failed' });
+    });
+    install(bridge);
+    await expect(nativeOpenAppLockSettings()).resolves.toEqual({
+      status: 'failed',
+      code: 'failed',
+      message: 'The app is locked',
+    });
   });
 
   it('nativeHostCan answers what a wrapper would: announced and carried, nothing else', () => {
@@ -310,6 +356,66 @@ describe('typed call wrappers feature-detect and never throw', () => {
       status: 'failed',
       code: 'failed',
       message: 'Camera permission denied',
+    });
+  });
+
+  it('pickImage forwards its options and resolves the picked file, or null on cancel', async () => {
+    const bridge = fakeBridge();
+    install(bridge);
+    await expect(nativePickImage({ camera: true, maxWidth: 1600 })).resolves.toEqual({
+      status: 'ok',
+      value: { base64: 'aGVsbG8=', name: 'IMG_0001.jpg', mime: 'image/jpeg' },
+    });
+    expect(bridge.pickImage).toHaveBeenCalledWith({ camera: true, maxWidth: 1600 });
+    expect((bridge.pickImage as Mock).mock.contexts[0]).toBe(bridge);
+    bridge.pickImage = vi.fn(async () => null);
+    await expect(nativePickImage()).resolves.toEqual({ status: 'ok', value: null });
+  });
+
+  it('openFile forwards the file and resolves "failed" with bad_args when the shell refuses it', async () => {
+    const bridge = fakeBridge();
+    install(bridge);
+    const file = { base64: 'aGVsbG8=', name: 'a.pdf', mime: 'application/pdf' };
+    await expect(nativeOpenFile(file)).resolves.toEqual({ status: 'ok', value: null });
+    expect(bridge.openFile).toHaveBeenCalledWith(file);
+    bridge.openFile = vi.fn(async () => {
+      throw Object.assign(new Error('Files cross the bridge up to 8 MB'), { code: 'bad_args' });
+    });
+    await expect(nativeOpenFile(file)).resolves.toEqual({
+      status: 'failed',
+      code: 'bad_args',
+      message: 'Files cross the bridge up to 8 MB',
+    });
+  });
+
+  it('share forwards the url and text', async () => {
+    const bridge = fakeBridge();
+    install(bridge);
+    await expect(nativeShare({ url: 'https://example.com/r/1', text: 'Acme' })).resolves.toEqual({ status: 'ok', value: null });
+    expect(bridge.share).toHaveBeenCalledWith({ url: 'https://example.com/r/1', text: 'Acme' });
+  });
+
+  it('the bridge file limit is the shell 8 MiB', () => {
+    expect(NATIVE_FILE_MAX_BYTES).toBe(8 * 1024 * 1024);
+  });
+
+  it('fileFromNativeFile decodes the base64 bytes into a typed, named File', async () => {
+    const file = fileFromNativeFile({ base64: 'aGVsbG8=', name: 'IMG_0001.jpg', mime: 'image/jpeg' });
+    expect(file).toBeInstanceOf(File);
+    expect(file.name).toBe('IMG_0001.jpg');
+    expect(file.type).toBe('image/jpeg');
+    expect(file.size).toBe(5);
+    expect(await file.text()).toBe('hello');
+  });
+
+  it('nativeFileFromBlob encodes the bytes with no data: prefix and a parameter-free type', async () => {
+    await expect(nativeFileFromBlob(new Blob(['hello'], { type: 'text/plain;charset=utf-8' }), 'a.txt')).resolves.toEqual({
+      base64: 'aGVsbG8=',
+      name: 'a.txt',
+      mime: 'text/plain',
+    });
+    await expect(nativeFileFromBlob(new Blob(['hello']), 'a.bin')).resolves.toMatchObject({
+      mime: 'application/octet-stream',
     });
   });
 

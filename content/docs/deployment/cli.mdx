@@ -1305,6 +1305,7 @@ where the data lives.
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate blank-single-values` | Rewrite the empty strings (`''`) still stored on optional single-value option, reference and file columns to `null`, the form a cleared value is stored in today, so `$empty` finds those rows. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-single-values) |
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
+| `os migrate text-scalars` | Rewrite numbers and booleans still stored raw on text fields (rows written before text fields stored the string) to that string, so filters, reads and unique keys see one value. SQLite `"N.0"` text it cannot decide is listed, never rewritten. No flag; idempotent. See [below](#os-migrate-text-scalars) |
 | `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
@@ -1555,6 +1556,32 @@ declared options (it may be text someone typed), a `"1.0"` on a field declaring
 both `"1"` and `"true"`, and a value whose reading the field no longer
 declares. A row that would collide with a unique value already stored is
 listed as a failure and the walk goes on. Idempotent: re-running until it
+reports nothing to rewrite is the verification, so it records no flag.
+
+#### `os migrate text-scalars`
+
+A number or a boolean written to a text field (`text`, `textarea`, `email`,
+`url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`,
+`signature`, `qrcode`) is stored as its string: `42` as `"42"`, `true` as
+`"true"`. Rows written before that rule keep the form the database stored: the
+raw number or boolean on driver-memory with persistence, the text `"42.0"`,
+`"1.0"` or `"0.0"` on SQLite. A filter on `"42"` does not find those rows, a
+read hands back the old form, and a unique field admits a new `"42"` beside an
+old `42` or `"42.0"`.
+
+```bash
+os migrate text-scalars                  # Dry run: counts per object and field, writes no rows
+os migrate text-scalars --apply          # Rewrite the raw numbers and booleans (prompts)
+os migrate text-scalars --apply --yes --json   # CI / scripts
+os migrate text-scalars --object account       # Restrict to one object (repeatable)
+```
+
+A raw number or boolean becomes its string. A SQLite `"42.0"` on a text field
+is listed per object and field and left as stored, for you to fix by hand: a
+text field declares no values, so it may be an old number or text someone
+typed. A row whose rewrite the write door refuses (a unique value already
+stored, or a string the field's format no longer admits) is listed as a
+failure, left whole, and the walk goes on. Idempotent: re-running until it
 reports nothing to rewrite is the verification, so it records no flag.
 
 #### `os migrate record-currency-codes`
@@ -2968,6 +2995,7 @@ runtime**.
 |---------|----------|-------------|
 | `os package publish [artifact]` | ObjectOS Cloud | Upload a compiled artifact as a versioned package in your organization |
 | `os package install <package>` | A running runtime | Install a package into a live kernel, from that runtime's catalog or from a local artifact |
+| `os package export` | A running runtime | Export the deployment's whole ontology as installable packages, one directory per package, in install order |
 
 For which one to reach for and the preview patterns around them, see
 [Publish & preview](/docs/deployment/publish-and-preview). This section is the
@@ -3161,6 +3189,54 @@ A `404` means the target runtime does not mount `MarketplaceInstallLocalPlugin`
 composed without it will not accept installs.
 
 In catalog mode, a runtime connected to an ObjectOS Cloud account presents its connection credential to the cloud catalog — see [Cloud Connection](/docs/deployment/cloud-connection).
+
+#### `os package export`
+
+Takes a running deployment's whole ontology out as packages you can install on
+any runtime, the open Apache-2.0 one included. One read,
+`GET /api/v1/packages/export`, answers every installed package the deployment's
+own code does not register: the marketplace and authored packages, each base's
+`.custom` customization package among them. Each comes exactly as
+`GET /api/v1/packages/:id/export` answers it, with the namespace and
+dependencies it was installed with, and dependencies come first, so a `.custom`
+package follows its base. A package registered by the deployment's own code
+(`defineStack()`, a plugin, the platform) is not exported: it travels with that
+code.
+
+```bash
+os package export --out ./ontology --url https://acme.example.com
+# ./ontology/01-com.acme.crm/objectstack.json
+# ./ontology/02-com.acme.crm.custom/objectstack.json
+# ./ontology/03-com.acme.billing/objectstack.json
+
+# on the target runtime, in the numbered order:
+os package install ./ontology/01-com.acme.crm/objectstack.json
+os package install ./ontology/02-com.acme.crm.custom/objectstack.json
+os package install ./ontology/03-com.acme.billing/objectstack.json
+```
+
+Each file is one package's export, installable as it stands with
+[`os package install`](#os-package-install). Install them in the numbered order;
+the command prints that order too, and never re-sorts what the read answered.
+
+- **No secret leaves.** Credential positions are withheld, as on every served
+  metadata read, and a connector's `auth.credentialRef` stays the reference it
+  is: fill the secret it names on the target runtime.
+- **No enabled state.** Every package installs enabled, including one that was
+  switched off where it was exported.
+- **Whole or nothing.** A package whose export cannot be assembled fails the
+  read, and the command prints the runtime's refusal, which names the package,
+  and writes nothing. It refuses an `--out` directory that already holds files.
+- **Who can export.** The same callers who can read a single package's export:
+  `studio.access` or `setup.access`.
+
+**Options:**
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `-o, --out <dir>` | — | Directory to write into (default `./objectstack-export`); created, and refused when it already holds files |
+| `-u, --url <url>` | `OS_CLOUD_URL` | Server URL of the deployment to export (default: the stored `os login` session's, else `http://localhost:3000`) |
+| `-t, --token <token>` | `OS_TOKEN` | Authentication token (default: the stored `os login` session's) |
 
 ## Configuration
 

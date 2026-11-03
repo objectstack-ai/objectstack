@@ -31,7 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -600,17 +600,6 @@ const LOAD_FAILED_COPY: Record<LoadErrorKind, { title: [string, string]; message
 };
 
 /**
- * The server's sentence for a failed read, or `null` when the server did not
- * answer (a network failure carries no status, and its text is the browser's,
- * not the server's).
- */
-function serverSentence(err: unknown): string | null {
-  const e = err as { httpStatus?: unknown; status?: unknown; statusCode?: unknown } | null;
-  const answered = [e?.httpStatus, e?.status, e?.statusCode].some((s) => typeof s === 'number');
-  return answered ? extractWriteErrorMessage(err) : null;
-}
-
-/**
  * The one line a related list draws when its read FAILED (objectstack#26415),
  * in place of the "no related records" it used to draw. The refusal kinds say
  * the shared fixed sentence and never the server's text (a refused read does
@@ -630,11 +619,14 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
   const kind = classifyLoadError(error);
   const copy = LOAD_FAILED_COPY[kind];
   const refused = kind === 'forbidden';
+  // The server's own words when it answered — the rule the list page and the
+  // record page share (`answeredLoadFailure`, objectstack#29704).
+  const answer = copy.message ? null : answeredLoadFailure(error);
   const message =
     (refused ? null : declaredUserMessage(error))
     ?? (copy.message
       ? t(copy.message[0], { defaultValue: copy.message[1] })
-      : serverSentence(error)
+      : answer?.message
         ?? t('list.loadErrorMessage', { defaultValue: 'Something went wrong while loading this data. Check your connection and try again.' }));
   const Icon = kind === 'network' || kind === 'rejected' ? AlertTriangle : ShieldAlert;
   return (
@@ -650,6 +642,11 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
       <Icon className={cn('h-4 w-4 shrink-0', refused ? 'text-muted-foreground' : 'text-destructive/70')} aria-hidden />
       <span className="font-medium">{t(copy.title[0], { defaultValue: copy.title[1] })}</span>
       <span className="min-w-0 text-muted-foreground">{message}</span>
+      {answer?.code && (
+        <code data-testid="related-list-load-failed-code" className="rounded bg-muted px-1 font-mono text-xs text-muted-foreground">
+          {answer.code}
+        </code>
+      )}
       {kind !== 'api-disabled' && !refused && (
         <Button
           variant="outline"

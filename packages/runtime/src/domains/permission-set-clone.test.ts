@@ -31,7 +31,9 @@ import {
     PERMISSION_SET_CLONE_MUTATED_FIELDS,
     PERMISSION_SET_CLONE_NOTICE,
     clonePermissionSetDefinition,
+    PERMISSION_SET_CLONE_NOTICE_CODES,
     permissionSetCloneNotice,
+    permissionSetCloneNoticeCode,
     permissionSetObjectNames,
 } from './permission-set-clone.js';
 
@@ -197,6 +199,7 @@ describe('the permission-set clone door — success', () => {
             permissionSet: save.item,
             package: 'crm.custom',
             notice: permissionSetCloneNotice({ packageId: 'crm.custom', created: true }),
+            noticeCode: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE',
         });
         expect(data.notice).toContain("'crm.custom'");
         expect(data.notice.endsWith(PERMISSION_SET_CLONE_NOTICE)).toBe(true);
@@ -212,6 +215,8 @@ describe('the permission-set clone door — success', () => {
         expect(statusOf(second)).toBe(200);
         expect(h.saves.map((s) => s.packageId)).toEqual(['crm.custom', 'crm.custom']);
         expect((second as any).response.body.data.notice).toBe(permissionSetCloneNotice({ packageId: 'crm.custom', created: false }));
+        // [#29727] Reused, not created: the in-package code, not the created one.
+        expect((second as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
     });
 
     it('CONTROL — an environment-authored set copies environment-wide, as before: no package, no ensure', async () => {
@@ -224,6 +229,9 @@ describe('the permission-set clone door — success', () => {
         expect(Object.keys(h.saves[0]).sort()).toEqual(['item', 'name', 'parentVersion', 'type']);
         expect(h.ensures).toEqual([]);
         expect((res as any).response.body.data.package).toBeNull();
+        // [#29727] The environment-wide variant's code.
+        expect((res as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_ENVIRONMENT_WIDE');
+        expect((res as any).response.body.data.notice).toBe(permissionSetCloneNotice({ packageId: null, created: false }));
     });
 
     it('a set already in a writable package copies into that package, with no ensure', async () => {
@@ -235,6 +243,8 @@ describe('the permission-set clone door — success', () => {
         expect(h.saves[0].packageId).toBe('com.acme.base');
         expect(h.saves[0].item).not.toHaveProperty('_packageId');
         expect(h.ensures).toEqual([]);
+        // [#29727] The in-package variant's code.
+        expect((res as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
     });
 
     it('a given writable target that reaches the set lands there, with no ensure', async () => {
@@ -313,6 +323,45 @@ describe('the permission-set clone door — authority', () => {
         const res = await clone(h, ctx({ isSystem: true, positions: [], systemPermissions: [] }), PACKAGED.name, { name: 'sys_copy', label: 'S' });
 
         expect(statusOf(res)).toBe(200);
+    });
+});
+
+describe('[#29727] the clone notice is named by one stable code per landing', () => {
+    // CONTROL: the three sentences, spelled out as they were served before the
+    // codes arrived, so a change to `notice` while adding a code reds here.
+    const TAIL =
+        'The copy is a new permission set authored in this system, with no link to the set it was copied '
+        + 'from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the '
+        + 'everyone-baseline suggestion (`isDefault`) \u2014 grant either deliberately on the copy if it needs one. '
+        + 'The copy is held by nobody yet: add it to a position, or assign it to users.';
+    const VARIANTS = [
+        {
+            landing: { packageId: null, created: false },
+            code: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE',
+            notice: 'The copy was saved environment-wide, in no package, as the set it was copied from is. ' + TAIL,
+        },
+        {
+            landing: { packageId: 'com.acme.base', created: false },
+            code: 'PERMISSION_SET_CLONE_IN_PACKAGE',
+            notice: "The copy was saved in package 'com.acme.base', beside the original rather than in place of it, "
+                + 'and travels with that package. ' + TAIL,
+        },
+        {
+            landing: { packageId: 'crm.custom', created: true },
+            code: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE',
+            notice: "The copy was saved in package 'crm.custom', created for it to hold your changes to the package "
+                + 'the set came from, beside the original rather than in place of it, and travels with that package. ' + TAIL,
+        },
+    ] as const;
+
+    it.each(VARIANTS)('$code names its sentence, and the sentence is byte-identical', ({ landing, code, notice }) => {
+        expect(permissionSetCloneNoticeCode(landing)).toBe(code);
+        expect(permissionSetCloneNotice(landing)).toBe(notice);
+    });
+
+    it('the three codes are distinct and the table holds exactly them', () => {
+        expect(Object.values(PERMISSION_SET_CLONE_NOTICE_CODES).sort()).toEqual(VARIANTS.map((v) => v.code).sort());
+        expect(new Set(VARIANTS.map((v) => permissionSetCloneNotice(v.landing))).size).toBe(3);
     });
 });
 

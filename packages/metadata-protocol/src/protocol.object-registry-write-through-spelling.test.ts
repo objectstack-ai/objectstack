@@ -147,6 +147,8 @@
 //   6. Comment stripper neutered to return '' -> RED in §4
 //      (non-vacuity: the expected count is ONE, not zero)
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

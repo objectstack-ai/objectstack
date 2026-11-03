@@ -166,6 +166,19 @@ export interface ExternalDatasourceRoutesOptions {
  * [commit e634ecf6a] The reasoning is unchanged by the scoping fix and was never about
  * the sweep's WIDTH: it is the same introspection whether one datasource is
  * read or all of them, so `validate` answers to the read capability either way.
+ *
+ * ## …and the writes require it too: one rule for the whole family
+ *
+ * Seeing a datasource's remote structure needs this capability on every
+ * route, writes included. The two write routes answer with that structure —
+ * the import with the object definition it generated from the remote table,
+ * the refresh with the catalog snapshot (every table, every column) — so each
+ * requires this capability AND {@link FEDERATION_WRITE_CAPABILITY}, never the
+ * write capability alone. Maintainer ruling, 2026-11-03 (verbatim:
+ * 「两个写接口同时要求读权限 (Recommended)」): the permission gate, not a
+ * narrower response. The rule is written once, in
+ * {@link federationCapabilityRefusal}, and every door into this family's
+ * operations reads it there.
  */
 export const FEDERATION_READ_CAPABILITY = 'manage_platform_settings';
 
@@ -173,16 +186,77 @@ export const FEDERATION_READ_CAPABILITY = 'manage_platform_settings';
  * [#9901] The capability the federation family's WRITE routes require:
  * `POST /external/tables/:remote/import` and `POST /external/refresh-catalog`.
  *
- * Not the read capability, and deliberately so: these two have no twin on the
- * admin spelling to converge with, and what they do is CREATE METADATA — the
- * import mounts a live runtime-origin federated object, the refresh rewrites
- * the cached catalog snapshot. `manage_metadata` is this package's established
+ * It is the capability for the WRITE: these two have no twin on the admin
+ * spelling to converge with, and what they do is CREATE METADATA — the import
+ * mounts a live runtime-origin federated object, the refresh rewrites the
+ * cached catalog snapshot. `manage_metadata` is this package's established
  * gate for exactly that (`package-routes.ts`, whose write arm requires it for
  * `POST /packages/publish` and `DELETE /packages/:id`), so the split follows
  * the platform's existing division rather than inventing a second policy for
  * this family.
+ *
+ * It is required IN ADDITION to {@link FEDERATION_READ_CAPABILITY}, never
+ * instead of it: what the two writes answer is the remote structure, and
+ * seeing that needs the read capability on every route (that constant's note
+ * carries the 2026-11-03 ruling; {@link federationCapabilityRefusal} is the
+ * rule).
  */
 export const FEDERATION_WRITE_CAPABILITY = 'manage_metadata';
+
+/**
+ * The two kinds of call into the federation family: a `'read'` answers remote
+ * structure, a `'write'` answers it AND creates metadata from it.
+ */
+export type FederationCallKind = 'read' | 'write';
+
+/**
+ * The capabilities each kind requires, in the order a refusal names them.
+ * The read capability heads BOTH rows: seeing remote structure needs it on
+ * every route, writes included (2026-11-03 ruling, see
+ * {@link FEDERATION_READ_CAPABILITY}). A write adds the write capability; it
+ * never replaces the read one.
+ */
+const FEDERATION_REQUIRED_CAPABILITIES: Readonly<Record<FederationCallKind, readonly string[]>> = {
+  read: [FEDERATION_READ_CAPABILITY],
+  write: [FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY],
+};
+
+/** What each capability is FOR, as the refusal states it to the caller. */
+const FEDERATION_CAPABILITY_PURPOSE: Readonly<Record<string, string>> = {
+  [FEDERATION_READ_CAPABILITY]: 'Introspecting an external datasource',
+  [FEDERATION_WRITE_CAPABILITY]: 'Creating metadata from an external datasource',
+};
+
+/**
+ * The federation family's capability rule, in ONE place: `undefined` when
+ * `held` admits a call of this `kind`, otherwise the refusal sentence the door
+ * answers with `403 PERMISSION_DENIED`.
+ *
+ * Read by every door into the family's operations — the five REST routes
+ * here and the MCP federation tools (`list_remote_tables` / `import_object`,
+ * the runtime's bridge) — so no door can admit a caller another refuses. The
+ * read capability is required by every kind: seeing a datasource's remote
+ * structure needs it on every route, writes included; a write also needs the
+ * write capability.
+ *
+ * The sentence names every capability the caller lacks, one sentence each,
+ * the read one first. So a caller lacking only the read capability gets the
+ * read routes' refusal on a write route, word for word, and a caller lacking
+ * both learns both grants in one answer. It names capabilities and nothing
+ * else: a refused caller learns which grant to ask an administrator for,
+ * never whether the datasource exists.
+ */
+export function federationCapabilityRefusal(
+  kind: FederationCallKind,
+  held: readonly unknown[] | null | undefined,
+): string | undefined {
+  const holds: readonly unknown[] = Array.isArray(held) ? held : [];
+  const missing = FEDERATION_REQUIRED_CAPABILITIES[kind].filter((capability) => !holds.includes(capability));
+  if (missing.length === 0) return undefined;
+  return missing
+    .map((capability) => `${FEDERATION_CAPABILITY_PURPOSE[capability]} requires the \`${capability}\` capability.`)
+    .join(' ');
+}
 
 export function registerExternalDatasourceRoutes(
   server: IHttpServer,
@@ -251,6 +325,15 @@ export function registerExternalDatasourceRoutes(
    * on {@link FEDERATION_READ_CAPABILITY}, writes on
    * {@link FEDERATION_WRITE_CAPABILITY}.
    *
+   * [2026-11-03 ruling] The writes on BOTH: seeing a datasource's remote
+   * structure needs the read capability on every route, writes included, and
+   * both writes answer with it. The capability decision is
+   * {@link federationCapabilityRefusal} — the family's one rule, which the MCP
+   * federation tools read too — so this guard asks it rather than picking one
+   * capability per kind itself. A caller holding only the write capability
+   * gets, on a write route, the read routes' own refusal: the same status, the
+   * same code, the same sentence.
+   *
    * ## One resolution, two decisions — deliberately not two guards
    *
    * The identity and the held capabilities come out of the SAME
@@ -301,7 +384,7 @@ export function registerExternalDatasourceRoutes(
   const refuseFederationRequest = async (
     req: any,
     res: any,
-    kind: 'read' | 'write',
+    kind: FederationCallKind,
   ): Promise<boolean> => {
     let authz:
       | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[]; authGate?: AuthGate }
@@ -337,21 +420,14 @@ export function registerExternalDatasourceRoutes(
       sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
       return true;
     }
-    const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
-    const held = Array.isArray(authz?.systemPermissions) ? authz.systemPermissions : [];
-    if (!held.includes(required)) {
-      // The capability's name and nothing else. A refused caller needs to know
-      // which grant to ask an administrator for; it must not learn whether the
-      // named datasource exists or which services this deployment wired —
-      // which is also why this runs BEFORE the service lookup below.
-      sendError(
-        res,
-        403,
-        'PERMISSION_DENIED',
-        kind === 'write'
-          ? `Creating metadata from an external datasource requires the \`${FEDERATION_WRITE_CAPABILITY}\` capability.`
-          : `Introspecting an external datasource requires the \`${FEDERATION_READ_CAPABILITY}\` capability.`,
-      );
+    // The capabilities' names and nothing else. A refused caller needs to know
+    // which grant to ask an administrator for; it must not learn whether the
+    // named datasource exists or which services this deployment wired — which
+    // is also why this runs BEFORE the service lookup below. On a write route
+    // that is the read capability AND the write one: the family's one rule.
+    const refusal = federationCapabilityRefusal(kind, authz?.systemPermissions);
+    if (refusal !== undefined) {
+      sendError(res, 403, 'PERMISSION_DENIED', refusal);
       return true;
     }
     return false;
@@ -549,6 +625,10 @@ export function registerExternalDatasourceRoutes(
     // immediately queryable — the "Import as Object" action (ADR-0015 Addendum).
     // 503 when the service is absent; 400 when import is refused (e.g. read-only
     // metadata store) or the remote table is missing.
+    //
+    // A 'write' that answers with the generated definition — the remote table's
+    // structure — so it requires the read capability as well as the write one
+    // (2026-11-03 ruling; `federationCapabilityRefusal`).
     {
       method: 'POST',
       path: `${ext}/tables/:remote/import`,
@@ -571,6 +651,10 @@ export function registerExternalDatasourceRoutes(
     },
 
     // Refresh and return the cached catalog snapshot.
+    //
+    // A 'write' that answers with the snapshot — every remote table and column
+    // — so it requires the read capability as well as the write one
+    // (2026-11-03 ruling; `federationCapabilityRefusal`).
     {
       method: 'POST',
       path: `${ext}/refresh-catalog`,

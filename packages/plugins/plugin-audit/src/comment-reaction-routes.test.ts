@@ -136,6 +136,69 @@ describe('the unreact door — answers given before the engine is asked', () => 
   });
 });
 
+describe('the unreact door — its verdict on the row, read as the caller', () => {
+  /** An engine whose read answers `row` and whose delete answers `removed`. */
+  const scripted = (row: unknown, removed: unknown = 1) => ({
+    findOne: vi.fn().mockResolvedValue(row),
+    delete: vi.fn().mockResolvedValue(removed),
+  });
+
+  it('a row the caller cannot read (the read answers nothing): 404 RECORD_NOT_FOUND, and nothing is removed', async () => {
+    const engine = scripted(null);
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'r1' },
+    });
+    expect(answer.status).toBe(404);
+    expect(answer.body?.error?.code).toBe('RECORD_NOT_FOUND');
+    expect(engine.findOne.mock.calls[0][0]).toBe('sys_comment_reaction');
+    expect(engine.findOne.mock.calls[0][1]).toEqual({ where: { id: 'r1' }, context: MEMBER });
+    expect(engine.delete).not.toHaveBeenCalled();
+  });
+
+  it('a row whose reactor is someone else: 403 PERMISSION_DENIED, and nothing is removed', async () => {
+    const engine = scripted({ id: 'r1', created_by: 'u_other' });
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'r1' },
+    });
+    expect(answer.status).toBe(403);
+    expect(answer.body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(engine.delete).not.toHaveBeenCalled();
+  });
+
+  it('the reactor\'s own row: 200 { id, deleted: true }, removed as the system, attributed to the caller, inside the caller\'s organization', async () => {
+    const engine = scripted({ id: 'r1', created_by: 'u_member' });
+    const answer = await call(
+      door({ getEngine: () => engine, resolveCaller: async () => ({ ...MEMBER, tenantId: 'org_a' }) }),
+      { params: { id: 'r1' } },
+    );
+    expect(answer.status).toBe(200);
+    expect(answer.body?.data).toEqual({ id: 'r1', deleted: true });
+    expect(engine.delete.mock.calls[0][0]).toBe('sys_comment_reaction');
+    expect(engine.delete.mock.calls[0][1]).toEqual({
+      where: { id: 'r1' },
+      context: { isSystem: true, attributedUserId: 'u_member', tenantId: 'org_a' },
+    });
+  });
+
+  it('a caller with no organization: the removal carries none', async () => {
+    const engine = scripted({ id: 'r1', created_by: 'u_member' });
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'r1' },
+    });
+    expect(answer.status).toBe(200);
+    expect(engine.delete.mock.calls[0][1].context).toEqual({ isSystem: true, attributedUserId: 'u_member' });
+  });
+
+  it('a row that went between the read and the removal: 404 RECORD_NOT_FOUND', async () => {
+    const engine = scripted({ id: 'r1', created_by: 'u_member' }, 0);
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'r1' },
+    });
+    expect(answer.status).toBe(404);
+    expect(answer.body?.error?.code).toBe('RECORD_NOT_FOUND');
+  });
+});
+
 describe('AuditPlugin mounts the unreact door on the kernel’s HTTP server', () => {
   let kernel: ObjectKernel | undefined;
   afterEach(async () => {

@@ -4241,6 +4241,120 @@ export class SchemaRegistry {
   // ==========================================
 
   /**
+   * [#29673] Would {@link registerObject} refuse this body, as `ownership`
+   * from `packageId`? The refusal it would throw, or `null` — asked of its own
+   * doors ({@link judgeRegistrationDoors}), so the answer cannot drift from
+   * the throw. Registers nothing, materializes nothing.
+   *
+   * For the metadata doors that make a stored body LIVE (the per-item and the
+   * package publish, the publishing save): the registration runs after the row
+   * is already active, where a refusal can only be logged, so they ask this
+   * first and refuse the publish with the registry's own envelope — the same
+   * shape as the ADR-0029 D9.9 representability refusal they already ask.
+   *
+   * Covers the doors that judge the body ALONE. The record-currency
+   * `summary` door is left out: it judges the body against the registry as it
+   * stands (the pair is judged at whichever registration completes it), so
+   * asked of a draft before its batch registers it answers both ways wrong —
+   * it refuses a draft whose sibling in the same batch takes the child amount
+   * out of record-currency mode, and it passes one whose sibling completes the
+   * pair. It stays the registration's own question. The single-owner rule is
+   * the protocol's (`classifyObjectContribution`), and a code package's action
+   * parse never judges a tenant-authored body.
+   */
+  objectRegistrationRefusal(
+    schema: ServiceObject,
+    packageId?: string,
+    ownership: ObjectOwnership = 'own',
+  ): Error | null {
+    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: true });
+    return 'refusal' in door ? door.refusal : null;
+  }
+
+  /**
+   * [#29673] The registration doors of {@link registerObject}, moved here
+   * whole so {@link objectRegistrationRefusal} asks exactly what the
+   * registration throws: the refusal, or the body to register (an `extend`
+   * body re-keyed to the object it extends). `bodyOnly` skips the one door
+   * that reads the registry's other objects (see
+   * {@link objectRegistrationRefusal}).
+   */
+  private judgeRegistrationDoors(
+    schema: ServiceObject,
+    packageId: string | undefined,
+    ownership: ObjectOwnership,
+    opts: { bodyOnly?: boolean } = {},
+  ): { refusal: Error } | { schema: ServiceObject } {
+    // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
+    // its position is the whole point.
+    //
+    // MAINTAINER RULING 2026-09-10 (director seat batch #111 item 2): 「一个没写
+    // type(或拼错)的字段 应该禁止加载」. This registry is the ONE choke point every
+    // metadata door passes — declared stacks, plugin/package manifests,
+    // `saveMetaItem`, the `sys_metadata` boot rehydration and raw
+    // `registerObject` calls — so one check here closes all of them at once,
+    // which is why the ruling put it here rather than at the four downstream
+    // guesses it also retires.
+    //
+    // ⛔ BEFORE `applySystemFields` and every other materialization below, so
+    // the object and field the refusal names are the AUTHOR's own and never a
+    // platform injection; and ⛔ before the contributor list is opened, so a
+    // refused declaration leaves no half-registered entry behind.
+    //
+    // ⛔ The whole object is refused; the offending field is never dropped on
+    // its own. See {@link ObjectFieldTypeRefusedError}.
+    const fieldTypeRefusal = objectFieldTypeRefusal(schema);
+    if (fieldTypeRefusal) return { refusal: fieldTypeRefusal };
+
+    // [ADR-0142 D3] Beside it, for its reason: an eligible object's own
+    // `queue` field is refused before the injection could be skipped for it —
+    // see {@link ObjectQueueColumnRefusedError}. A base layer only: an `extend`
+    // body is never planned on its own (#24314, below), so its `queue` is
+    // governed in the fold instead ({@link withoutExtensionQueueField}),
+    // whichever order the layers register in.
+    if (ownership !== 'extend') {
+      const queueRefusal = objectQueueColumnRefusal(schema);
+      if (queueRefusal) return { refusal: queueRefusal };
+    }
+
+    // [ADR-0095 D1 note; ruling E′ item 4] An `extend` contribution never sets
+    // the object's default row scope — see
+    // {@link ExtensionDefaultRowScopeRefusedError}. Here, beside the field-`type`
+    // door and for the same reason: before any materialization and before the
+    // contributor list is opened, so a refused contribution leaves nothing behind.
+    // [#25234 ruling A, refusal 10] Nor does it declare a membership key — see
+    // {@link ExtensionMembershipKeysRefusedError}. The same door, for the same
+    // reason, so a refused contribution leaves nothing behind. [#28574] Both
+    // are asked through {@link extendContributionRefusal}, the one copy the
+    // metadata save and publish doors also ask of an `object_extension` item.
+    if (ownership === 'extend') {
+      const extendRefusal = extendContributionRefusal(schema, packageId);
+      if (extendRefusal) return { refusal: extendRefusal };
+      // [#28858] …filed under the key the object it extends is registered
+      // under — see {@link extensionTargetKey}. Every entry that registers an
+      // extension reaches this line: the manifest `objectExtensions` loop and
+      // a stored `object_extension` row ({@link registerObjectExtension}).
+      const target = this.extensionTargetKey(String(schema.name ?? ''), packageId);
+      if (target !== schema.name) schema = { ...schema, name: target };
+    }
+    // [#29673] The pre-flight question stops here: the door below reads the
+    // registry's other objects, not the body alone.
+    if (opts.bodyOnly) return { schema };
+    // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
+    // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
+    // their own currency — is refused here, the door every metadata path
+    // passes, before any materialization: the pair is judged at whichever
+    // registration completes it. See `record-currency-aggregate-door.ts`.
+    const recordCurrencySummary = recordCurrencySummaryRefusal(
+      schema,
+      (name) => this.getObject(name),
+      () => this.getAllObjects(),
+    );
+    if (recordCurrencySummary) return { refusal: recordCurrencySummary };
+    return { schema };
+  }
+
+  /**
    * Register an object with ownership semantics.
    * 
    * @param schema - The object definition
@@ -4276,69 +4390,16 @@ export class SchemaRegistry {
         ? DEFAULT_OVERLAY_PRIORITY
         : DEFAULT_EXTENDER_PRIORITY
   ): string {
-    // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
-    // its position is the whole point.
-    //
-    // MAINTAINER RULING 2026-09-10 (director seat batch #111 item 2): 「一个没写
-    // type(或拼错)的字段 应该禁止加载」. This registry is the ONE choke point every
-    // metadata door passes — declared stacks, plugin/package manifests,
-    // `saveMetaItem`, the `sys_metadata` boot rehydration and raw
-    // `registerObject` calls — so one check here closes all of them at once,
-    // which is why the ruling put it here rather than at the four downstream
-    // guesses it also retires.
-    //
-    // ⛔ BEFORE `applySystemFields` and every other materialization below, so
-    // the object and field the refusal names are the AUTHOR's own and never a
-    // platform injection; and ⛔ before the contributor list is opened, so a
-    // refused declaration leaves no half-registered entry behind.
-    //
-    // ⛔ The whole object is refused; the offending field is never dropped on
-    // its own. See {@link ObjectFieldTypeRefusedError}.
-    const fieldTypeRefusal = objectFieldTypeRefusal(schema);
-    if (fieldTypeRefusal) throw fieldTypeRefusal;
-
-    // [ADR-0142 D3] Beside it, for its reason: an eligible object's own
-    // `queue` field is refused before the injection could be skipped for it —
-    // see {@link ObjectQueueColumnRefusedError}. A base layer only: an `extend`
-    // body is never planned on its own (#24314, below), so its `queue` is
-    // governed in the fold instead ({@link withoutExtensionQueueField}),
-    // whichever order the layers register in.
-    if (ownership !== 'extend') {
-      const queueRefusal = objectQueueColumnRefusal(schema);
-      if (queueRefusal) throw queueRefusal;
-    }
-
-    // [ADR-0095 D1 note; ruling E′ item 4] An `extend` contribution never sets
-    // the object's default row scope — see
-    // {@link ExtensionDefaultRowScopeRefusedError}. Here, beside the field-`type`
-    // door and for the same reason: before any materialization and before the
-    // contributor list is opened, so a refused contribution leaves nothing behind.
-    // [#25234 ruling A, refusal 10] Nor does it declare a membership key — see
-    // {@link ExtensionMembershipKeysRefusedError}. The same door, for the same
-    // reason, so a refused contribution leaves nothing behind. [#28574] Both
-    // are asked through {@link extendContributionRefusal}, the one copy the
-    // metadata save and publish doors also ask of an `object_extension` item.
-    if (ownership === 'extend') {
-      const extendRefusal = extendContributionRefusal(schema, packageId);
-      if (extendRefusal) throw extendRefusal;
-      // [#28858] …filed under the key the object it extends is registered
-      // under — see {@link extensionTargetKey}. Every entry that registers an
-      // extension reaches this line: the manifest `objectExtensions` loop and
-      // a stored `object_extension` row ({@link registerObjectExtension}).
-      const target = this.extensionTargetKey(String(schema.name ?? ''), packageId);
-      if (target !== schema.name) schema = { ...schema, name: target };
-    }
-    // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
-    // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
-    // their own currency — is refused here, the door every metadata path
-    // passes, before any materialization: the pair is judged at whichever
-    // registration completes it. See `record-currency-aggregate-door.ts`.
-    const recordCurrencySummary = recordCurrencySummaryRefusal(
-      schema,
-      (name) => this.getObject(name),
-      () => this.getAllObjects(),
-    );
-    if (recordCurrencySummary) throw recordCurrencySummary;
+    // [#29673] The registration DOORS — every refusal this method answers
+    // before any materialization and before the contributor list is opened —
+    // live in {@link judgeRegistrationDoors}, so the metadata doors that make
+    // a body live can ask the same question BEFORE they promote it
+    // ({@link objectRegistrationRefusal}) instead of meeting the throw after
+    // the row is already active. Still the first statement here, and the
+    // position is still the whole point (the comments inside say why).
+    const door = this.judgeRegistrationDoors(schema, packageId, ownership);
+    if ('refusal' in door) throw door.refusal;
+    schema = door.schema;
 
     // [#25744] A code package's object keeps its own actions as their
     // `ActionSchema` parse — `requiresFeature` / `requiresMembershipReach`

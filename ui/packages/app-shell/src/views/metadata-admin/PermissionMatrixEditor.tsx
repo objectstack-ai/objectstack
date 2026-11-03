@@ -106,6 +106,7 @@ import { useDraftAutoSave, type DraftSend } from '../studio-design/useDraftAutoS
 // objectui#12456 — the Studio Access pillar's presentation draws the shared item header.
 import { StudioItemHeader, StudioTab } from '../studio-design/StudioItemHeader.js';
 import { STUDIO_KIND_CHIP } from '../studio-design/studio-tokens.js';
+import type { CustomizationMarkKind } from '../studio-design/customizationMarks.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import {
   t as translate,
@@ -114,6 +115,7 @@ import {
   translateValidationMessage,
   useMetadataLocale,
 } from './i18n.js';
+import { isStudioCatalogueLoaded } from '@object-ui/i18n/namespaces/studio';
 import { MatrixScrollPane } from './MatrixScrollPane.js';
 import { PermissionAdvancedFacets, rlsClauseFindingCount } from './PermissionAdvancedFacets.js';
 import { CelPredicateField } from './CelPredicateField.js';
@@ -149,6 +151,7 @@ import {
   type ObjectPermFlag,
   type FieldPerm,
   type PermissionSetDraft,
+  permissionObjectScopePackages,
 } from './permission-slice.js';
 import type { ObjectAccessScope } from '@objectstack/spec/security';
 
@@ -464,25 +467,45 @@ function ScopePicker({
  * (`@objectstack/spec` `security/high-privilege.ts`, the opt-in export axis),
  * so only its own checkbox grants or clears it — "None" excepted, which
  * empties the whole row.
+ *
+ * objectstack#29729 — `short` is the column header, per locale (`perm.col.*`):
+ * en abbreviates (C, R, U … VA, MA: the words do not fit the column), zh
+ * spells the action word, so a zh header needs no legend to be read.
  */
 function getObjectActions(
   locale: string,
 ): Array<{ key: ObjectPermFlag; short: string; tip: string; optIn?: true }> {
   return [
-    { key: 'allowCreate', short: 'C', tip: translate('perm.action.create', locale) },
-    { key: 'allowRead', short: 'R', tip: translate('perm.action.read', locale) },
-    { key: 'allowEdit', short: 'U', tip: translate('perm.action.edit', locale) },
-    { key: 'allowDelete', short: 'D', tip: translate('perm.action.delete', locale) },
-    { key: 'allowExport', short: 'E', tip: translate('perm.action.export', locale), optIn: true },
-    { key: 'allowTransfer', short: 'Tr', tip: translate('perm.action.transfer', locale) },
+    { key: 'allowCreate', short: translate('perm.col.create', locale), tip: translate('perm.action.create', locale) },
+    { key: 'allowRead', short: translate('perm.col.read', locale), tip: translate('perm.action.read', locale) },
+    { key: 'allowEdit', short: translate('perm.col.edit', locale), tip: translate('perm.action.edit', locale) },
+    { key: 'allowDelete', short: translate('perm.col.delete', locale), tip: translate('perm.action.delete', locale) },
+    {
+      key: 'allowExport',
+      short: translate('perm.col.export', locale),
+      tip: translate('perm.action.export', locale),
+      optIn: true,
+    },
+    { key: 'allowTransfer', short: translate('perm.col.transfer', locale), tip: translate('perm.action.transfer', locale) },
     // No `Re` (allowRestore) / `Pu` (allowPurge) columns: both keys are retired
     // (objectui#6595 — see the tombstone on `ObjectPerm` in `permission-slice`
     // for the full account and the M2 return path on objectstack#1883). They
     // gated ObjectQL operations that have never existed, so every tick was a
     // grant no runtime read. `allowTransfer` is enforced upstream and stays.
-    { key: 'viewAllRecords', short: 'VA', tip: translate('perm.action.viewAll', locale) },
-    { key: 'modifyAllRecords', short: 'MA', tip: translate('perm.action.modifyAll', locale) },
+    { key: 'viewAllRecords', short: translate('perm.col.viewAll', locale), tip: translate('perm.action.viewAll', locale) },
+    { key: 'modifyAllRecords', short: translate('perm.col.modifyAll', locale), tip: translate('perm.action.modifyAll', locale) },
   ];
+}
+
+/**
+ * objectstack#29729 — whether the column headers are abbreviations a reader
+ * needs the legend line for (en's C, R, U …), or the action words themselves
+ * (zh), which the legend would only repeat.
+ */
+function headersAbbreviate(actions: ReturnType<typeof getObjectActions>, locale: string): boolean {
+  return actions.some(
+    (a) => a.short.replace(/\s+/g, '') !== translate(STUDIO_LEGEND_KEYS[a.key] ?? '', locale).replace(/\s+/g, ''),
+  );
 }
 
 /**
@@ -579,13 +602,23 @@ export interface PermissionMatrixEditPageProps {
    * is the routed page's. Omitted (Setup's permission page): unchanged.
    */
   studio?: PermissionStudioChrome;
+  /**
+   * objectstack#29809 (ADR-0146 D3) — the customization mark the host's rail
+   * draws for this set (`customizationMarks.ts`, the one rule): on a read-only
+   * base, `'added'` for a set its `<base>.custom` pair holds (a New similar
+   * copy or a set created there), `'customized'` for a served override of a
+   * base set. Set only by the Studio Access pillar; omitted (Setup, the
+   * metadata admin) or `null` (no mark, or the read has not answered),
+   * nothing changes. Read by the provenance badge alone.
+   */
+  customizationMark?: CustomizationMarkKind | null;
 }
 
 /* ────────────────────────────────────────────────────────────────── */
 /* Component                                                          */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio }: PermissionMatrixEditPageProps) {
+export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio, customizationMark = null }: PermissionMatrixEditPageProps) {
   // objectstack ADR-0146 D1 (#28561) — Studio's "All metadata" area mounts this
   // editor through the routed item page, which hands it no `readOnly`: a
   // read-only package's area is the host gate here, as a pillar's prop is.
@@ -723,7 +756,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // envelope's code artifact), else it was authored in this environment. Spec
   // 18 retired the authored `managedBy` (objectstack#23891), and no served
   // datum names a "platform" set, so there are two answers (objectui#12753).
-  const shippedByPackage = !!packageId || codeIsArtifact;
+  // objectstack#29809 (ADR-0146 D3) — a base's `<base>.custom` pair is a
+  // package too, so its door's `packageId` alone called a set the pair adds
+  // "Package" beside the rail's "Added". The host's mark answers that, by the
+  // rule its rail draws from: an added set is the environment's own, whatever
+  // door opened it. A customized base set stays the base's ("Package").
+  const shippedByPackage = customizationMark !== 'added' && (!!packageId || codeIsArtifact);
   const artifactArmOpen = !!entry?.allowEnvironmentOverlay && servedEditable !== false;
   const typeTierOpen = !!(entry?.allowEnvironmentOverlay || entry?.allowRuntimeCreate);
   const canWriteByType = artifactTierApplies ? artifactArmOpen : typeTierOpen;
@@ -776,7 +814,16 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const lockedByArtifactTier = artifactTierApplies && !artifactArmOpen && typeTierOpen && canAuthor && !walled;
   const locale = useMetadataLocale();
   const t = React.useCallback((k: string) => translate(k, locale), [locale]);
-  const OBJECT_ACTIONS = React.useMemo(() => getObjectActions(locale), [locale]);
+  // objectstack#29729 — the headers, tooltips and legend read the lazily
+  // fetched `studio` catalogue. Keyed on the locale alone, this kept the `en`
+  // answer of a first render that ran before the zh catalogue was resident:
+  // Setup's legend line and every header tooltip read English in zh-CN.
+  const catalogueResident = isStudioCatalogueLoaded(locale);
+  const OBJECT_ACTIONS = React.useMemo(
+    () => getObjectActions(locale),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the residency flag is the dependency: the columns read the catalogue through `translate`
+    [locale, catalogueResident],
+  );
 
   const [draft, setDraft] = React.useState<PermissionSetDraft>({
     name,
@@ -978,8 +1025,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           // first publish: each pending draft is served with a `_draft` mark
           // (the object picker's read, `useObjectCatalog`). The environment
           // door keeps the published list: only the package door authors drafts.
+          // objectstack#29674 — a pair's set is scoped to its base's objects
+          // too (`permissionObjectScopePackages`), each list read the same way.
           (packageId
-            ? client.withPreviewDrafts(true).list<any>('object', { packageId })
+            ? Promise.all(
+                permissionObjectScopePackages(packageId).map((scopeId) =>
+                  client.withPreviewDrafts(true).list<any>('object', { packageId: scopeId }),
+                ),
+              ).then((lists) => lists.flat())
             : client.list<any>('object', {})
           ).catch(() => []),
           draftReadForSave,
@@ -1038,7 +1091,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               ...(item?._draft === true ? { draft: true } : {}),
             };
           })
-          .filter((o) => !!o.name)
+          // One row per object: a name two scope packages both answer keeps
+          // the first one's row (the set's own package lists first).
+          .filter((o, i, rows) => !!o.name && rows.findIndex((r) => r.name === o.name) === i)
           .sort((a, b) => a.name.localeCompare(b.name));
         setObjects(list);
         const full: PermissionSetDraft = {
@@ -1951,7 +2006,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           this editor already fetches (`codeIsArtifact`, the artifact
           gate's own input). At the environment scope there is no
           `packageId`, so a set a code package ships read "Custom" beside
-          its own lock. */}
+          its own lock. A set a base's pair adds reads "Custom" (the host's
+          `customizationMark`, objectstack#29809). */}
       <Badge variant="outline" className="text-[10px] shrink-0" data-testid="perm-provenance-badge">
         {shippedByPackage ? t('perm.badge.package') : t('perm.badge.custom')}
       </Badge>
@@ -2299,7 +2355,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 t={t}
               />
               {objectInheritedLegendEl}
-              <MatrixScrollPane className="flex-1" testId="perm-matrix-pane">
+              <MatrixScrollPane className={MATRIX_PANE} testId="perm-matrix-pane">
                 <StudioObjectMatrix
                   objects={filteredObjects}
                   draft={draft}
@@ -2490,17 +2546,22 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             `title` tooltip per column, but a hover-only affordance on
             unfamiliar two-letter abbreviations (Tr/VA/MA) is easy to
             miss. Spell them out once, up front. */}
-        <div className="px-6 py-2 border-b flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          {OBJECT_ACTIONS.map((a) => (
-            <span key={a.key as string} className="whitespace-nowrap">
-              <span className="font-medium text-foreground">{a.short}</span> {a.tip}
-            </span>
-          ))}
-        </div>
+        {headersAbbreviate(OBJECT_ACTIONS, locale) && (
+          <div
+            className="px-6 py-2 border-b flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"
+            data-testid="perm-column-legend"
+          >
+            {OBJECT_ACTIONS.map((a) => (
+              <span key={a.key as string} className="whitespace-nowrap">
+                <span className="font-medium text-foreground">{a.short}</span> {a.tip}
+              </span>
+            ))}
+          </div>
+        )}
         {objectInheritedLegendEl}
 
         {/* Matrix */}
-        <MatrixScrollPane className="flex-1" testId="perm-matrix-pane">
+        <MatrixScrollPane className={MATRIX_PANE} testId="perm-matrix-pane">
           <PermissionTable
             objects={filteredObjects}
             draft={draft}
@@ -2628,6 +2689,7 @@ function PermissionTable({
   onFieldWhenLint,
   onOpenOwd,
 }: PermissionTableProps) {
+  const locale = useMetadataLocale();
   return (
     // objectui#2600 B3 — the fixed columns (object + 7 CRUD + bulk) need ~960px;
     // a min-width makes the enclosing overflow-auto container scroll instead of
@@ -2646,7 +2708,7 @@ function PermissionTable({
               className="px-2 py-2 font-medium text-center w-14"
               title={a.tip}
             >
-              {a.short}
+              <span className="break-keep">{a.short}</span>
             </th>
           ))}
           {SCOPE_AXES.map((s) => (
@@ -2734,7 +2796,7 @@ function PermissionTable({
                         }
                       : {})}
                   >
-                    {`OWD ${o.owd ? owdLabel(t, o.owd) : t('perm.owd.defaultPrivate')}`}
+                    {tFormat('perm.owd.chip', locale, { value: o.owd ? owdLabel(t, o.owd) : t('perm.owd.defaultPrivate') })}
                   </Badge>
                 </td>
                 {objectActions.map((a) => (
@@ -2890,14 +2952,19 @@ function StudioObjectsToolbar({
           {t('perm.filter.onlyGranted')}
         </Label>
       </div>
-      <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        {legend.map((a) => (
-          <span key={a.key as string} className="whitespace-nowrap" title={a.tip}>
-            <span className="font-semibold text-foreground">{a.short}</span>{' '}
-            {t(STUDIO_LEGEND_KEYS[a.key] ?? '') || a.tip}
-          </span>
-        ))}
-      </div>
+      {headersAbbreviate(legend, locale) && (
+        <div
+          className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+          data-testid="perm-column-legend"
+        >
+          {legend.map((a) => (
+            <span key={a.key as string} className="whitespace-nowrap" title={a.tip}>
+              <span className="font-semibold text-foreground">{a.short}</span>{' '}
+              {t(STUDIO_LEGEND_KEYS[a.key] ?? '') || a.tip}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2944,7 +3011,7 @@ function StudioObjectMatrix({
           <th className="w-28 px-3 text-left font-medium">{t('engine.studio.access.colOwd')}</th>
           {objectActions.map((a, i) => (
             <th key={a.key as string} title={a.tip} className={cn('w-[52px] px-1 text-center font-medium', divider(i))}>
-              {a.short}
+              <span className="break-keep">{a.short}</span>
             </th>
           ))}
           {SCOPE_AXES.map((s, i) => (
@@ -3197,11 +3264,27 @@ function StudioObjectRow({
 }
 
 /**
- * objectstack#26846 — the field sub-table's name cell, header and rows alike:
- * pinned to the left edge of the matrix's scroll container, over an opaque
- * background so the boxes scrolling under it do not show through.
+ * objectstack#29677 — the matrix's scroll pane is a size container, so the
+ * field panel under an expanded object can be as wide as the pane shows
+ * ({@link FIELD_PANEL}).
  */
-const FIELD_NAME_CELL = 'sticky left-0 z-[1] bg-background pr-2';
+const MATRIX_PANE = 'flex-1 @container';
+
+/**
+ * objectstack#29677 — the field panel under an expanded object (toolbar,
+ * legend and sub-table): pinned at the expanded cell's own left inset (`pl-12`
+ * on both hosts) while the matrix scrolls sideways, and no wider than the
+ * pane shows less both insets. The field table needs four columns, not the
+ * matrix's floor, so it never scrolls with the object columns: every Read and
+ * Edit box stays in view and clickable at any scroll offset, and the field
+ * name beside it stays readable.
+ *
+ * It replaces objectstack#26846's pinned name column. That column was the
+ * table's flexible one, so it took all the width the floor left over (697 px
+ * at a 1304 px matrix), and once pinned it covered both boxes from a scroll of
+ * 80 px on; below 1304 px of pane the boxes could not be reached at all.
+ */
+const FIELD_PANEL = 'sticky left-12 max-w-[calc(100cqi-6rem)]';
 
 /**
  * objectstack#27866 — the field sub-table's header cells: pinned to the top of
@@ -3389,7 +3472,7 @@ function FieldsSubTable({
   }
   const sharesLabel = (f: FieldSummary) => (labelCounts.get((f.label ?? f.name).trim().toLowerCase()) ?? 0) > 1;
   return (
-    <div className="space-y-2">
+    <div className={cn('space-y-2', FIELD_PANEL)} data-testid={`perm-field-panel-${objectName}`}>
       {/* Field toolbar (B4): filter + bulk over the visible field set. The
           filter only appears once one-by-one would actually hurt. */}
       {/* objectstack#26846 — the count sits beside the filter it counts. At
@@ -3456,12 +3539,13 @@ function FieldsSubTable({
         <table className="w-full text-xs">
           <thead data-testid={`perm-field-head-${objectName}`}>
             <tr className="text-muted-foreground">
-              {/* objectstack#26846 — the name column stays in view while the
-                  matrix scrolls sideways (FIELD_NAME_CELL).
+              {/* objectstack#29677 — the whole panel stays in view while the
+                  matrix scrolls sideways (FIELD_PANEL), so the name column
+                  needs no pin of its own.
                   objectstack#27866 — the header pins under the matrix's own
                   (FIELD_HEAD_CELL), so a long field list scrolled into view is
                   labelled by its own columns, not by the object columns above. */}
-              <th className={cn('text-left py-1 font-medium', FIELD_NAME_CELL, FIELD_HEAD_CELL, 'z-[3]')}>{t('perm.field.col.name')}</th>
+              <th className={cn('text-left py-1 pr-2 font-medium', FIELD_HEAD_CELL)}>{t('perm.field.col.name')}</th>
               <th className={cn('px-2 py-1 font-medium w-16 text-center', FIELD_HEAD_CELL)} title={t('perm.field.read')}>{t('perm.field.read')}</th>
               <th className={cn('px-2 py-1 font-medium w-16 text-center', FIELD_HEAD_CELL)} title={t('perm.field.edit')}>{t('perm.field.edit')}</th>
               <th className={cn('px-2 py-1 font-medium text-left', FIELD_HEAD_CELL)} title={t('perm.field.when.tip')}>{t('perm.field.when')}</th>
@@ -3478,7 +3562,7 @@ function FieldsSubTable({
                 <React.Fragment key={f.name}>
                   <tr className="border-t border-muted">
                     <td
-                      className={cn('py-1', FIELD_NAME_CELL)}
+                      className="py-1 pr-2"
                       data-testid={`perm-field-name-${objectName}-${f.name}`}
                       data-shared-label={sharesLabel(f) || undefined}
                     >

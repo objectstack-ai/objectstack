@@ -14,6 +14,8 @@
  * `phoneNumber`, `magicLink`, the generic OAuth providers, the OIDC provider
  * with its `jwt` plugin, `sso`, `scim`, device authorization and the custom
  * session — each with its own failure tier, as the method's docblock states.
+ * (Since the move one plugin joined the list: the one-time token, ahead of
+ * the custom session, for the mobile sign-in hand-off.)
  * The `organization` factory's body was moved out by cut 15; its arrow, which
  * hands that body its host, moves here with the rest.
  *
@@ -79,6 +81,11 @@ import {
   buildTwoFactorPluginSchema,
 } from './auth-schema-config.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import {
+  ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
+  oneTimeTokenStoreHasher,
+  registeredAppSchemesOf,
+} from './one-time-token-handoff.js';
 import { userInfoLocaleClaim } from './oidc-userinfo-locale-claim.js';
 import { buildTurnstileSignUpPlugin, reportHalfConfiguredTurnstile, resolveTurnstileKeys } from './turnstile-sign-up.js';
 
@@ -798,6 +805,26 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       return deviceAuthorization({
         verificationUri: this.getConsolePageUrl('/auth/device'),
         schema: buildDeviceAuthorizationPluginSchema(),
+      });
+    });
+  }
+
+  // One-time token — the mobile sign-in hand-off (maintainer ruling, option
+  // B: better-auth's own plugin, no hand-written exchange endpoint). Mounted
+  // only when the deployment registers at least one app scheme, because the
+  // hand-off has nowhere to send a token otherwise. Generation is refused
+  // over HTTP (`disableClientRequest`): the only minter is the ObjectStack
+  // hand-off route, which binds each token to the shell's PKCE challenge
+  // through `storeToken`'s custom hasher, so an intercepted callback cannot
+  // be redeemed. Lifetime and the binding are argued in
+  // `one-time-token-handoff.ts`.
+  if (registeredAppSchemesOf(this.config).length > 0) {
+    await this.addOptionalPlugin(plugins, 'oneTimeToken', async () => {
+      const { oneTimeToken } = await import('better-auth/plugins/one-time-token');
+      return oneTimeToken({
+        expiresIn: ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
+        disableClientRequest: true,
+        storeToken: { type: 'custom-hasher', hash: oneTimeTokenStoreHasher },
       });
     });
   }

@@ -50,6 +50,7 @@ import {
   Label,
 } from '@object-ui/components';
 import { actionErrorDetail } from '@object-ui/core';
+import { StudioItemHeaderFoldedItems } from './StudioItemHeader.js';
 import { Copy, Loader2, MoreHorizontal, Trash2 } from 'lucide-react';
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
@@ -193,6 +194,8 @@ export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newS
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
+          {/* objectstack#29693 — what the flow header's title row folded away, on a narrow row. */}
+          <StudioItemHeaderFoldedItems />
           {newSimilar && (
             <DropdownMenuItem
               data-testid="auto-item-new-similar"

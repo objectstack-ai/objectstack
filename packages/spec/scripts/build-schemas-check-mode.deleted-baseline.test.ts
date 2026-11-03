@@ -18,9 +18,15 @@ import { RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 // Read ONLY to keep the #17356 fixture honest about which SET its root lives in
 // — never to assert gate behaviour, which is read off the spawned run's output.
 import {
+  getMetadataTypeSchema,
   listMetadataTypeSchemaTypes,
   listUnregisteredKindSchemaTypes,
 } from '../src/kernel/metadata-type-schemas';
+// Read ONLY to keep the #29668 depth fixture honest about WHERE its def hangs —
+// beneath the unregistered root and beneath no other — never to assert gate
+// behaviour, which is read off the spawned run's output.
+import { ConnectorInstanceBearerAuthSchema } from '../src/integration/connector.zod';
+import { zodChildSchemas, zodShapeOf } from './lib/zod-graph';
 // Read ONLY to keep the #18301 fixture honest about the TREE FACT it models — a
 // key that left the shape whose door still answers an author with a prescription
 // — never to assert gate behaviour, which is read off the spawned run's output.
@@ -95,13 +101,17 @@ const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
 
 /** #17356's pin. A def whose ONLY root is an UNREGISTERED KIND — `connector`,
  *  bound in `UNREGISTERED_KIND_SCHEMAS` by #6245 and deliberately absent from
- *  `listMetadataTypeSchemaTypes()`. `integration/RetryConfig` sits two hops
- *  from that root (`connector.retryConfig`, unwrapped once through `optional`),
- *  and `stack.connectors[]` / `PUT /api/v1/meta/connector/:name` both parse a
- *  real metadata document through it. (The def was `integration/DataSyncConfig`,
- *  the measured specimen below, until protocol 18 retired it whole with
- *  `connector.syncConfig` — ADR-0049; `RetryConfig` is the connector's other
- *  open block on the same root at the same depth.)
+ *  `listMetadataTypeSchemaTypes()`. `integration/DeclarativeConnectorEntry` is
+ *  that root's own def — the schema `stack.connectors[]` and
+ *  `PUT /api/v1/meta/connector/:name` parse a real metadata document against —
+ *  so the eager graph reaches it by identity. (The def was
+ *  `integration/DataSyncConfig`, the measured specimen below, until protocol 18
+ *  retired it whole with `connector.syncConfig` — ADR-0049; then
+ *  `integration/RetryConfig`, two hops down at `connector.retryConfig`, until the
+ *  authored entry parsed that block through its own closed twin. The twin shares
+ *  `RetryConfig`'s field instances, so the gate still reaches the open def, but
+ *  through its derived-clone bridge — a different reading from the root-graph
+ *  hit this pin asserts in the eager regime.)
  *
  *  Until #17356 the gate built its roots from `listMetadataTypeSchemaTypes()`
  *  alone, so this def read `null` and check (c) proof 2 WAIVED a bare deletion
@@ -115,12 +125,43 @@ const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
  *  ever sees a key the build STOPPED emitting, and the def is judged by its
  *  DEF half (`key.slice(0, key.indexOf(':'))`), so a synthetic leaf under the
  *  real def runs the identical code path as the real deletion did. */
-const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/RetryConfig';
+const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/DeclarativeConnectorEntry';
 
 const DELETED_VIA_UNREGISTERED_KIND = `${DELETED_VIA_UNREGISTERED_KIND_DEF}:zzOnlyRootIsAnUnregisteredKind17356`;
 
 /** The unregistered kind that def's only root lives in. */
 const UNREGISTERED_KIND_ROOT = 'connector';
+
+/** #29668's pin — the DEPTH half of #17356. A def reached ONLY by descending
+ *  below the unregistered `connector` root: `connector.auth` (optional) →
+ *  `ConnectorInstanceAuthSchema` (a discriminated union on `type`) → its
+ *  `bearer` arm. Nothing registered and no other unregistered kind holds the
+ *  `auth` union, so the walk reaches this def through that root's graph or
+ *  not at all.
+ *
+ *  Why the root's own def above is no longer enough. Every metadata document
+ *  carries the shared bookkeeping keys (`_lock`, `_lockReason`, …) as the SAME
+ *  schema instances, so with the roots narrowed back to
+ *  `listMetadataTypeSchemaTypes()` — the #17356 defect —
+ *  `integration/DeclarativeConnectorEntry` still reads 'derived-clone' through
+ *  any registered root's `_lock`, and its deletion is still refused (only the
+ *  wording moves). This def has no such entry: under the narrowed roots it
+ *  reads `null`, and check (c) proof 2 WAIVES its deletion as over-collection.
+ *  Measured on `main` at 0e4b0fa4 by a BFS over the gate's own walk
+ *  (`zodChildSchemas` + the shape-entry bridge), in both schema regimes. The
+ *  def was `integration/RetryConfig` (`connector.retryConfig`) until #29573
+ *  moved the #17356 specimen to the root's own def; `integration/RetryConfig`
+ *  now resolves through the closed twin's derived-clone bridge, so it measures
+ *  a different reading.
+ *
+ *  Nine sibling arms with authorable keys (`api-key`, `basic`, `oauth2*`,
+ *  `app-credential`, `signed*`, `none`) qualify the same way; `bearer` is the
+ *  plainest. The prop
+ *  is synthetic for the same reason the #17356 one is: check (c) judges the
+ *  DEF half, and only ever sees a key the build STOPPED emitting. */
+const DELETED_BENEATH_UNREGISTERED_KIND_DEF = 'integration/ConnectorInstanceBearerAuth';
+
+const DELETED_BENEATH_UNREGISTERED_KIND = `${DELETED_BENEATH_UNREGISTERED_KIND_DEF}:zzBeneathAnUnregisteredRoot29668`;
 
 /** Def the build no longer emits at all — the literal #4643 cluster. */
 const DELETED_GONE_DEF = ['identity/Session:userId', 'identity/Session:token'];
@@ -211,6 +252,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       DELETED_LEAF_COLLIDER,
       DELETED_UNREACHABLE,
       DELETED_VIA_UNREGISTERED_KIND,
+      DELETED_BENEATH_UNREGISTERED_KIND,
       ...DELETED_GONE_DEF,
       DELETED_AGED,
       DELETED_BY_RENAME,
@@ -270,6 +312,52 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       `${DELETED_VIA_UNREGISTERED_KIND_DEF} is no longer emitted with authorable keys — check (c) ` +
         `would route this fixture to the vanished-def proof instead; re-pick the def`,
     ).toBe(true);
+    // #29668's depth fixture is only a pin while its def hangs beneath the
+    // unregistered root and beneath NOTHING else. Read the way the gate reads a
+    // def: its own instance in a BFS closure, or one of its shape entries (same
+    // name, same instance) held by a visited object node. Reached from
+    // `connector`, and by neither route from every other root — otherwise the
+    // narrowed root set would still reach it and the assertion below would pass
+    // while asserting nothing about descent beneath an unregistered root.
+    expect(
+      keys.some((k) => k.startsWith(`${DELETED_BENEATH_UNREGISTERED_KIND_DEF}:`)),
+      `${DELETED_BENEATH_UNREGISTERED_KIND_DEF} is no longer emitted with authorable keys — check ` +
+        `(c) would route this fixture to the vanished-def proof instead; re-pick the def`,
+    ).toBe(true);
+    type ZodNode = Parameters<typeof zodChildSchemas>[0];
+    const closureFrom = (types: string[]): Set<ZodNode> => {
+      const visited = new Set<ZodNode>();
+      const queue = types.map((t) => getMetadataTypeSchema(t)).filter((s): s is ZodNode => s !== undefined);
+      while (queue.length > 0) {
+        const node = queue.pop()!;
+        if (visited.has(node)) continue;
+        visited.add(node);
+        queue.push(...zodChildSchemas(node));
+      }
+      return visited;
+    };
+    const depthDef = ConnectorInstanceBearerAuthSchema;
+    expect(
+      closureFrom([UNREGISTERED_KIND_ROOT]).has(depthDef),
+      `${DELETED_BENEATH_UNREGISTERED_KIND_DEF} is no longer beneath the '${UNREGISTERED_KIND_ROOT}' ` +
+        `root — re-pick a def the walk reaches only by descending below it`,
+    ).toBe(true);
+    const otherRoots = [...listMetadataTypeSchemaTypes(), ...listUnregisteredKindSchemaTypes()].filter(
+      (t) => t !== UNREGISTERED_KIND_ROOT,
+    );
+    const elsewhere = closureFrom(otherRoots);
+    const depthShape = Object.entries(zodShapeOf(depthDef) ?? {});
+    expect(depthShape.length, `${DELETED_BENEATH_UNREGISTERED_KIND_DEF} has no object shape`).toBeGreaterThan(0);
+    expect(
+      elsewhere.has(depthDef) ||
+        [...elsewhere].some((node) => {
+          const shape = zodShapeOf(node);
+          return shape !== null && depthShape.some(([name, prop]) => shape[name] === prop);
+        }),
+      `${DELETED_BENEATH_UNREGISTERED_KIND_DEF} is reachable from a root other than ` +
+        `'${UNREGISTERED_KIND_ROOT}' — its only root is no longer the unregistered kind, so the ` +
+        `#29668 fixture no longer measures descent beneath it; re-pick the def`,
+    ).toBe(false);
     // #18301's fixture is only a pin while `data/Metric:filters` is still a
     // completed guidance-route retirement in the tree. Three halves, all loud,
     // because each can rot on its own and each rots the pin into a green that
@@ -491,13 +579,16 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       // `listMetadataTypeSchemaTypes()`, which per #6245 deliberately does not
       // enumerate `UNREGISTERED_KIND_SCHEMAS`. `connector` lives there, so the
       // BFS never started from it, `integration/DataSyncConfig` (then this
-      // fixture's def; `integration/RetryConfig` since protocol 18) read `null`,
+      // fixture's def; `integration/DeclarativeConnectorEntry`, the connector
+      // root's own def, since the entry closed its nested blocks) read `null`,
       // and a bare deletion of one of its baseline lines was waived as
       // over-collection — for a def `stack.connectors[]` parses on every boot.
       // The gate now enumerates its own reachability root union; the KIND
       // vocabulary `listMetadataTypeSchemaTypes()` answers is untouched (the
       // `beforeAll` guard above asserts that half).
-      seedBase((s) => [...s, DELETED_VIA_UNREGISTERED_KIND, DELETED_UNREACHABLE].sort());
+      seedBase((s) =>
+        [...s, DELETED_VIA_UNREGISTERED_KIND, DELETED_BENEATH_UNREGISTERED_KIND, DELETED_UNREACHABLE].sort(),
+      );
       const canonical = seedSurface((s) => s);
 
       const rx = (key: string, tail: string): RegExp =>
@@ -515,10 +606,20 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(eager.output).toMatch(
         rx(DELETED_VIA_UNREGISTERED_KIND, 'def reachable from the metadata-type roots; .*was LIVE'),
       );
-      // Specifically NOT the proof-2 waiver, for this key. Asserting the absence
-      // is the pin: narrow the roots back to `listMetadataTypeSchemaTypes()` and
-      // the run exits 0 printing exactly the string below.
+      // Specifically NOT the proof-2 waiver, for this key. Narrowing the roots
+      // back to `listMetadataTypeSchemaTypes()` no longer prints that waiver for
+      // the root's own def: its bookkeeping keys bridge it as a derived clone,
+      // so the run still exits 1 and only the wording above moves (measured,
+      // #29668). The depth key below is the one that is waived then.
       expect(eager.output).not.toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def not reachable from the'));
+      // Direction 1 at DEPTH (#29668) — the walk descends below that root. The
+      // root's own def above is refused under the pre-#17356 roots too (its
+      // bookkeeping keys bridge it as a derived clone), so it is THIS key whose
+      // verdict flips to the proof-2 waiver when the descent is lost.
+      expect(eager.output).toMatch(
+        rx(DELETED_BENEATH_UNREGISTERED_KIND, 'def reachable from the metadata-type roots; .*was LIVE'),
+      );
+      expect(eager.output).not.toMatch(rx(DELETED_BENEATH_UNREGISTERED_KIND, 'def not reachable from the'));
 
       // Direction 2 — conservatism is not turned around. A REST response
       // envelope no metadata document is parsed against still reads unreachable
@@ -539,6 +640,8 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(lazy.status).toBe(1);
       expect(lazy.output).toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def .*was LIVE \\(never tombstoned\\)'));
       expect(lazy.output).not.toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def not reachable from the'));
+      expect(lazy.output).toMatch(rx(DELETED_BENEATH_UNREGISTERED_KIND, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(lazy.output).not.toMatch(rx(DELETED_BENEATH_UNREGISTERED_KIND, 'def not reachable from the'));
       expect(lazy.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
 
       expect(readSurface()).toBe(canonical);

@@ -149,6 +149,12 @@ export * from './aggregation-conformance';
 // values in them are, and its absence is why that family (commit 4045b954d, #11535,
 // #11782, #10995) kept arriving one card at a time.
 export * from './value-roundtrip-conformance';
+// Canonical conformance cases for NULL-distinct `unique` (#29377) — two rows
+// whose unique key holds a NULL (`null` or absent) in any key part both land,
+// while `''` and equal non-null values still collide. driver-mongodb's sparse
+// index refused the second `null` until #29339 while every census cell stayed
+// green: no case-set asked the question.
+export * from './unique-null-distinct-conformance';
 export * from './date-macros.zod';
 // Dashboard date-range preset names (#4614 single source, re-homed by #8793) —
 // declared for the dashboard date-filter positions, REFUSED as bare ordering

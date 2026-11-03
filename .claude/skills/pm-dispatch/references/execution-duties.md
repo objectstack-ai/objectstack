@@ -98,7 +98,7 @@
 - 下限档给机械卡(正确性由门禁农场机械判定)。
 - 默认判断档给 M/L、裁决实施与任何带设计判断的卡;拿不准就升一档。
 - 上限 = 契约复审档(`CONTRACT_REVIEW_TIER`),给最重协议/流程/编排卡,按卡取用非新默认。
-- 强制条款①:凡改协议语义面或 `docs/adr/**` 的卡一律契约复审档;后者 effort 下限 `xhigh`。
+- 强制条款①:改协议语义面或 `docs/adr/**` 即契约复审档;ADR 修订常设令 `xhigh`,新裁决除外。
 - 协议语义面 = 本 `SKILL.md`、决策框架拷贝所在文件、`.claude/agents/os-dev.md` 与 `skills/**`。
 - 仅 `references/**` 面、或治理面上一行级机械文本改动的卡,降为默认判断档施工。
 - `skills/**`(随 `npx skills add` 发运)与 `docs/adr/**` ⛔ 无一行级豁免,逐行判机械不作数。
@@ -119,7 +119,7 @@
 - 额度墙只向下(降档或降并发)⛔ 永不向上;临时偏离记座位贴带结束条件,逐次巡检重读。
 - 降档的档位与理由记入认领评论 Container & model 行;档位逐次派发显式传参,永不省略。
 - effort 按卡难度定、与档位并列,写进 Container & model 行与派发令,派发显式传参,⛔ 不留空。
-- S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭点名或常设令。
+- S 机械 `medium`;M `high`(默认);L/XL/security/p1/契约复核/四轴分析/ADR `xhigh`;`max` 凭点名/常设令。
 - 解析顺序、pin 语义与允许名单回退陷阱以 os-dev 定义 frontmatter 注释为权威。
 - 分诊 suggestion 行是输入不是决定,不采纳给理由。
 - 派发词只带增量,⛔ 不整段贴卡正文;dev 自读全文与评论、自查完整(`dispatch-runbook.md`)。
@@ -133,6 +133,7 @@
 - ⛔ GitHub MCP 写:`create_pull_request`、`update_pull_request`、`issue_write`、`add_issue_comment` 等。
 - 多仓项目线程不加载仓 `settings.json` deny,此行即唯一防线;两数 = 写预算与 `mcp_calls`。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
+- 建包单:派发令点名目录与 npm 名,dev 动笔前先测同类包先例;命名规则见 AGENTS.md 角色表。
 - 门禁清单取 `dispatch-gates --commands --repo 仓` 逐条跑,退出码先落盘,`--ran` 对账;被拒即手推。
 - 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
 - 派发令里关于代码的危害断言必须有读数(点名 call site / 路径 / 迁移)。
@@ -176,7 +177,6 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
-- 报告或复核见涉 cloud ⇒ 整卡 `Release:`+`pm:retriage` 转 cloud 车道,读点留卡;⛔ 不拆半边。
 - 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。

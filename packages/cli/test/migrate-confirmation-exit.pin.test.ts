@@ -246,6 +246,7 @@ const ROSTER: Record<string, Member> = {
   'audit-metadata-bodies': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'blank-single-values': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'option-codes': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  'text-scalars': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-parent-pair': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-reactions': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'files-to-references': { argv: ['--apply'], confirm: '--yes', writes: BOOT },

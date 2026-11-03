@@ -28,6 +28,8 @@
  * shape). Nothing on the save, read or publish path is stubbed.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -632,13 +634,13 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect(published).toMatchObject({ success: true, publishedCount: 3, failedCount: 0 });
     });
 
-    it('[#29233] the region verdict on the draft read is the registry rule\'s: the engine\'s sentence, at the item root', async () => {
+    it('[#29233] the region verdict on the draft read is the registry rule\'s: the engine\'s sentence, at the container it names (#29558)', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         // A one-branch parallel block nested in a try region. The registry rule
-        // judges the flow as one unit (as the engine does) and anchors the
-        // flow itself, so the item-relative path is the item root; the
-        // sentence names the region.
+        // judges the flow as one unit (as the engine does) and, since #29558,
+        // anchors the container the engine's refusal names, so the
+        // item-relative path is that parallel node inside the try region.
         const flow = regionFlow('nested_region', {
             id: 'guard', type: 'try_catch', label: 'Guard',
             config: {
@@ -654,7 +656,7 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         const diagnostics = await draftDiagnostics(protocol, 'flow', flow.name);
         expect(diagnostics.valid).toBe(false);
         expect((diagnostics.errors ?? []).filter((e) => e.code === 'flow-region-shape-invalid')).toEqual([{
-            path: '',
+            path: 'nodes.1.config.try.nodes.0',
             message: "Flow 'nested_region' would be refused at registration: parallel 'fan': a parallel block needs at least 2 branches",
             code: 'flow-region-shape-invalid',
         }]);
@@ -975,6 +977,44 @@ describe('[#29007] a stored object carrying the retired titleFormat', () => {
     });
 });
 
+// [#29557, #29696] The legacy-D2 flow fixtures the publish doors (#29557) and the
+// reads (#29696) are both pinned on.
+
+/** start → get_record → end, the match map spelled under `filterKey`. */
+const fetchFlow = (name: string, filterKey: 'filters' | 'filter') => ({
+    name,
+    label: name,
+    type: 'autolaunched',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'fetch', type: 'get_record', label: 'Fetch', config: { objectName: 'deal', [filterKey]: { name: 'Acme' }, outputVariable: 'deal' } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+        { id: 'e1', source: 'start', target: 'fetch' },
+        { id: 'e2', source: 'fetch', target: 'end' },
+    ],
+});
+
+/** The stored active row a legacy draft is a re-save of. */
+async function seedActive(engine: any, body: { name: string }) {
+    await engine.insert('sys_metadata', {
+        type: 'flow',
+        name: body.name,
+        organization_id: null,
+        package_id: PKG,
+        state: 'active',
+        metadata: JSON.stringify(body),
+        checksum: hashSpec(body, 'flow'),
+        version: 1,
+    });
+}
+
+const storedConfig = (rows: Map<string, Row>, name: string, state: 'active' | 'draft') => {
+    const row = [...rows.values()].find((r) => r.type === 'flow' && r.name === name && r.state === state);
+    return row ? JSON.parse(row.metadata).nodes[1].config : undefined;
+};
+
 /**
  * [#29557] A flow draft stored in a legacy ADR-0087 D2 spelling the engine
  * registers (`get_record` `config.filters`, `flow-node-crud-filter-alias`). The
@@ -997,41 +1037,6 @@ describe('[#29557] a stored flow draft in a legacy D2 spelling the engine regist
     afterEach(() => {
         warn.mockRestore();
     });
-
-    /** start → get_record → end, the match map spelled under `filterKey`. */
-    const fetchFlow = (name: string, filterKey: 'filters' | 'filter') => ({
-        name,
-        label: name,
-        type: 'autolaunched',
-        nodes: [
-            { id: 'start', type: 'start', label: 'Start' },
-            { id: 'fetch', type: 'get_record', label: 'Fetch', config: { objectName: 'deal', [filterKey]: { name: 'Acme' }, outputVariable: 'deal' } },
-            { id: 'end', type: 'end', label: 'End' },
-        ],
-        edges: [
-            { id: 'e1', source: 'start', target: 'fetch' },
-            { id: 'e2', source: 'fetch', target: 'end' },
-        ],
-    });
-
-    /** The stored active row a legacy draft is a re-save of. */
-    async function seedActive(engine: any, body: { name: string }) {
-        await engine.insert('sys_metadata', {
-            type: 'flow',
-            name: body.name,
-            organization_id: null,
-            package_id: PKG,
-            state: 'active',
-            metadata: JSON.stringify(body),
-            checksum: hashSpec(body, 'flow'),
-            version: 1,
-        });
-    }
-
-    const storedConfig = (rows: Map<string, Row>, name: string, state: 'active' | 'draft') => {
-        const row = [...rows.values()].find((r) => r.type === 'flow' && r.name === name && r.state === state);
-        return row ? JSON.parse(row.metadata).nodes[1].config : undefined;
-    };
 
     async function stageLegacy(name: string, body = fetchFlow(name, 'filters')) {
         const { engine, rows } = makeStubEngine();
@@ -1071,8 +1076,7 @@ describe('[#29557] a stored flow draft in a legacy D2 spelling the engine regist
         expect(await (protocol as any).draftPublishVerdict({ type: 'flow', name: 'legacy_fetch', body: stored, packageId: PKG }))
             .toEqual([]);
         // Served, it carries none of the rules the publish refused it on before.
-        // (The read's own schema half still judges the served body as stored;
-        // that seam is the read's, not the publish verdict's.)
+        // ([#29696] The read's own schema half is pinned in its own block below.)
         const codes = ((await draftDiagnostics(protocol, 'flow', 'legacy_fetch')).errors ?? []).map((e) => e.code);
         expect(codes).not.toContain('expression-invalid');
         expect(codes).not.toContain('flow-region-shape-invalid');
@@ -1114,5 +1118,97 @@ describe('[#29557] a stored flow draft in a legacy D2 spelling the engine regist
         expect(batch).toMatchObject({ success: false, publishedCount: 0 });
         expect(batch.failed.map((f: any) => f.name)).toEqual(['broken_fetch']);
         expect(issueTriples(batch.failed[0].issues)).toEqual(issueTriples(canonical.err.issues));
+    });
+});
+
+/**
+ * [#29696] A flow READ judges a stored legacy D2 row in the spelling the doors
+ * judge it in. A row at rest in a legacy ADR-0087 D2 spelling (`get_record`
+ * `config.filters`) is accepted by the save door, both publish doors (#29557)
+ * and the engine's canonicalizer; the read's `_diagnostics` schema half judges
+ * it through the same seam (`storedFlowVerdictBody`), and serves it as stored.
+ * Measured on `origin/main` `0eb97fa4` before the fix: every read below
+ * answered `valid: false` with `unrecognized_keys` on `config.filters`.
+ */
+describe('[#29696] a flow read judges a stored legacy D2 row in its D2-converted spelling', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    /** The legacy fixture with a config key no conversion rewrites and the parse refuses. */
+    const withUndeclaredKey = (name: string, filterKey: 'filters' | 'filter') => {
+        const flow = fetchFlow(name, filterKey);
+        return {
+            ...flow,
+            nodes: flow.nodes.map((n) => (n.id === 'fetch' ? { ...n, config: { ...n.config, not_a_config_key: true } } : n)),
+        };
+    };
+
+    async function seeded(body: { name: string }) {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await seedActive(engine, body);
+        return { engine, rows, protocol };
+    }
+
+    /** The active item read's `_diagnostics` and the config it serves. */
+    async function activeRead(protocol: ObjectStackProtocolImplementation, name: string) {
+        const read: any = await protocol.getMetaItem({ type: 'flow', name, packageId: PKG } as any);
+        return { diagnostics: read.item._diagnostics, config: read.item.nodes[1].config };
+    }
+
+    it('the active item read reads valid: true and serves the stored bytes', async () => {
+        const { protocol } = await seeded(fetchFlow('legacy_fetch', 'filters'));
+
+        const { diagnostics, config } = await activeRead(protocol, 'legacy_fetch');
+
+        expect(diagnostics).toEqual({ valid: true });
+        expect(config).toEqual({ objectName: 'deal', filters: { name: 'Acme' }, outputVariable: 'deal' });
+    });
+
+    it('the list read reads valid: true and serves the stored bytes', async () => {
+        const { protocol } = await seeded(fetchFlow('legacy_fetch', 'filters'));
+
+        const list: any = await protocol.getMetaItems({ type: 'flow', packageId: PKG });
+        const item = (list.items as any[]).find((i) => i.name === 'legacy_fetch');
+
+        expect(item?._diagnostics).toEqual({ valid: true });
+        expect(item.nodes[1].config).toEqual({ objectName: 'deal', filters: { name: 'Acme' }, outputVariable: 'deal' });
+    });
+
+    it('the layered read reads valid: true', async () => {
+        const { engine, protocol } = await seeded(fetchFlow('legacy_fetch', 'filters'));
+        // The layered read asks the registry for the shipped layer; this
+        // double ships none.
+        engine.registry.getItem = () => undefined;
+
+        const layered: any = await protocol.getMetaItemLayered({ type: 'flow', name: 'legacy_fetch', packageId: PKG } as any);
+
+        expect(layered._diagnostics).toEqual({ valid: true });
+    });
+
+    it('the draft read of a re-save of it reads valid: true', async () => {
+        const body = fetchFlow('legacy_fetch', 'filters');
+        const { rows, protocol } = await seeded(body);
+        expect(await stageDraft(protocol, 'flow', body)).toMatchObject({ success: true, state: 'draft' });
+        expect(storedConfig(rows, 'legacy_fetch', 'draft')).toEqual({ objectName: 'deal', filters: { name: 'Acme' }, outputVariable: 'deal' });
+
+        expect(await draftDiagnostics(protocol, 'flow', 'legacy_fetch')).toEqual({ valid: true });
+    });
+
+    it('a row still refused once converted reads valid: false, with the errors its canonical spelling reads', async () => {
+        const canonical = await activeRead((await seeded(withUndeclaredKey('refused_fetch', 'filter'))).protocol, 'refused_fetch');
+        const legacy = await activeRead((await seeded(withUndeclaredKey('refused_fetch', 'filters'))).protocol, 'refused_fetch');
+
+        expect(canonical.diagnostics.valid).toBe(false);
+        expect(JSON.stringify(canonical.diagnostics.errors)).toContain('not_a_config_key');
+        expect(legacy.diagnostics).toEqual(canonical.diagnostics);
+        // Served as stored: the legacy spelling is what the read hands back.
+        expect(legacy.config.filters).toEqual({ name: 'Acme' });
     });
 });

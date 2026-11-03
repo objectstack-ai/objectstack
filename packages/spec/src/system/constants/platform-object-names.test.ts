@@ -15,10 +15,12 @@
 // inverting the spec → * dependency direction.
 //
 // If this fails: you added/removed/moved a platform object. Update
-// PLATFORM_OBJECTS_BY_PACKAGE in ./platform-object-names.ts to match.
+// PLATFORM_OBJECTS_BY_PACKAGE in ./platform-object-names.ts to match. An
+// installable app package (one with an `objectstack.manifest.json` listing at
+// its root) declares its own objects, not platform ones, and is left out.
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -41,6 +43,23 @@ const PACKAGES_DIR = join(REPO_ROOT, 'packages');
  * into a running platform, so neither belongs in the registry.
  */
 const FIXTURE_PACKAGES = new Set(['qa', 'create-objectstack']);
+
+/**
+ * The listing file of an installable app package (`packages/apps/connector-*`):
+ * its presence at the package root marks a package that is published to the
+ * marketplace and INSTALLED into an environment, like any third-party app. Its
+ * objects are the app's own (namespaced `<namespace>_*` by its stack manifest),
+ * never platform-provided, so they are not this registry's to list. The key is
+ * the file, not the `apps/` directory: `packages/apps/{account,setup,studio}`
+ * are platform apps the runtime itself serves, carry no listing, and stay
+ * scanned.
+ */
+const INSTALLABLE_LISTING_FILE = 'objectstack.manifest.json';
+
+/** Whether the package rooted at `packageRoot` is an installable app listing. */
+function isInstallableAppPackage(packageRoot: string): boolean {
+  return existsSync(join(packageRoot, INSTALLABLE_LISTING_FILE));
+}
 
 function walk(dir: string, out: string[] = []): string[] {
   let entries: string[];
@@ -81,26 +100,45 @@ function owningPackage(file: string): string | undefined {
   return parts[srcAt - 1];
 }
 
-function scanDeclaredObjects(): Map<string, Set<string>> {
-  const byPackage = new Map<string, Set<string>>();
+/** `packages/apps/connector-x/src/objects/y.object.ts` → `…/packages/apps/connector-x`. */
+function owningPackageRoot(file: string): string | undefined {
+  const parts = file.slice(PACKAGES_DIR.length + 1).split(/[\\/]/);
+  const srcAt = parts.indexOf('src');
+  if (srcAt < 1) return undefined;
+  return join(PACKAGES_DIR, ...parts.slice(0, srcAt));
+}
+
+interface ObjectScan {
+  /** Platform contributions: owning package → declared object names. */
+  readonly platform: Map<string, Set<string>>;
+  /** Installable app listings, left out of `platform`: owning package → declared object names. */
+  readonly installable: Map<string, Set<string>>;
+}
+
+function scanDeclaredObjects(): ObjectScan {
+  const platform = new Map<string, Set<string>>();
+  const installable = new Map<string, Set<string>>();
   for (const file of walk(PACKAGES_DIR)) {
     const pkg = owningPackage(file);
-    if (!pkg) continue;
+    const root = owningPackageRoot(file);
+    if (!pkg || !root) continue;
     const rel = file.slice(PACKAGES_DIR.length + 1);
     const topLevel = rel.split(/[\\/]/)[0];
     if (FIXTURE_PACKAGES.has(topLevel) || FIXTURE_PACKAGES.has(pkg)) continue;
     const name = declaredObjectName(readFileSync(file, 'utf8'));
     if (!name) continue;
-    if (!byPackage.has(pkg)) byPackage.set(pkg, new Set());
-    byPackage.get(pkg)!.add(name);
+    const into = isInstallableAppPackage(root) ? installable : platform;
+    if (!into.has(pkg)) into.set(pkg, new Set());
+    into.get(pkg)!.add(name);
   }
-  return byPackage;
+  return { platform, installable };
 }
 
 const sorted = (v: Iterable<string>) => [...v].sort();
 
 describe('PLATFORM_PROVIDED_OBJECT_NAMES — conformance with what packages register', () => {
-  const declared = scanDeclaredObjects();
+  const scan = scanDeclaredObjects();
+  const declared = scan.platform;
 
   it('finds the platform object sources (guards against a broken scan)', () => {
     // A silently-empty scan would make every assertion below vacuously pass.
@@ -113,6 +151,32 @@ describe('PLATFORM_PROVIDED_OBJECT_NAMES — conformance with what packages regi
       const registered = PLATFORM_OBJECTS_BY_PACKAGE[pkg];
       expect(registered, `package "${pkg}" declares objects but has no registry group`).toBeDefined();
       expect(sorted(registered ?? []), `registry group "${pkg}" is out of date`).toEqual(sorted(names));
+    }
+  });
+
+  it('leaves installable app listings out of the registry, by their listing file and nothing broader', () => {
+    // The exclusion is keyed on the package's own listing file: an app package
+    // with one is installed like a third-party app; the platform apps beside it
+    // in `packages/apps/` have none and are scanned like any other package.
+    expect(isInstallableAppPackage(join(PACKAGES_DIR, 'apps', 'connector-docusign'))).toBe(true);
+    expect(isInstallableAppPackage(join(PACKAGES_DIR, 'apps', 'connector-stripe'))).toBe(true);
+    for (const platformApp of ['account', 'setup', 'studio']) {
+      expect(isInstallableAppPackage(join(PACKAGES_DIR, 'apps', platformApp)), platformApp).toBe(false);
+    }
+    expect(isInstallableAppPackage(join(PACKAGES_DIR, 'platform-objects'))).toBe(false);
+    // A lit control: the listing that declares an object is seen, and kept out.
+    expect(scan.installable.get('connector-docusign')?.has('docusign_envelope')).toBe(true);
+    expect(declared.has('connector-docusign')).toBe(false);
+    expect(PLATFORM_PROVIDED_OBJECT_NAMES).not.toContain('docusign_envelope');
+  });
+
+  it('an installable app listing declares no object under a reserved platform prefix', () => {
+    // The exclusion above must not become a hiding place: an app that shipped a
+    // `sys_*`-style object would collide with the platform's namespace.
+    for (const [pkg, names] of scan.installable) {
+      for (const name of names) {
+        expect(hasPlatformObjectPrefix(name), `"${name}" in installable app "${pkg}" carries a platform prefix`).toBe(false);
+      }
     }
   });
 

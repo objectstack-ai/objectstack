@@ -26,7 +26,11 @@
  *  - a refusal (the ensure door's, the save door's) is shown as sent;
  *  - walled: Add field draws disabled in the console's sentence, and nothing
  *    is asked or written;
- *  - CONTROL: a writable package's add-field and inspector are unchanged.
+ *  - CONTROL: a writable package's add-field and inspector are unchanged;
+ *  - objectstack#29691: once the base object carries the pair's extension
+ *    (published, or the first add), the object header says where it is saved
+ *    ("Saved to HotCRM’s customizations"); before that, and on a writable
+ *    package, it says nothing of the kind.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -119,6 +123,10 @@ import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface'
 import { t, tFormat } from '../metadata-admin/i18n';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
+// The pinyin dictionary a Chinese label derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690).
+import { loadHanRomanizer } from '../metadata-admin/romanizeHan';
+await loadHanRomanizer();
 
 registerMetadataInspector('object', ObjectFieldInspector);
 
@@ -419,5 +427,64 @@ describe('CONTROL: a writable package’s add-field is unchanged (objectstack#28
     const inspector = await screen.findByTestId('data-field-inspector');
     expect(within(inspector).queryByTestId('field-base-patch-only')).toBeNull();
     expect(within(inspector).getByRole('checkbox', { name: t('designer.field.required', 'en') })).toBeEnabled();
+  });
+});
+
+describe('A Chinese label names a base object\'s extension field by pinyin, suffixed (objectstack#29690)', () => {
+  it('previews kehu_dengji__c and writes the field under exactly that name into the pair', async () => {
+    await renderBase();
+    await openForm();
+    await userEvent.click(await screen.findByTestId('data-form-add-extension-field'));
+    const popover = await screen.findByTestId('add-field-popover');
+    await userEvent.type(within(popover).getByTestId('add-field-label-input'), '客户等级');
+    expect(within(popover).getByTestId('add-field-api-name-preview')).toHaveTextContent('kehu_dengji__c');
+    await userEvent.click(within(popover).getByTestId('add-field-create'));
+    await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
+    expect(extensionSaves()[0][2]).toStrictEqual({
+      extend: OBJECT,
+      fields: { kehu_dengji__c: { type: 'text', label: '客户等级' } },
+    });
+  });
+});
+
+describe('the object header says where a base object’s extension is saved (objectstack#29691)', () => {
+  const SAVED_TO = 'Saved to HotCRM’s customizations';
+  const savedTo = () => within(screen.getByTestId('data-object-header')).queryByTestId('data-object-saved-to');
+
+  it('the first add makes the extension, and the header says it is saved to the base’s customizations', async () => {
+    await renderBase();
+    await openForm();
+    expect(savedTo()).toBeNull();
+    await addFromFormToolbar('Region');
+    await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
+    await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    expect(savedTo()!.closest('[data-slot="item-note"]')).not.toBeNull();
+  });
+
+  it('a base object the pair’s published extension already extends says it on open', async () => {
+    const region = { type: 'text', label: 'Region' };
+    srv.served = { ...baseServed(), fields: { ...baseServed().fields, region__c: region } };
+    srv.publishedExt = { extend: OBJECT, fields: { region__c: region }, _packageId: PAIR };
+    await renderBase();
+    await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+  });
+
+  it('CONTROL: a base object with no extension says nothing of the kind', async () => {
+    await renderBase();
+    await openForm();
+    // The extension has been read: its Add field is offered.
+    await screen.findByTestId('data-form-add-extension-field', undefined, { timeout: 8000 });
+    expect(savedTo()).toBeNull();
+    expect(screen.getByTestId('data-object-header').querySelector('[data-slot="item-note"]')).toBeNull();
+  });
+
+  it('CONTROL: an object of a writable package says nothing of the kind', async () => {
+    render(
+      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+        <DataPillar packageId="com.example.showcase" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
+    expect(savedTo()).toBeNull();
   });
 });
