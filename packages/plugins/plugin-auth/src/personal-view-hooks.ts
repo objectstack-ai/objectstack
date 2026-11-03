@@ -20,11 +20,8 @@
  *
  * **The owner is fixed when the view is saved.** An update that sends a
  * `user_id` other than the stored one is refused `403 PERMISSION_DENIED`, for
- * every caller but the system. The row scope alone does not hold this: for an
- * organization member, `member_default`'s `'*'` update floor
- * (`created_by == current_user.id`) is a held update policy, so the object's
- * declared default does not apply to an update, and the post-image of a
- * re-parent still carries the member's own `created_by`.
+ * every caller but the system. The rule, and why the row scope alone does not
+ * hold it, is `owner-fixed-rule.ts`'s, shared with `sys_user_preference`.
  *
  * Which view opens by default is not this object's: the reader's existing
  * per-object pin holds a view id (seat ruling 6587007982 on #29443).
@@ -37,6 +34,7 @@
 import { ListViewSchema } from '@objectstack/spec/ui';
 import { zodIssuesToFields } from '@objectstack/spec/api';
 import { validationFailure } from '@objectstack/types';
+import { assertOwnerUnchanged } from './owner-fixed-rule.js';
 
 /** The object these hooks guard. */
 export const PERSONAL_VIEW_OBJECT = 'sys_personal_view';
@@ -95,22 +93,8 @@ export function assertPersonalViewConfig(config: unknown, objectName?: unknown):
   );
 }
 
-/** The string form two stored ids are compared by (an echo of the stored owner is no change). */
-function sameId(a: unknown, b: unknown): boolean {
-  const norm = (v: unknown) => (v === undefined || v === null || v === '' ? null : String(v));
-  return norm(a) === norm(b);
-}
-
-/** The refusal for an update that would hand a view to another user: `PERMISSION_DENIED` / `403`. */
-export function ownerChangeError(id: unknown): Error {
-  const err = new Error(
-    `Personal view ${String(id ?? '')} was not changed: a view's owner (user_id) is fixed when the view is saved, `
-      + 'and nobody can hand a view to another user. Save a new view in that user\'s name instead. The view is unchanged.',
-  ) as Error & { code?: string; status?: number };
-  err.code = 'PERMISSION_DENIED';
-  err.status = 403;
-  return err;
-}
+/** How the shared owner rule names this object's rows. */
+const PERSONAL_VIEW_SUBJECT = { label: 'Personal view', noun: 'view' } as const;
 
 const sets = (data: Record<string, unknown> | null | undefined, key: string): boolean =>
   !!data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, key);
@@ -133,14 +117,7 @@ export function registerPersonalViewHooks(engine: any, opts: PersonalViewHooksOp
     // The row as it will be: what the write sends, over what is stored
     // (`ctx.previous`, present on the by-id path and per row on a multi-row update).
     const previous = (ctx.previous ?? undefined) as Record<string, unknown> | undefined;
-    if (
-      ctx?.session?.isSystem !== true
-      && sets(data, 'user_id')
-      && previous
-      && !sameId(data!.user_id, previous.user_id)
-    ) {
-      throw ownerChangeError(previous.id ?? ctx.input?.id);
-    }
+    assertOwnerUnchanged(ctx, PERSONAL_VIEW_SUBJECT);
     const sendsConfig = sets(data, CONFIG_FIELD);
     if (!sendsConfig && !sets(data, 'object_name')) return;
     const config = sendsConfig ? data![CONFIG_FIELD] : previous?.[CONFIG_FIELD];

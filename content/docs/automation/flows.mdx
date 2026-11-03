@@ -2029,6 +2029,7 @@ variables: [
 | `isInput` | `boolean` | Available as input parameter |
 | `isOutput` | `boolean` | Available as output parameter |
 | `defaultValue` | `unknown` | Bound at run start when no parameter supplies one — this is what makes the declaration a guarantee. Optional |
+| `objectName` | `string` | **Planned.** On an input only (refused at parse on any other variable): the input is the id of a record of this object. No start door reads it yet. See [a start input that is a record id](#a-start-input-that-is-a-record-id). Optional |
 
 ### `defaultValue` — declaring a variable is not the same as binding it
 
@@ -2097,6 +2098,56 @@ edges: [
 The value is **not** checked against the declared `type` — `type` is an open
 string, so there is no vocabulary to check against. It behaves like every other
 `defaultValue` on the authoring surface.
+
+### A start input that is a record id
+
+An input may declare that its value is the id of a record of a named object,
+with `objectName` — the word the CRUD nodes use for the object they read:
+
+{/* os:check */}
+```typescript
+import { defineFlow } from '@objectstack/spec/automation';
+
+export const CloseAccount = defineFlow({
+  name: 'close_account',
+  label: 'Close Account',
+  type: 'autolaunched',
+  variables: [
+    { name: 'accountId', type: 'text', isInput: true, objectName: 'crm_account' },
+  ],
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [{ id: 'e1', source: 'start', target: 'end' }],
+});
+```
+
+<Callout type="warn">
+**Planned — no door applies this yet.** The declaration parses, is refused on a
+variable that is not an input, and is linted, but no start door loads a
+declared input today: a start that hands it an id the caller cannot read still
+runs. `os validate` warns on every flow that writes it
+(`liveness-planned-property`). The contract below is what the start doors will
+enforce.
+</Callout>
+
+The contract: every door that starts the flow by name (the trigger route, an
+action of `type: 'flow'` over REST and MCP `run_action`, a declared endpoint of
+`type: 'flow'`) loads a declared input from the named object in the caller's
+own scope before the run exists. An id the caller cannot read there is refused
+`404` `RECORD_NOT_FOUND`; a value that is not an id is refused `400`
+`VALIDATION_FAILED` naming the input. An input without the declaration is
+judged as a record only where the flow's own definition reads it as a record id
+(see the `404` row under [running a flow via the API](#run-a-flow-via-api)).
+
+- **Inputs only.** A variable that is not `isInput: true` receives nothing from
+  a caller, so `objectName` there is refused at parse.
+- **`type` stays the data type.** The variable holds the id the caller sent, so
+  it is `'text'`; `type: 'record'` already means a variable that holds a whole
+  record (a `get_record` node's `outputVariable`), and is not the declaration.
+- **The name is checked.** `os validate` warns when the stack defines no object
+  of that name (`flow-input-unknown-object`); a `sys_` name is not judged.
 
 <Callout type="warn">
 **Reading a variable that might be unbound: only the `vars.`-scoped guard

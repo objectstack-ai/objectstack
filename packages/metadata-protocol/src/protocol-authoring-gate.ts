@@ -50,6 +50,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from './protocol.js';
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
+import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
@@ -544,7 +545,9 @@ export async function draftPublishVerdict(
         type: singular,
         name: draft.name,
         state: 'active',
-        body: draft.body,
+        // [#29557] The body the promotion judges: a flow draft in its
+        // D2-converted spelling, every other draft as stored.
+        body: storedFlowVerdictBody(singular, draft.body),
         packageId: draft.packageId,
         ...(pending !== undefined ? { pending } : {}),
         ...(channel
