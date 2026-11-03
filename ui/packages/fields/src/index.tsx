@@ -2686,9 +2686,16 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
     (field as { reference_field?: string }).reference_field ||
     undefined;
 
+  // A value made only of served names (`referenceNameVisible`, a target the
+  // reader is refused) resolves nothing: each name is drawn as served. So it
+  // asks nothing of the referenced object either, not even its definition.
+  const nameOnlyValue = Array.isArray(value)
+    ? value.length > 0 && value.every(isReferenceNameOnly)
+    : isReferenceNameOnly(value);
+
   // Referenced object's schema (nameField / titleFormat) so expanded records
   // resolve through the same unified resolver as the picker (issue #2357).
-  const refSchema = useRefObjectSchema(referenceTo);
+  const refSchema = useRefObjectSchema(nameOnlyValue ? undefined : referenceTo);
 
   // The permission policy the referenced record is named under: every name
   // below is resolved from the row with the fields it denies on
@@ -2761,6 +2768,11 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
     }
   }
 
+  // A `referenceNameVisible` field's target the reader is refused: the served
+  // name, as text — no link and no hover card, both of which lead to or read
+  // the refused record (director ruling 6574398310, letter B).
+  if (isReferenceNameOnly(value)) return <ReferenceNameOnly name={value.name} />;
+
   // Server-side $expand returns the related record as a nested object
   // (e.g. { id, name }). Render its display name directly — no fetch needed.
   if (!Array.isArray(value) && typeof value === 'object') {
@@ -2821,7 +2833,14 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
   };
 
   if (Array.isArray(value)) {
-    const itemDisplay = (item: unknown): { label: string; unresolved: boolean; restricted: boolean } => {
+    const itemDisplay = (
+      item: unknown,
+    ): { label: string; unresolved: boolean; restricted: boolean; nameOnly: boolean } => {
+      // The served name of an element whose target the reader is refused,
+      // as served — per element, as the server serves it.
+      if (isReferenceNameOnly(item)) {
+        return { label: item.name, unresolved: false, restricted: false, nameOnly: true };
+      }
       if (item != null && typeof item === 'object') {
         return {
           label:
@@ -2829,12 +2848,18 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
             String((item as any).id || (item as any)._id || '[Object]'),
           unresolved: false,
           restricted: false,
+          nameOnly: false,
         };
       }
       const r = resolveLabel(item);
       // A restricted entry's label is the restricted sentence, never its id —
       // the overflow chip's `title` lists labels too.
-      return { label: r.restricted ? restrictedLabel : r.text, unresolved: r.unresolved, restricted: r.restricted };
+      return {
+        label: r.restricted ? restrictedLabel : r.text,
+        unresolved: r.unresolved,
+        restricted: r.restricted,
+        nameOnly: false,
+      };
     };
 
     // Cap the chips the same way UserCellRenderer caps its avatars: a
@@ -2848,7 +2873,18 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
     return (
       <div className="flex flex-wrap gap-1">
         {visible.map((item, idx) => {
-          const { label, unresolved, restricted } = itemDisplay(item);
+          const { label, unresolved, restricted, nameOnly } = itemDisplay(item);
+          if (nameOnly) {
+            // One text chip per refused element: its served name, no link.
+            return (
+              <span
+                key={idx}
+                className="inline-flex min-w-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-700 dark:bg-gray-800/50 dark:text-gray-200"
+              >
+                <ReferenceNameOnly name={label} />
+              </span>
+            );
+          }
           if (restricted) {
             // No link: the reader's read of this record answered "not found".
             return (
@@ -3204,6 +3240,62 @@ function RestrictedLookupReference({ label }: { label: string }): React.ReactEle
 }
 
 /**
+ * The value a `lookup` / `user` field declaring `referenceNameVisible: true`
+ * is served on `$expand` when the reader may read the record carrying it but
+ * is refused the record it points at (director ruling 6574398310, letter B):
+ * the id the row holds, the target's display name, and the refusal said in
+ * the value. The server's own type is `ReferenceNameOnlyValue` in
+ * `@objectstack/objectql` (`engine-reference-name-visible.ts`); it is served
+ * once per element on a `multiple: true` field. `name` is the target's
+ * ADR-0079 display name, or the floor `Record #<id>` when a field-level rule
+ * on the name column holds it back, and is drawn exactly as served.
+ */
+interface ReferenceNameOnlyValue {
+  id: string;
+  name: string;
+  readRefused: true;
+}
+
+/**
+ * Is this one reference value the served name-only form? Judged on the
+ * in-band `readRefused: true` the server writes, never on the shape of the
+ * rest: an expanded record the reader may read can also carry just an id and
+ * a name (a narrow projection), and that one stays a link.
+ */
+function isReferenceNameOnly(value: unknown): value is ReferenceNameOnlyValue {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as { readRefused?: unknown; name?: unknown };
+  return candidate.readRefused === true && typeof candidate.name === 'string';
+}
+
+/**
+ * The name of a referenced record the reader is refused, as plain text.
+ *
+ * ⛔ No link and no hover card: both lead to, or read, a record this reader's
+ * own read is refused, so the link would open a page that answers 404 and the
+ * card would make the read the server just refused. ⛔ No second read to name
+ * it either: the server served the name, under its own field-level rules, and
+ * this draws that text and nothing else. The viewer's policy on the target
+ * object is not applied to it, because that policy is what refused the record
+ * and the server already decided which name the reader may see.
+ *
+ * Distinct from {@link RestrictedLookupReference}: that face is a field
+ * WITHOUT the key, whose reader's own read answered "not found", so there is
+ * no name to show. This one is a field whose author declared the name visible.
+ */
+function ReferenceNameOnly({ name, className }: { name: string; className?: string }): React.ReactElement {
+  return (
+    <span
+      data-slot="reference-name-only"
+      className={cn('inline-flex min-w-0 max-w-full items-center', className)}
+      title={name}
+    >
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
+/**
  * The shipped PRESENTATION of an unresolved reference, shared by the two
  * renderers that state one (objectui#8434 for `user`, objectui#8695 for
  * `lookup` / `master_detail` / `tree`), and published for the host faces of the
@@ -3300,6 +3392,18 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
           if (typeof entry !== 'object' || entry === null) {
             return <UnresolvedUserReference key={idx} value={entry} className="text-sm" />;
           }
+          // A person the reader is refused, named because the field declares
+          // `referenceNameVisible`: one text chip, the name as served.
+          if (isReferenceNameOnly(entry)) {
+            return (
+              <span
+                key={idx}
+                className="inline-flex min-w-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-700 dark:bg-gray-800/50 dark:text-gray-200"
+              >
+                <ReferenceNameOnly name={entry.name} />
+              </span>
+            );
+          }
           // Each person as the viewer may read it (objectui#10535).
           const user = withoutDeniedFields(entry, perms, personObject);
           // An entry carrying nothing names no person (objectui#8596) — the
@@ -3350,6 +3454,12 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   //
   // Judged on the person as the viewer may read it (objectui#10535), as is
   // everything below.
+  //
+  // ...except a person the reader is refused, served by name because the field
+  // declares `referenceNameVisible`: the name as served, as text, with no
+  // avatar. The viewer's `sys_user` policy is what refused the record, so it is
+  // not applied to the one name the server chose to serve.
+  if (isReferenceNameOnly(value)) return <ReferenceNameOnly name={value.name} />;
   const user = withoutDeniedFields(value, perms, personObject);
   if (Object.keys(user).length === 0) {
     return <TruncatedText text={String(coerceToSafeValue(user))} />;
