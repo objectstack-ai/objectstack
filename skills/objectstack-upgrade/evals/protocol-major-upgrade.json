@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "把这个项目升级到 v17。objectstack.config.ts 的 manifest 里写着 engines: { protocol: '^16' }。",
-      "expected_output": "Preflight: `--from 16` read off `manifest.engines.protocol` (the floor of the range, never guessed from the installed spec); keep `os validate > .upgrade/validate-before.txt` as the control. Mechanical: `os migrate meta --from 16 --step`, `--json`, and `--out .upgrade/migrated.stack.json` — the command rewrites nothing on disk, so port the printed `path: from → to (conversionId)` edits into the sources, one `conversionId` per commit, then replay `os migrate meta --from 17 --json` until `applied` is `[]`. Acceptance: `os validate` green, `tsc --noEmit` green, and `.upgrade/REPORT.md` with the mechanical table, decided residue, open decisions and pending per-deployment gates.",
+      "expected_output": "Preflight: `--from 16` read off `manifest.engines.protocol` (the floor of the range, never guessed from the installed spec); keep `os validate > .upgrade/validate-before.txt` as the control. Mechanical: `os migrate meta --from 16 --step`, `--json`, and `--out .upgrade/migrated.stack.json` — the command rewrites nothing on disk, so port the printed `path: from → to (conversionId)` edits into the sources, one `conversionId` per commit, then replay the ported hop, `os migrate meta --from 16 --to 17 --json`, until `applied` is `[]` with no `replayedNothing` (`--from 17` names an empty range and checks nothing). Acceptance: `os validate` green, `tsc --noEmit` green, and `.upgrade/REPORT.md` with the mechanical table, decided residue, open decisions and pending per-deployment gates.",
       "files": [],
       "assertions": {
         "must_contain": ["os migrate meta --from 16", "--out", "tsc --noEmit", "REPORT.md", "applied"],
@@ -34,10 +34,10 @@
     {
       "id": 4,
       "prompt": "We bumped @objectstack/spec 16 → 17 and `os validate` is green, so there was nothing to upgrade, right? Production also has `sys_metadata` rows written under 16.",
-      "expected_output": "No: `validate` green is necessary, not sufficient — migration-chain-only conversions (16 → 17 has `field-required-notnull-explicit`) reject nothing at parse. Replays `os migrate meta --from 17 --json` and reads `applied` (must be `[]`). Stored rows rehydrate through `applyConversionsToStoredItem` only while the installed release carries their conversions (18.3 drops those retired at or below 16.x), so before moving past 18.2 it runs `os migrate meta --stored` (read-only) then `os migrate meta --stored --apply --yes` (`--yes` is mandatory in a non-TTY), and never hand-edits `sys_metadata`. Any per-deployment data-migration gates the run prints go into the report as pending, by name.",
+      "expected_output": "No: `validate` green is necessary, not sufficient — migration-chain-only conversions (16 → 17 has `field-required-notnull-explicit`) reject nothing at parse. Replays the ported hop, `os migrate meta --from 16 --to 17 --json`, and reads `applied` (must be `[]`) with `replayedNothing` absent — `--from 17` alone names an empty range, so its `applied: []` proves nothing. Stored rows rehydrate through `applyConversionsToStoredItem` only while the installed release carries their conversions (18.3 drops those retired at or below 16.x), so before moving past 18.2 it runs `os migrate meta --stored` (read-only) then `os migrate meta --stored --apply --yes` (`--yes` is mandatory in a non-TTY), and never hand-edits `sys_metadata`. Any per-deployment data-migration gates the run prints go into the report as pending, by name.",
       "files": [],
       "assertions": {
-        "must_contain": ["applied", "--stored", "--yes", "field-required-notnull-explicit", "applyConversionsToStoredItem"],
+        "must_contain": ["applied", "replayedNothing", "--stored", "--yes", "field-required-notnull-explicit", "applyConversionsToStoredItem"],
         "must_not_contain": ["UPDATE sys_metadata"]
       }
     },
