@@ -318,7 +318,7 @@ protocol normalizes `$searchFields` onto it, and the object form
 
 Omit it to search the object's declared `searchableFields` (or, with none
 declared, an auto-default: name/title + short-text fields, plus every field
-marked `searchable: true` of any type except `secret` / `password` / `vector`),
+marked `searchable: true` of any type except `secret` / `password` / `vector` or a virtual `formula`),
 resolved server-side. It can only **narrow** that set, never widen it: over the
 REST/protocol ingress a name outside it is `400 INVALID_FIELD`, not a silent
 fall-back to a full scan. `searchable: false`, the default, never removes a

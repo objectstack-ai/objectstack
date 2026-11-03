@@ -185,8 +185,8 @@ export const CaseViews = defineView({
 
 | The object … | The allowed set is |
 |:-------------|:-------------------|
-| declares `searchableFields` | **that list, verbatim** — whatever the field types are |
-| declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select`) + every field marked `searchable: true`, of any type except `secret` / `password` / `vector` |
+| declares `searchableFields` | **that list, verbatim** — any stored field type |
+| declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select`) + every field marked `searchable: true`, of any type except `secret` / `password` / `vector` or a virtual `formula` |
 
 `searchable: false`, the default, removes nothing the type default scans; declare `searchableFields` to choose the set.
 
@@ -205,7 +205,7 @@ the whole search box, for every user and every term: no result at all.
 | key omitted | clean | scans the object's full allowed set |
 | `searchableFields: []` | clean | **identical to omitting it** — empty is *absent*, so it scans MORE than `["subject"]` would |
 | a renamed / mistyped column, or a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
-| a real column outside the allowed set, or a virtual `formula` column (nothing stored to scan) | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
+| a real column outside the allowed set, or a virtual `formula` column | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 
 Both diagnostics are **errors**, not warnings — `os validate` fails the build.
 

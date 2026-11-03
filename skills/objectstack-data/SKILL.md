@@ -115,7 +115,7 @@ Toggle system behaviours per object:
 Leave it unset and search auto-defaults to the `nameField` plus the object's
 short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
 `textarea` / `markdown` / `select`) plus every field marked `searchable: true`,
-of any type except `secret` / `password` / `vector`. `searchable: false`, the
+of any type except `secret` / `password` / `vector` or a virtual `formula`. `searchable: false`, the
 default, never removes a field the type default scans; declare
 `searchableFields` to choose the set. Views may narrow it, never widen it.
 
@@ -139,14 +139,14 @@ declare *that* field searchable. A task list searched by project name:
   fields: {
     name:         { type: 'text', required: true },
     project_id:   { type: 'lookup', reference: 'project' },
-    project_name: { type: 'text', label: 'Project Name' },   // ← the mirror
+    project_name: { type: 'text', label: 'Project Name' },
   },
   searchableFields: ['name', 'project_name'],
 }
 ```
 
 `?search=apollo` expands to `name $contains 'apollo' OR project_name $contains
-'apollo'` — one single-table scan, every driver, no traversal.
+'apollo'` — one single-table scan, every driver.
 
 ❌ **Never mirror onto a `formula` field.** It is *virtual* (no column to scan)
 and CEL reads only this record's own fields, so it cannot hold the related title;
