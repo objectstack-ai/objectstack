@@ -103,7 +103,7 @@ function workspaceSources(): Plugin {
 
 /**
  * The metadata client and the holders list, stubbed where the editor imports
- * them. Every other export of `useMetadata` is the real one.
+ * them. Every other export of either module is the real one.
  */
 function stubs(): Plugin {
   return {
@@ -114,7 +114,7 @@ function stubs(): Plugin {
         const resolved = await this.resolve(id.slice(0, -REAL_SUFFIX.length), importer, { skipSelf: true });
         return resolved?.id ?? null;
       }
-      if (importer === STUB_METADATA) return null;
+      if (importer === STUB_METADATA || importer === STUB_ASSIGNED) return null;
       if (!/(^|\/)(useMetadata|AssignedUsersSection)(\.js|\.tsx?)?$/.test(id)) return null;
       const resolved = await this.resolve(id, importer, { skipSelf: true });
       if (!resolved) return null;
@@ -132,7 +132,10 @@ export function useMetadataTypes() {
   return { loading: false, error: null, entries: [{ type: 'permission', label: 'Permission', allowEnvironmentOverlay: true }] };
 }`;
       }
-      if (id === STUB_ASSIGNED) return 'export function AssignedUsersSection() { return null; }';
+      if (id === STUB_ASSIGNED) {
+        const real = source('packages/app-shell/src/views/metadata-admin/AssignedUsersSection.tsx') + REAL_SUFFIX;
+        return `export * from ${JSON.stringify(real)};\nexport function AssignedUsersSection() { return null; }`;
+      }
       return null;
     },
   };
