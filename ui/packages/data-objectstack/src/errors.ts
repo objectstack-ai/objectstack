@@ -121,6 +121,16 @@ export class BulkOperationError extends ObjectStackError {
 
 /**
  * Error thrown when connection to ObjectStack server fails
+ *
+ * `statusCode` is the server's answer and nothing else: a 503 / 504 the server
+ * sent (`createErrorFromResponse`), or the status a refused discovery read
+ * came back with (`connect()`). Built without one, the error stands for a
+ * request nothing answered (the host unreachable, `fetch` rejected), and
+ * `statusCode` stays undefined rather than an invented 503: a reader that sees
+ * a numeric status takes it for the server's answer (`answeredLoadFailure`)
+ * and would show "Failed to fetch" as the server's own words
+ * (objectstack#29916, the same rule objectstack#29885 set for
+ * `createErrorFromResponse`).
  */
 export class ConnectionError extends ObjectStackError {
   constructor(
@@ -132,7 +142,7 @@ export class ConnectionError extends ObjectStackError {
     super(
       `Connection error: ${message}`,
       'CONNECTION_ERROR',
-      statusCode || 503,
+      statusCode,
       { url, ...details }
     );
     this.name = 'ConnectionError';
