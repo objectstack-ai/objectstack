@@ -1514,6 +1514,7 @@ One changed key path of the pending draft, and the last write that changed it.
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name (e.g., "object", "plugin") |
 | **packageId** | `string` | optional | Optional package ID to filter items by |
+| **names** | `string[]` | optional | [PLANNED — not yet served] Item names to narrow the list to: only the named items of the type are answered, among those the list would answer without it. Sent over HTTP as one comma-separated value (`?names=a,b,c`). A name that matches no item is simply absent from the answer (no 404). An empty value is refused with 400 rather than read as every item; leave the key out to list every item. No list door reads it yet: until one does, a request carrying it is answered as if it were absent. |
 | **previewDrafts** | `boolean` | optional | Draft-visibility switch (ADR-0033 draft-overlay preview): when true, pending `state='draft'` rows are overlaid on the active list — draft wins on name collision, draft-only items appear, and each overlaid item is tagged `_draft: true` so UIs can badge the preview. Absent/false = published world only. Declaration ≠ authorization: this member only switches which rows are read, and ADR-0106 masking is unaffected — callers without draft-preview authorization are refused upstream (admin-gated), not by this schema. |
 
 

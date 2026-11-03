@@ -835,6 +835,7 @@
     "api/GetMetaItemResponse:sortability",
     "api/GetMetaItemResponse:type",
     "api/GetMetaItemResponse:version",
+    "api/GetMetaItemsRequest:names",
     "api/GetMetaItemsRequest:packageId",
     "api/GetMetaItemsRequest:previewDrafts",
     "api/GetMetaItemsRequest:type",
