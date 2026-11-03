@@ -50,7 +50,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
 import type { ViewFilterElement } from '@objectstack/spec/ui';
-import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard } from '@object-ui/fields';
+import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard, formatCurrency } from '@object-ui/fields';
 import {
   buildExpandFields,
   collectPredicateFieldRefs,
@@ -85,9 +85,9 @@ import {
   type ActionResult,
   type FilterNode,
 } from '@object-ui/core';
-import { useSafeFieldLabel } from '@object-ui/react';
+import { useSafeFieldLabel, useRecordContext } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
-import { useDisplayLocale } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization, resolveFieldCurrency } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
 import {
@@ -691,46 +691,110 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
  * seam itself — `@object-ui/core`'s `parent-scope` — so one place answers it.
  */
 
-/** Field types a body table totals (objectstack#27055, Target 8). */
-const TOTALLED_FIELD_TYPES = new Set(['currency', 'number', 'integer', 'decimal']);
+/**
+ * The number types a body table totals ONLY when a roll-up declares the column
+ * additive (objectstack#29943). A `number` / `integer` / `decimal` is as often
+ * an ordinal (a version number, an instalment number) as a quantity, and the
+ * type alone cannot tell them apart: objectstack#27055 Target 8 summed both,
+ * which printed 「版本号 10」 under versions v1–v4.
+ */
+const ROLLED_UP_FIELD_TYPES = new Set(['number', 'integer', 'decimal']);
 
 /**
- * The totals line of a body table: the sum of each numeric column over the
- * rows on show (the page), labelled as the page's — never as the whole
- * list's, which a windowed list does not hold. Currency sums keep the field's
- * declared currency. Nothing is drawn without a numeric column.
+ * The child fields the record's own object rolls up with `sum`: a `summary`
+ * field on the parent whose `summaryOperations` sums `field` of this child
+ * `object` is the author's own declaration that the column adds up. Read off
+ * the parent schema the record page already holds (`useRecordContext`), in
+ * either container shape the metadata API serves. The roll-up's
+ * `relationshipField` is not compared: which foreign key a sum runs through
+ * does not change whether the child column is additive.
  */
-const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefined; objectSchema: any }> = ({
+function rolledUpSumFields(parentFields: unknown, childObject: string | undefined): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (!childObject || !parentFields || typeof parentFields !== 'object') return out;
+  const defs: unknown[] = Array.isArray(parentFields) ? parentFields : Object.values(parentFields as Record<string, unknown>);
+  for (const def of defs) {
+    const d = def as { type?: unknown; summaryOperations?: { object?: unknown; field?: unknown; function?: unknown } } | null;
+    const ops = d?.type === 'summary' ? d.summaryOperations : undefined;
+    if (ops?.function === 'sum' && ops.object === childObject && typeof ops.field === 'string' && ops.field !== '') {
+      out.add(ops.field);
+    }
+  }
+  return out;
+}
+
+/**
+ * The one currency a currency column's counted rows are in, or `undefined`
+ * when any row's currency is unknown or two rows disagree: each row resolves
+ * through `resolveFieldCurrency`, the cell's own reader (a `fixed` code, the
+ * tenant default for `dynamic`, the row's sibling code field for `record`).
+ * A sum across currencies, or in a currency nobody named, is not a total.
+ */
+function agreedRowCurrency(def: any, rows: readonly any[], tenantCurrency: string | undefined): string | undefined {
+  let agreed: string | undefined;
+  for (const row of rows) {
+    const code = resolveFieldCurrency(def, tenantCurrency, row);
+    if (!code) return undefined;
+    if (agreed === undefined) agreed = code;
+    else if (agreed.toUpperCase() !== code.toUpperCase()) return undefined;
+  }
+  return agreed;
+}
+
+/**
+ * The totals line of a body table: the sum of each additive column over the
+ * rows on show (the page), labelled as the page's — never as the whole
+ * list's, which a windowed list does not hold. Which columns are additive
+ * (objectstack#29943):
+ *
+ *  1. a `currency` column — amounts add up by type — totalled only when every
+ *     counted row is in one known currency, and formatted in it;
+ *  2. a `number` / `integer` / `decimal` column only when the record's object
+ *     rolls it up with `sum` (`rolledUpSumFields`);
+ *  3. nothing else. A line with nothing to total is not drawn.
+ */
+const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefined; objectSchema: any; childObject: string | undefined }> = ({
   rows,
   columns,
   objectSchema,
+  childObject,
 }) => {
   const { t } = useDetailTranslation();
   // The totals format in the reader's display locale, never the machine's.
   const displayLocale = useDisplayLocale();
+  // The tenant default currency (ADR-0053) a `dynamic` amount displays in.
+  const { currency: tenantCurrency } = useLocalization();
+  // The record page's own object: the parent whose roll-ups name this child.
+  const parentSchema = useRecordContext()?.objectSchema as { fields?: unknown } | undefined;
+  const rolledUp = rolledUpSumFields(parentSchema?.fields, childObject);
   const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
   const totals: Array<{ key: string; label: string; text: string }> = [];
   for (const col of columns ?? []) {
     const key = col?.accessorKey || columnIdentity(col);
     const def = key ? fields[key] : undefined;
-    if (!key || !def || !TOTALLED_FIELD_TYPES.has(def.type)) continue;
+    if (!key || !def) continue;
+    const isCurrency = def.type === 'currency';
+    if (!isCurrency && !(ROLLED_UP_FIELD_TYPES.has(def.type) && rolledUp.has(key))) continue;
     let sum = 0;
-    let counted = 0;
+    const counted: any[] = [];
     for (const row of rows) {
       const n = typeof row?.[key] === 'number' ? row[key] : Number(row?.[key]);
       if (row?.[key] === null || row?.[key] === undefined || row?.[key] === '' || !Number.isFinite(n)) continue;
       sum += n;
-      counted += 1;
+      counted.push(row);
     }
-    if (counted === 0) continue;
-    const currency = def.type === 'currency' ? def.currencyConfig?.defaultCurrency ?? def.currency : undefined;
+    if (counted.length === 0) continue;
     let text: string;
-    try {
-      text = currency
-        ? new Intl.NumberFormat(displayLocale, { style: 'currency', currency }).format(sum)
-        : new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum);
-    } catch {
-      text = String(sum);
+    if (isCurrency) {
+      const currency = agreedRowCurrency(def, counted, tenantCurrency);
+      if (!currency) continue;
+      text = formatCurrency(sum, currency, displayLocale);
+    } else {
+      try {
+        text = new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum);
+      } catch {
+        text = String(sum);
+      }
     }
     totals.push({ key, label: col.header || col.label || def.label || key, text });
   }
@@ -3466,7 +3530,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 </Button>
               </div>
             )}
-            {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} />}
+            {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} childObject={api || objectName} />}
           </>
         )}
         {trailingDialogs}
@@ -3705,7 +3769,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             truncation condition: the full list page is worth opening even when
             every row fits here (sort, filter, export, a shareable URL). An
             empty list has nothing to see in full. */}
-        {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} />}
+        {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} childObject={api || objectName} />}
 
         {onViewAll && !isEmpty && !bodyTable && (
           <div className="mt-3 pt-3 border-t flex justify-center">
