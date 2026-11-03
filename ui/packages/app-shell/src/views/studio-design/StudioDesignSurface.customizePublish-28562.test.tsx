@@ -32,6 +32,7 @@
  *    sentence (the REAL `SavedToCustomizationNote`; the stubbed panel draws
  *    its line with the REAL `savedToCustomizationText` from the label the
  *    host hands it, so the two lines read the same), and nothing before.
+ *    Both come from `preview/savedToCustomization`, which no stub replaces.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -40,6 +41,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { savedToCustomizationText } from '../../preview/savedToCustomization';
 
 const BASE = 'com.example.hotcrm';
 const PAIR = 'com.example.hotcrm.custom';
@@ -84,16 +86,14 @@ vi.mock('sonner', () => ({
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
-vi.mock('../../preview/DraftChangesPanel', async (importOriginal) => {
-  const real = await importOriginal<typeof import('../../preview/DraftChangesPanel')>();
-  // objectstack#29691 — the sheet's "saved to" line, in the sheet's own words.
-  function SheetSavedTo({ baseLabel }: { baseLabel: string }) {
-    const { t } = useObjectTranslation();
-    return <p data-testid="sheet-saved-to">{real.savedToCustomizationText(t, baseLabel)}</p>;
-  }
-  return {
-    ...real,
-    DraftChangesPanel: ({
+/** objectstack#29691 — the sheet's "saved to" line, in the sheet's own words. */
+function SheetSavedTo({ baseLabel }: { baseLabel: string }) {
+  const { t } = useObjectTranslation();
+  return <p data-testid="sheet-saved-to">{savedToCustomizationText(t, baseLabel)}</p>;
+}
+
+vi.mock('../../preview/DraftChangesPanel', () => ({
+  DraftChangesPanel: ({
     packageId,
     onPublish,
     customizationOf,
@@ -111,8 +111,7 @@ vi.mock('../../preview/DraftChangesPanel', async (importOriginal) => {
       )}
     </div>
   ),
-  };
-});
+}));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';

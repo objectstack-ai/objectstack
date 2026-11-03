@@ -437,11 +437,11 @@ import {
 } from './StudioCustomizeControls.js';
 import {
   DraftChangesPanel,
-  SavedToCustomizationNote,
   type DraftChangeEntry,
   type DraftChangesPosture,
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
+import { SavedToCustomizationNote } from '../../preview/savedToCustomization.js';
 import { toast } from 'sonner';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */

@@ -82,6 +82,7 @@ import { readDraftChanges, type DraftChange, type MetadataClient } from '@object
 // spec-named local declaration is what `scripts/check-spec-symbol-derivation.mjs`
 // refuses, and a faithful copy is exactly the fork that guard exists to prevent.
 import { fetchPendingDrafts } from './usePendingDrafts.js';
+import { savedToCustomizationText } from './savedToCustomization.js';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, OverrideDeclarationFields, stripReadDecorations } from '@objectstack/spec/kernel';
@@ -1384,27 +1385,11 @@ export interface DraftChangesPanelProps {
 export type DraftChangesPosture = 'review' | 'confirm';
 
 /**
- * objectstack ADR-0146 D3 — the one sentence that names where a customization
- * of a read-only base is saved: "Saved to BASE's customizations". The
- * pending-changes sheet draws it, and the item header reuses it, so both say
- * the same words.
+ * objectstack ADR-0146 D3 — the "Saved to BASE's customizations" sentence,
+ * from its own module so the item header can say it without this sheet's
+ * module (objectstack#29691). Re-exported here, where #29723 published it.
  */
-export function savedToCustomizationText(t: Translate, baseLabel: string): string {
-  return t('preview.changes.savedToCustomization', {
-    package: baseLabel,
-    defaultValue: 'Saved to {{package}}’s customizations',
-  });
-}
-
-/**
- * objectstack#29691 — {@link savedToCustomizationText} as an element, for the
- * Studio item header's note line, so the header reads the sheet's own words
- * without a key of its own.
- */
-export function SavedToCustomizationNote({ baseLabel, testId }: { baseLabel: string; testId?: string }) {
-  const { t } = useObjectTranslation();
-  return <span data-testid={testId}>{savedToCustomizationText(t, baseLabel)}</span>;
-}
+export { savedToCustomizationText };
 
 export function DraftChangesPanel({
   open,
