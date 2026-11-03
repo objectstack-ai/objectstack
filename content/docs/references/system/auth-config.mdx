@@ -1,7 +1,7 @@
 ---
 title: Auth Config schema — System Protocol reference
 navTitle: Auth Config
-description: "Auth Config schemas of the ObjectStack System Protocol: AdvancedAuthConfig and 10 more — each property with its type, default and a TypeScript example."
+description: "Auth Config schemas of the ObjectStack System Protocol: AdvancedAuthConfig and 11 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Auth Config schemas of the ObjectStack System Protocol: AdvancedAu
 ## TypeScript Usage
 
 ```typescript
-import { AdvancedAuthConfigSchema, AudienceConfigSchema, AuthConfigSchema, AuthPluginConfigSchema, AuthProviderConfigSchema, EmailAndPasswordConfigSchema, EmailVerificationConfigSchema, MutualTLSConfigSchema, OidcProviderConfigSchema, OidcProvidersConfigSchema, SocialProviderConfigSchema } from '@objectstack/spec/system';
-import type { AdvancedAuthConfig, AudienceConfig, AuthConfig, AuthPluginConfig, AuthProviderConfig, EmailAndPasswordConfig, EmailVerificationConfig, MutualTLSConfig, OidcProviderConfig, OidcProvidersConfig, SocialProviderConfig } from '@objectstack/spec/system';
+import { AdvancedAuthConfigSchema, AudienceConfigSchema, AuthConfigSchema, AuthPluginConfigSchema, AuthProviderConfigSchema, EmailAndPasswordConfigSchema, EmailVerificationConfigSchema, MutualTLSConfigSchema, OidcProviderConfigSchema, OidcProvidersConfigSchema, SocialProviderConfigSchema, TrustedAppSchemeSchema } from '@objectstack/spec/system';
+import type { AdvancedAuthConfig, AudienceConfig, AuthConfig, AuthPluginConfig, AuthProviderConfig, EmailAndPasswordConfig, EmailVerificationConfig, MutualTLSConfig, OidcProviderConfig, OidcProvidersConfig, SocialProviderConfig, TrustedAppScheme } from '@objectstack/spec/system';
 
 // Validate data
 const result = AdvancedAuthConfigSchema.parse(data);
@@ -73,6 +73,7 @@ Advanced / low-level Better-Auth options
 | **plugins** | `{ organization?: boolean; twoFactor?: boolean; passkeys?: boolean; passwordRejectBreached?: boolean; … }` | optional |  |
 | **session** | `{ expiresIn?: number; updateAge?: number }` | optional |  |
 | **trustedOrigins** | `string[]` | optional | Trusted origins for CSRF protection. Supports wildcards (e.g. "https://*.example.com"). The baseUrl origin is always trusted implicitly. |
+| **trustedAppSchemes** | `string[]` | optional | Native-app URI schemes the mobile sign-in hand-off may redirect a one-time token to (e.g. ["com.example.app"]). A hand-off to any other scheme is refused with 400 VALIDATION_ERROR and no redirect; absent or empty means the hand-off is not offered |
 | **socialProviders** | `Record<string, { clientId: string; clientSecret: string; enabled?: boolean; scope?: string[] } & Record<string, any>>` | optional | Social/OAuth provider map forwarded to better-auth socialProviders. Keys are provider ids (google, github, apple, …). |
 | **oidcProviders** | `{ providerId: string; name?: string; discoveryUrl?: string; issuer?: string; … }[]` | optional | List of OIDC/OAuth2 providers for enterprise SSO. Product or enterprise packages can pass this directly or contribute it through auth:configure. |
 | **emailAndPassword** | `{ enabled?: boolean; disableSignUp?: boolean; requireEmailVerification?: boolean; minPasswordLength?: number; … }` | optional | Email and password authentication options forwarded to better-auth |
@@ -335,6 +336,15 @@ List of OIDC/OAuth2 providers for enterprise SSO. Product or enterprise packages
 Social/OAuth provider map forwarded to better-auth socialProviders. Keys are provider ids (google, github, apple, …).
 
 **Type:** `Record<string, { clientId: string; clientSecret: string; enabled?: boolean; scope?: string[] } & Record<string, any>>`
+
+
+---
+
+## TrustedAppScheme
+
+A registered native-app URI scheme: lowercase, reverse-domain (two or more non-empty labels joined by single dots, the first starting with a letter), written bare (e.g. com.example.app)
+
+**Type:** `string`
 
 
 ---

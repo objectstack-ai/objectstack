@@ -68,7 +68,7 @@ import {
   type WidgetLabelling,
   type WidgetRenderer,
 } from './widgets.js';
-import { useMetadataLocale, t, tFormat, translateSchemaIssue, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp } from './i18n.js';
+import { useMetadataLocale, t, tFormat, translateSchemaIssue, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp, type SupportedLocale } from './i18n.js';
 import type { SchemaIssueDetail } from './i18n.js';
 import { prettifyFieldName as prettify, untranslatedFieldLabel } from './field-source-label.js';
 
@@ -2113,6 +2113,23 @@ function FieldRow({
   );
 }
 
+/**
+ * The value of the "— None —" item an optional enum select leads with. Radix
+ * `Select.Item` refuses an empty-string value (it reserves `''` for the
+ * placeholder state), so the item carries this sentinel and `onValueChange`
+ * maps it back to `undefined` — never written to the draft.
+ */
+const ENUM_UNSET_ITEM = '__schema_form_enum_unset__';
+
+/** The "— None —" item: `engine.form.none`, the word the metadata-admin pickers use. */
+function EnumUnsetItem({ locale }: { locale: SupportedLocale | string }) {
+  return (
+    <SelectItem value={ENUM_UNSET_ITEM}>
+      <span className="text-muted-foreground">{t('engine.form.none', locale)}</span>
+    </SelectItem>
+  );
+}
+
 function FieldControl({
   id,
   ariaLabelledBy,
@@ -2127,6 +2144,7 @@ function FieldControl({
   fieldSpec,
   widgetContext,
   formData,
+  listElement,
 }: {
   /**
    * The host field id. From `FieldRow` it is present only on the
@@ -2180,6 +2198,13 @@ function FieldControl({
   fieldSpec?: FormFieldSpec;
   widgetContext?: WidgetContext;
   formData?: Record<string, unknown>;
+  /**
+   * This control renders ONE ELEMENT of a scalar list (a repeater whose rows
+   * are scalars), not the value of an object key. An element has no "absent"
+   * state — it is removed with its own row button — so an enum element offers
+   * no "— None —" item even though it carries no required marker.
+   */
+  listElement?: boolean;
 }) {
   const locale = useMetadataLocale();
   // The host shell's predicate scope (`ExpressionProvider` → `usePredicateScope`).
@@ -2196,6 +2221,14 @@ function FieldControl({
   const face = resolveFieldFace({ fieldSpec, widget, schema, value });
   // `undefined` when optional, so the attribute is omitted rather than "false".
   const ariaRequired = required ? true : undefined;
+  // An OPTIONAL key's enum select can be returned to "declares nothing": its
+  // first item writes the key as ABSENT through this form's clear convention,
+  // `onChange(undefined)` (`setField` deletes the key; a repeater row keeps an
+  // `undefined` that serialisation drops). Without it, once an author picked a
+  // value the form had no way back — on a `user` field's `deleteBehavior`,
+  // "declares nothing" is its own enforced outcome, not a cosmetic blank.
+  // A required key, and a scalar list element, have no absent state to offer.
+  const offerUnset = !required && !listElement;
 
   // Composite/repeater are first-class structured types — render natively
   // with recursive FieldRow calls so all UI features (widgets, options,
@@ -2391,13 +2424,14 @@ function FieldControl({
     return (
       <Select
         value={value == null ? '' : String(value)}
-        onValueChange={(v) => onChange(v)}
+        onValueChange={(v) => onChange(v === ENUM_UNSET_ITEM ? undefined : v)}
         disabled={readOnly}
       >
         <SelectTrigger id={id} aria-labelledby={ariaLabelledBy} aria-required={ariaRequired}>
           <SelectValue placeholder={t('engine.form.selectEllipsis', locale)} />
         </SelectTrigger>
         <SelectContent>
+          {offerUnset && <EnumUnsetItem locale={locale} />}
           {visibleOptions(options, buildPredicateCtx(formData, hostScope)).map((opt) => (
             <SelectItem key={opt.value} value={opt.value}>
               {opt.label}
@@ -2419,13 +2453,14 @@ function FieldControl({
     return (
       <Select
         value={value == null ? '' : String(value)}
-        onValueChange={(v) => onChange(v)}
+        onValueChange={(v) => onChange(v === ENUM_UNSET_ITEM ? undefined : v)}
         disabled={readOnly}
       >
         <SelectTrigger id={id} aria-labelledby={ariaLabelledBy} aria-required={ariaRequired}>
           <SelectValue placeholder={t('engine.form.selectEllipsis', locale)} />
         </SelectTrigger>
         <SelectContent>
+          {offerUnset && <EnumUnsetItem locale={locale} />}
           {enumValues.map((opt) => (
             <SelectItem key={String(opt)} value={String(opt)}>
               {translateEnumOption(fieldName ?? '', String(opt), locale)}
@@ -2844,6 +2879,7 @@ function RepeaterField({
                   value={row}
                   readOnly={readOnly}
                   widgetContext={widgetContext}
+                  listElement
                   onChange={(v) => replace(idx, v)}
                 />
               </div>

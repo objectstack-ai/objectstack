@@ -1,12 +1,12 @@
 /**
- * EnvironmentEntitlementDialog — a friendly upgrade / limit dialog shown instead
- * of a raw red error toast when an environment-create is gated by plan or
- * capacity (DEV_ENV_PLAN_LOCKED / DEV_ENV_LIMIT / PRODUCTION_ENV_LIMIT).
+ * EnvironmentEntitlementDialog — a friendly limit dialog shown instead of a raw
+ * red error toast when an environment-create is refused because the org
+ * already owns its one production environment (PRODUCTION_ENV_LIMIT).
  *
  * Driven by a single {@link EntitlementDialogSpec}, opened from one place: the
  * action runtime's apiHandler, when the create POST comes back with an
- * entitlement 403. The env-list toolbar opens no dialog: its plan-locked state
- * draws a locked mark that links to the upgrade page instead (objectui#12190).
+ * entitlement 403. The env-list toolbar opens no dialog: once the production
+ * environment exists it draws no create affordance at all.
  *
  * The CTA renders as an anchor (not an SPA navigation) so a control-plane URL
  * lands on the control plane's own page regardless of the console's router.

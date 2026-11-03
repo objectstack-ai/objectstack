@@ -20,6 +20,8 @@
  *    the base export's answer is the export's own and not an unpublished
  *    override.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import '../lint-root-preload.testkit.js';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

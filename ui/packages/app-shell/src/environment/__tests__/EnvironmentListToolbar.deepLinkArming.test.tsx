@@ -243,29 +243,17 @@ describe('EnvironmentListToolbar — the non-arming affordances read the same li
     expect(screen.queryByTestId('environment-create-cta-loading')).toBeNull();
   });
 
-  it('the locked mark stands in for the create action, so a gated-out create shows none', () => {
-    // `environment-development-locked` is the plan-locked org's stand-in for
-    // the create action (objectui#12190). With no create action on the bar
-    // there is nothing for it to stand in for.
+  it('production env exists: the gated create action and the open one both draw nothing', () => {
+    // Once the org owns its one environment, no state draws a stand-in for the
+    // create action (the retired plan-locked development mark included),
+    // whether or not the caller holds the capability.
     const gatedCreate = { ...CREATE, requiredPermissions: ['manage_environments'] };
-    mountStack({
-      actions: [REFRESH, gatedCreate],
-      entitlements: st({ canCreateDevelopmentEnv: false, plan: 'free' }),
-      held: ['view_environments'],
-    });
-
-    expect(screen.getByText('Refresh')).toBeTruthy();
-    expect(screen.queryByTestId('environment-development-locked')).toBeNull();
-  });
-
-  it('…and still shows it when the caller holds the capability', () => {
-    const gatedCreate = { ...CREATE, requiredPermissions: ['manage_environments'] };
-    mountStack({
-      actions: [REFRESH, gatedCreate],
-      entitlements: st({ canCreateDevelopmentEnv: false, plan: 'free' }),
-      held: ['manage_environments'],
-    });
-
-    expect(screen.getByTestId('environment-development-locked')).toBeTruthy();
+    for (const held of [['view_environments'], ['manage_environments']]) {
+      const { unmount } = mountStack({ actions: [REFRESH, gatedCreate], entitlements: st({}), held });
+      expect(screen.getByText('Refresh')).toBeTruthy();
+      expect(screen.queryByText('Create Environment')).toBeNull();
+      expect(screen.queryByTestId('environment-development-locked')).toBeNull();
+      unmount();
+    }
   });
 });

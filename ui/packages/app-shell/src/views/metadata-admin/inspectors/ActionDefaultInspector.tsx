@@ -58,6 +58,7 @@ import {
 import { usePermissions } from '@object-ui/permissions';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
+import { fallbackFormPatch } from './fallbackFormPatch.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 import {
   InspectorShell,
@@ -1270,7 +1271,7 @@ export function ActionDefaultInspector({
             value={draft}
             hiddenFields={[...CURATED_FIELDS, ...RETIRED_FIELDS]}
             readOnly={readOnly}
-            onChange={(next) => onPatch(next)}
+            onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         </div>
       )}

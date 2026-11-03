@@ -104,6 +104,8 @@ const FAMILY: Record<string, string[]> = {
   'migrate blank-single-values': [],
   // Same shape as `blank-single-values`: a read-only boot, no row written.
   'migrate option-codes': [],
+  // Same shape as `option-codes`: a read-only boot, no row written.
+  'migrate text-scalars': [],
   // [ADR-0139 E7] The same shape: a dry run by default, reading `sys_comment`
   // and writing nothing, its backfill logging through a sink `--json` points at
   // stderr.
