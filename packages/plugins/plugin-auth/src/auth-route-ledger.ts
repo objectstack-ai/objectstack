@@ -283,6 +283,13 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   { route: 'POST /api/v1/auth/organization/update', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.update', requires: 'organization' },
   { route: 'POST /api/v1/auth/organization/update-member-role', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.updateMemberRole', requires: 'organization' },
   { route: 'POST /api/v1/auth/organization/update-team', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.teams.update', requires: 'organization' },
+  // The mobile sign-in hand-off (maintainer ruling, option B): better-auth's
+  // `one-time-token` plugin, mounted only when `trustedAppSchemes` registers
+  // an app scheme, plus the ObjectStack hand-off that is its only minter.
+  // `one-time-token-handoff.ts` carries the interception argument.
+  { route: 'GET /api/v1/auth/one-time-token/generate', family: 'one-time-token', source: 'better-auth', disposition: 'server-only', requires: 'oneTimeToken', note: 'published by the catch-all and refused to every client request (disableClientRequest: 400 with a session, 401 without); the only caller is the in-process hand-off, which binds the token it mints to the app shell\'s PKCE challenge' },
+  { route: 'POST /api/v1/auth/one-time-token/verify', family: 'one-time-token', source: 'better-auth', disposition: 'public', requires: 'oneTimeToken', note: 'no SDK method builds this URL — the mobile app shell (or the Console in its WebView) redeems a hand-off token here with no session: body { token: "T.code_verifier" }, answering the vendor { session, user } plus the session cookie, once, within one minute; a token without the verifier whose challenge started the hand-off (an intercepted callback) answers the vendor 400 and consumes nothing' },
+  { route: 'GET /api/v1/auth/one-time-token/handoff', family: 'one-time-token', source: 'objectstack', disposition: 'server-only', requires: 'oneTimeToken', note: 'no SDK method builds this URL — the mobile app shell opens it in the system browser after a sign-in there; session required. Closed query set { redirect_uri, code_challenge, code_challenge_method }: answers 302 to a redirect_uri whose scheme trustedAppSchemes registers, with a single-use one-minute token bound to the S256 code_challenge; an unregistered scheme answers 400 with no redirect. The mount is unconditional; with no registered scheme every target is refused' },
   { route: 'POST /api/v1/auth/two-factor/disable', family: 'two-factor', source: 'better-auth', disposition: 'sdk', client: 'auth.twoFactor.disable', requires: 'twoFactor' },
   { route: 'POST /api/v1/auth/two-factor/enable', family: 'two-factor', source: 'better-auth', disposition: 'sdk', client: 'auth.twoFactor.enable', requires: 'twoFactor' },
   { route: 'POST /api/v1/auth/two-factor/generate-backup-codes', family: 'two-factor', source: 'better-auth', disposition: 'sdk', client: 'auth.twoFactor.generateBackupCodes', requires: 'twoFactor' },
@@ -344,6 +351,7 @@ export const BETTER_AUTH_MOUNTED_SURFACE: readonly string[] = [
   'GET /api/v1/auth/oauth2/public-client',
   'GET /api/v1/auth/oauth2/userinfo',
   'GET /api/v1/auth/ok',
+  'GET /api/v1/auth/one-time-token/generate',
   'GET /api/v1/auth/organization/get-active-member',
   'GET /api/v1/auth/organization/get-active-member-role',
   'GET /api/v1/auth/organization/get-full-organization',
@@ -389,6 +397,7 @@ export const BETTER_AUTH_MOUNTED_SURFACE: readonly string[] = [
   'POST /api/v1/auth/get-session',
   'POST /api/v1/auth/link-social',
   'POST /api/v1/auth/oauth2/authorize',
+  'POST /api/v1/auth/one-time-token/verify',
   // `private_key_jwt` client key rotation. Added to `@better-auth/oauth-provider`
   // after 1.7.3 and published here since the 1.7.12 lift (#25096). The handler
   // refuses before it reads anything unless the plugin is given

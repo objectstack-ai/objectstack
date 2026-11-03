@@ -20,7 +20,10 @@
  *  - an edit to a base object's grant saves the copy's draft at the pair,
  *    keeping every grant it holds; no write names the base;
  *  - CONTROL: the base's own (read-only) set lists the base's objects and
- *    reads no pair list for them.
+ *    reads no pair list for them;
+ *  - objectstack#29809: the header's provenance chip follows the rail's mark,
+ *    Custom for a set the pair holds (copied or created there), Package for
+ *    the base's own set.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -271,5 +274,50 @@ describe('CONTROL: the base’s own set (objectstack#29674)', () => {
     await waitFor(() => expect(header()).toHaveTextContent(countsText(8, 3)));
     expect(objectListReads().filter((p) => p === PAIR)).toEqual([]);
     expect(header()).not.toHaveTextContent(tFormat('engine.studio.access.bannerPair', 'en', { package: 'Showcase' }));
+  });
+});
+
+/**
+ * objectstack#29809 (ADR-0146 D3) — the header's provenance chip and the rail
+ * row's customization mark tell one story: a set the pair holds reads Custom
+ * beside the rail's Added, and the base's own set still reads Package with no
+ * mark. Same harness: the real surface, pillar and page.
+ */
+describe('the header’s provenance chip follows the rail’s mark (objectstack#29809)', () => {
+  /** A set created in the pair: its draft, never published, listed from the pair’s drafts. */
+  const CREATED = 'pair_auditor';
+  const accessRail = () => screen.getByTestId('studio-rail-access');
+  /** The rail row holding `text`, and the kind of mark it carries (`null`: none). */
+  const railMarkOf = (text: string) =>
+    within(accessRail())
+      .getByText(text)
+      .closest('button')
+      ?.querySelector('[data-testid="customization-mark"]')
+      ?.getAttribute('data-kind') ?? null;
+  const chip = () => within(header()).getByTestId('perm-provenance-badge');
+
+  it('a New similar copy in the pair: Custom in the header, Added in the rail', async () => {
+    renderAccess(COPY);
+    await copyOpen();
+    await waitFor(() => expect(railMarkOf('My contributor')).toBe('added'), { timeout: 8000 });
+    expect(chip()).toHaveTextContent(t('perm.badge.custom', 'en'));
+    expect(chip()).not.toHaveTextContent(t('perm.badge.package', 'en'));
+  });
+
+  it('a set created in the pair: Custom in the header, Added in the rail', async () => {
+    srv.pairDrafts.set(`permission/${CREATED}`, { name: CREATED, label: 'Pair auditor', objects: {}, fields: {} });
+    renderAccess(CREATED);
+    await waitFor(() => expect(within(header()).getAllByText(CREATED).length).toBeGreaterThan(0), { timeout: 8000 });
+    await waitFor(() => expect(railMarkOf(CREATED)).toBe('added'), { timeout: 8000 });
+    expect(chip()).toHaveTextContent(t('perm.badge.custom', 'en'));
+  });
+
+  it('CONTROL: the base’s own set reads Package, and its rail row carries no mark', async () => {
+    renderAccess(BASE_SET.name);
+    await waitFor(() => expect(within(header()).getByText('Contributor')).toBeInTheDocument(), { timeout: 8000 });
+    // The read has answered: the copy's row is marked, the base set's is not.
+    await waitFor(() => expect(railMarkOf('My contributor')).toBe('added'), { timeout: 8000 });
+    expect(railMarkOf('Contributor')).toBeNull();
+    expect(chip()).toHaveTextContent(t('perm.badge.package', 'en'));
   });
 });

@@ -3060,6 +3060,25 @@ describe('ApprovalService — org-filtered read-back refuses loudly (#12769)', (
     expect(await svc.listActions(req.id, SYS)).toHaveLength(actionsBefore);
   });
 
+  it('an org-scoped submitter does not read the org-less row either, so recall, remind, resubmit and comment answer it as a missing id — before any write', async () => {
+    const req = await openOrgless();
+    // The same person who submitted it, now acting inside organization 't1'.
+    const ORG_SUBMITTER = { userId: 'u1', tenantId: 't1', positions: [], permissions: [] } as any;
+    expect(await svc.getRequest(req.id, ORG_SUBMITTER)).toBeNull();
+    const before = { ...(engine._tables['sys_approval_request'] ?? []).find((r: any) => r.id === req.id) };
+    const actionsBefore = (await svc.listActions(req.id, SYS)).length;
+    await expect(svc.recall(req.id, { actorId: 'u1' }, ORG_SUBMITTER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    await expect(svc.remind(req.id, { actorId: 'u1' }, ORG_SUBMITTER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    await expect(svc.resubmit(req.id, { actorId: 'u1' }, ORG_SUBMITTER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    await expect(svc.comment(req.id, { actorId: 'u1', comment: 'any news?' }, ORG_SUBMITTER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    expect((engine._tables['sys_approval_request'] ?? []).find((r: any) => r.id === req.id)).toEqual(before);
+    expect(await svc.listActions(req.id, SYS)).toHaveLength(actionsBefore);
+  });
+
   it('control: an org-less caller (trigger/system context shape) reads back fine — no narrowing, no refusal', async () => {
     const req = await openOrgless();
     const out = await svc.recall(req.id, { actorId: 'u1' }, ORGLESS_SUBMITTER);
@@ -6273,6 +6292,150 @@ describe('ApprovalService — the act doors answer an unreadable request as a mi
     const bySystem = await open(svc, engine);
     const out = await svc.decideNode(bySystem.id, { decision: 'reject', actorId: SLA_ACTOR_ID } as any, SYS);
     expect(out.request.status).toBe('rejected');
+  });
+});
+
+describe('ApprovalService — a request with no submitter is recalled, reminded or resubmitted only by the system or the override actor', () => {
+  /** A run whose trigger resolved no user: a system context in organization 't1', and no submitter. */
+  const NO_USER_TRIGGER = { isSystem: true, tenantId: 't1', positions: [], permissions: [] } as any;
+  const WITH_SUBMITTER = CTX; // u1, tenant t1
+  const APPROVER = asUser('u2');
+  /** Same tenant, on no slate: reads the request through the record-reader tier alone. */
+  const READER = asUser('u5');
+  /** The administrator of 't1': the override actor on its pending requests. */
+  const TENANT_ADMIN = { userId: 'adm_t1', tenantId: 't1', positions: [], permissions: [], posture: 'TENANT_ADMIN' } as any;
+  /** A system context acting in 't1' — it names the actor it acts under. */
+  const SYSTEM = { isSystem: true, tenantId: 't1', positions: [], permissions: [] } as any;
+  const SYSTEM_ACTOR = 'sys_job';
+
+  let seq = 0;
+  const setup = () => {
+    const engine = makeFakeEngine();
+    let n = 0;
+    const svc = new ApprovalService({
+      engine: engine as any, clock: { now: () => new Date(1758000000000 + (n++) * 1000) },
+      recordReaderVisibleObjects: ['opportunity'],
+    });
+    // A flow whose approval node declares the `revise` out-edge send-back needs.
+    svc.attachAutomation({
+      async resume() { /* resumed */ },
+      async cancelRun() { /* handed back */ },
+      async getFlow() {
+        return {
+          name: 'deal_approval',
+          nodes: [{ id: 'approve_step', type: 'approval' }, { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE }],
+          edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
+        };
+      },
+    } as any);
+    return { engine, svc };
+  };
+  const open = async (
+    svc: ApprovalService, engine: ReturnType<typeof makeFakeEngine>, submitted: boolean,
+  ) => {
+    const recordId = `nosub_${++seq}`;
+    (engine._tables['opportunity'] ??= []).push({ id: recordId, amount: 100 });
+    const out: any = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId: `run_nosub_${seq}`, nodeId: 'approve_step',
+      flowName: 'deal_approval', config: nodeConfig(['u2'], { lockRecord: false }), record: { id: recordId, amount: 100 },
+      ...(submitted ? {} : { submitterId: null }),
+    }, submitted ? WITH_SUBMITTER : NO_USER_TRIGGER);
+    expect(out.organization_id).toBe('t1');
+    expect(out.submitter_id ?? null).toBe(submitted ? 'u1' : null);
+    return out as { id: string };
+  };
+  const sendBack = async (svc: ApprovalService, id: string) => {
+    const out = await svc.sendBack(id, { actorId: 'u2', comment: 'rework' }, APPROVER);
+    expect(out.request.status).toBe('returned');
+  };
+  const refusalOf = (p: Promise<unknown>) => p.then(() => 'ADMITTED', (err: Error) => err.message);
+  const snapshot = (engine: ReturnType<typeof makeFakeEngine>, id: string) => ({
+    row: { ...(engine._tables['sys_approval_request'] ?? []).find((r) => r.id === id) },
+    actions: (engine._tables['sys_approval_action'] ?? []).length,
+  });
+  /** The submitter's three doors, each as the REST door calls it: the actor is the caller. */
+  const recall = (svc: ApprovalService, id: string, ctx: any) => svc.recall(id, {} as any, ctx);
+  const remind = (svc: ApprovalService, id: string, ctx: any) => svc.remind(id, {} as any, ctx);
+  const resubmit = (svc: ApprovalService, id: string, ctx: any) => svc.resubmit(id, {} as any, ctx);
+
+  it('a caller who can read it but did not submit it — a pending approver, a record reader — is refused recall, remind and resubmit with the refusal a non-submitter gets, and nothing is written', async () => {
+    const { engine, svc } = setup();
+    const pending = await open(svc, engine, false);
+    const returned = await open(svc, engine, false);
+    await sendBack(svc, returned.id);
+    // The yardstick: the same callers on a request that HAS a submitter.
+    const submittedPending = await open(svc, engine, true);
+    const submittedReturned = await open(svc, engine, true);
+    await sendBack(svc, submittedReturned.id);
+
+    for (const [who, ctx] of [['the pending approver', APPROVER], ['a record reader', READER]] as const) {
+      // Precondition: they can read both requests — the read door serves them.
+      expect(await svc.getRequest(pending.id, ctx), `${who} reads the pending request`).not.toBeNull();
+      expect(await svc.getRequest(returned.id, ctx), `${who} reads the returned request`).not.toBeNull();
+      const before = { pending: snapshot(engine, pending.id), returned: snapshot(engine, returned.id) };
+
+      const cases: Array<[string, () => Promise<unknown>, () => Promise<unknown>]> = [
+        ['recall · pending', () => recall(svc, pending.id, ctx), () => recall(svc, submittedPending.id, ctx)],
+        ['recall · returned', () => recall(svc, returned.id, ctx), () => recall(svc, submittedReturned.id, ctx)],
+        ['remind', () => remind(svc, pending.id, ctx), () => remind(svc, submittedPending.id, ctx)],
+        ['resubmit', () => resubmit(svc, returned.id, ctx), () => resubmit(svc, submittedReturned.id, ctx)],
+      ];
+      for (const [door, noSubmitter, withSubmitter] of cases) {
+        const refused = await refusalOf(noSubmitter());
+        expect(refused, `${door} · ${who}`).toMatch(/^FORBIDDEN: /);
+        expect(refused, `${door} · ${who}: the refusal a non-submitter gets`).toBe(await refusalOf(withSubmitter()));
+      }
+      expect(snapshot(engine, pending.id), `${who}: nothing written on the pending request`).toEqual(before.pending);
+      expect(snapshot(engine, returned.id), `${who}: nothing written on the returned request`).toEqual(before.returned);
+    }
+    // The refusals, named — the door's own, unchanged.
+    expect(await refusalOf(remind(svc, pending.id, APPROVER))).toBe('FORBIDDEN: only the submitter may send reminders');
+    expect(await refusalOf(resubmit(svc, returned.id, READER))).toBe('FORBIDDEN: only the submitter may resubmit');
+  });
+
+  it('the override actor still recalls it while pending, and is refused where the door never admitted it — remind, resubmit, recall of a returned one', async () => {
+    const { engine, svc } = setup();
+    const pending = await open(svc, engine, false);
+    const returned = await open(svc, engine, false);
+    await sendBack(svc, returned.id);
+    expect(await refusalOf(remind(svc, pending.id, TENANT_ADMIN))).toBe('FORBIDDEN: only the submitter may send reminders');
+    expect(await refusalOf(resubmit(svc, returned.id, TENANT_ADMIN))).toBe('FORBIDDEN: only the submitter may resubmit');
+    expect(await refusalOf(recall(svc, returned.id, TENANT_ADMIN))).toMatch(/^FORBIDDEN: /);
+    expect((await svc.getRequest(returned.id, SYS))?.status).toBe('returned');
+
+    const out = await recall(svc, pending.id, TENANT_ADMIN);
+    expect((out as any).request.status).toBe('recalled');
+  });
+
+  it('a system context still recalls and reminds it while pending, and resubmits it once returned', async () => {
+    const { engine, svc } = setup();
+    const toRemind = await open(svc, engine, false);
+    const reminded = await svc.remind(toRemind.id, { actorId: SYSTEM_ACTOR }, SYSTEM);
+    expect(reminded.notified).toBeGreaterThanOrEqual(0);
+    expect((engine._tables['sys_approval_action'] ?? []).some((a) => a.request_id === toRemind.id && a.action === 'remind')).toBe(true);
+
+    const toRecall = await open(svc, engine, false);
+    const recalled = await svc.recall(toRecall.id, { actorId: SYSTEM_ACTOR }, SYSTEM);
+    expect(recalled.request.status).toBe('recalled');
+
+    const toResubmit = await open(svc, engine, false);
+    await sendBack(svc, toResubmit.id);
+    await svc.resubmit(toResubmit.id, { actorId: SYSTEM_ACTOR }, SYSTEM);
+    expect((engine._tables['sys_approval_action'] ?? []).some((a) => a.request_id === toResubmit.id && a.action === 'resubmit')).toBe(true);
+  });
+
+  it('control: a request that has a submitter is recalled, reminded and resubmitted by that submitter, as before', async () => {
+    const { engine, svc } = setup();
+    const toRemind = await open(svc, engine, true);
+    await svc.remind(toRemind.id, {} as any, WITH_SUBMITTER);
+    const toRecall = await open(svc, engine, true);
+    expect((await svc.recall(toRecall.id, {} as any, WITH_SUBMITTER)).request.status).toBe('recalled');
+    const toResubmit = await open(svc, engine, true);
+    await sendBack(svc, toResubmit.id);
+    await svc.resubmit(toResubmit.id, {} as any, WITH_SUBMITTER);
+    const kinds = (engine._tables['sys_approval_action'] ?? [])
+      .filter((a) => [toRemind.id, toRecall.id, toResubmit.id].includes(a.request_id)).map((a) => a.action);
+    expect(kinds).toEqual(expect.arrayContaining(['remind', 'recall', 'resubmit']));
   });
 });
 

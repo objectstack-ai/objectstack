@@ -34,9 +34,12 @@
  *       drawn in the order the registry draws them, even when an app's
  *       `requiresObject` names one of the related objects (it lands first);
  *   (d) CONTROLs, the registry as before: an object outside the app's
- *       navigation, no bundle, a bundle that holds no app, a record drawer
- *       over the route, and a packaged app's record route (byte-identical:
- *       the one registry read, nothing by name).
+ *       navigation, no bundle, a bundle that holds no app, and a record drawer
+ *       over the route.
+ *
+ * objectstack#29681 — the last describe pins the same route in a packaged app,
+ * read through its package scope; it replaces the CONTROL that pinned that
+ * route to the registry.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -143,7 +146,7 @@ function serverBundle(app: Doc) {
   const reach = ['crm_account', 'crm_contact'];
   const points = (o: Doc) =>
     Object.values((o.fields ?? {}) as Record<string, any>).some((f) => (f.type === 'lookup' || f.type === 'master_detail') && reach.includes(f.reference));
-  const members = OBJECTS.filter((o) => reach.includes(o.name) || points(o));
+  const members = server.objects.filter((o) => reach.includes(o.name) || points(o));
   const items = new Map<string, Map<string, { item: unknown; envelope: Record<string, unknown> }>>();
   const put = (type: string, docs: Doc[]) => {
     const byName = new Map();
@@ -159,7 +162,7 @@ function serverBundle(app: Doc) {
 }
 
 type Peek = { status: 'none' } | { status: 'pending'; settled: Promise<unknown> } | { status: 'ready'; items: ReturnType<typeof serverBundle> };
-const server = { calls: [] as string[], peek: null as Peek | null };
+const server = { calls: [] as string[], peek: null as Peek | null, objects: OBJECTS, pages: [] as Doc[] };
 
 function makeAdapter() {
   const host: Record<string, unknown> = {
@@ -174,7 +177,8 @@ function makeAdapter() {
       meta: {
         getItems: (type: string, options?: { packageId?: string }) => {
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
-          const all: Doc[] = type === 'object' ? OBJECTS : type === 'app' ? [OPS_APP, REQUIRES_APP, CRM_APP] : [];
+          const all: Doc[] =
+            type === 'object' ? server.objects : type === 'app' ? [OPS_APP, REQUIRES_APP, CRM_APP] : type === 'page' ? server.pages : [];
           const items = options?.packageId ? all.filter((o) => o._packageId === options.packageId) : all;
           return Promise.resolve({ type, items: structuredClone(items) });
         },
@@ -184,7 +188,7 @@ function makeAdapter() {
           const bundled = peek?.status === 'ready' ? peek.items.get(type)?.get(name) : undefined;
           if (bundled) return Promise.resolve(structuredClone(bundled.envelope));
           server.calls.push(`${type}/${name}`);
-          const item = (type === 'object' ? OBJECTS : []).find((o) => o.name === name);
+          const item = (type === 'object' ? server.objects : []).find((o) => o.name === name);
           return item
             ? Promise.resolve({ type, name, item: structuredClone(item) })
             : Promise.reject(Object.assign(new Error('not found'), { httpStatus: 404, code: 'RESOURCE_NOT_FOUND' }));
@@ -233,11 +237,15 @@ const sorted = (list: readonly string[]) => [...list].sort();
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 /** The related lists the whole registry draws for `objectName` today. */
 const registryRelated = (objectName: string) =>
-  deriveRelatedLists(OBJECTS.find((o) => o.name === objectName) as never, OBJECTS as never[]).map((r) => `${r.childObject}.${r.referenceField}`);
+  deriveRelatedLists(server.objects.find((o) => o.name === objectName) as never, server.objects as never[]).map(
+    (r) => `${r.childObject}.${r.referenceField}`,
+  );
 const drawnRelated = () => (screen.getByTestId('record-view').getAttribute('data-related') ?? '').split(',').filter(Boolean);
 
 beforeEach(() => {
   server.calls = [];
+  server.objects = OBJECTS;
+  server.pages = [];
   server.peek = { status: 'ready', items: serverBundle(OPS_APP) };
   localStorage.clear();
   sessionStorage.clear();
@@ -357,13 +365,104 @@ describe('CONTROLs: the registry as before (objectstack#29552)', () => {
     await waitFor(() => expect(objectCalls()).toContain('object'));
   });
 
-  it('a packaged app’s record route is unchanged: the registry, and nothing by name', async () => {
+});
+
+/**
+ * objectstack#29681 — the same route in a PACKAGED app reads its names through
+ * the app's package scope: the package list, then by name each name the list
+ * does not hold. The CONTROL that pinned this route to the registry
+ * ("a packaged app's record route is unchanged") is flipped here.
+ *
+ * Measured on a production Console (app-crm, `crm_app`, the Initech
+ * `crm_account` record, no declared record page): the registry was 561,247 B
+ * of the route's 1,584,710 B, with the `/meta/view` list (7,014 B) read beside
+ * it.
+ */
+describe('a packaged app’s record route with no declared record page reads its package scope, not the registry (objectstack#29681)', () => {
+  /**
+   * An object outside the app's package that points at the account, listed
+   * between the package's own objects: saved in the environment, as an object
+   * created in Studio is. The bundle holds it; the package list does not.
+   */
+  const VISIT: Doc = { name: 'ops_visit', _packageId: 'sys_metadata', fields: { account: { type: 'lookup', reference: 'crm_account' } } };
+  const WITH_VISIT: Doc[] = [...OBJECTS.slice(0, 2), VISIT, ...OBJECTS.slice(2)];
+  const ACCOUNT_PAGE: Doc = {
+    name: 'account_detail',
+    type: 'record',
+    object: 'crm_account',
+    kind: 'full',
+    regions: [{ name: 'main', components: [{ type: 'record:related_list', properties: { objectName: 'crm_contact' } }] }],
+  };
+
+  beforeEach(() => {
+    server.objects = WITH_VISIT;
     server.peek = { status: 'ready', items: serverBundle(CRM_APP) };
+  });
+
+  it('reads no unscoped object list: the package list, and by name only the lookup target outside the bundle', async () => {
     boot('/apps/crm/crm_account/record/r1');
-    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_activity'));
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('ops_visit'));
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('sys_user'));
     await settle();
 
+    expect(objectCalls()).not.toContain('object');
+    // The object of another package is answered from the bundle, asked of no route.
+    expect(objectCalls()).toEqual(['object?package=app.crm', 'object/sys_user']);
+  });
+
+  it('draws the registry’s related lists in the registry’s order, the object of another package in its place', async () => {
+    boot('/apps/crm/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('ops_visit'));
+    await settle();
+
+    expect(registryRelated('crm_account')).toEqual([
+      'crm_opportunity.account',
+      'crm_activity.what',
+      'ops_visit.account',
+      'crm_contact.account',
+      'crm_lead.account',
+      'crm_opportunity.partner',
+    ]);
+    expect(drawnRelated()).toEqual(registryRelated('crm_account'));
+  });
+
+  it('an object pointed at only from another package draws that list', async () => {
+    boot('/apps/crm/crm_contact/record/c1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_case'));
+    await settle();
+
+    expect(objectCalls()).not.toContain('object');
+    expect(registryRelated('crm_contact')).toEqual(['crm_case.contact']);
+    expect(drawnRelated()).toEqual(registryRelated('crm_contact'));
+  });
+
+  it('CONTROL: a declared record page reads the objects it binds, as before', async () => {
+    server.pages = [ACCOUNT_PAGE];
+    boot('/apps/crm/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_contact'));
+    await settle();
+
+    expect(objectCalls()).toEqual(['object?package=app.crm', 'object/sys_user']);
+    expect(screen.getByTestId('record-view').textContent).not.toContain('ops_visit');
+  });
+
+  it('CONTROL: an object outside the app’s navigation reads the registry', async () => {
+    boot('/apps/crm/crm_opportunity/record/o1');
+    await waitFor(() => expect(objectCalls()).toContain('object'));
+    await settle();
     expect(objectCalls()).toEqual(['object']);
-    expect(sorted(drawnRelated())).toEqual(sorted(registryRelated('crm_account')));
+  });
+
+  it('CONTROL: no bundle reads the registry', async () => {
+    server.peek = null;
+    boot('/apps/crm/crm_account/record/r1');
+    await waitFor(() => expect(objectCalls()).toContain('object'));
+    await settle();
+    expect(objectCalls()).toEqual(['object']);
+  });
+
+  it('CONTROL: a record drawer over the route reads the registry beside it (objectstack#27626)', async () => {
+    boot('/apps/crm/crm_account/record/r1?recordId=r2');
+    await waitFor(() => expect(objectCalls()).toContain('object'));
   });
 });

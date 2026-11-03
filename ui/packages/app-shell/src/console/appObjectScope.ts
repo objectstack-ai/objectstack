@@ -40,12 +40,16 @@
  * (`usePageAssignment`'s choice). A record route with no declared record page,
  * or a slotted one, reads the whole registry: its synthesized page derives
  * the related lists from every object that points at the record's object, in
- * any package. objectstack#29552 — except in an app with no package, for an
- * object its navigation reaches: the app bundle holds every object that points
- * at it (`BundledReads.objectsReferencing`), so the route reads those by name,
- * with the object's own names, instead (measured on a production Console: the
- * registry was 553 KB of a console-created app's 888 KB record route). Until
- * the bundle has answered it waits; an object outside the navigation, no
+ * any package. objectstack#29552 — except for an object the app's navigation
+ * reaches: the app bundle holds every object that points at it
+ * (`BundledReads.objectsReferencing`), so the route reads those by name, with
+ * the object's own names, instead (measured on a production Console: the
+ * registry was 553 KB of a console-created app's 888 KB record route).
+ * objectstack#29681 — a packaged app reads them through its package scope, as
+ * its object routes read their names: the package list, then by name each
+ * name it does not hold, an object of another package pointing at the record's
+ * among them (the registry was 561 KB of `crm_app`'s 1.58 MB record route).
+ * Until the bundle has answered it waits; an object outside the navigation, no
  * bundle, or draft preview reads the registry as before.
  *
  * Everywhere else the route reads the whole registry, as before. For the
@@ -508,17 +512,19 @@ export function readAppObjectScope(
     if (!pagesRead?.settled) return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
     const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined);
     if (!page) {
-      // objectstack#29552 — the synthesized page of an app with no package:
-      // its related lists are derived from every object that points at the
-      // record's object, which the app bundle holds for an object the app's
-      // navigation reaches. Those are read by name with the route's own names
-      // (a bundled object is answered from the bundle, asked of no route).
-      // A packaged app, and a bundle that cannot say, read the registry.
-      if (packageId) return { candidate, scope: null, ready: false, ...NOT_READ };
+      // objectstack#29552 — the synthesized page: its related lists are
+      // derived from every object that points at the record's object, which
+      // the app bundle holds for an object the app's navigation reaches. Those
+      // are read by name with the route's own names (a bundled object is
+      // answered from the bundle, asked of no route). objectstack#29681 — a
+      // packaged app reads them through its package scope: the package list,
+      // then by name each one it does not hold (an object of another package
+      // that points at the record's). A bundle that cannot say reads the
+      // registry.
       const referencing = readObjectsReferencing?.(route.objectName);
       if (referencing?.state === 'pending') return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
       if (referencing?.state !== 'hit') return { candidate, scope: null, ready: false, ...NOT_READ };
-      return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, undefined, referencing.value) };
+      return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId, referencing.value) };
     }
     const extra = [route.objectName, ...appRequiredObjectNames(app)];
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {

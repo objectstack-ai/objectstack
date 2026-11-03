@@ -55,7 +55,7 @@ describe('[#29049] flow-region-shape-invalid', () => {
     const bad = flow('rgn_lead_time', guard(fanOut(false)));
     const findings = validateFlowRegionShape({ flows: [flow('rgn_ok', guard(fanOut(true))), bad] });
     expect(findings.map(({ severity, rule, where, path }) => ({ severity, rule, where, path }))).toEqual([
-      { severity: 'error', rule: FLOW_REGION_SHAPE_INVALID, where: "flow 'rgn_lead_time'", path: 'flows[1]' },
+      { severity: 'error', rule: FLOW_REGION_SHAPE_INVALID, where: "flow 'rgn_lead_time' › node 'guard'", path: 'flows[1].nodes[1]' },
     ]);
     expect(findings[0]!.message).toBe(`Flow 'rgn_lead_time' would be refused at registration: ${engineRefusal(bad)}`);
     expect(findings[0]!.message).toContain("try_catch 'guard' catch: region must be single-exit");
@@ -65,6 +65,40 @@ describe('[#29049] flow-region-shape-invalid', () => {
     const bad = flow('rgn_fan', n('fan', 'parallel', { config: { branches: [{ nodes: [n('only')], edges: [] }] } }));
     const [finding] = validateFlowRegionShape({ flows: [bad] });
     expect(finding?.message).toContain("parallel 'fan': a parallel block needs at least 2 branches");
+  });
+
+  describe('[#29558] the finding is anchored on the container the engine names', () => {
+    it('a top-level container: the path and where name the try_catch at fault, the message is unchanged', () => {
+      const bad = flow('rgn_lead_time', guard(fanOut(false)));
+      const [finding, ...rest] = validateFlowRegionShape({ flows: [flow('rgn_ok', guard(fanOut(true))), bad] });
+      expect(rest).toEqual([]);
+      expect(finding).toMatchObject({ path: 'flows[1].nodes[1]', where: "flow 'rgn_lead_time' › node 'guard'" });
+      expect(finding!.message).toBe(`Flow 'rgn_lead_time' would be refused at registration: ${engineRefusal(bad)}`);
+    });
+
+    it('a nested container: a one-branch parallel inside a try region is anchored where it sits', () => {
+      const bad = flow('rgn_nested', n('guard', 'try_catch', {
+        config: {
+          try: { nodes: [n('fan', 'parallel', { config: { branches: [{ nodes: [n('only')], edges: [] }] } })], edges: [] },
+          catch: { nodes: [n('recover')], edges: [] },
+        },
+      }));
+      const [finding] = validateFlowRegionShape({ flows: [bad] });
+      expect(finding).toMatchObject({ path: 'flows[0].nodes[1].config.try.nodes[0]', where: "flow 'rgn_nested' › node 'fan'" });
+      expect(finding!.message).toBe(`Flow 'rgn_nested' would be refused at registration: ${engineRefusal(bad)}`);
+    });
+
+    it('a container in a parallel branch: the branch index is part of the path', () => {
+      const looped = n('sweep', 'loop', {
+        config: { collection: [1, 2], iteratorVariable: 'row', body: fanOut(false) },
+      });
+      const bad = flow('rgn_branch', n('fan', 'parallel', {
+        config: { branches: [{ nodes: [n('left')], edges: [] }, { nodes: [looped], edges: [] }] },
+      }));
+      const [finding] = validateFlowRegionShape({ flows: [bad] });
+      expect(finding).toMatchObject({ path: 'flows[0].nodes[1].config.branches[1].nodes[0]', where: "flow 'rgn_branch' › node 'sweep'" });
+      expect(finding!.message).toContain("loop 'sweep' body");
+    });
   });
 
   it('CONTROL: the same flow with the join restored has no finding, nor does a stack with no flows', () => {
@@ -84,7 +118,7 @@ describe('[#29049] flow-region-shape-invalid', () => {
     it('a non-record entry is no flow and draws nothing; the flow after it keeps its own index', () => {
       const bad = flow('rgn_lead_time', guard(fanOut(false)));
       const findings = validateFlowRegionShape({ flows: [null, 'x', bad] });
-      expect(findings.map(({ path }) => path)).toEqual(['flows[2]']);
+      expect(findings.map(({ path }) => path)).toEqual(['flows[2].nodes[1]']);
     });
 
     it('a body with no string name is named by its path', () => {

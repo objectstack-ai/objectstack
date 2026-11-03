@@ -113,6 +113,9 @@ import {
     QUERY_TRANSPORT_DOLLAR_ALIASES,
     QUERY_TRANSPORT_DOLLAR_PARAMS,
     type DroppedFieldsEvent,
+    type EngineAggregateOptions,
+    type EngineCountOptions,
+    type EngineQueryOptions,
     type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
     externalBindingDatasourceRefusal,
@@ -142,7 +145,13 @@ import { type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '
 // (curated entry, unchanged).
 import { type FormFieldInput } from '@objectstack/spec/ui';
 export type { FormFieldInput };
-import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
+import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage, type TranslationBundle } from '@objectstack/spec/system';
+import {
+    restoreTranslatedEchoes,
+    translatedEchoNotices,
+    TRANSLATED_ECHO_NOTICE_ID,
+    type RestoredTranslatedSlot,
+} from './protocol-translated-echo.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
     resolveLockState,
@@ -3764,6 +3773,125 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#29673] The refusal `registerObject` would throw for this object body,
+     * registered as the write-through registers it
+     * ({@link applyObjectRegistryMutation}: `_provenance: 'org'`, the layer's
+     * package and kind) — asked of the registry's own doors
+     * (`SchemaRegistry.objectRegistrationRefusal`), so a door that makes the
+     * body live refuses it before the row is written instead of meeting the
+     * throw after. `null` when the registry would take it, when the layer is a
+     * D9.9 `mismatch` (that refusal is the caller's own, asked first), and on
+     * a registry that cannot answer the question (a partial double).
+     */
+    private objectRegistrationRefusal(
+        body: unknown,
+        layer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']>,
+    ): Error | null {
+        if (layer.kind === 'mismatch') return null;
+        const registry = this.engine?.registry as { objectRegistrationRefusal?: (...args: unknown[]) => Error | null } | undefined;
+        if (typeof registry?.objectRegistrationRefusal !== 'function') return null;
+        if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+        return registry.objectRegistrationRefusal(
+            { ...(body as Record<string, unknown>), _provenance: 'org' },
+            layer.packageId,
+            layer.kind,
+        );
+    }
+
+    /**
+     * [#29673] The write-path inverse of the `/meta` read's translation, for an
+     * `object` body: every label the read served translated is put back to its
+     * source text before the body is stored ({@link restoreTranslatedEchoes},
+     * whose module header is the contract). Its pure half,
+     * {@link restoreInjectedColumnEchoes}, already ran before the served-column
+     * strip; this half reads the stored row, so it runs after every refusal.
+     *
+     * The source is the row this save overwrites, read as the credential
+     * carry-forward reads it ({@link storedBodyForCarryForward}: the row at the
+     * save's own state, else the active row a first draft overlays), and with
+     * no stored row the packaged base (`getPackagedObjectBase`) in place of
+     * the carry-forward's code-layer read. Every read of the source is
+     * translated against that packaged base, as the REST read's is, so a slot
+     * the read serves untranslated is no translation's source. The locales are
+     * the bundle's and the built-in system-field table's — every locale a read
+     * could have answered in. Each restored slot is answered on the save's
+     * `advisories` ({@link translatedEchoNotices}).
+     *
+     * Every save is asked, the stored-row migration included
+     * (`source: 'migrate-stored'`): it re-saves a row through this door, which
+     * is how a row a zh-CN session already stored is repaired. Any other
+     * type's body is returned as it came. No `try`/`catch`: a failed stored-row
+     * read fails the save rather than storing a body this door could not judge;
+     * the packaged base is a registry lookup, so a degraded MetadataService
+     * fails nothing here.
+     */
+    private async restoreTranslatedObjectEchoes(
+        request: SaveMetaItemRequest,
+        repo: SysMetadataRepository,
+        ref: Parameters<SysMetadataRepository['get']>[0],
+        mode: 'draft' | 'publish',
+    ): Promise<{ item: SaveMetaItemRequest['item']; restored: RestoredTranslatedSlot[] }> {
+        if (canonicalMetaType(request.type) !== 'object') return { item: request.item, restored: [] };
+        if (!request.item || typeof request.item !== 'object' || Array.isArray(request.item)) {
+            return { item: request.item, restored: [] };
+        }
+        // The packaged base the read translates against (`getPackagedObjectBase`,
+        // what the REST read hands `translateObject` as `packagedBase`), and,
+        // with no stored row, the source itself: the body a read of an object
+        // with no overlay served. A registry lookup, never a MetadataService
+        // read — so a degraded service fails no save here (a brand-new object
+        // has no source beyond the platform columns the pure half handled).
+        const packagedBase = this.getPackagedObjectBase(request.name);
+        const source = await storedBodyForCarryForward.call(
+            { readCodeLayerForCarryForward: async () => packagedBase },
+            {
+                type: 'object',
+                repo,
+                ref,
+                state: mode === 'draft' ? 'draft' : 'active',
+                packageId: request.packageId ?? null,
+            },
+        );
+        return restoreTranslatedEchoes(request.item, {
+            source,
+            bundle: this.registeredTranslationBundle(),
+            packagedBase: packagedBase ?? undefined,
+        });
+    }
+
+    /**
+     * [#29673] The pure half of {@link restoreTranslatedObjectEchoes}, run
+     * before the served-column strip: each injected column's slots compared
+     * with the platform's own definition only (no stored row, so no read).
+     * A column that came back translated is the platform's definition again,
+     * and the strip removes it.
+     */
+    private restoreInjectedColumnEchoes(request: SaveMetaItemRequest): SaveMetaItemRequest['item'] {
+        if (canonicalMetaType(request.type) !== 'object') return request.item;
+        if (!request.item || typeof request.item !== 'object' || Array.isArray(request.item)) return request.item;
+        return restoreTranslatedEchoes(request.item, { source: undefined, bundle: this.registeredTranslationBundle() }).item;
+    }
+
+    /**
+     * [#29673] The registered i18n service's catalog as a `TranslationBundle`
+     * (`locale -> data`), or `undefined` when no service or no locale is
+     * registered — the bundle the `/meta` read exits translate with
+     * (`translationBundleOf` in `@objectstack/rest`, built the same way).
+     */
+    private registeredTranslationBundle(): TranslationBundle | undefined {
+        const service: any = this.getServicesRegistry?.().get('i18n');
+        if (!service || typeof service.getLocales !== 'function' || typeof service.getTranslations !== 'function') {
+            return undefined;
+        }
+        const bundle: Record<string, any> = {};
+        for (const locale of service.getLocales() as string[]) {
+            const data = service.getTranslations(locale);
+            if (data && typeof data === 'object') bundle[locale] = data;
+        }
+        return Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined;
+    }
+
+    /**
      * [#8154] The write-path counterpart the read exits' credential redaction
      * owes, in the same sense {@link stripServedObjectColumns} is owed to
      * {@link governServedObject}: a body this service's READ subtracted
@@ -6121,7 +6249,7 @@ export class ObjectStackProtocolImplementation implements
         const hasGroupBy = Array.isArray(options.groupBy) && options.groupBy.length > 0;
         const hasAggregations = Array.isArray(options.aggregations) && options.aggregations.length > 0;
         if (hasGroupBy || hasAggregations) {
-            const records = await this.engine.aggregate(request.object, {
+            const aggregateQuery: EngineAggregateOptions = {
                 where: options.where,
                 groupBy: options.groupBy,
                 aggregations: options.aggregations,
@@ -6140,7 +6268,8 @@ export class ObjectStackProtocolImplementation implements
                 search: options.search,
                 searchFields: options.searchFields,
                 context: options.context,
-            } as any);
+            };
+            const records = await this.engine.aggregate(request.object, aggregateQuery);
             // Apply limit client-side (EngineAggregateOptions doesn't carry limit).
             // `records` is the full grouped set, so its length IS the real total
             // and `hasMore` follows from whether the slice dropped any groups.
@@ -6209,6 +6338,25 @@ export class ObjectStackProtocolImplementation implements
         // projection named only the body, and taken back off before serving.
         const bodyProjection = storedMetadataBodyProjection(request.object, options.fields);
         if (bodyProjection.addedType) options.fields = bodyProjection.fields;
+        // [#29764] The bag `engine.find` receives is typed as the engine declares
+        // it. `options` is the caller's normalized request bag, and by this line
+        // every key the normalizer does not hand on has been folded, deleted or
+        // moved into `where`. What can still stand is the find set below, plus
+        // `groupBy` / `aggregations` holding null at most (a non-empty one took
+        // the aggregate branch above, an empty one was refused). The engine reads
+        // a null option as absent, so leaving those two out changes nothing. Keys
+        // are copied only when present, so the engine sees the same bag as before.
+        const findQuery: EngineQueryOptions = {
+            ...(options.context !== undefined ? { context: options.context } : {}),
+            ...(options.where !== undefined ? { where: options.where } : {}),
+            ...(options.fields !== undefined ? { fields: options.fields } : {}),
+            ...(options.orderBy !== undefined ? { orderBy: options.orderBy } : {}),
+            ...(options.limit !== undefined ? { limit: options.limit } : {}),
+            ...(options.offset !== undefined ? { offset: options.offset } : {}),
+            ...(options.search !== undefined ? { search: options.search } : {}),
+            ...(options.searchFields !== undefined ? { searchFields: options.searchFields } : {}),
+            ...(options.expand !== undefined ? { expand: options.expand } : {}),
+        };
         // [#21207] …and its stored CONTENT HASH (`checksum`, `previous_checksum`)
         // is served in keyed form — never the stored value, which beside the
         // projected body confirms a guess at the withheld material offline —
@@ -6217,7 +6365,7 @@ export class ObjectStackProtocolImplementation implements
             request.object,
             redactStoredMetadataRows(
                 request.object,
-                await this.engine.find(request.object, options),
+                await this.engine.find(request.object, findQuery),
                 { dropType: bodyProjection.addedType },
             ),
             this.storedHashDigest(),
@@ -6293,12 +6441,13 @@ export class ObjectStackProtocolImplementation implements
                 // TypeScript cannot narrow it back across the try/catch.
                 let counted: number;
                 try {
-                    counted = await this.engine.count(request.object, {
+                    const countQuery: EngineCountOptions = {
                         where: options.where,
                         search: options.search,
                         searchFields: options.searchFields,
                         context: options.context,
-                    } as any);
+                    };
+                    counted = await this.engine.count(request.object, countQuery);
                 } catch {
                     // engine.count() has its own find().length fallback; if it still
                     // throws, degrade to a page-local total rather than failing the list.
@@ -6368,7 +6517,18 @@ export class ObjectStackProtocolImplementation implements
             if (Object.keys(served).length > 0) queryOptions.expand = served;
         }
 
-        const result = await this.engine.findOne(request.object, queryOptions);
+        // [#29764] The bag `engine.findOne` receives is typed as the engine
+        // declares it. `queryOptions` stays the working bag: the projection
+        // helpers above answer `unknown` (they serve the raw list query too), so
+        // its `fields` has no declared type until it is handed on here. Keys are
+        // copied only when present, so the engine sees the same bag as before.
+        const findOneQuery: EngineQueryOptions = {
+            where: queryOptions.where,
+            ...(queryOptions.context !== undefined ? { context: queryOptions.context } : {}),
+            ...(queryOptions.fields !== undefined ? { fields: queryOptions.fields } : {}),
+            ...(queryOptions.expand !== undefined ? { expand: queryOptions.expand } : {}),
+        };
+        const result = await this.engine.findOne(request.object, findOneQuery);
         if (result) {
             return {
                 object: request.object,
@@ -6452,7 +6612,7 @@ export class ObjectStackProtocolImplementation implements
 
         const source = await this.engine.findOne(
             request.object,
-            { where: { id: request.id }, ...(ctxOpt as any) } as any,
+            { where: { id: request.id }, ...ctxOpt },
         );
         if (!source) throw recordNotFoundError(request.object, request.id);
 
@@ -6609,7 +6769,7 @@ export class ObjectStackProtocolImplementation implements
      * token, a caller whose read of the row is refused gets that read refusal.
      */
     private async probeRecord(object: string, id: string): Promise<any> {
-        return this.engine.findOne(object, { where: { id }, context: { isSystem: true } } as any);
+        return this.engine.findOne(object, { where: { id }, context: { isSystem: true } });
     }
 
     /**
@@ -13365,6 +13525,16 @@ export class ObjectStackProtocolImplementation implements
         // schema gate, the authoring gate and the persisted body all still see
         // one document. See {@link stripServedSystemColumns} for why this is a
         // separate strip from the decoration list and not another entry in it.
+        //
+        // [#29673] …and, one beat BEFORE that strip, the read's TRANSLATION
+        // of an injected column taken back off: a label the `/meta` read served
+        // in the caller's language through the built-in table is put back to
+        // the platform's own text, so the column is the platform's definition
+        // again and comes off with the rest. Pure — no read, so it runs before
+        // the refusals. The author's own slots are compared with the stored
+        // row later, beside the credential carry-forward that reads the same
+        // row. See {@link restoreInjectedColumnEchoes}.
+        request.item = this.restoreInjectedColumnEchoes(request);
         request.item = this.stripServedObjectColumns(request.type, request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
@@ -13668,6 +13838,9 @@ export class ObjectStackProtocolImplementation implements
         // answered `200` for a draft no publish can serve. An ambiguous
         // address is left to the repository's `409`, as before. The address
         // is the one read above, before the named-base rule's inherited arm.
+        // [#29673] The object layer the D9.9 block below classified, for the
+        // registry's refusal asked after the spec gate.
+        let objectRegistrationLayer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']> | undefined;
         if (singularType === 'object') {
             const writtenPackage = draftAddress && draftAddress.kind !== 'ambiguous'
                 ? draftAddress.into
@@ -13692,6 +13865,9 @@ export class ObjectStackProtocolImplementation implements
                     { mode, storedPackages, namedNoPackage, strandedDrafts },
                 );
             }
+            // [#29673] …and the layer the registry's own refusal of the BODY
+            // is asked under, after the spec gate below.
+            objectRegistrationLayer = layer;
         }
 
         // [#24547 · ADR-0129 D2] THE NAMESPACE-PREFIX RULE, on the door that
@@ -14237,6 +14413,21 @@ export class ObjectStackProtocolImplementation implements
                     (err as any).issues = issues;
                     throw err;
                 }
+                // [#29673] The registry's own refusal of the BODY, at the
+                // producer for the D9.9 refusal's reason: a body
+                // `registerObject` refuses was stored, answered `200`, and
+                // logged a `console.warn` at the write-through — and a draft of
+                // it published as "published" and never reached the data plane.
+                // Asked in both modes (#23712: a draft no publish can serve is a
+                // refusal now, not later), and AFTER the spec gate, so a body
+                // both refuse keeps the gate's structured `issues[]` (#5364).
+                // The body is the one this save stores: the read's injected
+                // columns already came off it above. See
+                // {@link objectRegistrationRefusal}.
+                if (objectRegistrationLayer) {
+                    const registration = this.objectRegistrationRefusal(request.item, objectRegistrationLayer);
+                    if (registration) throw registration;
+                }
                 if (singularType === 'view') {
                     // [#20051] A saved view is the parsed body: the parsed
                     // value of every key the request carried, undeclared keys
@@ -14765,6 +14956,13 @@ export class ObjectStackProtocolImplementation implements
         // no door accepts and nothing reads): those are never re-grafted, so
         // this save drops them from the row at rest, and the answer names each
         // one on `advisories` (`droppedWithheldKeyNotices`) — loud, never silent.
+        // [#29673] The author's own slots the `/meta` read translated (a field's
+        // label through the catalog, the object's own label), put back to the
+        // stored row's source text. After every refusal, so a refused save
+        // costs no read; before the carry-forward and the put, so what is
+        // stored is the source. See {@link restoreTranslatedObjectEchoes}.
+        const echoes = await this.restoreTranslatedObjectEchoes(request, repo, ref, mode);
+        request.item = echoes.item;
         const carried = await this.carryForwardRedactedCredentials({
             type: singularTypeForRepo,
             repo,
@@ -14778,6 +14976,8 @@ export class ObjectStackProtocolImplementation implements
         const saveNotices = [
             ...runtimeAdvisories,
             ...droppedWithheldKeyNotices({ type: singularTypeForRepo, name: request.name, dropped: carried.dropped }),
+            // [#29673] Each author slot this save put back to its source text.
+            ...translatedEchoNotices(request.name, echoes.restored),
         ];
         // [#20790] …and then OUT of the body: a type with a write-only
         // credential channel (`flow`, registered by the automation plugin)
@@ -15394,7 +15594,28 @@ export class ObjectStackProtocolImplementation implements
                 : this.convertStoredItemDetailed(
                     singular, body, undefined, await this.storedRowKnownDatasources(singular, body),
                 );
-            const changed = flowResult ? item !== body : notices.length > 0;
+            // [#29673] …and, for an `object` row, the save door's translated-echo
+            // restoration ({@link restoreTranslatedObjectEchoes}), asked of the
+            // row against itself and the platform's injected columns: a row a
+            // zh-CN Studio session stored before that door existed carries an
+            // injected column's TRANSLATED label as an author's field (a `queue`
+            // the registry refuses, so the object never registers and a restart
+            // does not recover it). Each slot is a notice, and the re-save below
+            // goes through the door that puts it back and strips the column.
+            const echoNotices: StoredMigrationNotice[] = singular === 'object' && !flowResult
+                ? restoreTranslatedEchoes(item, { source: item, bundle: this.registeredTranslationBundle() })
+                    .restored.map((slot) => ({
+                        conversionId: TRANSLATED_ECHO_NOTICE_ID,
+                        surface: 'object.field.label',
+                        from: slot.from,
+                        to: slot.to ?? '',
+                        path: slot.path,
+                        message: 'the stored text is the /meta read\'s translation of its source, stored as the '
+                            + 'document by an edit that echoed a translated read; the re-save stores the source '
+                            + 'text, and an injected column that is the platform\'s own again comes off the row',
+                    }))
+                : [];
+            const changed = flowResult ? item !== body : notices.length > 0 || echoNotices.length > 0;
             // [#17321] A site the chain left as stored — no lossless rewrite
             // exists for it (ADR-0087 D3: a structured TODO, never silence) —
             // rides on the row whatever its outcome, and is what keeps a row
@@ -15430,14 +15651,17 @@ export class ObjectStackProtocolImplementation implements
                 });
                 continue;
             }
-            const flattened: StoredMigrationNotice[] = notices.map((n) => ({
-                conversionId: n.conversionId,
-                surface: n.surface,
-                from: n.from,
-                to: n.to,
-                path: n.path,
-                message: n.message,
-            }));
+            const flattened: StoredMigrationNotice[] = [
+                ...notices.map((n) => ({
+                    conversionId: n.conversionId,
+                    surface: n.surface,
+                    from: n.from,
+                    to: n.to,
+                    path: n.path,
+                    message: n.message,
+                })),
+                ...echoNotices,
+            ];
 
             if (!apply) {
                 record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'pending' });
@@ -16129,7 +16353,19 @@ export class ObjectStackProtocolImplementation implements
                     },
                 );
             }
+            // [#29673] …and the registry's refusal of the body this promotion
+            // makes live, on the same row and for the D9.9 refusal's reason:
+            // the write-through runs after the row is active, where a refusal
+            // is only a `console.warn`, so a publish answered `published` for
+            // an object that never registered (a zh-CN Studio's echoed `queue`
+            // column, measured). Asked here, before `repo.promoteDraft`
+            // writes, the per-item publish answers the registry's own envelope
+            // and a batch publish aborts on it into `failed[]` as on the
+            // refusals below (ADR-0067 D2). See {@link objectRegistrationRefusal}.
+            const registration = this.objectRegistrationRefusal(draftForGate.body, layer);
+            if (registration) throw registration;
         }
+
         // [#24547 · ADR-0129 D2] …and the namespace-prefix rule, the third
         // door's turn: the per-item publish (`POST /meta/object/:name/publish`)
         // made an object `active` under a namespaced package although its name

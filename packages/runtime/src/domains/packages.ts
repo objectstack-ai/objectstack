@@ -166,6 +166,10 @@ import {
     PackageInstallRequestSchema,
     PublishPackageDraftsRequestSchema,
 } from '@objectstack/spec/api';
+// [#28640 ruling ③A] The export names each connector map the served read
+// withheld: the declaration of that list, and the redactor that decided it.
+import { PackageExportManifestSchema, type PackageExportManifest } from '@objectstack/spec/api';
+import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -243,6 +247,12 @@ export type PackagesDomainProtocol =
          * producer's own signature as above.
          */
         getMetaItemsPerPackage?: ObjectStackProtocolImplementation['getMetaItemsPerPackage'];
+        /**
+         * [#28640 ruling ③A] The by-name execution read the export asks for a
+         * DECISION only (which connector maps the served read withheld), typed
+         * from the producer's own signature.
+         */
+        getMetaItemForExecution?: ObjectStackProtocolImplementation['getMetaItemForExecution'];
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         publishPackageDrafts?(request: any): Promise<any>;
         discardPackageDrafts?(request: any): Promise<any>;
@@ -3592,7 +3602,69 @@ context: HttpProtocolContext,
     if (namespace !== undefined && namespace !== null) manifest.namespace = namespace;
     const dependencies = pkg?.manifest?.dependencies;
     if (dependencies !== undefined && dependencies !== null) manifest.dependencies = { ...dependencies };
+    // [#28640 ruling ③A] Every connector map the served read withheld whole,
+    // named so an import can tell an incomplete map from one never written.
+    // Omitted, not emptied, when nothing was withheld.
+    const withheldMaps = await withheldConnectorMaps(protocol, packageId, manifest.connectors);
+    if (withheldMaps.length > 0) manifest.withheldMaps = withheldMaps;
     return manifest;
+}
+
+/** One entry of {@link PackageExportManifestSchema}'s `withheldMaps`. */
+type WithheldMap = NonNullable<PackageExportManifest['withheldMaps']>[number];
+
+/**
+ * [#28640 ruling ③A] The `withheldMaps` of an export: each header or
+ * environment-variable map of an exported connector that the served read
+ * withheld whole, as `{ type: 'connector', name, path }`, in the order the
+ * connectors are exported and, within one, the order the declaration lists
+ * the positions.
+ *
+ * The export writes SERVED items, so a withheld map is simply absent from the
+ * item, and an absence there cannot be told from a map never written. So the
+ * verdict is read where the redaction is decided: each exported connector's
+ * stored body, read on the protocol's by-name EXECUTION face
+ * (`getMetaItemForExecution`), is handed to the same `connector` redactor the
+ * served read ran, and every position it reports withheld that the
+ * declaration names is listed. Only that decision leaves this function, never
+ * a byte of the stored body: a position, and no header or variable name.
+ *
+ * A connector cannot be replaced by a declared override (`connector` is not an
+ * overridable type, ADR-0146 D2), so the by-name read under the package's id
+ * reads the item the per-package list served.
+ *
+ * ⛔ No verdict is guessed. A protocol without the execution face, or an
+ * exported connector the face answers no body for, is a failure: an export
+ * that writes this key promises that its absence means nothing was withheld.
+ */
+async function withheldConnectorMaps(
+    protocol: Pick<PackagesDomainProtocol, 'getMetaItemForExecution'>,
+    packageId: string,
+    connectors: unknown,
+): Promise<WithheldMap[]> {
+    if (!Array.isArray(connectors) || connectors.length === 0) return [];
+    const redact = getMetadataTypeRedactor('connector');
+    if (!redact) {
+        throw new Error(`[packages] export of '${packageId}': no 'connector' redactor is registered, so the export cannot name the connector maps the served read withheld.`);
+    }
+    if (typeof protocol.getMetaItemForExecution !== 'function') {
+        throw new Error(`[packages] export of '${packageId}': the metadata protocol has no execution read (getMetaItemForExecution), so the export cannot name the connector maps the served read withheld.`);
+    }
+    const positions: readonly WithheldMap['path'][] = PackageExportManifestSchema.shape.withheldMaps.unwrap().element.shape.path.options;
+    const withheld: WithheldMap[] = [];
+    for (const connector of connectors) {
+        const name = (connector as { name?: unknown } | null)?.name;
+        if (typeof name !== 'string') continue;
+        const stored = (await protocol.getMetaItemForExecution({ type: 'connector', name, packageId }))?.item;
+        if (!stored || typeof stored !== 'object') {
+            throw new Error(`[packages] export of '${packageId}': the execution read answered no body for connector '${name}', so the export cannot say whether its maps were withheld.`);
+        }
+        const { redactedKeys } = redact(stored as Record<string, unknown>);
+        for (const path of positions) {
+            if (redactedKeys.includes(path)) withheld.push({ type: 'connector', name, path });
+        }
+    }
+    return withheld;
 }
 
 /**

@@ -309,6 +309,18 @@ describe('a summary roll-up over a record-mode amount is refused at registration
     }
   });
 
+  it('[#29673] the pre-flight `objectRegistrationRefusal` leaves this door to the registration: it reads other objects, not the body alone', async () => {
+    const { engine } = await bootEngine();
+    engine.registry.registerObject(LINE as any);
+    // A sibling drafted in the same batch may take the child's amount out of
+    // record-currency mode before this parent registers, so the pre-flight a
+    // save or promote asks does not refuse it; the registration still does.
+    expect(engine.registry.objectRegistrationRefusal(parentWith('sum') as any)).toBeNull();
+    const err = await refusalOf(() => engine.registry.registerObject(parentWith('sum') as any));
+    expect(err?.name).toBe('RecordCurrencySummaryRefusedError');
+    expect(engine.registry.getObject('fx_parent')).toBeUndefined();
+  });
+
   it('the child registering after the parent is refused, naming the same roll-up', async () => {
     const { engine } = await bootEngine();
     engine.registry.registerObject(parentWith('sum') as any);

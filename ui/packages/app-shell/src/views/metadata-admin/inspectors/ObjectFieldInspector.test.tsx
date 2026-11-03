@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { FieldSchema } from '@objectstack/spec/data';
 
 // The inspector loads the object list (published + drafts) for the lookup
@@ -32,6 +33,7 @@ vi.mock('../previews/useObjectFields', () => ({
 
 import { ObjectFieldInspector } from './ObjectFieldInspector';
 import { __setCelFormulaLoader } from '../celAuthoring';
+import { t } from '../i18n';
 
 afterEach(() => {
   cleanup();
@@ -665,5 +667,128 @@ describe('ObjectFieldInspector — summary roll-up editor', () => {
     );
     expect(screen.getByText(/advanced shape/i)).toBeInTheDocument();
     expect(screen.queryByText('Filter 1')).not.toBeInTheDocument();
+  });
+});
+
+describe('ObjectFieldInspector — delete behavior (objectstack#29807)', () => {
+  // Radix Select reads pointer capture and scrollIntoView, which jsdom lacks.
+  const proto = Element.prototype as unknown as Record<string, unknown>;
+  for (const m of ['hasPointerCapture', 'setPointerCapture', 'releasePointerCapture']) {
+    if (!proto[m]) proto[m] = m === 'hasPointerCapture' ? () => false : () => {};
+  }
+  if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
+
+  type Def = Record<string, unknown>;
+  const LABEL = t('designer.field.deleteBehavior', 'en-US');
+  const NONE = t('engine.form.none', 'en-US');
+  const SET_NULL = t('designer.field.deleteBehavior.set_null', 'en-US');
+  const CASCADE = t('designer.field.deleteBehavior.cascade', 'en-US');
+  const RESTRICT = t('designer.field.deleteBehavior.restrict', 'en-US');
+  const LOOKUP: Def = { type: 'lookup', label: 'Parent', reference: 'account' };
+  const USER: Def = { type: 'user', label: 'Assignee' };
+  const MASTER: Def = { type: 'master_detail', label: 'Master', reference: 'account' };
+  const has = (o: object, key: string) => Object.prototype.hasOwnProperty.call(o, key);
+
+  /** A host that feeds each patch back into the draft, as Studio's editor does. */
+  function renderStateful(def: Def) {
+    const onPatch = vi.fn();
+    function Host() {
+      const [draft, setDraft] = React.useState<Record<string, unknown>>({
+        name: 'ticket',
+        fields: { title: { type: 'text', label: 'Title' }, ref: def },
+      });
+      return (
+        <ObjectFieldInspector
+          type="object"
+          name="ticket"
+          draft={draft}
+          selection={{ kind: 'field', id: 'ref' }}
+          onPatch={(patch: Record<string, unknown>) => {
+            onPatch(patch);
+            setDraft((d) => ({ ...d, ...patch }));
+          }}
+          onClearSelection={vi.fn()}
+          onSelectionChange={vi.fn()}
+          readOnly={false}
+          locale={'en-US'}
+        />
+      );
+    }
+    render(<Host />);
+    /** The `ref` definition the editor's Save would persist after the last edit. */
+    const saved = () => (onPatch.mock.calls.at(-1)![0].fields as Record<string, Def>).ref;
+    return { onPatch, saved };
+  }
+
+  const control = () => screen.queryByRole('combobox', { name: LABEL });
+
+  async function optionNames(): Promise<string[]> {
+    await userEvent.click(control()!);
+    const list = await screen.findByRole('listbox');
+    return within(list).getAllByRole('option').map((o) => o.textContent ?? '');
+  }
+
+  async function pick(name: string) {
+    await userEvent.click(control()!);
+    const list = await screen.findByRole('listbox');
+    await userEvent.click(within(list).getByRole('option', { name }));
+  }
+
+  async function retypeTo(typeLabel: string) {
+    await userEvent.click(screen.getByRole('combobox', { name: t('designer.field.type', 'en-US') }));
+    const list = await screen.findByRole('listbox', { name: t('designer.field.type', 'en-US') });
+    await userEvent.click(within(list).getByRole('option', { name: typeLabel }));
+  }
+
+  it.each([
+    ['lookup', LOOKUP, [NONE, SET_NULL, CASCADE, RESTRICT]],
+    ['user', USER, [NONE, SET_NULL, CASCADE, RESTRICT]],
+    // The spec refuses an authored `set_null` on a master_detail.
+    ['master_detail', MASTER, [NONE, CASCADE, RESTRICT]],
+  ] as const)('draws the row on a %s field with the values the spec accepts there', async (_type, def, expected) => {
+    renderStateful(def);
+    expect(screen.getByTestId('field-delete-behavior')).toBeTruthy();
+    expect(await optionNames()).toEqual(expected);
+  });
+
+  it.each([
+    ['text', { type: 'text', label: 'Title' }],
+    ['tree', { type: 'tree', label: 'Parent' }],
+  ] as const)('CONTROL: draws no row on a %s field', (_type, def) => {
+    renderStateful(def);
+    expect(screen.queryByTestId('field-delete-behavior')).toBeNull();
+    expect(control()).toBeNull();
+  });
+
+  it('picking a value writes it to the draft', async () => {
+    const { saved } = renderStateful(USER);
+    await pick(CASCADE);
+    expect(saved().deleteBehavior).toBe('cascade');
+  });
+
+  it('picking None removes the key outright (absent, never empty or null)', async () => {
+    const { saved } = renderStateful({ ...LOOKUP, deleteBehavior: 'restrict' });
+    await pick(NONE);
+    expect(has(saved(), 'deleteBehavior')).toBe(false);
+    expect(saved().reference).toBe('account');
+  });
+
+  it('a retype to text drops the key', async () => {
+    const { saved } = renderStateful({ ...LOOKUP, deleteBehavior: 'cascade' });
+    await retypeTo(t('engine.fieldType.text', 'en-US'));
+    expect(saved().type).toBe('text');
+    expect(has(saved(), 'deleteBehavior')).toBe(false);
+  });
+
+  it('a retype to master_detail drops set_null and keeps cascade', async () => {
+    const first = renderStateful({ ...LOOKUP, deleteBehavior: 'set_null' });
+    await retypeTo(t('engine.fieldType.master_detail', 'en-US'));
+    expect(first.saved().type).toBe('master_detail');
+    expect(has(first.saved(), 'deleteBehavior')).toBe(false);
+    cleanup();
+
+    const second = renderStateful({ ...LOOKUP, deleteBehavior: 'cascade' });
+    await retypeTo(t('engine.fieldType.master_detail', 'en-US'));
+    expect(second.saved().deleteBehavior).toBe('cascade');
   });
 });

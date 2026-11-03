@@ -155,6 +155,11 @@
           "verifiedAt": "2026-08-28",
           "evidence": "packages/services/service-datasource/src/datasource-admin-service.ts#testConnection (`const queryTimeoutMs = (input.external as …)?.queryTimeoutMs`, spread onto the probe options as `timeoutMs` only when it is a number)",
           "note": "carried into the external-datasource probe options as `timeoutMs`. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `:220` had rotted onto a BLANK LINE, which is the most legible form of this rot: in range, resolvable, and pointing at nothing at all. Re-closed by hand against c459da6bc; DATED for the first time."
+        },
+        "rowCap": {
+          "status": "planned",
+          "verifiedAt": "2026-11-03",
+          "note": "PLANNED (#29762, maintainer ruling: a per-datasource cap bounded by a platform maximum of 10,000). The plugin-driver row cap: the most rows the engine's correctness floor reads from a plugin driver for one request, and so the most one read may match before EXTERNAL_ROW_CAP_EXCEEDED (422). Declared in the spec slice (packages/spec/src/data/datasource.zod.ts, beside `EXTERNAL_ROW_CAP_DEFAULT` and `EXTERNAL_ROW_CAP_CEILING`); refused at parse above the ceiling, on a built-in driver, and (through the managed-block refusal) on a managed datasource. ACTED ON by nothing yet: the reader is the floor in packages/objectql/src/external-driver-floor.ts, which lands in the card's second PR. Flip to `live` on the commit that lands that reader, citing it."
         }
       },
       "note": "5 of 7 live. The two dead ones are opposite in risk: `external.label` is cosmetic, `external.requirePermission` is security-shaped — it reads as an access gate and is not one."
