@@ -319,6 +319,74 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         expect(findData).not.toHaveBeenCalled();
     });
 
+    describe('[#29946] a user field relates its child to sys_user, as the row query follows it', () => {
+        const SYS_USER = { name: 'sys_user', label: 'User', fields: { id: { name: 'id', type: 'text' } } };
+        const TASK = {
+            name: 'task',
+            label: 'Task',
+            fields: {
+                id: { name: 'id', type: 'text' },
+                // A bare `Field.user` as a raw registration spells it: no carrier.
+                owner: { name: 'owner', type: 'user' },
+                // ...and as the spec's parse materializes it.
+                assignee: { name: 'assignee', type: 'user', reference: 'sys_user' },
+                reviewers: { name: 'reviewers', type: 'user', multiple: true },
+                parent: { name: 'parent', type: 'tree', reference: 'task' },
+                account: { name: 'account', type: 'lookup', reference: 'account' },
+            },
+        };
+        const items = { ...ITEMS, sys_user: SYS_USER, task: TASK };
+
+        it('a related list on sys_user keyed by a user field answers 200 with its rows (duly#185)', async () => {
+            const { call, findData } = boot({ items });
+            const answer = await call(
+                { related: [{ object: 'task', field: 'owner', top: 5 }, { object: 'task', field: 'assignee', top: 5 }, { object: 'task', field: 'reviewers', top: 5 }] },
+                {},
+                { object: 'sys_user', id: 'u9' },
+            );
+            expect(answer.status).toBe(200);
+            const data = RecordPageResponseSchema.parse(answer.body.data);
+            expect(data.related).toEqual([
+                expect.objectContaining({ object: 'task', field: 'owner', total: 7, records: [{ id: 'task-1' }] }),
+                expect.objectContaining({ object: 'task', field: 'assignee', total: 7 }),
+                expect.objectContaining({ object: 'task', field: 'reviewers', total: 7 }),
+            ]);
+            expect(findData.mock.calls.map(([req]: any) => req.query.where)).toEqual([
+                { owner: 'u9' },
+                { assignee: 'u9' },
+                { reviewers: { $contains: 'u9' } },
+            ]);
+        });
+
+        it('a user field on a page that is not sys_user is still a located 400, naming the kinds it accepts', async () => {
+            const { call, getData, findData } = boot({ items });
+            const answer = await call({ related: [{ object: 'task', field: 'owner', top: 1 }] });
+            expect(answer.status).toBe(400);
+            expect(answer.body.error.details.fields).toEqual([{
+                field: 'related.0.field',
+                code: 'invalid_relationship',
+                message: "'owner' on 'task' is not a lookup, master-detail, user or tree field that references 'account'.",
+            }]);
+            expect(getData).not.toHaveBeenCalled();
+            expect(findData).not.toHaveBeenCalled();
+        });
+
+        it('a lookup keeps relating only to its own reference, and a tree to its own object', async () => {
+            const { call } = boot({ items });
+            expect((await call({ related: [{ object: 'task', field: 'account', top: 1 }] })).status).toBe(200);
+            expect((await call({ related: [{ object: 'task', field: 'account', top: 1 }] }, {}, { object: 'sys_user', id: 'u9' })).status).toBe(400);
+            expect((await call({ related: [{ object: 'task', field: 'parent', top: 1 }] }, {}, { object: 'task', id: 't1' })).status).toBe(200);
+            expect((await call({ related: [{ object: 'task', field: 'parent', top: 1 }] })).status).toBe(400);
+        });
+
+        it('an unreadable reference carrier is not a relationship: the located 400, not a thrown 500', async () => {
+            const odd = { ...TASK, fields: { ...TASK.fields, bad: { name: 'bad', type: 'lookup', reference: { object: 'account' } } } };
+            const answer = await boot({ items: { ...items, task: odd } }).call({ related: [{ object: 'task', field: 'bad', top: 1 }] });
+            expect(answer.status).toBe(400);
+            expect(answer.body.error.details.fields).toEqual([expect.objectContaining({ code: 'invalid_relationship' })]);
+        });
+    });
+
     it('a declared filter the list read refuses is a located 400 before anything is read', async () => {
         const { call, getData, findData } = boot();
         const answer = await call({ related: [{ object: 'note', field: 'account', top: 1, filter: { title: { $in: 'x' } } }] });
