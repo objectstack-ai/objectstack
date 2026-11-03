@@ -1,0 +1,31 @@
+{
+  "number": 29945,
+  "kind": "issue",
+  "title": "Record page v3 body tables sit in the narrow details column, so a seven-column child list hides its last columns behind a horizontal scroll at 1440 px",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T16:32:58Z",
+  "updated_at": "2026-11-03T17:03:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29945",
+  "body": "repo:hotclm#1 · zhuangjianguo · session_01QsR2jUw8KJgAwuwk6sqYLD\n\nFiling gate: ① user-visible defect, reproduced in the browser on @objectstack 18.3.0 (hotclm 18.3 upgrade pass; hotclm decision-box batch 11, maintainer 「同意」 2026-11-03T16:16:59Z).\n\n**Symptom.** At 1440×900 the v3 record page gives the details column about 680 px and the side column (activity, side cards, attachments) the rest. Body tables are drawn inside the details column, so hotclm's child lists, which name seven or eight columns in `relatedListColumns`, show four or five and clip the rest with no visible cue: the versions table hides 文件 (the PDF link — the column a reader opens the table for), 提交人 and 创建时间; obligations clip 负责人 mid-word (\"Busines…\") and hide 状态; signatures hide 执行副本 and 完成时间. On 18.2 the same lists, drawn in a full-width tab, showed every column (hotclm 18.2 screenshot 19-legal-versions-tab.png).\n\n**Expected.** A body table either takes the page's full width (spanning the side column, as \"full-width table\" in `relatedList: 'primary'`'s description promises), or makes the overflow obvious (sticky first column, a scroll affordance, or the 'expand' view opened by default for wide tables).\n\nEvidence: /mnt/project-files/hotclm-objectstack-18-3-upgrade/02-detail-counsel-2.png, -3.png; compare /mnt/project-files/hotclm-objectstack-18-2-upgrade/19-legal-versions-tab.png. Platform version: 18.3.0."
+}

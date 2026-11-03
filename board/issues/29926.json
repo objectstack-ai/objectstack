@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T13:12:38Z",
-  "updated_at": "2026-11-03T13:53:55Z",
+  "updated_at": "2026-11-03T15:51:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29926",
   "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ① a product defect with a named landing point (reach: the `expression-invalid` advisory `os validate` and `POST /api/v1/packages/:id/publish-drafts` serve; read on the tree at PR #29923's head `1dfad411`, the contract review 6604729050 ③-1/③-2/④-A).\nBusiness reason: an author who writes a text-vs-number comparison in a record-triggered flow condition is told it \"silently evaluates to null\"; it does not: the flow run fails at that condition (the write that fired it lands), the outcome `validate-null-guards.ts` documents as `run-fails`. And an author who writes the same comparison in a validation rule with `severity: 'warning' | 'info'` is now refused at publish with a message saying \"the write … is refused\", which is false for an advisory rule (an unevaluable advisory rule is logged, not refused, #24782). Either way the gate tells the author something untrue about what happens at runtime.\nReader who acts: `domain:server`. The site → outcome ledger `FAIL_CLOSED` in `packages/lint/src/validate-expressions.ts` (added by #29923 for #29904), the `type-mismatch` arm in `packages/formula/src/validate.ts`, and `packages/formula/src/expression-refusal.ts` with its pins in `expression-refusal-codes.test.ts`.\nDedupe (open and closed): `flow condition type mismatch \"evaluates to null\"` 3 hits, `type-mismatch fail-closed advisory validation rule` 6, `expression-refusal type-mismatch template outcome` 3. Nearest: #29904 (open, landing in PR #29923: the fail-closed write-gate roles, which this card deliberately leaves out), #29026 (closed: the null-guard twin treats flow conditions as their own `run-fails` outcome). None covers these two roles.\n\n## What to decide and fix\n\n1. **Flow conditions** (start / edge / decision / node conditions of a record-triggered flow): add a `run-fails` outcome to the type-mismatch verdict, the way the null-guard twin has one: at least the message says the run fails at that condition and the triggering write still lands; whether it also becomes an `error` follows the twin's grading for that surface.\n2. **Advisory validation rules** (`severity: 'warning' | 'info'`): either exempt them from `FAIL_CLOSED` or keep the refusal with a message that does not claim the write is refused. The nullable twin grades them the same way today; decide both together.\n3. **Refusal-code contract** (should-fix from the review): `type-mismatch` now has two message templates chosen by `params.outcome`, against `expression-refusal.ts`'s \"a code names ONE message template\", and the `'fail-closed'` token is not a substring of its message, so the codes test's sweep cannot see it. Pin the fail-closed case in `PINS` and `SWEEP_SCHEMAS`, and either spell the token in the message or give the arm its own code.\n4. Nit: the D3 entry `18.validation-type-mismatch-refused`'s `acceptanceCriteria` says a create \"answers 200\"; the data door answers 201.\n\nMeasured on the tree at `1dfad411` (PR #29923), not yet at a merged `main`; re-measure once #29923 lands."

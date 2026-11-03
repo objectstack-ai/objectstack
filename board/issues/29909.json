@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T10:39:42Z",
-  "updated_at": "2026-11-03T11:07:06Z",
+  "updated_at": "2026-11-03T18:26:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29909",
   "body": "security#1 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\nBlocked-by: #29827\n\n**Maintainer ruling.** In session `session_01QSeKYn5CmmdShCJifm6WYj` on 2026-11-03, the maintainer first ruled, verbatim: 「一律吊销,不加开关」. A completed self-service password reset always ends the account's sessions, and there is no setting. Later, accepting the seat's analysis (reviewed at `CONTRACT_REVIEW_TIER` first), they said, verbatim: 「第三批 同意」. Item 2 of that analysis: retire the key.\n\n## What\nPR #29827 makes plugin-auth always pass `revokeSessionsOnPasswordReset: true`. It also refuses an explicit `false` at the AuthManager constructor and in `applyConfigPatch`. After it lands, the spec key `EmailAndPasswordConfig.revokeSessionsOnPasswordReset` (`packages/spec/src/system/auth-config.zod.ts:318`, `z.boolean().optional()`, on the authorable-surface baseline) can hold only one value. Under ADR-0049 enforce-or-remove, it is retired.\n\n## Change (spec lane; follow the `spec-property-retirement` skill)\n- Retire the key with a tombstone. Prescription: \"delete this key — a completed password reset always ends every session the account holds\".\n- Update the comment at `auth-config.zod.ts:308-313`, which lists this key as an `externalVocabulary` mirror example of #14478 ruling B. After #29827 the key is no longer forwarded, so the mirror reason no longer holds.\n- Delete plugin-auth's `assertPasswordResetEndsSessions` (it becomes unreachable) in the same change, or in a paired PR if lanes require it.\n- Regenerate the baselines and docs. Add an ADR-0087 D3 entry (it narrows: a writer of `true` must delete the key).\n- Measured at the analysis: the only writers of `true` are tests (`auth-manager.test.ts:2060/2072`, `auth-config.test.ts:299`), plus `docs/HARDENING.md` references.\n\n## Acceptance\n- The key is gone from the authorable surface, and its tombstone prescribes the deletion.\n- No producer anywhere writes the key.\n- The D3 entry is registered.\n- `check:authorable-surface`, `check:generated` and the liveness ledger are green.\n\nRe-check: `git grep -n revokeSessionsOnPasswordReset -- packages docs skills content`"

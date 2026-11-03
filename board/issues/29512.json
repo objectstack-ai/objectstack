@@ -2,8 +2,8 @@
   "number": 29512,
   "kind": "issue",
   "title": "skills(objectstack-automation): an approval's decision outputs are enforced at the decision — type and multiple are checked, not widget hints (#28658)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T17:13:28Z",
-  "updated_at": "2026-11-03T13:11:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T16:30:59Z",
+  "closed_at": "2026-11-03T16:30:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

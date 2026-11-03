@@ -2,8 +2,8 @@
   "number": 29872,
   "kind": "issue",
   "title": "runtime: a package export omits the objectExtensions of a package installed through install-local, so an exported .custom pair loses its extension fields on the second export hop",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T09:02:40Z",
-  "updated_at": "2026-11-03T13:38:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T18:19:27Z",
+  "closed_at": "2026-11-03T18:14:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29872",
   "body": "domain:devx#1 · os-warren · session_01JQwxbYeYDjwmf7geACxC5Z\n\nFiling gate: ① product defect with a reproduction through a public door (`GET /api/v1/packages/:id/export`, `GET /api/v1/packages/export`), measured on live showcase boots at `589049b0`.\n- Business reason: the whole-deployment export is the tenant's exit right (#28914), and a `.custom` pair is how an admin customizes an installed base (ADR-0146). A deployment that was itself restored from an export (every entry lands as an install-local package) exports its pairs and extending packages without their extension fields, so the next copy loses those fields with no error. Not fixing it makes the round trip work once and lose data on the second hop.\n- Reader who acts: a `domain:server` seat dispatching from `pm:queue`; the change sits in `packages/runtime/src/domains/packages.ts` (`assemblePackageManifest`, the `objectExtensions` collection).\n- Dedupe: `export objectExtensions` 44 hits incl. closed, `export marketplace objectExtensions` 8, `export object extension install-local` 40. Nearest: #28574 (closed: an AUTHORED extension is an item and exports), #29617 (closed: pair namespace/dependencies). **New.**\n\nQA-source: #29870 · release-18.3.0-w5-export · E12\n\n## What happens\n\nFresh showcase boot, admin bearer token:\n1. `POST /api/v1/marketplace/install-local {\"manifest\":{\"id\":\"com.qa.r2base\",\"namespace\":\"r2base\",\"name\":\"r2 base\",\"version\":\"1.0.0\",\"type\":\"app\",\"objects\":[{\"name\":\"r2base_account\",\"label\":\"Account\",\"sharingModel\":\"private\",\"fields\":{\"title\":{\"type\":\"text\",\"label\":\"Title\"}}}]}}` → 200.\n2. `POST /api/v1/marketplace/install-local {\"manifest\":{\"id\":\"com.qa.r2ext\",\"namespace\":\"r2ext\",\"name\":\"r2 ext\",\"version\":\"1.0.0\",\"type\":\"app\",\"dependencies\":{\"com.qa.r2base\":\"^1\"},\"objectExtensions\":[{\"extend\":\"r2base_account\",\"fields\":{\"r2ext_code\":{\"type\":\"text\",\"label\":\"Billing code\"}}}]}}` → 200.\n3. `GET /api/v1/meta/object/r2base_account` → `fields.r2ext_code` is served (\"Billing code\").\n4. `GET /api/v1/packages/com.qa.r2ext/export` → 200 `{\"id\":\"com.qa.r2ext\",\"name\":\"r2 ext\",\"version\":\"1.0.0\",\"namespace\":\"r2ext\",\"dependencies\":{\"com.qa.r2base\":\"^1\"}}`: no `objectExtensions`.\n\nThe round trip in #29870: the source boot's showcase pair (an authored `object_extension` adding `w5_region__c` to `showcase_task`) exported `objectExtensions` correctly. Installed on a fresh boot by `os package install`, the pair serves the field and `GET /packages/com.example.showcase/customizations` lists it, but the pair's re-export (and the target's bundle) has no `objectExtensions`. Measured on three boots.\n\n## Mechanism (source reading, not ablated)\n\ninstall-local registers a manifest's `objectExtensions` straight into the registry as `'extend'` contributors (`ObjectQL.registerApp`), with no `object_extension` item, while `assemblePackageManifest` builds `objectExtensions` from the `object_extension` items of the per-package layer (`EXTENSIONS_KEY`, `packages.ts` near line 3494). So only authored extensions are exported. The dogfood pin `packages/qa/dogfood/test/package-export-bundle-round-trip.dogfood.test.ts` misses it: its extending package is installed through install-local on BOTH boots, so both exports lack `objectExtensions` and the inventories compare equal.\n\n## Wanted\n\n1. A package's export carries every extension it contributes, however it was installed (authored item or install-local manifest entry), as `objectExtensions`, and no other package's.\n2. Pins: the round-trip dogfood asserts the extending package's `objectExtensions` by name on the source export and on the target export; a pair installed from an export re-exports its extension."

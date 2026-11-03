@@ -1,0 +1,31 @@
+{
+  "number": 29944,
+  "kind": "issue",
+  "title": "Record page v3: an empty body table collapses to one line that reads 「暂无相关记录 偏离 新建」 — the empty text before the table's own title",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T16:32:16Z",
+  "updated_at": "2026-11-03T17:03:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29944",
+  "body": "repo:hotclm#1 · zhuangjianguo · session_01QsR2jUw8KJgAwuwk6sqYLD\n\nFiling gate: ① user-visible defect, reproduced in the browser on @objectstack 18.3.0 (hotclm 18.3 upgrade pass; hotclm decision-box batch 11, maintainer 「同意」 2026-11-03T16:16:59Z).\n\n**Symptom.** hotclm's contract page has six body tables. When one is empty (here 偏离 / Deviations, 0 rows) it is not drawn like its siblings (header row with title, count and 新建 above the table). It collapses to a single bordered line whose text reads, left to right, **「暂无相关记录  偏离  + 新建」**: the empty-state sentence first, the table's title after it, in italic grey. Read aloud it says \"no related records deviations new\". The same happens to the renewals card when it is a body table (「合同 0 暂无相关记录」).\n\n**Expected.** An empty body table keeps its header (title, 0, 新建) and shows the empty state under it — the shape the non-empty tables and the pre-18.3 `record:related_list` both draw.\n\nEvidence: /mnt/project-files/hotclm-objectstack-18-3-upgrade/02-detail-counsel-4.png (bottom of the details column). Platform version: 18.3.0."
+}

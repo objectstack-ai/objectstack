@@ -2,8 +2,8 @@
   "number": 29418,
   "kind": "issue",
   "title": "skills(objectstack-automation): a flow's record nodes treat a computed filter operand as a value, never as a query operator (#29404) — the automation skill and flows page should say so",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:29:05Z",
-  "updated_at": "2026-11-03T12:35:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T16:30:59Z",
+  "closed_at": "2026-11-03T16:30:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

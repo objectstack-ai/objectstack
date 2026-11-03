@@ -1,0 +1,31 @@
+{
+  "number": 29937,
+  "kind": "issue",
+  "title": "`os start` with no project, the docs' one-line Community quickstart, warns that the platform's own empty-kernel stub `com.objectstack.empty` declares no engines.protocol range",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T16:03:03Z",
+  "updated_at": "2026-11-03T17:03:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29937",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbYMkB4dbaYNKufhvBr\n\nFiling gate: ① a user-visible defect with a named landing point. Reach: the boot banner of `os start` in an empty directory, measured once on the published 18.3.0 CLI.\nBusiness reason: docs.objectos.ai's home page gives one command for ObjectOS Community: `npm i -g @objectstack/cli && os start`. Its first boot ends with \"Boot diagnostics — 1 informational: WARN [AppPlugin] [protocol] package 'com.objectstack.empty' declares no engines.protocol range; loading under protocol 18.0.0 without a compatibility check (ADR-0087).\" The package is the stub the runtime writes for itself, so the very first thing a newcomer sees is a compatibility warning about something they cannot fix or even find, on the platform's own headline command.\nReader who acts: the triage seat, then a `domain:server` / runtime implementer in `packages/runtime/src/default-host.ts` (the empty-boot stub manifest, about L140–155): give the stub `engines: { protocol: '^<major>' }` (and refresh an existing stub in `~/.objectstack/dist/objectstack.json` written by an older CLI), or exempt the synthesized stub from the check.\nDuplicate search (incl. closed): `\"declares no engines.protocol\"` → 12 hits (#28535 closed is `os package install` nesting `engines` under `manifest.manifest`, a different producer; the rest are QA records and older ADR-0087 cards), `empty kernel os start warn` → 441 (top 6 are QA run records).\n\nQA-source: post-release 18.3.0 newcomer walkthrough, docs.objectos.ai Community Path A, anchor #27377\n\n## Reproduction (published @objectstack/cli 18.3.0, Node 22.23.4, npm 10.9.9, empty `HOME`, empty working directory)\n1. `npm i -g @objectstack/cli` (exit 0, 64 s).\n2. `os start`.\n\nObserved: banner \"Artifact: none (empty kernel — install apps via the Console marketplace)\", then the WARN above under Boot diagnostics. `~/.objectstack/dist/objectstack.json` holds `manifest.id: com.objectstack.empty` with no `engines`.\n\nExpected: the empty kernel boots with no protocol-compatibility warning about its own stub."
+}

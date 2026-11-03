@@ -1,0 +1,31 @@
+{
+  "number": 29934,
+  "kind": "issue",
+  "title": "os dev and os start keep their crypto key in two different files, so a secret saved under `npm run dev` reads back as unset under `os start` on the same project database",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T16:00:10Z",
+  "updated_at": "2026-11-03T17:03:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29934",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbYMkB4dbaYNKufhvBr\n\nFiling gate: ① a product defect with a named landing point and a measured repro. Reach: `GET /api/settings/ai` and the Setup settings form, measured once on the published 18.3.0 CLI.\nBusiness reason: \"Your First Project\" step 6 tells a newcomer to `npm run build` and `npx os start --artifact ./dist/objectstack.json` in the same project they just ran `npm run dev` in. Both commands open the same SQLite file (`.objectstack/data/objectstack.db`), but `os dev` reads the key at `~/.objectstack/dev-crypto-key` and `os start` mints a new one at `<project>/.objectstack/dev-crypto-key`. Every secret written during development (an AI key, SMTP password, datasource credential, a `secret` field) silently reads back as unset under `os start`: the server only logs \"failed to decrypt … re-save the field to repair\". A single-node self-hoster who moves from dev to start loses every stored credential with no visible error. The comment in `start.ts` (L485, \"persisting a key file (~/.objectstack/dev-crypto-key)\") shows the intent was one file. Not a security finding: no secret is exposed, the ciphertext just becomes unreadable.\nReader who acts: the triage seat, then a `domain:cli` implementer in `packages/cli/src/commands/start.ts` (home resolution L187 and the `OS_CRYPTO_AUTOKEY` opt-in at L480–490) and `packages/services/service-settings/src/local-crypto-provider.ts` (`keyFilePath`, L463). One key location for both commands in project mode, or `os start` refusing or warning loudly when the database already holds `sys_secret` rows its key cannot open.\nDuplicate search (incl. closed): `dev-crypto-key` → 114 hits (top 12 read, none about dev vs start), `\"os start\" decrypt` → 2 (#21326, #20790, both unrelated), `\"failed to decrypt\"` → 0, `OS_HOME crypto key start dev` → 15 (#21471 and #21499 are one-shot commands minting a key, closed, a different path).\n\nQA-source: post-release 18.3.0 newcomer walkthrough, path 1 \"Your First Project\", anchor #27377\n\n## Reproduction (published @objectstack/cli 18.3.0, Node 22.23.4, npm 10.9.9, empty `HOME`)\n1. `npm create objectstack@latest my-app && cd my-app && npm run dev`. The banner says `No OS_SECRET_KEY/OS_DEV_CRYPTO_KEY set — generated a new AES-256-GCM key and persisted it to $HOME/.objectstack/dev-crypto-key`.\n2. Sign in as `admin@objectos.ai` / `admin123`, then `PUT /api/settings/ai` with `{\"openai_api_key\":\"sk-test\"}` → 200, value `••••••••`, source `global`.\n3. Stop dev. `npm run build && npx os start --artifact ./dist/objectstack.json --port 8080`. The banner says `minted a new AES-256-GCM key and persisted it to <project>/.objectstack/dev-crypto-key`; the two key files differ (`cmp`).\n4. Sign in again, `GET /api/settings/ai`.\n\nObserved: `openai_api_key` is `{\"value\": null, \"source\": \"default\"}` and the server logs `[SettingsService] failed to decrypt ai.openai_api_key: Unsupported state or unable to authenticate data. Returning null …`. The Setup form shows the key as empty.\n\nExpected: the same project reads its own secrets back under `os start`, or `os start` refuses to boot over a database whose secrets its key cannot open and says which key file the data was written with."
+}

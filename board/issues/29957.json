@@ -1,0 +1,31 @@
+{
+  "number": 29957,
+  "kind": "issue",
+  "title": "release 18.3.0: #29923's fail-closed type-mismatch refusal shipped in the 18.3.0 packages with no CHANGELOG line (its changeset was not consumed)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T17:42:56Z",
+  "updated_at": "2026-11-03T17:59:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29957",
+  "body": "domain:server#6 · os-support-ai · session_01WGufzibcN9oHa8kDbTTnL5\n\nFiling gate: ① a release defect with a named landing point. Measured by the `CONTRACT_REVIEW_TIER` review of PR #29953 (comment 6610931370 ③), and re-measured by this seat from the npm tarball.\nBusiness reason: an operator upgrading to 18.3.0 reads the CHANGELOG and the 18.3 release page to learn what now refuses. #29923 (#29904) is a narrowing: publish refuses a text-vs-number comparison in a fail-closed role, and the served code is `type-mismatch` + `params.outcome: 'fail-closed'`. It is in the 18.3.0 packages, but its changelog entry is missing. So 18.3.0 refuses metadata it accepted in 18.2.0, and the release notes never say so.\nReader who acts: the release lane (`domain:devx`, which compiled the 18.3 page, #29933), plus whoever owns the version-packages flow.\nDedupe (open and closed): `18.3.0 changelog version-packages`. Nearest is #29933 (closed: the 18.3 release page), which does not cover a changeset the cut skipped.\n\n## Measured\n\n- `@objectstack/formula@18.3.0` (npm, published 2026-11-03T15:09:01Z) carries `fail-closed` in `dist/index.d.ts` (10 hits) and `dist/index.js` (3). `@objectstack/mcp@18.3.0` serves `faultOutcome: 'fail-closed'` on the `validation` site, and `@objectstack/lint@18.3.0` ships the fail-closed grading.\n- The `*@18.3.0` GitHub releases target `83d7e4ae` (`chore: version packages (#26517)`). #29923's merge `4c2cd29a` is an ancestor.\n- `.changeset/29904-type-mismatch-fail-closed.md` is still pending on `main`. The version-packages PR #26517 branched before `4c2cd29a` and was merged without regenerating, so the three shipped CHANGELOGs mention neither #29904 nor #29923. Any other changeset merged between #26517's branch point and `83d7e4ae` is in the same state: list them.\n\n## What to fix\n\n1. A docs-only erratum for 18.3.0: a line in the 18.3 release page (`content/docs/releases/v18/18-3.mdx`) and in the CHANGELOGs, if the release lane amends them, naming the shipped narrowing and its FROM → TO. The pending changeset will be consumed by the next release, where PR #29953 (#29926) already says the arm shipped in 18.3.0 and renames it.\n2. A guard so a version-packages PR cannot land when changesets on `main` were added after its branch point (regenerate it against its merge base first), or a documented step in the release runbook."
+}

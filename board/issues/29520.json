@@ -2,8 +2,8 @@
   "number": 29520,
   "kind": "issue",
   "title": "Codemod split pilot: generate the sql-driver.ts split with a deterministic script, verified byte-identical",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:devx",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T17:23:42Z",
-  "updated_at": "2026-11-03T13:29:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T17:23:34Z",
+  "closed_at": "2026-11-03T16:26:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 14,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29520",
   "body": "domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB\n\nFiling gate: ruling 6583399215 on #29465 (letter A, maintainer 「同意」 2026-11-02T17:11Z), which names this pilot card as the `domain:devx` seat's to file. ⛔ Not a claim. No grade: triage sets it and routes it.\n\nRuling-ref: 6583399215\nGoverns: #24586 ruling A (6270097840, one move-only programme per file over 10,000 lines), the declaration-file bar of ruling 6348891160 on #25222, and the landing plan 6582376616 on #29465.\n\n## What to build\n\n1. A deterministic codemod (ts-morph; `packages/cli` already depends on `ts-morph` ^28) that applies the cut pattern the hand series already used on this file (#25521, closed after cut 21): a whole section's method bodies move to a section module, the `SqlDriver` class keeps one-line stubs, and shared members are reached through the host pattern the existing modules use (`packages/drivers/driver-sql/src/sql-driver-*.ts`, e.g. `sql-driver-introspection.ts`, `sql-driver-schema-sync.ts`).\n2. The script's own check: every moved body is byte-identical to its source (AST text comparison), and the package's declaration files pass ruling 6348891160's bar (sorted string-literal unions compare equal; no declaration added or removed).\n3. Run it on `packages/drivers/driver-sql/src/sql-driver.ts` (18,333 lines on `main` `04e0c2c0`, one commit in the last 7 days, no open PR on it) in a draft PR that carries the script and the generated split, plus type-check and the full suite.\n\n## How it lands (landing plan 6582376616)\n\n- Phase 0, no pause: build and prove the script and the generated pilot in the draft PR. The PR is over 3000 changed lines, so it takes contract review, the final four-piece set and the maintainer's approval.\n- Phase 1, a window the maintainer orders (「车队什么时候空闲是有我安排的」): seats land or park open PRs on the file, the dev re-runs the script on the latest `main` (regenerated, never rebased), CI runs once, the maintainer approves and the PR enters the merge queue.\n- ⛔ A pilot that fails byte-identity or the declaration bar is reported as a fork on #29465 and option B applies there. The generated split is never hand-edited to pass.\n\n## After the pilot merges\n\nPer the ruling, one codemod card per remaining file goes to its lane: `packages/spec/src/conversions/registry.ts` → `domain:spec` (per-entry files with a generated index, as #7297 did); `packages/objectql/src/engine.ts` (#25522 is released into its card) and the rest of `packages/metadata-protocol/src/protocol.ts` (#25467 stops cutting once its codemod card is claimed) → `domain:server`. `StudioDesignSurface.tsx` stays on hand slices. Note the current freeze on `protocol.ts` (server seat 5, until 2026-11-03 06:00Z at the latest) before any work there.\n\n## Done when\n\nThe draft PR holds the script and the generated `sql-driver.ts` split, its byte-identity and declaration checks pass, type-check and the full suite are green, and it has landed in the maintainer's window (or the fork is reported on #29465).\n\nDedupe: searched `codemod split`, `sql-driver.ts split script`, `generated split`: only #29465, #25521, #24586. **New.**"

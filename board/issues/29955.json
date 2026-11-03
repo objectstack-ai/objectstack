@@ -1,0 +1,36 @@
+{
+  "number": 29955,
+  "kind": "pull_request",
+  "title": "fix(plugin-email): a non-string recipient display name answers the send door's 400, not 500",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T17:27:09Z",
+  "updated_at": "2026-11-03T19:50:34Z",
+  "closed_at": "2026-11-03T19:50:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-03T19:50:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29955",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwB7J3TmFTYMYQrfpye6GQNg9)_\n\nFixes #29891\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：`POST /api/v1/email/send` 里 `to` / `cc` / `bcc` / `replyTo`（含列表项）的显示名不是字符串时，现在返回 400 `VALIDATION_FAILED`（\"the display name of … must be a string\"），不再是 500 `EMAIL_SEND_FAILED`；拒收记录照常写入 `sys_email`。\n- **为什么改**：拒收判断本来就对（`formatCallerAddress`，#29250），但随后写拒收行的 `rawAddressText` 对调用方原始 `name` 调 `.trim()`，抛 TypeError，把 400 变成 500。\n- **风险与回滚**：只改一个内部函数（未导出），非字符串显示名不写进拒收行（`error` 列已写明原因）；字符串、缺省、`null` 显示名行为不变。回滚即 revert。\n- **先看**：`packages/plugins/plugin-email/src/email-service.ts` 的 `rawAddressText`；新 pin `packages/rest/src/email-send-display-name.test.ts`。\n- **两分钟验证**：`pnpm --filter @objectstack/rest exec vitest run --project local src/email-send-display-name.test.ts`，预期 19 passed。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- **`@objectstack/plugin-email` (patch).** `rawAddressText`, the writer of the rejection row in `EmailService.recordRejectedMessage`, reads each address part as unknown input: a string display name is trimmed and kept, any other type is left out of the row, and a non-object, non-string entry records nothing. It still judges nothing. `formatCallerAddress` stays the one place a caller's recipient shape is refused (it already refused non-string names, #29250), so no second validation was added.\n- **`@objectstack/rest` (tests only, no changeset).** A new pin drives the real route (`HonoHttpServer` + `RestServer`) over the real `EmailServicePlugin` (log provider) with `sys_email` persistence wired, which is the stock showcase shape. `email-send-door-bounds.test.ts` uses a mail double and never reaches the writer. Supporting changes: a devDependency on `@objectstack/plugin-email` (lockfile importer row), an anchored source alias in `vitest.config.ts` (`check:test-source-alias`), the double's `update()` routed through `assertEngineUpdateDispatch`, and the regenerated `scripts/engine-double-contract.pinned.json` row (`check:engine-double-contract`).\n\n### Same-pattern sweep (what I checked)\n\nEvery caller-supplied field the rejection row reads: `to`, `cc`, `bcc`, `replyTo` and `from` all go through the one `rawAddressText`, so the fix covers all five. `subject` is `String(...)`; `text` / `html` are `typeof`-guarded; `address` is `String(...)`; `relatedObject` / `relatedId` / `sentBy` / `organizationId` are stored, not trimmed. On the validation side, `formatCallerAddress` covers all four recipient fields. `formatAddress` (the sender's path) still calls `obj.name?.trim()`, but the REST door replaces a caller `from` with the configured sender, so a caller's non-string sender name never reaches it through this route. Left as is.\n\n## Why\n\nReproduced on `21510bba` (main) through the new pin before the fix: every non-string shape in every field answered `500` (see the ablation below). The card's own reproduction: `{\"to\":{\"address\":\"ok@example.com\",\"name\":42},\"subject\":\"x\",\"text\":\"x\"}`.\n\n## Pins\n\n`packages/rest/src/email-send-display-name.test.ts`, 19 cases:\n- number / object / array / boolean display name × `to` / `cc` / `bcc` / `replyTo`: 400 `VALIDATION_FAILED` with the exact message naming the field, one rejection row with `status: 'failed'`, `error: 'rejected before delivery: VALIDATION_FAILED: …'` and the bare address in the field's column (16);\n- a `to` list entry with an object name: 400, and the row lists both entries (1);\n- `null` name sends (200), and a string name sends (200) (2).\n\n**Ablation, once.** Restored `const name = a.name?.trim()` in `rawAddressText` and rebuilt: 17 of 19 failed with `AssertionError: expected 500 to be 400` (all except the two 200 controls). Restored the fix: 19 passed.\n\n**Deviation from the order (null).** The order listed `null` among the shapes that answer 400. `formatCallerAddress` deliberately treats `null` as \"no name\" (`name !== undefined && name !== null`), and `null?.trim()` never threw, so `null` already answered 200 before this PR. Making it 400 would refuse input the door accepts today (a narrowing), so `null` is pinned at 200 instead.\n\n## Verification\n\n- `pnpm --filter @objectstack/plugin-email test`, `pnpm --filter @objectstack/rest test`: exit 0.\n- `typecheck` and `check:test-typecheck` for both packages: exit 0.\n- `pnpm lint`: exit 0.\n- Full `turbo run build --concurrency=2`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` on the final head: 82 derived, 82 run, all exit 0; `--ran`: \"82 run, 0 NOT-MEASURED\". In the first round (before commit 2), `check:engine-double-contract` and `check:test-source-alias` were red and are fixed by commit 2. `check:dual-build-cjs-loads` exited 3 until the full build ran.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzj6ujX8a8Krdcs92Ye\n\n\n<!-- signed: domain:server#6 · os-support-ai · session_01WGufzj6ujX8a8Krdcs92Ye -->\n"
+}

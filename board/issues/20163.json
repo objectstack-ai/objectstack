@@ -1,7 +1,7 @@
 {
   "number": 20163,
   "kind": "issue",
-  "title": "[PM seat] domain:devx · seat 2 — 🟢 marchtian · 由 marchtian 账户的项目负责",
+  "title": "[PM seat] domain:devx · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "marchtian"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-11-02T02:08:23Z",
+  "updated_at": "2026-11-03T17:30:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 96,
+  "comments": 97,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
-  "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 2**. Seat 1 is #6023 and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM — 🟢 marchtian\n\n- **Holder:** `marchtian` (`GET /user`) · `session_017ihL2gLghEqeDKTbDTC7Zd` (project thread \"接手 devx 车道席位\", the marchtian account's project) · seated 2026-11-01T05:16Z on the maintainer's 「再开一个 devx 车道」, opening mark 6553813514.\n- **Previous holder:** `os-justin` · `session_01QSeKYmTYfaPbLQD4BJfomW`, sign-off brief 6540114700, no stay-behind.\n- **Mailbox:** PR #28536 (`Mailbox-of: domain:devx#2 · marchtian`), subscribed by the seated session.\n- **Patrol:** trig_01A8n96RRmiuZmr7C58ydy7j · 18 * * * * (hourly, bound to the seated session).\n- **Concurrency:** at most 3 cards in hand.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- #27377 (wave-3 sweep anchor) is driven by `session_017xRBcVy4VXmkQjn2MGeaWk`, which signs `domain:devx#1`; this seat does not take it.\n- Standing constraints carried from the previous holder: changesets go to the root `.changeset/`; a `ci.yml` change needs the maintainer's ruling.\n\n"
+  "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 2**. Seat 1 is #6023 and seat 3 is #26373 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-03T17:27Z (signed off).</sub>\n\n## Current PM\n\n⏳ vacant · signed off by `marchtian` · `session_017ihL2gLghEqeDKTbDTC7Zd` (project thread \"接手 devx 车道席位\"), seated 2026-11-01T05:16Z. The maintainer ordered the clock-out in the project thread: 「当前任务处理完，合并后就下班」 (2026-11-03T15:29Z). The clock-out brief is the newest \"Clock-out brief\" comment on this post.\n\n- `check-handover.mjs --session=session_017ihL2gLghEqeDKTbDTC7Zd --account=marchtian` exited 0 before this write: no unreleased claim, no decision outside the inbox.\n- Successor: `/pm-dispatch 接手`, and read this post first.\n\n## Ledger at sign-off\n\n- **Closed this term:** 26 `domain:devx` cards under this seat, plus #29094 (domain:skills, taken by this seat). They are listed in the clock-out brief.\n- **Stay-behind:** none. #29520 (PR #29598) was approved and merged by os-zhuang at 2026-11-03T16:26Z, before sign-off. No timers.\n- **Lane queue snapshot (2026-11-03T17:25Z):** 26 open `domain:devx` cards. 5 are at `pm:queue` (3 p2, 2 p3; no p0 or p1), 0 at `pm:dispatched`, 1 at `needs-user-decision`, and 6 at `pm:blocked`.\n\n## Hot-file serial queue\n\n- Every lane file: FREE (no claim and no open PR from this seat).\n\n## Notes\n\n- Patrol: deleted at clock-out. Mailbox PR #28536: closed at clock-out.\n- #27377 (wave-3 sweep anchor) is driven by `session_017xRBcVy4VXmkQjn2MGeaWk`, which signs `domain:devx#1`.\n- Standing constraints carried from the previous holder: changesets go to the root `.changeset/`; a `ci.yml` change needs the maintainer's ruling.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
 }

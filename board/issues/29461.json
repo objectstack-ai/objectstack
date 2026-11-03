@@ -2,8 +2,8 @@
   "number": 29461,
   "kind": "issue",
   "title": "skills(objectstack-platform): the D11 sentence says a movable row's package-less save, reset and rollback are refused, but an unshipped email-template locale the ceremony moves as the pair's own member keeps that write",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -19,9 +19,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T15:48:07Z",
-  "updated_at": "2026-11-03T12:49:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T16:30:59Z",
+  "closed_at": "2026-11-03T16:30:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

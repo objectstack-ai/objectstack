@@ -1,0 +1,33 @@
+{
+  "number": 29935,
+  "kind": "issue",
+  "title": "An `operation: 'update'` action without `refreshAfter: true` writes the record but the Console keeps showing the old values and the action button, and `os validate` passes it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-03T16:00:58Z",
+  "updated_at": "2026-11-03T19:17:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29935",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbYMkB4dbaYNKufhvBr\n\nFiling gate: ① a user-visible defect with a stable repro (3 of 3) and named landing points. Reach: `os validate` passes the action, and the Console record page and list show stale data after a 200 from `POST /api/v1/actions/:object/:action`.\nBusiness reason: the \"Build with Claude Code\" tutorial's whole verification step is \"click Resolve: toast, status changes to Resolved, button disappears, ticket leaves the Open list\". An agent following the objectstack-ui skill's action table writes `operation: 'update'` + `patch` and, unless it also finds the sentence in `rules/actions.md` (\"Set `refreshAfter: true` whenever the action mutates the current record\"), leaves `refreshAfter` at its schema default `false`. The server writes `status: resolved`, the toast says \"Ticket resolved.\", but the record header still shows Open, the Resolve button stays (its `visible` predicate is now false), and the ticket stays in the Open list until a manual reload. A user clicks again or assumes the action failed. An `operation: 'update'` action always mutates the current record by definition, so the platform knows the refresh is needed; this is the same \"silent at runtime\" class the skill says `os validate` exists to catch (bare predicates).\nReader who acts: the triage seat, then the owner of the action contract: either `packages/spec/src/ui/action.zod.ts` (`refreshAfter` default at L1591 for `operation: 'update'`), an author-time rule in the validate set, or the Console runtime (`ui/packages/app-shell/src/views/RecordDetailView.tsx` `notifyRecordChanged`, `ui/packages/core/src/actions/serverActionHandler.ts` L310) treating a declared update as a record change. Choosing between them may be a spec decision; the defect is the stale page.\nDuplicate search (incl. closed): `refreshAfter` → 18 hits (#27611, #25800, #22722, #25649, #9474, #6739 read: none about the default on declared updates), `refreshAfter \"operation: 'update'\"` → 2 (QA run records only), `action refetch after` / `declarative update action console` / `record header action stale` (in:title) → 0.\n\nQA-source: post-release 18.3.0 newcomer walkthrough, path 2 \"Build with Claude Code\", anchor #27377\n\n## Reproduction (published 18.3.0, `npm create objectstack@latest support-desk`)\n1. Author the tutorial's ticket object, Open list view and app, and this action (exported from `src/actions/index.ts`):\n   `{ name: 'resolve_ticket', label: 'Resolve', objectName: 'support_desk_ticket', type: 'script', operation: 'update', patch: { status: 'resolved' }, locations: ['record_header'], visible: 'record.status != \"resolved\" && record.status != \"closed\"', successMessage: 'Ticket resolved.' }`\n2. `npm run validate` → passes, \"1 Apps 1 Views 1 Actions\".\n3. `npx os dev --ui`, sign in, Support Desk → Open, open a ticket (overlay from the list, or the full page `/record/<id>`), click Resolve.\n\nObserved: toast \"Ticket resolved.\"; network shows only `POST /api/v1/actions/support_desk_ticket/resolve_ticket` (200, record `status: \"resolved\"`) and no re-read. After 8 s the header path bar still shows Open, the Resolve button is still there, and the Open list still lists the ticket (count 1). A browser reload shows Resolved and an empty Open list. Adding `refreshAfter: true` makes the page re-read and everything matches the tutorial.\n\nExpected: after a successful declared update the record page and list reflect the write, or `os validate` flags an `operation: 'update'` action that will leave the page stale."
+}

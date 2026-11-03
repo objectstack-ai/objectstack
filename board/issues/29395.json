@@ -2,8 +2,8 @@
   "number": 29395,
   "kind": "issue",
   "title": "skills: three files teach the record-search auto-default as type-only; after #29008 a field marked searchable: true also joins it when searchableFields is not declared",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -19,9 +19,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:02:51Z",
-  "updated_at": "2026-11-03T07:01:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-03T16:30:59Z",
+  "closed_at": "2026-11-03T16:30:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,
