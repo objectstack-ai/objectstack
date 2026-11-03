@@ -152,7 +152,10 @@ describe('revokeSessionsOnPasswordReset retirement — ADR-0087 registration', (
 //   - plugin-auth's `auth-manager-auth-instance.ts`, which writes
 //     better-auth's OWN option of that name into better-auth's configuration —
 //     the mechanism of the rule, never read from a host;
-//   - `**/CHANGELOG.md`, release-owned history of what shipped.
+//   - `**/CHANGELOG.md`, release-owned history of what shipped;
+//   - `packages/spec/json-schema/`, the git-ignored build projection of the
+//     schema, where the key appears as the tombstone itself (`not: {}` under
+//     its `[REMOVED]` description).
 // The bound, stated: a key assembled under a computed name, and `docs/**`,
 // `.claude/**`, `.github/**` and the repo-root files are outside this walk.
 describe('tree-scoped absence: nothing inside the declared radius still writes emailAndPassword.revokeSessionsOnPasswordReset', () => {
@@ -172,6 +175,8 @@ describe('tree-scoped absence: nothing inside the declared radius still writes e
     'packages/plugins/plugin-auth/src/password-reset-ends-sessions.test.ts',
     'packages/plugins/plugin-auth/src/auth-manager-auth-instance.ts',
   ]);
+
+  const JSON_SCHEMA_PROJECTION = 'packages/spec/json-schema/';
 
   const IN_KEY_POSITION = /(^|[\s{,(])["']?revokeSessionsOnPasswordReset["']?\s*:(?!\s*retiredKey\()/g;
 
@@ -217,7 +222,7 @@ describe('tree-scoped absence: nothing inside the declared radius still writes e
 
     const offences: string[] = [];
     for (const rel of scanned) {
-      if (EXCLUDED.has(rel) || rel.endsWith('/CHANGELOG.md')) continue;
+      if (EXCLUDED.has(rel) || rel.endsWith('/CHANGELOG.md') || rel.startsWith(JSON_SCHEMA_PROJECTION)) continue;
       const raw = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
       if (!raw.includes('revokeSessionsOnPasswordReset')) continue;
       const text = CODE_EXT.has(path.extname(rel)) ? maskComments(raw) : raw;
