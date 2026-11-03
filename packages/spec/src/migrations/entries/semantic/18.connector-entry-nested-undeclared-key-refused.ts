@@ -21,7 +21,9 @@ export const entry: SemanticMigration = {
     'reason: an undeclared key may be a misplaced setting or the only copy of a secret. The open shapes ' +
     '(`ConnectorSchema`, `RetryConfigSchema`, `ConnectorActionSchema` — the def a plugin hands to ' +
     '`registerConnector`, and the policy the runtime parses) are unchanged. A row stored before this refusal keeps ' +
-    'working: the read withholds the undeclared key, and a save of the served form keeps it at rest.',
+    'working: the read withholds the undeclared key. An explicit `retryConfig` in a save replaces the stored one ' +
+    'whole, so its undeclared key is not kept and the save names it on its answer; an `actions` element\'s ' +
+    'undeclared key is kept at rest by a save of the served form.',
   acceptanceCriteria:
     'Every authored connector entry parses through `DeclarativeConnectorEntrySchema` with no `unrecognized_keys` ' +
     'issue at `retryConfig` or at an `actions` element; each secret that sat at such a key is set under its ' +
