@@ -766,8 +766,8 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ),
   cascadeDeleteObjects: z.array(z.string()).optional().describe(
     'The objects, by name, that deleting a record of this object can also delete: every object whose '
-    + 'relation into it cascades (a `master_detail` by default, a `lookup` or `tree` that declares '
-    + '`deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
+    + 'relation into it cascades (a `master_detail` by default, a `lookup`, `tree` or `user` field that '
+    + 'declares `deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
     + 'order the delete reaches them. This object itself is named only when a cascading relation leads back '
     + 'to it. A `restrict` or `set_null` relation removes nothing and is not named. Read from the rule the '
     + 'delete runs, and object-level: it never says which records or how many. Present only on an `object` '
