@@ -77,7 +77,11 @@ const driver = {
   execute: refuse('execute'),
   async find(object: string, query: DriverQuery = {}) {
     calls.push({ method: 'find', object, query: snapshot(query) });
-    return (tables[object] ?? []).filter((r) => matches(r, query.where)).map((r) => ({ ...r }));
+    const matched = (tables[object] ?? []).filter((r) => matches(r, query.where));
+    // The caller's bound is honoured (`check:objectql-double-limit`).
+    const from = typeof query.offset === 'number' ? query.offset : 0;
+    const page = typeof query.limit === 'number' ? matched.slice(from, from + query.limit) : matched.slice(from);
+    return page.map((r) => ({ ...r }));
   },
   async findOne(object: string, query: DriverQuery = {}) {
     calls.push({ method: 'findOne', object, query: snapshot(query) });
