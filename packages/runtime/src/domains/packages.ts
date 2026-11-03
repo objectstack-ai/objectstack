@@ -3442,9 +3442,11 @@ function ownDocumentsOf(items: any[], type: string, packageId: string, registry:
 }
 
 /**
- * [#29760] Whether this runtime serves metadata type `type`: whether its live
- * type vocabulary lists it (`getMetaTypes`, the one accessor that answers
- * "which types exist here" for the `/meta` listing too). The question
+ * [#29760] Whether this runtime serves metadata type `type` (the canonical
+ * singular): whether its live type vocabulary lists it under either spelling
+ * (`getMetaTypes`, the one accessor that answers "which types exist here" for
+ * the `/meta` listing too; each listed name folded through
+ * `PLURAL_TO_SINGULAR`, as its other callers fold it). The question
  * {@link assemblePackageManifest} asks only after a per-type read threw, to
  * tell the one throw it may skip, a type this runtime does not serve, from a
  * failed read of a type it does.
@@ -3463,7 +3465,10 @@ async function runtimeServesMetadataType(protocol: PackagesDomainProtocol, type:
     } catch {
         return true;
     }
-    return !Array.isArray(types) || types.includes(type);
+    if (!Array.isArray(types)) return true;
+    // The listing spells each type as its source stores it, singular or
+    // plural; folded to the singular the export loop asks with.
+    return types.some((listed) => typeof listed === 'string' && (PLURAL_TO_SINGULAR[listed] ?? listed) === type);
 }
 
 /**

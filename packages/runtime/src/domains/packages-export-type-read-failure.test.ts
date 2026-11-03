@@ -114,6 +114,13 @@ describe('[#29760] GET /packages/:id/export refuses on a failed read of a type t
         expect(protocol.getMetaTypes).toHaveBeenCalled();
     });
 
+    it('a vocabulary that lists the type only by its plural spelling still serves it: the failed read refuses', async () => {
+        const refusal = refusalOf(await exportOf(protocolWith('dashboard', new Error('overlay read failed'), ['objects', 'dashboards'])));
+        expect({ status: refusal.status, code: refusal.code }).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+        expect(refusal.message).toContain(`'${PKG}'`);
+        expect(refusal.message).toContain(`'dashboard'`);
+    });
+
     it('fail closed: a protocol that brings no `getMetaTypes` has not shown the type unknown, so the export is refused', async () => {
         const refusal = refusalOf(await exportOf(protocolWith('dashboard', new Error('overlay read failed'), null)));
         expect(refusal.status).toBe(500);
