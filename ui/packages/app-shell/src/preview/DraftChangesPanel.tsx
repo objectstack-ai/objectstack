@@ -1372,9 +1372,29 @@ export interface DraftChangesPanelProps {
    * nothing to say.
    */
   renderEntryNote?: (entry: DraftChangeEntry) => ReactNode;
+  /**
+   * objectstack ADR-0146 D3 — the label of the read-only base whose
+   * `<base>.custom` pair these drafts are saved to. When set, the sheet says
+   * so under its title ({@link savedToCustomizationText}); the host passes it
+   * only while it reviews a pair's drafts.
+   */
+  customizationOf?: string;
 }
 
 export type DraftChangesPosture = 'review' | 'confirm';
+
+/**
+ * objectstack ADR-0146 D3 — the one sentence that names where a customization
+ * of a read-only base is saved: "Saved to BASE's customizations". The
+ * pending-changes sheet draws it, and the item header reuses it, so both say
+ * the same words.
+ */
+export function savedToCustomizationText(t: Translate, baseLabel: string): string {
+  return t('preview.changes.savedToCustomization', {
+    package: baseLabel,
+    defaultValue: 'Saved to {{package}}’s customizations',
+  });
+}
 
 export function DraftChangesPanel({
   open,
@@ -1385,6 +1405,7 @@ export function DraftChangesPanel({
   publishing = false,
   posture = 'review',
   renderEntryNote,
+  customizationOf,
 }: DraftChangesPanelProps) {
   const { t, language } = useObjectTranslation();
   const [entries, setEntries] = useState<DraftChangeEntry[] | null>(null);
@@ -1652,6 +1673,11 @@ export function DraftChangesPanel({
               defaultValue: 'What publishing will change. New items are added; updates overwrite the live version.',
             })}
           </SheetDescription>
+          {customizationOf ? (
+            <p data-testid="draft-changes-saved-to" className="text-xs font-medium text-foreground">
+              {savedToCustomizationText(t, customizationOf)}
+            </p>
+          ) : null}
         </SheetHeader>
         {posture === 'confirm' && entries && entries.length > 0 && !error ? (
           // objectui#12517 — what the publish carries, counted off the same

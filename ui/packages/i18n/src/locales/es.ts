@@ -1154,6 +1154,10 @@ const es = {
       pin: "Fijar: abrir esta vista de forma predeterminada",
       unpin: "Desfijar: la lista vuelve a abrir su vista predeterminada",
       inMenu: "Ya está en el menú",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Mis vistas",
+      saveAsMyView: "Guardar como mi vista",
+      myViewName: "Nombre de la vista",
     },
     dragToReorder: "Arrastrar para reordenar",
     defaultView: "Vista predeterminada",
@@ -4586,6 +4590,7 @@ const es = {
     changes: {
       title: 'Cambios pendientes',
       description: 'Lo que cambiará al publicar. Los elementos nuevos se añaden; las actualizaciones sobrescriben la versión publicada.',
+      savedToCustomization: 'Guardado en las personalizaciones de {{package}}',
       loading: 'Cargando cambios pendientes…',
       loadFailed: 'No se pudieron cargar los cambios pendientes:',
       empty: 'Nada pendiente — todos los borradores se han publicado.',

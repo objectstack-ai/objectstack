@@ -1144,6 +1144,10 @@ const zh = {
       pin: '固定：默认打开此视图',
       unpin: '取消固定：列表恢复打开默认视图',
       inMenu: '已在菜单中',
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: '我的视图',
+      saveAsMyView: '另存为我的视图',
+      myViewName: '视图名称',
     },
     dragToReorder: '拖动排序',
     defaultView: '默认视图',
@@ -3416,6 +3420,7 @@ const zh = {
     changes: {
       title: '待发布的变更',
       description: '发布将带来以下变更。“新增”为全新内容，“更新”将覆盖线上版本。',
+      savedToCustomization: '保存到 {{package}} 的定制',
       loading: '正在加载待发布变更…',
       loadFailed: '无法加载待发布变更：',
       empty: '没有待发布的内容 —— 所有草稿均已发布。',
