@@ -1256,7 +1256,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 700 since #29462: the field form's `referenceNameVisible` row (a lookup
       // or user field shows a refused target's name as plain text) — one row
       // label, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(700);
+      // 701 since #29442: the flow form's variables repeater offers
+      // `objectName` (a start input declared a record id) — one row label,
+      // authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(701);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
