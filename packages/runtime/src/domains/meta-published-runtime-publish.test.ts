@@ -26,6 +26,8 @@
  * so what they measure is the wiring, not a stub's opinion of it.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import '../lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 // The producer's OWN write-verb dispatch decisions, so the fake engine below
 // cannot accept a call ObjectQL itself would refuse — a double looser than the

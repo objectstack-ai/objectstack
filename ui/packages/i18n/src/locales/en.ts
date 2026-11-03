@@ -3586,6 +3586,12 @@ const en = {
       saved: 'Language preference updated.',
       readOnly: 'Your administrator manages the language for your account.',
     },
+    appLock: {
+      title: 'App lock',
+      off: 'Off',
+      onImmediately: 'On, locks as soon as you leave the app',
+      onAfter: 'On, locks {{duration}} after you leave the app',
+    },
     password: {
       changeTitle: 'Change Password',
       setTitle: 'Set Local Password',
@@ -4774,35 +4780,14 @@ const en = {
     buyCredits: 'Buy a credit pack',
     upgradePlan: 'Upgrade plan',
   },
-  // Plan-tier labels, keyed by the TIER rather than by the surface that draws
-  // them, so every plan-locked mark reuses one string (objectui#12190). The zh
-  // value follows the cloud control plane's own zh plan label.
-  planTier: {
-    teamAndUp: 'Team plan and up',
-  },
   environment: {
     setUpProduction: 'Set up your production environment',
-    addDevelopment: 'Add development environment',
-    // The plan-locked stand-in for the create action (objectui#12190).
-    // `{{tier}}` is a `planTier.*` label.
-    developmentLocked: 'Development environments · {{tier}}',
-    // Plan/capacity dialog (EnvironmentEntitlementDialog). Shown on a paid
-    // conversion path, so it must read in the user's language — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog). It must read in the
+    // user's language — cloud#959.
     entitlement: {
       productionLimitTitle: 'You already have your production environment',
       productionLimitBody:
         'Each organization includes exactly one production environment. Create a separate organization for another, or contact us about an Enterprise arrangement.',
-      planLockedTitle: 'Development environments are a paid feature',
-      planLockedBody:
-        'Your {{plan}} includes one production environment. Upgrade to add development environments — build in dev, then publish to production.',
-      limitTitle: 'Development environment limit reached',
-      limitBody:
-        'Capacity scales with AI seats. Add an AI seat, or archive an unused development environment to free one up.',
-      limitBodyWithCount:
-        'You are using {{used}} of {{limit}} development environments. Capacity scales with AI seats — add an AI seat, or archive an unused development environment to free one up.',
-      freePlan: 'free plan',
-      namedPlan: '{{plan}} plan',
-      upgradeCta: 'Upgrade plan',
       contactSalesCta: 'Contact sales',
     },
   },

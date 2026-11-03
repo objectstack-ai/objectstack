@@ -3000,6 +3000,12 @@ const de = {
       saved: "Spracheinstellung aktualisiert.",
       readOnly: "Die Sprache Ihres Kontos wird von Ihrer Administration verwaltet.",
     },
+    appLock: {
+      title: "App-Sperre",
+      off: "Aus",
+      onImmediately: "An, sperrt sofort, wenn Sie die App verlassen",
+      onAfter: "An, sperrt {{duration}} nach dem Verlassen der App",
+    },
     password: {
       changeTitle: "Passwort ändern",
       setTitle: "Lokales Passwort festlegen",
@@ -3979,25 +3985,12 @@ const de = {
     buyCredits: "Credit-Paket kaufen",
     upgradePlan: "Tarif upgraden",
   },
-  planTier: {
-    teamAndUp: "Ab Tarif Team",
-  },
   environment: {
     setUpProduction: "Produktionsumgebung einrichten",
-    addDevelopment: "Entwicklungsumgebung hinzufügen",
-    developmentLocked: "Entwicklungsumgebungen · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "Sie haben bereits Ihre Produktionsumgebung",
       productionLimitBody: "Jede Organisation enthält genau eine Produktionsumgebung. Erstellen Sie für eine weitere eine separate Organisation, oder sprechen Sie uns auf eine Enterprise-Vereinbarung an.",
-      planLockedTitle: "Entwicklungsumgebungen sind eine kostenpflichtige Funktion",
-      planLockedBody: "Ihr {{plan}} enthält eine Produktionsumgebung. Führen Sie ein Upgrade durch, um Entwicklungsumgebungen hinzuzufügen — entwickeln Sie in der Entwicklungsumgebung und veröffentlichen Sie dann in der Produktion.",
-      limitTitle: "Limit für Entwicklungsumgebungen erreicht",
-      limitBody: "Die Kapazität wächst mit den KI-Lizenzen. Fügen Sie eine KI-Lizenz hinzu oder archivieren Sie eine ungenutzte Entwicklungsumgebung, um Platz zu schaffen.",
-      limitBodyWithCount: "Sie nutzen {{used}} von {{limit}} Entwicklungsumgebungen. Die Kapazität wächst mit den KI-Lizenzen — fügen Sie eine KI-Lizenz hinzu oder archivieren Sie eine ungenutzte Entwicklungsumgebung.",
-      freePlan: "kostenloser Tarif",
-      namedPlan: "Tarif {{plan}}",
-      upgradeCta: "Tarif upgraden",
       contactSalesCta: "Vertrieb kontaktieren",
     },
   },

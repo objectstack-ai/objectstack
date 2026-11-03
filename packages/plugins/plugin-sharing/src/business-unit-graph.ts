@@ -4,8 +4,6 @@ import type { IBusinessUnitGraphService } from '@objectstack/spec/contracts';
 import type { SharingEngine } from './sharing-service.js';
 import { TeamGraphService, managerIsProvablyOutsideOrg, readMembershipToCompletion } from './team-graph.js';
 
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
-
 /**
  * [#29655] Rows per page of a child-unit read — the bound the read always
  * carried, so a parent with fewer children issues the one read it always did,
@@ -261,21 +259,27 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     return Array.from(new Set(rows.map((r) => String(r?.user_id ?? '')).filter(Boolean)));
   }
 
+  /**
+   * The unit's head (`manager_user_id`), or `null` when the unit has none.
+   *
+   * [#29713] Read through the walk {@link seedIsUsable} uses
+   * ({@link readMembershipToCompletion}), so a read that FAILS throws and
+   * nothing is cached for it. It caught any error to `null` and cached that
+   * for the pass: a consumer naming a unit's head would have dropped the head
+   * on an outage, and kept dropping it after the read recovered. A unit that
+   * does not exist, sits in another organization or names no head answers
+   * `null`, and so does a stack that never materialises `sys_business_unit`.
+   */
   async headOf(businessUnitId: string): Promise<string | null> {
     if (!businessUnitId) return null;
     if (this.cache.head!.has(businessUnitId)) return this.cache.head!.get(businessUnitId) ?? null;
-    let row: any = null;
-    try {
-      const rows = await this.engine.find('sys_business_unit', {
-        where: this.orgScope({ id: businessUnitId }),
-        fields: ['id', 'manager_user_id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      row = Array.isArray(rows) ? rows[0] : null;
-    } catch {
-      row = null;
-    }
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_business_unit',
+      where: this.orgScope({ id: businessUnitId }),
+      fields: ['manager_user_id'],
+      subject: `the head of business unit '${businessUnitId}'`,
+    });
+    const row = rows?.[0];
     const head = row?.manager_user_id ? String(row.manager_user_id) : null;
     this.cache.head!.set(businessUnitId, head);
     return head;
@@ -291,29 +295,34 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * unscreened answer from the same method name purely by how the service
    * happened to be constructed. A screen that depends on a constructor option
    * is not a screen.
+   *
+   * [#29713] The standalone fallback's `sys_user` read goes through
+   * {@link readMembershipToCompletion}: a read that FAILS throws, where it
+   * answered `null` ("no manager"); a stack that never materialises
+   * `sys_user` has no manager on file and answers `null`. The fallback caches
+   * nothing, before or after. The organization screen keeps its ruled
+   * fail-open posture ({@link managerIsProvablyOutsideOrg}), and the
+   * delegating limb is {@link TeamGraphService.managerOf}'s own answer,
+   * unchanged here.
    */
   async managerOf(userId: string, organizationId?: string): Promise<string | null> {
     if (this.teamGraph) return this.teamGraph.managerOf(userId, organizationId);
     // Standalone fallback: read sys_user.manager_id directly.
     if (!userId) return null;
     const org = organizationId ?? this.organizationId;
-    try {
-      const rows = await this.engine.find('sys_user', {
-        where: { id: userId },
-        fields: ['id', 'manager_id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      const row: any = Array.isArray(rows) ? rows[0] : null;
-      const managerId = row?.manager_id ? String(row.manager_id) : null;
-      if (!managerId) return null;
-      // The SAME screen the delegating limb applies — one implementation,
-      // imported rather than restated, so the two limbs cannot drift.
-      if (await managerIsProvablyOutsideOrg(this.engine, managerId, org)) return null;
-      return managerId;
-    } catch {
-      return null;
-    }
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_user',
+      where: { id: userId },
+      fields: ['manager_id'],
+      subject: `the manager of user '${userId}'`,
+    });
+    const row = rows?.[0];
+    const managerId = row?.manager_id ? String(row.manager_id) : null;
+    if (!managerId) return null;
+    // The SAME screen the delegating limb applies — one implementation,
+    // imported rather than restated, so the two limbs cannot drift.
+    if (await managerIsProvablyOutsideOrg(this.engine, managerId, org)) return null;
+    return managerId;
   }
 
   /**
@@ -358,7 +367,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * ## Why the member rows are screened at all
    *
    * Both member reads used to carry no organization predicate whatever, under
-   * a {@link SYSTEM_CTX} that carries no tenant either — so the query was
+   * a system context that carries no tenant either — so the query was
    * completely unscoped by organization: any unit an org-stamped rule could
    * see handed back EVERY tenant's membership rows hanging off it, and tenant
    * A's rule materialised real `sys_record_share` rows for tenant B's users.

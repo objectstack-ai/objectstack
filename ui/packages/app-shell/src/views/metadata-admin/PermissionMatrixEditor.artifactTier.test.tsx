@@ -137,11 +137,29 @@ async function renderMatrix(props?: { packageId?: string; readOnly?: boolean }) 
   await screen.findByText('Account');
 }
 
+/**
+ * Every "Read-only" that names the PACKAGE as its reason: the identity strip's
+ * chip and, since objectstack#29705, the header badge, which draws the same
+ * word through the same key. A type-gate lock carries no such reason.
+ */
+function packageReadOnlyMarks(): HTMLElement[] {
+  return screen
+    .queryAllByText('Read-only', { exact: true })
+    .filter((el) => (el.getAttribute('title') ?? '').includes('Read-only package'));
+}
+
+/** The package names itself as the reason, and every "Read-only" on screen gives that reason. */
+function expectPackageReadOnly(): void {
+  expect(packageReadOnlyMarks()).not.toHaveLength(0);
+  expect(screen.getAllByText('Read-only', { exact: true })).toEqual(packageReadOnlyMarks());
+}
+
 /** The identity-strip read-only badge, or null when the surface is writable. */
 function lockBadge(): HTMLElement | null {
   return (
     screen.queryByText(/^Read-only \(/) ??
-    screen.queryByText('Read-only', { exact: true })
+    packageReadOnlyMarks()[0] ??
+    null
   );
 }
 
@@ -184,7 +202,7 @@ describe('PermissionMatrixEditPage — the ARTIFACT tier locks an env-scope over
     // mirror-image lie of the one #4446 removed.
     expect(screen.queryByText(TYPE_CAPTION)).toBeNull();
     // NOT the package wording either — no read-only PACKAGE is involved.
-    expect(screen.queryByText('Read-only', { exact: true })).toBeNull();
+    expect(packageReadOnlyMarks()).toHaveLength(0);
 
     // The hint carries the server's own reason, the same place the 403 text
     // puts it. It names the env hatch only to say the hatch does not open a set
@@ -202,18 +220,18 @@ describe('PermissionMatrixEditPage — the ARTIFACT tier locks an env-scope over
 
   /**
    * The header hero badge is NOT re-litigated here, and it is not a
-   * contradiction: `PageShell`'s `WritabilityBadge` renders "create-only" for
-   * this shape, whose tooltip already reads "Code-shipped items are locked; new
-   * items can be created at runtime". That is exactly what the artifact tier
+   * contradiction: `PageShell`'s `WritabilityBadge` renders "Can be added" for
+   * this shape ("create-only" until objectstack#29705), whose tooltip already
+   * reads that the items a code package ships stay read-only. That is exactly what the artifact tier
    * says, so the two renderings agree — unlike the #4036 divergence, where
    * "create-only" sat over dead checkboxes for a set that was NOT code-shipped.
    */
-  it('the header hero badge stays "create-only" and never claims "writable"', async () => {
+  it('the header hero badge stays "Can be added" and never claims "Writable"', async () => {
     codeLayer = { _packageId: 'com.example.showcase' };
     await renderMatrix();
 
-    expect(screen.getByText('create-only')).toBeInTheDocument();
-    expect(screen.queryByText('writable')).toBeNull();
+    expect(screen.getByText('Can be added')).toBeInTheDocument();
+    expect(screen.queryByText('Writable')).toBeNull();
   });
 
   it('an overlay-allowed type is still writable even when code-declared', async () => {
@@ -338,8 +356,7 @@ describe('PermissionMatrixEditPage — MUST NOT CHANGE: what the artifact tier m
 
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
-    const badge = screen.getByText('Read-only', { exact: true });
-    expect(badge).toHaveAttribute('title', expect.stringContaining('Read-only package'));
+    expectPackageReadOnly();
     expect(screen.queryByText(ARTIFACT_CAPTION)).toBeNull();
     expect(screen.queryByText(TYPE_CAPTION)).toBeNull();
   });

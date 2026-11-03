@@ -418,10 +418,13 @@ from **one** resolution:
    code package is a candidate of `packagelessAddress`, and a stored row bound to another package never wins by being
    the only stored row (#28238, N-03). A stored row with **no** package — the row Setup writes today — keeps winning
    over the code package until [D11](#d11) migrates it; ⛔ that card does not break an existing customization.
-2. **Within X's address, a declared override is served over the base's document.** The read that serves X's name — the
+2. **Within X's address, a declared override is served over the base's document, in every read but the base's own
+   export (item 3).** The reads that serve X's name or carry X's customizations — the
    package-less read, the read naming X (`?package=X`), the layered read (`packages/metadata-protocol/src/protocol.ts#getMetaItemLayered`: `code` = the base's
    document, `override` = the `.custom` item, `effective` = the served one), the list (`GET /api/v1/meta/:type`, scoped
-   to X or not) and the export of X's app surface — serves the **one** document the declaration selects, the `.custom` item that declares it. An item of the pair that
+   to X or not) and the export that carries X's customizations, the **pair's** export `GET /packages/X.custom/export`
+   (item 3; ⛔ never `GET /packages/X/export`, the base's own export, which item 3 keeps unchanged) — serve the **one**
+   document the declaration selects, the `.custom` item that declares it. An item of the pair that
    bears X's name **without** the declaration, and an item of any other dependent that bears X's name — declared or not —
    have no place under this record: each is refused when its package publishes ([D2](#d2)); until N-09 lands, item 1 keeps
    the code package the owner of X's address, so such a row is not served as X's (N-03). A same-named item of a package
@@ -676,9 +679,10 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
    against `FieldSchema` and publishes them as one closed constant — the whitelist the write gate reads, in the shape of
    [D2](#d2)'s type list; the maintainer's 2026-10-31 reading: the criterion stays, the whitelist is that constant. A
    list written here would be either stale or invented.
-5. **A declared override is served within the base's address for all five read kinds, and the base's own document
-   stays reachable as the layered read's `code` layer** ([D8](#d8)) — so "Restore package original" needs no second
-   read path and the chip needs no computation.
+5. **A declared override is served within the base's address for the four reads under it — package-less, named,
+   layered and list — and travels in the pair's export, never the base's ([D8](#d8) items 2 and 3); the base's own
+   document stays reachable as the layered read's `code` layer** ([D8](#d8)) — so "Restore package original" needs no
+   second read path and the chip needs no computation.
 6. **The migration is an administrator's CLI ceremony, idempotent, per base** ([D11](#d11)), in ADR-0131 D10's shape
    — not a boot step: a boot that rewrites rows into a package it creates is the recorded-verdict defect AGENTS.md's
    *Startup registry reads* section names.
@@ -700,7 +704,9 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
   `basedOn` records the base package's version, ruling record 6549129352 on [#28404](https://github.com/objectstack-ai/objectstack/issues/28404));
   PR [#28145](https://github.com/objectstack-ai/objectstack/pull/28145) (closed unmerged; its three wording fixes
   S13–S15 are folded into this rewrite); PR [#28045](https://github.com/objectstack-ai/objectstack/pull/28045) (the
-  Proposed draft this rewrite replaces, hand-merged 2026-10-30).
+  Proposed draft this rewrite replaces, hand-merged 2026-10-30); card [#29601](https://github.com/objectstack-ai/objectstack/issues/29601)
+  and PR [#29791](https://github.com/objectstack-ai/objectstack/pull/29791) (2026-11-03, wording only: [D8](#d8) item 2 names
+  the pair's export and scopes its lead; *Decided here* #5 scoped with it).
 - [#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 13, 14, 19, 20, 21 and their landed
   PRs #27376, #27927, #28076.
 - ADR-0005, ADR-0009, ADR-0010, ADR-0029, ADR-0048 (and its 2026-10-08 addendum), ADR-0070, ADR-0126, ADR-0131,
