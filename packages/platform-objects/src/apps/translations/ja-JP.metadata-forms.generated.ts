@@ -721,6 +721,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "参照",
         helpText: "参照先オブジェクト名"
       },
+      referenceNameVisible: {
+        label: "閲覧不可でも名前を表示",
+        helpText: "このレコードの閲覧者が参照先レコードを開けない場合でも、その名前をリンクなしのプレーンテキストで表示します。それ以外の内容は表示されず、名前フィールドに対するフィールドレベルのルールは引き続き適用されます（その場合、名前は Record # と ID で表示されます）。未設定の場合、このような参照は「制限付きレコード」として表示されます。"
+      },
       deleteBehavior: {
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
@@ -2252,6 +2256,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "variables.defaultValue": {
         label: "既定値"
+      },
+      "variables.objectName": {
+        label: "レコードオブジェクト"
       },
       status: {
         label: "状態",

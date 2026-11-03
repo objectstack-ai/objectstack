@@ -74,6 +74,14 @@ export interface MetadataCacheStats {
 export class MetadataCache {
   private cache: Map<string, CachedSchema>;
   private inflight: Map<string, Promise<unknown>>;
+  /**
+   * objectstack#29550 — the last invalidation that reached each key, and the
+   * last that reached every key ({@link invalidate} with no key, {@link clear}),
+   * on one counter. See {@link droppedAt}.
+   */
+  private invalidations = new Map<string, number>();
+  private invalidatedAll = 0;
+  private invalidationSeq = 0;
   private maxSize: number;
   private ttl: number;
   private stats: {
@@ -250,9 +258,11 @@ export class MetadataCache {
     if (key) {
       this.cache.delete(key);
       this.inflight.delete(key);
+      this.invalidations.set(key, ++this.invalidationSeq);
     } else {
       this.cache.clear();
       this.inflight.clear();
+      this.invalidatedAll = ++this.invalidationSeq;
     }
   }
 
@@ -262,6 +272,7 @@ export class MetadataCache {
   clear(): void {
     this.cache.clear();
     this.inflight.clear();
+    this.invalidatedAll = ++this.invalidationSeq;
     this.stats = {
       hits: 0,
       misses: 0,
@@ -288,6 +299,28 @@ export class MetadataCache {
       coalesced: this.stats.coalesced,
       hitRate: hitRate,
     };
+  }
+
+  /**
+   * The read in flight for `key`, if one is on the wire, without starting one
+   * and without counting a hit or a miss (objectstack#29550). A caller that
+   * would otherwise ask a narrower question joins it; a detached read (see
+   * {@link load}) is not returned.
+   */
+  peekInflight<V = unknown>(key: string): Promise<V> | undefined {
+    return this.inflight.get(key) as Promise<V> | undefined;
+  }
+
+  /**
+   * When `key` was last invalidated, by its own name, by an invalidation of
+   * every key or by {@link clear}: a number that only grows, 0 if never
+   * (objectstack#29550). A reader that keeps a request of its own beside this
+   * cache, derived from what `key` holds, records it when the request starts
+   * and lets no caller join the request once it has changed, so the request
+   * is detached exactly when one under `key` would be.
+   */
+  droppedAt(key: string): number {
+    return Math.max(this.invalidations.get(key) ?? 0, this.invalidatedAll);
   }
 
   /**

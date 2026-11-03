@@ -2072,6 +2072,33 @@ const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// `flow-input-unknown-object` (#29442) shares the rule file, the hedge and the
+// closure split with `flow-trigger-unknown-object` above; what differs is the
+// position it reads and what a wrong name costs.
+
+const FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-input-unknown-object',
+  covers: 'why an unknown start-input object warns, and when it refuses',
+  paragraphs: [
+    'A flow input may declare that its value is the id of a record of a named object, with `objectName` on ' +
+      'the variable. The start doors are to load such an input from exactly that name in the caller\'s own ' +
+      'scope before the run exists, so a name no object answers to would refuse every start that supplies ' +
+      'the input. Names match exactly — `app_candidate`, not `candidate`. The declaration is planned: no ' +
+      'door reads it yet, and the property lint says so separately.',
+    'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
+      'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
+      'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
+      'not judged. A start that omits the input is not affected, so this is not a verdict that the flow ' +
+      'never runs.',
+    'A write into a package is judged against that package\'s closure instead: its own objects, the objects ' +
+      'of the packages its manifest declares in `dependencies`, and platform objects. An object outside it ' +
+      'is one the package never declared it may reference, so there the finding is an error and the publish ' +
+      'is refused, the verdict `flow-trigger-unknown-object` gives a trigger object. Declare a dependency on ' +
+      'the package that defines the object, or name an object inside the closure. A `sys_` name is not ' +
+      'judged there either.',
+  ],
+};
+
 // ── Validation rules that compile at publish time ───────────────────────────
 // `validate-rule-compilability.ts` and `validate-rule-schema-formats.ts`: the
 // write path's fail-open skip and the runtime's ajv environment are shared,
@@ -4872,6 +4899,15 @@ const CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       'literal moves to `auth: { type: \'bearer\', credentialRef }` plus `credentialEnv: \'VARIABLE_NAME\'`, ' +
       'and the env entry is dropped. Without `credentialEnv` a stdio transport does not apply `auth` at ' +
       'all, so the env finding names both keys. The connector guide is content/docs/automation/connectors.mdx.',
+    // Both route findings are held to the rule by its test.
+    'Two more findings sit on that route. A stdio `mcp` entry that declares a `bearer`, `api-key` or `basic` ' +
+      '`auth` and no `credentialEnv` is reported at `auth`: the reference is still resolved, and a missing one ' +
+      'still degrades the instance, but the provider hands the credential to a stdio server only in the variable ' +
+      '`credentialEnv` names, so without it the credential reaches nothing and nothing else says so. Add the key, ' +
+      'or drop `auth` when the server takes no credential. And `credentialEnv` holds a variable name that is ' +
+      'served on every metadata read, so a value there that reads as a credential (it opens with an auth scheme, ' +
+      'or carries a run of 16 or more letters and digits that switches between the two at least four times, as a ' +
+      'generated token does) is reported at that key. A conventional name such as `REPO_MCP_TOKEN` never draws.',
     'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
       'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
       '`token` can hold something that is not a secret, and a false positive costs a line of ' +
@@ -5568,6 +5604,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
   [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION,
+  [FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION,
   [VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION,
   [VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION,
   [VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION,

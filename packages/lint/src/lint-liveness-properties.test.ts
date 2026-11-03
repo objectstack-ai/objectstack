@@ -158,6 +158,35 @@ describe('lintLivenessProperties', () => {
     expect(ruleOf(findings, 'nodes.outputSchema')).toBeUndefined();
   });
 
+  // #29442 — `flow.variables[].objectName` is declared before any start door
+  // reads it, so its row is `planned` + `authorWarn`. Pinned through the SHIPPED
+  // ledger and an array of variables, so the drill (`variables.objectName`)
+  // and the array fan-out both have to hold for the author to be told.
+  it('warns on a flow input declared a record reference — planned, nothing reads it yet', () => {
+    const findings = lintLivenessProperties({
+      flows: [{
+        name: 'close_account',
+        variables: [
+          { name: 'note', type: 'text', isInput: true },
+          { name: 'accountId', type: 'text', isInput: true, objectName: 'crm_account' },
+        ],
+        nodes: [{ id: 'start', type: 'start' }],
+      }],
+    });
+    const warned = findings.filter((f) => f.message.includes('sets `variables.objectName`'));
+    expect(warned).toHaveLength(1);
+    expect(warned[0].rule).toBe('liveness-planned-property');
+    expect(warned[0].hint).toContain('nothing reads it yet');
+    // The live siblings the drill graded stay silent.
+    for (const key of ['name', 'type', 'isInput', 'isOutput', 'defaultValue']) {
+      expect(ruleOf(findings, `variables.${key}`), key).toBeUndefined();
+    }
+    // And a flow that writes no `objectName` draws nothing about it.
+    expect(lintLivenessProperties({
+      flows: [{ name: 'f2', variables: [{ name: 'note', type: 'text', isInput: true }], nodes: [] }],
+    }).filter((f) => f.message.includes('objectName'))).toEqual([]);
+  });
+
   it('warns on an experimental prop with no authorWarn of its own (tool.outputSchema)', () => {
     // `experimental` warns implicitly — shouldWarn() treats a declared-but-
     // unenforced guarantee like an opted-in dead prop. Repointed from
