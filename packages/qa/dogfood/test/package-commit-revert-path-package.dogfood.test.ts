@@ -55,8 +55,9 @@
 // [#29414] A commit names its own package's rows. The pair's first publish
 // beside such a base-bound row is recorded as a create (its plan used to read
 // the base row's version), so its revert removes the pair's row and the base
-// row is served again; a revert whose row was deleted since asks the
-// package-less close, as the per-item rollback does. Control: a writable
+// row is served again. A revert whose row was deleted since restores into the
+// committing package's own row, never a package-less one, so the base's own
+// commit is refused by the close naming the pair. Control: a writable
 // package's edit commit restores its own row in place.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -349,7 +350,7 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
     expect(await servedLabel()).toBe(shipped);
   });
 
-  it('[#29414] a commit that edited a base-bound row since deleted is refused by the package-less close, as the per-item rollback is, and writes nothing', async () => {
+  it('[#29414] a commit that edited a base-bound row since deleted restores into the base\'s own row, so it is refused by the close naming the pair, and writes nothing', async () => {
     const shipped = await servedLabel();
     await publishBaseBound('Deleted later 1');
     const edited = await publishBaseBound('Deleted later 2');
@@ -361,7 +362,7 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json?.data).toMatchObject({ success: false, revertedCount: 0, failedCount: 1 });
     expect(res.json?.data?.failed?.[0]).toMatchObject({ type: 'view', name: OVERLAY, code: 'NOT_OVERRIDABLE' });
-    expect(res.json.data.failed[0].error).toContain('a rollback of its package-less row is closed');
+    expect(res.json.data.failed[0].error).toContain('a rollback of its row bound to the read-only base is closed');
     expect(res.json.data.failed[0].error).toContain(`?package=${SHOWCASE}.custom`);
     expect(await servedLabel()).toBe(shipped);
   });
