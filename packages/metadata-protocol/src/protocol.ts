@@ -1565,7 +1565,9 @@ export class ObjectStackProtocolImplementation implements
      *    ({@link assertRuntimeAuthoringRules}), judged as an `active` write
      *    bound to the row's own package, and told which credentials the
      *    write-only channel holds — the restore keeps them (R2) — as the draft
-     *    promotion tells it;
+     *    promotion tells it; [#29696] a flow version judged in its
+     *    D2-converted spelling (`storedFlowVerdictBody`), as the promotion
+     *    judges a flow draft, and restored as stored;
      *  - the authoring gate a domain plugin registers
      *    ({@link runAuthoringGate}), on the channel the save door asks it on.
      *
