@@ -155,7 +155,7 @@ export interface OrganizationOwnershipBootGuardOptions {
    * with, and the operator's shell does not hold this one, so on a boot that
    * is not a development boot the named commands export it from this file
    * (`OS_AUTH_SECRET="$(cat FILE)" os migrate organization-ownership …`).
-   * Without it the plan is written and the apply stops at its authored-
+   * Without it the plan is written and the apply can stop at its authored-
    * conversion step.
    */
   authSecretFile?: string;
@@ -349,8 +349,8 @@ function secretNote(opts: OrganizationOwnershipBootGuardOptions): string {
   if (opts.dev || !opts.authSecretFile) return '';
   return (
     ` Both commands export the auth secret this server read from ${opts.authSecretFile}: the ceremony composes ` +
-    'the security plugin only with the secret the deployment serves with, and without it the apply stops before it ' +
-    'converts the authored rows.'
+    'the security plugin only with the secret the deployment serves with, and without it the apply can stop at its ' +
+    'authored-conversion step.'
   );
 }
 

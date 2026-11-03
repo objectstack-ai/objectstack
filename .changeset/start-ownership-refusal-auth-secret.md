@@ -5,7 +5,7 @@
 
 fix(cli,runtime): the ownership refusal `os start` prints names the auth secret the ceremony needs
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 On a database 17.x or an 18.0 pre-release created, `os start` refuses to boot and names the ownership ceremony. When the operator had set no auth secret, `os start` was serving with the one it generated and keeps in `<home>/auth-secret`, and that secret is not in the operator's shell. Run exactly as printed, the ceremony composed no security plugin: it wrote the plan and stopped the apply at its `authored-conversion` step, and nothing said which secret was missing. The refusal now names both commands with that secret exported from its file, by path:
