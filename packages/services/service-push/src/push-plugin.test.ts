@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { PushServicePlugin } from './push-plugin.js';
+import { PushServicePlugin, PUSH_RELAY_NOT_SERVED_MESSAGE } from './push-plugin.js';
 import { PushService, type IPushTransport, type PushMessage } from './push-service.js';
 import { envPushCredentialResolver } from './credential.js';
 
@@ -34,11 +34,30 @@ describe('PushServicePlugin', () => {
         expect(push.vendors().sort()).toEqual(['apns', 'fcm']);
     });
 
-    it('registers a push service with no vendor when nothing is configured, and says so', async () => {
-        const { ctx, services, lines } = context();
-        await new PushServicePlugin().init(ctx);
-        expect((services.get('push') as PushService).vendors()).toEqual([]);
-        expect(lines.some((l) => l.includes('no vendor configured'))).toBe(true);
+    it('boots the direct transport, named or read from a vendor block', async () => {
+        for (const config of [{ transport: 'direct' as const, apns: APNS }, { apns: APNS }]) {
+            const { ctx, services } = context();
+            await new PushServicePlugin({ config }).init(ctx);
+            expect((services.get('push') as PushService).vendors()).toEqual(['apns']);
+        }
+    });
+
+    it.each([
+        ['no config', undefined],
+        ['the empty config', {}],
+        ["transport: 'relay'", { transport: 'relay' as const }],
+        ['a staging relay endpoint', { transport: 'relay' as const, endpoint: 'https://relay.staging.example.com' }],
+    ])('refuses the relay transport at init (%s), registering nothing', async (_name, config) => {
+        const { ctx, services } = context();
+        const init = new PushServicePlugin({ config }).init(ctx);
+        await expect(init).rejects.toThrow(PUSH_RELAY_NOT_SERVED_MESSAGE);
+        expect(services.has('push')).toBe(false);
+    });
+
+    it('names the follow-up card and the direct transport in the relay refusal', () => {
+        expect(PUSH_RELAY_NOT_SERVED_MESSAGE).toContain('#29920');
+        expect(PUSH_RELAY_NOT_SERVED_MESSAGE).toContain("transport: 'direct'");
+        expect(PUSH_RELAY_NOT_SERVED_MESSAGE).toContain('credentialRef');
     });
 
     it('refuses an inline secret at init with the schema\'s guidance, registering nothing', async () => {
