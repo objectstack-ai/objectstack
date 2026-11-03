@@ -735,7 +735,7 @@ async function selfTest() {
   t('⛔ an ACCEPT line ABOVE the heading is not the record\'s verdict', hasLandingVerdict([{ body: 'ACCEPT\n\n## 席位核对\n\nREWORK · rework' }]), false);
   t('the heading is H69\'s marker, imported not re-spelled: the three measured bodies read record alike', ['## 席位核对\n\n**ACCEPT** · x', '## 席位核对 — ACCEPT · x', '## Contract review\n\n**VERDICT: PASS**'].map((b) => `${seatRecord.SEAT_RECORD_MARKER.test(b)}/${hasLandingVerdict([{ body: b }])}`), ['true/true', 'true/true', 'false/true']);
   t('the mailbox constants are the opener\'s own, imported not re-spelled', [MAILBOX_LABEL, LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX], [mailboxOpen.MAILBOX_LABEL, mailboxOpen.LEDGER_EXCLUSION, mailboxOpen.MAILBOX_BRANCH_PREFIX]);
-  t('whose mailbox a pull is, and a seat row\'s slug, are the opener\'s own readings — imported, not re-spelled', [mailboxOwner === mailboxOpen.mailboxOwner, seatKey === mailboxOpen.seatKey, seatSlugOf({ lane: 'domain:ui', seat: 4 }), seatSlugOf({ lane: 'triage', seat: 1 })], [true, true, 'ui-4', 'triage-1']);
+  t('whose mailbox a pull is, and a seat row\'s slug, are the opener\'s own readings — imported, not re-spelled', [mailboxOwner === mailboxOpen.mailboxOwner, seatKey === mailboxOpen.seatKey, seatSlugOf({ lane: 'domain:ui', seat: 4 }), seatSlugOf({ lane: 'triage', seat: 1 }), seatSlugOf({ lane: 'security', seat: 1 })], [true, true, 'ui-4', 'triage-1', 'security-1']);
 
   battery('the fixture snapshot: rows for the three repos');
   const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
