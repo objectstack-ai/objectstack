@@ -297,15 +297,13 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
   // ⚖️ `check:pm-half-states` LEFT this population under #16904's D2 and its row
   // is gone with it — a listed family that stops being a member reds here, and
   // a stale exclusion is an exclusion nobody measures. It is now placeable BY
-  // PATH, and truthfully: `check-half-states.mjs`'s self-test reads two sibling
-  // sources as program text — `scripts/pm/sweep-stale-finding.mjs` and
-  // `scripts/pm/check-prior-rulings.mjs` — to pin that the sweep still ALIASES
-  // the one stale-`finding` screen rather than re-growing a copy, and that the
-  // prior-ruling line's writer still prints the key the patrol greps. So a card
-  // touching either sibling really does owe this gate, which is the opposite of
-  // the #15753 placement this row was written about: that one came from a
-  // noise-floor constant and said the opposite of what the constant declares,
-  // while these two literals are exactly what the self-test reads.
+  // PATH, and truthfully: `check-half-states.mjs`'s self-test reads a sibling
+  // source as program text — `scripts/pm/check-prior-rulings.mjs` — to pin
+  // that the prior-ruling line's writer still prints the key the patrol greps.
+  // So a card touching that sibling really does owe this gate, which is the
+  // opposite of the #15753 placement this row was written about: that one came
+  // from a noise-floor constant and said the opposite of what the constant
+  // declares, while this literal is exactly what the self-test reads.
   // ⚖️ `scripts/symbol-anchors.mjs --self-test` LEFT this population under
   // #18661 and its row is gone with it — a listed family that stops being a
   // member reds here, and a stale exclusion is an exclusion nobody measures.
