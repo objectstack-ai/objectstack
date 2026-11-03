@@ -20,9 +20,9 @@
  *    `type/name` (objectui#13333). The pillar sends the delete itself. Reset
  *    overlay is not offered: it arrives with the overlay editing of the
  *    Studio / Setup boundary record's phase 2 (#28045).
- *  - **Restore package original** (objectstack#28570, ADR-0146 D2), a
- *    read-only base's flow that its pair overrides. The pillar decides it from
- *    the served declaration and holds the confirmation, outside this menu.
+ *
+ * Restore package original is not here: it is on the flow's override mark,
+ * where the customization is named (objectstack#29692).
  */
 
 import * as React from 'react';
@@ -56,7 +56,6 @@ import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
 import { apiBase } from '../../utils/apiBase.js';
 import { STUDIO_HEADER_ICON_BUTTON } from './studio-tokens.js';
-import { StudioRestoreOriginalItem } from './StudioCustomizeControls.js';
 
 /** What the clone door saved: the copy's name, the package it names, and its sentence. */
 export interface FlowCopied {
@@ -65,6 +64,21 @@ export interface FlowCopied {
   packageId: string | null;
   /** `data.notice`, verbatim (the copy is switched off); `''` when none was sent. */
   notice: string;
+  /** objectstack#29727 — `data.noticeCode` as sent, naming {@link notice}'s sentence; absent when none was sent. */
+  noticeCode?: string;
+}
+
+/**
+ * objectstack#29727 — the copy's notice in the console's language. The door
+ * names its sentence by a code (`FLOW_CLONE_DISABLED_COPY`, the server's
+ * `FLOW_CLONE_NOTICE_CODE`); a code this console does not know, or an answer
+ * with none, shows the door's `notice` as sent. Same pattern as
+ * `CloudConnectionPanel`'s `translateFailureCode`: the key is a string literal
+ * so `check:i18n-keys` resolves it.
+ */
+export function flowCloneNoticeText(copy: Pick<FlowCopied, 'notice' | 'noticeCode'>, locale?: string): string {
+  if (copy.noticeCode === 'FLOW_CLONE_DISABLED_COPY') return t('engine.studio.auto.newSimilar.notice', locale);
+  return copy.notice;
 }
 
 /** The clone door's answer: the copy, or its refusal verbatim. */
@@ -100,6 +114,7 @@ async function requestFlowNewSimilar(
         name: typeof flowName === 'string' && flowName ? flowName : body.name,
         packageId: typeof data.packageId === 'string' && data.packageId !== '' ? data.packageId : null,
         notice: typeof data.notice === 'string' ? data.notice : '',
+        ...(typeof data.noticeCode === 'string' && data.noticeCode !== '' ? { noticeCode: data.noticeCode } : {}),
       },
     };
   } catch (e) {
@@ -129,17 +144,15 @@ interface NewSimilarDraft {
 /**
  * `label` is the flow's display label; `disabled` holds the menu's actions
  * while a save is in flight. `onDelete` draws Delete flow (a writable
- * package's flow); `newSimilar` draws New similar; `restore` draws Restore
- * package original (a flow the base's pair overrides).
+ * package's flow); `newSimilar` draws New similar.
  */
-export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newSimilar, restore }: {
+export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newSimilar }: {
   name: string;
   label: string;
   locale: string;
   disabled?: boolean;
   onDelete?: () => void;
   newSimilar?: FlowNewSimilarProps;
-  restore?: { disabled?: boolean; onSelect: () => void };
 }): React.ReactElement {
   const [confirming, setConfirming] = React.useState(false);
   const [copy, setCopy] = React.useState<NewSimilarDraft | null>(null);
@@ -217,9 +230,6 @@ export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newS
               <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
               {t('engine.studio.auto.deleteFlow', locale)}
             </DropdownMenuItem>
-          )}
-          {restore && (
-            <StudioRestoreOriginalItem disabled={disabled || restore.disabled} locale={locale} onSelect={restore.onSelect} />
           )}
         </DropdownMenuContent>
       </DropdownMenu>

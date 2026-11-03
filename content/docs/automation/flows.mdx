@@ -1810,7 +1810,7 @@ Edges connect nodes and define the execution path:
 | `source` | `string` | ✅ | Source node ID |
 | `target` | `string` | ✅ | Target node ID |
 | `type` | `enum` | optional | `'default'` (success), `'fault'` (error), `'conditional'` (expression-guarded), or `'back'` (declared back-edge, ADR-0044); defaults to `'default'` |
-| `condition` | `string` | optional | Boolean CEL predicate for branching (a bare string is stored as `{ dialect: 'cel', source }`) |
+| `condition` | `string` | optional | Boolean CEL predicate for branching (a bare string is stored as `{ dialect: 'cel', source }`); on a record-triggered flow a nullable field needs its `!= null` guard — see [Expressions in flows](#expressions-in-flows) |
 | `label` | `string` | optional | Label displayed on the connector — cosmetic only. It does **not** select a path except on a branching node (`decision` / `approval`), which picks its out-edge by label. |
 | `isDefault` | `boolean` | optional | BPMN default flow — the **"otherwise" branch**. Traversed only when no sibling `condition` on the same source node matched; never part of the unconditional parallel fan-out. Mutually exclusive with `condition`, at most one per node |
 
@@ -2443,6 +2443,18 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
 4. **A single-brace token in a text slot** — `title: 'Deal won: {record.name}'`
    — is refused with its `{{ }}` spelling ([text slots](#text-slots-read-double-brace-holes)): it is no placeholder there,
    and would go out as literal text.
+5. **An ordering or arithmetic operator on a nullable field, unguarded** — on a
+   record-triggered flow (`triggerType: 'record-*'`), `os validate` and the
+   runtime publish gate refuse a start `condition`, an edge `condition` (nested
+   regions too) or a `decision` branch `expression` that applies `< <= > >=` or
+   `+ - * / %` to a field of the trigger object with no `required: true`,
+   `defaultValue` or default option (a `count` / `sum` roll-up reads `0` when
+   empty; `min` / `max` / `avg` stay nullable), unguarded by `!= null` /
+   `== null` / `!isBlank()` in the same branch: the run binds every declared
+   field, `null` when empty, CEL has no `>` for null, and the run fails there
+   while the write that fired it still lands. A bare `budget` is `record.budget`,
+   and `os validate` judges it too; a start guard holds at every edge and branch — spell
+   it `record.budget != null`, which both doors accept, and `has()` is no guard.
 </Callout>
 
 <Callout type="info">

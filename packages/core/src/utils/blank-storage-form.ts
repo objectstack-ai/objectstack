@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * THE blank-as-null rule — which columns of an object store a blank string as
+ * THE blank-as-null rule — which columns of an object store a blank as
  * `null`, and which blanks — read by the write door that stores it and by the
  * seed loader's replay, which must compare a seed value in the form the door
  * stores it.
@@ -22,7 +22,7 @@
  * same reason. The type classes and the `$empty` table it reads are the
  * spec's, never re-listed.
  *
- * ## The rule — three arms
+ * ## The rule — four arms
  *
  * - [#20308] `'blank'`: a column whose type is non-string-typed
  *   (`NON_TEXT_STORED_VALUE_TYPES`: numeric, boolean, `date`, `datetime`,
@@ -36,12 +36,26 @@
  *   table's `null_only` row (`expandEmptyOperator`) whose value is ONE string
  *   ({@link ONE_STRING_STORED_TYPES}), unique or not (maintainer ruling B on
  *   #29346, record 6579813296).
+ * - [#29343] `'emptyList'`: the empty list `[]`, or exactly `''`, on an
+ *   optional column on the `$empty` table's `multi_value` row (a list-valued
+ *   column: `isMultiValueField`, read through `expandEmptyOperator`), unique
+ *   or not — the same ruling's execution step 2, which has this row follow
+ *   the table for `[]` the way the `null_only` arm follows it for `''`. A
+ *   stored `[]` collided under every NULL-distinct unique constraint as the
+ *   JSON text `'[]'`, and `''` (never a member: `multiValueStorageForm` leaves
+ *   a blank unwrapped) as the JSON text `'""'`.
  *
- * The two `'empty'` arms never reach a `required: true` column (there `''` is
- * refused `required`, and must not first become a `null` a `defaultValue`
- * would fill) nor a lifecycle column the engine owns
- * ({@link ENGINE_LIFECYCLE_COLUMNS}), and never whitespace (a value on both
- * rows of the `$empty` table they touch).
+ * The `'empty'` and `'emptyList'` arms never reach a `required: true` column
+ * (there the blank is refused `required`, and must not first become a `null`
+ * a `defaultValue` would fill) nor a lifecycle column the engine owns
+ * ({@link ENGINE_LIFECYCLE_COLUMNS}), and never whitespace (a value on every
+ * row of the `$empty` table they touch). A non-empty list is never touched.
+ * The `'emptyList'` arm also never reaches a `readonly: true` column
+ * (ruling record 6598733139): a readonly column is platform-stamped and never
+ * cleared by a writer (a non-system write of it is stripped), so the `[]` the
+ * platform writes there is a stamped value, not a cleared field, and is stored
+ * as written — `sys_activity.changed_fields`, where `[]` is "stamped, nothing
+ * changed" and `null` is "unstamped" (ADR-0139 E6).
  */
 
 import {
@@ -108,14 +122,17 @@ const ONE_STRING_STORED_TYPES: ReadonlySet<string> = new Set([
 
 /**
  * Which blanks a column stores as `null`: `'blank'` — any blank string
- * (`isMissing`); `'empty'` — exactly `''`.
+ * (`isMissing`); `'empty'` — exactly `''`; `'emptyList'` — the empty list
+ * `[]` or exactly `''` (a list-valued column).
  */
-export type BlankAsNullReach = 'blank' | 'empty';
+export type BlankAsNullReach = 'blank' | 'empty' | 'emptyList';
 
 /** The field shape the rule reads. */
 export interface BlankAsNullFieldDef extends ValueShapeFieldDef {
   required?: boolean;
   unique?: unknown;
+  /** Platform-stamped: the `'emptyList'` arm never reaches it (record 6598733139). */
+  readonly?: boolean;
 }
 
 /**
@@ -137,9 +154,15 @@ export function blankAsNullColumns(
       continue;
     }
     if (LIFECYCLE.has(name) || def.required === true) continue;
+    const { arm } = expandEmptyOperator(def);
+    if (arm === 'multi_value') {
+      // A readonly column keeps the `[]` the platform stamps (record 6598733139).
+      if (def.readonly !== true) out.set(name, 'emptyList');
+      continue;
+    }
     const empty = UNIQUE_BLANK_TEXT_TYPES.has(def.type)
       ? isCovered(name)
-      : expandEmptyOperator(def).arm === 'null_only' && ONE_STRING_STORED_TYPES.has(def.type);
+      : arm === 'null_only' && ONE_STRING_STORED_TYPES.has(def.type);
     if (empty) out.set(name, 'empty');
   }
   return out;
@@ -152,6 +175,7 @@ export function blankAsNullColumns(
  * {@link blankAsNullColumns} — keeps every value.
  */
 export function blankStorageForm(value: unknown, reach: BlankAsNullReach | undefined): unknown {
+  if (reach === 'emptyList') return value === '' || (Array.isArray(value) && value.length === 0) ? null : value;
   if (reach === undefined || typeof value !== 'string') return value;
   if (reach === 'empty') return value === '' ? null : value;
   return isMissing(value) ? null : value;

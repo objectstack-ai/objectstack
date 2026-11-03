@@ -1100,6 +1100,23 @@ function recordedActor(context: ExecutionContext | undefined): string | null {
 }
 
 /**
+ * Is `actorId` the submitter of request row `raw`? The one test the
+ * submitter's doors — `recall`, `remind`, `resubmit` — admit a caller by.
+ *
+ * A request with no submitter (a run whose trigger resolved no user stamps
+ * `submitter_id` null) has no one to be: the answer is `false` for every
+ * actor, ⛔ never `true` for all. Each door's other arms are unchanged — a
+ * system context, and the #3424 override actor, wherever that door admits
+ * them — so such a request is recalled, reminded or resubmitted only by them.
+ * Being able to READ a request (a pending approver, a record reader) grants no
+ * right over it.
+ */
+function actsAsSubmitter(raw: { submitter_id?: unknown }, actorId: unknown): boolean {
+  const submitter = raw?.submitter_id == null ? '' : String(raw.submitter_id);
+  return submitter !== '' && submitter === String(actorId ?? '');
+}
+
+/**
  * Max hops when following an OOO delegation chain (#1322 M1): A out → B, B out
  * → C, … Bounds the walk so a mis-configured chain can't loop or resolve
  * unboundedly; a cycle or self-reference also stops it early.
@@ -5595,13 +5612,17 @@ export class ApprovalService implements IApprovalService {
     // toast. See {@link ApprovalService.userFacingRefusal}.
     const overrideAdmits = raw.status === 'pending'
       && this.isOverrideActor(context, raw.organization_id ?? null);
-    if (!overrideAdmits && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
+    // A request with no submitter is recalled only through the arm above (a
+    // system context or the override actor, on `pending`): `actsAsSubmitter`
+    // answers no for every actor there.
+    if (!overrideAdmits && !actsAsSubmitter(raw, actorId)) {
       // The developer's half: the ids the catalog sentence deliberately does
       // not name (the throw site knows the submitter only as an opaque user
       // id), kept where a developer reads them and a user never does.
+      const submitterNamed = raw.submitter_id ? `submitter '${String(raw.submitter_id)}'` : 'no submitter';
       const developerMessage =
         `[approvals] recall refused: actor '${actorId}' is not the submitter of request `
-        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no admin override `
+        + `'${requestId}' (${submitterNamed}) and holds no admin override `
         + `for a '${raw.status}' request (the override reaches pending requests only)`;
       this.logger?.warn?.(developerMessage, {
         request: requestId,
@@ -6177,7 +6198,8 @@ export class ApprovalService implements IApprovalService {
     if (raw.status !== 'returned') {
       throw new Error(`INVALID_STATE: request is ${raw.status} (resubmit applies to returned requests)`);
     }
-    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
+    // A request with no submitter is resubmitted by a system context alone.
+    if (!context.isSystem && !actsAsSubmitter(raw, actorId)) {
       throw new Error('FORBIDDEN: only the submitter may resubmit');
     }
     await this.assertLatestForRun(raw);
@@ -6532,7 +6554,8 @@ export class ApprovalService implements IApprovalService {
   ): Promise<{ request: ApprovalRequestRow; notified: number }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     const raw = await this.loadPendingRow(requestId, context);
-    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
+    // A request with no submitter is reminded by a system context alone.
+    if (!context.isSystem && !actsAsSubmitter(raw, actorId)) {
       throw new Error('FORBIDDEN: only the submitter may send reminders');
     }
 
