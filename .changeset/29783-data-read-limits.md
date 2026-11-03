@@ -30,4 +30,4 @@ The budget counts the rows a query walks through its window. Rows a database sca
 
 A value that is not a positive integer, or a default above the maximum, fails at construction of the protocol and of the analytics service, naming the variable, so a typo never leaves the guard silently off.
 
-`@objectstack/types` exports the rule (`resolveQueryReadLimits`, `planQueryReadWindow`, `assertQueryReadRows`, `QueryReadLimitError` and the variable and code names). The two codes are registered in the error-code ledger.
+`@objectstack/types` exports the rule (`resolveQueryReadLimits`, `planQueryReadWindow`, `assertQueryReadRows`, `QueryReadLimitError` with one subclass per code, `QueryPageSizeExceededError` and `QueryRowBudgetExceededError`, and the variable and code names). The two codes are registered in the error-code ledger.

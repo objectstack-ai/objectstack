@@ -16,7 +16,9 @@ import {
   DATA_QUERY_ROW_BUDGET_ENV,
   QUERY_PAGE_SIZE_EXCEEDED,
   QUERY_ROW_BUDGET_EXCEEDED,
+  QueryPageSizeExceededError,
   QueryReadLimitError,
+  QueryRowBudgetExceededError,
   assertQueryReadRows,
   planQueryReadWindow,
   resolveQueryReadLimits,
@@ -176,9 +178,14 @@ describe('planQueryReadWindow — the row budget counts offset plus the rows ret
 
 describe('the refusal on the wire', () => {
   it('both codes are registered, so a door answers them verbatim at 400', () => {
-    for (const code of [QUERY_PAGE_SIZE_EXCEEDED, QUERY_ROW_BUDGET_EXCEEDED]) {
+    for (const [code, err] of [
+      [QUERY_PAGE_SIZE_EXCEEDED, new QueryPageSizeExceededError('over', 10)],
+      [QUERY_ROW_BUDGET_EXCEEDED, new QueryRowBudgetExceededError('over', 10)],
+    ] as const) {
       expect(ErrorCode.safeParse(code).success, code).toBe(true);
-      const answer = resolveThrownHttpError(new QueryReadLimitError(code as never, 'over', 10));
+      expect(err).toBeInstanceOf(QueryReadLimitError);
+      expect(err.code).toBe(code);
+      const answer = resolveThrownHttpError(err);
       expect(answer.status).toBe(400);
       expect(answer.code).toBe(code);
       expect(answer.declaredCode).toBe(code);

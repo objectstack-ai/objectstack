@@ -1168,7 +1168,8 @@ export const ERROR_CODE_LEDGER = {
     'METADATA_CONFLICT',
     // The data API's host-configured read limits (`query-read-limits.ts`,
     // `OS_DATA_DEFAULT_PAGE_SIZE` / `OS_DATA_MAX_PAGE_SIZE` /
-    // `OS_DATA_QUERY_ROW_BUDGET`): `QueryReadLimitError` carries both, 400,
+    // `OS_DATA_QUERY_ROW_BUDGET`): `QueryPageSizeExceededError` /
+    // `QueryRowBudgetExceededError` declare them, 400,
     // naming the limit. Thrown by `metadata-protocol`'s `findData` (the list
     // doors) and `service-analytics`' `query` / `queryDataset` (the analytics,
     // report and dashboard reads), before the driver is asked.

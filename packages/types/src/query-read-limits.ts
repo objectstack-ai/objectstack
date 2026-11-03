@@ -75,18 +75,35 @@ export interface QueryReadLimits {
  */
 export type QueryReadSurface = 'list' | 'analytics';
 
-/** The refusal every limit here answers with: a `400` carrying a registered code. */
-export class QueryReadLimitError extends Error {
-  readonly status = 400;
+/**
+ * The refusal every limit here answers with: a `400` carrying a registered
+ * code and the configured number the read went over. One subclass per code,
+ * each declaring its own `code` and `status`, so the pair is a declaration the
+ * error-status conformance gate reads rather than a value computed at the throw.
+ */
+export abstract class QueryReadLimitError extends Error {
+  abstract readonly code: typeof QUERY_PAGE_SIZE_EXCEEDED | typeof QUERY_ROW_BUDGET_EXCEEDED;
+  abstract readonly status: 400;
   constructor(
-    readonly code: typeof QUERY_PAGE_SIZE_EXCEEDED | typeof QUERY_ROW_BUDGET_EXCEEDED,
     message: string,
     /** The configured number the read went over. */
     readonly limit: number,
   ) {
     super(message);
-    this.name = 'QueryReadLimitError';
+    this.name = new.target.name;
   }
+}
+
+/** A `limit` over the maximum page size, or an unpaged analytics answer larger than the default page. */
+export class QueryPageSizeExceededError extends QueryReadLimitError {
+  readonly code: typeof QUERY_PAGE_SIZE_EXCEEDED = QUERY_PAGE_SIZE_EXCEEDED;
+  readonly status = 400;
+}
+
+/** A read whose `offset` plus its rows walks more than the query row budget. */
+export class QueryRowBudgetExceededError extends QueryReadLimitError {
+  readonly code: typeof QUERY_ROW_BUDGET_EXCEEDED = QUERY_ROW_BUDGET_EXCEEDED;
+  readonly status = 400;
 }
 
 function readLimitVar(env: Record<string, string | undefined>, name: string): number | undefined {
@@ -181,7 +198,9 @@ function refuse(
     `[data] read refused: code=${code} surface=${request.surface} object=${request.object} `
     + `rows=${rows} limit=${limit}`,
   );
-  throw new QueryReadLimitError(code, message, limit);
+  throw code === QUERY_PAGE_SIZE_EXCEEDED
+    ? new QueryPageSizeExceededError(message, limit)
+    : new QueryRowBudgetExceededError(message, limit);
 }
 
 function budgetMessage(budget: number, offset: number, rows: number | string): string {
