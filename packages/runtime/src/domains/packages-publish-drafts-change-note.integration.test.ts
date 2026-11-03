@@ -17,6 +17,8 @@
  * back are what landed in SQLite, not what a double was told.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import '../lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
