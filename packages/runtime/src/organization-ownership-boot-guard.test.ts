@@ -31,6 +31,7 @@ import {
   isOrganizationOwnershipBootRefusal,
   OrganizationOwnershipBirthMarkerPlugin,
   OrganizationOwnershipBootGuardPlugin,
+  organizationOwnershipRefusalMessage,
   recordOrganizationOwnershipBirth,
   ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME,
   ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
@@ -158,6 +159,30 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling �
     );
     const served = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND })));
     expect(served.message).not.toContain('--dev');
+  });
+
+  it('⭐ a production boot whose secret came from a file (`os start`) names the ceremony with that secret exported, in every refusal', async () => {
+    v17Shape();
+    const opts = { authSecretFile: '/srv/os/home/auth-secret' };
+    const exported = 'OS_AUTH_SECRET="$(cat /srv/os/home/auth-secret)" os migrate organization-ownership';
+    const absent = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND }), undefined, opts));
+    expect(absent.message).toContain(
+      `Run '${exported} --out PLAN' to write and review its plan, take a backup, then run ` +
+        `'${exported} --apply --plan-file PLAN --backup-taken', and start again.`,
+    );
+    expect(absent.message).toContain('Both commands export the auth secret this server read from /srv/os/home/auth-secret');
+    for (const state of ['outdated', 'unreadable', 'unverified'] as const) {
+      const message = organizationOwnershipRefusalMessage(['sys_job'], state, opts);
+      expect(message, state).toContain(`'${exported} --apply --plan-file PLAN --backup-taken'`);
+      expect(message, state).toContain('read from /srv/os/home/auth-secret');
+    }
+    // A path a shell would split or expand is one double-quoted word.
+    expect(organizationOwnershipRefusalMessage([], 'absent', { authSecretFile: '/home/o p/$x/auth-secret' }))
+      .toContain('OS_AUTH_SECRET="$(cat "/home/o p/\\$x/auth-secret")" os migrate organization-ownership --out PLAN');
+    // A development boot keeps its own spelling: `--dev` already composes the security plugin.
+    const dev = organizationOwnershipRefusalMessage([], 'absent', { dev: true, authSecretFile: '/srv/os/home/auth-secret' });
+    expect(dev).toContain("'os migrate organization-ownership --dev --out PLAN'");
+    expect(dev).not.toContain('OS_AUTH_SECRET');
   });
 
   it('⭐ R1: a store created from empty gets its birth marker, exactly once, and boots — again and again', async () => {
