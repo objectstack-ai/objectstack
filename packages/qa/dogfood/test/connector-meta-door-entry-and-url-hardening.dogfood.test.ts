@@ -14,8 +14,10 @@
 //    system context, the only way such a row is written), is served with those
 //    parts withheld, to a member and to an administrator, in the item, list and
 //    layered reads; the stored row itself is never touched.
-//  - CARRY-FORWARD: a save of the served form keeps the stored URL whole, and
-//    the instance still dispatches with it.
+//  - CARRY-FORWARD: on a row stored before the save door refused a credential
+//    part in a URL (seeded through the system context), a save of the served
+//    form keeps the stored URL whole, and the instance still dispatches with
+//    it: the runtime materializes the stored row as it is, never re-judged.
 //
 // Every credential below is an obviously-fake placeholder, and every assertion
 // on one is its absence from what a door served, or its presence at rest.
@@ -248,11 +250,16 @@ describe('connector metadata doors: undeclared entry keys refused; URL credentia
   describe('CARRY-FORWARD: a save of the served form keeps the stored URL, and dispatch still uses it', () => {
     it('the served URL drops the credential parameter; the re-saved row keeps it; the upstream receives it', async () => {
       const carriedUrl = `${upstreamUrl}/v1?api_key=${PLACEHOLDERS.carried}&region=eu`;
-      const put = await stack.apiAs(admin, 'PUT', `/meta/connector/${CARRIED}`, instance(CARRIED, {
-        providerConfig: { baseUrl: carriedUrl },
-      }));
+      // A row stored before the save door refused a credential part in a URL:
+      // saved disabled, so nothing materializes before the seeded form is the
+      // row, then the system context writes that form over it.
+      const put = await stack.apiAs(admin, 'PUT', `/meta/connector/${CARRIED}`, instance(CARRIED, { enabled: false }));
       expect(put.status, await put.clone().text()).toBe(200);
-      await waitReady(CARRIED);
+      const [row] = await stored(CARRIED);
+      await ql.update('sys_metadata', {
+        id: row.id,
+        metadata: JSON.stringify(instance(CARRIED, { providerConfig: { baseUrl: carriedUrl } })),
+      }, { context: SYSTEM });
 
       const read = await stack.apiAs(admin, 'GET', `/meta/connector/${CARRIED}`);
       const served = itemOf(await read.json());

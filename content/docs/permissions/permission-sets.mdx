@@ -460,8 +460,9 @@ the source never reach the copy.
   (`packageId`, `protection` and the internal protection envelope),
   and two privilege decisions — `adminScope` (delegated administration) and
   `isDefault` (the `everyone` suggestion). Grant either deliberately on the copy
-  if it needs one. The response, `{ permissionSet, package, notice }`, says
-  where the copy went and what was not copied.
+  if it needs one. The response, `{ permissionSet, package, notice, noticeCode }`, says
+  where the copy went and what was not copied. `noticeCode` names the notice's
+  variant so a console can translate it, and `notice` stays the English fallback.
 - **The copy is held by nobody** until you add it to a position or assign it.
 - **Who may call it** is who may save a permission set through the metadata
   API: a holder of `manage_metadata`. Anyone else is refused `403`

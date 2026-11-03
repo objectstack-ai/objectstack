@@ -46,7 +46,7 @@ import { FlowSchema } from '@objectstack/spec/automation';
 import { ROUTE_LEDGER } from '../route-ledger.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
-import { FLOW_CLONE_NOTICE, FLOW_CLONE_STATUS } from '../flow-clone.js';
+import { FLOW_CLONE_NOTICE, FLOW_CLONE_NOTICE_CODE, FLOW_CLONE_STATUS } from '../flow-clone.js';
 
 let home: string;
 let priorHome: string | undefined;
@@ -214,6 +214,9 @@ describe('[#28149] the default target: the copy lands in <base>.custom, switched
         expect(row.item.status).toBe('obsolete');
         expect(rig.flows.get('acme_lead_followup')?.status).toBe('obsolete');
         expect(answer.data.notice).toBe(FLOW_CLONE_NOTICE);
+        // [#29727] …named by its code, which the declared answer carries.
+        expect(answer.data.noticeCode).toBe(FLOW_CLONE_NOTICE_CODE);
+        expect(CloneFlowResponseSchema.parse(answer.body).data.noticeCode).toBe(FLOW_CLONE_NOTICE_CODE);
         // …and the original keeps running, untouched.
         expect(rig.flows.get(SOURCE)?.status).toBe('active');
         expect(await rig.rows(SOURCE)).toEqual([]);

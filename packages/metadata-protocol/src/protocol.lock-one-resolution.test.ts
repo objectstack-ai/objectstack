@@ -130,6 +130,8 @@
  * rule. Nothing the table enumerates is dropped: the 16 360 tests that ran as
  * one file run under the same titles, and the kit adds two tests of its own.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     MetadataLockSchema,

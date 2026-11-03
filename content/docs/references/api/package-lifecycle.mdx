@@ -43,13 +43,6 @@ declared a VERSION rollback against the live COMMIT-rollback path;
 `RollbackToPackageCommitResponseSchema` below is the true contract,
 authored after that retirement per the ruling's sequencing (3A).
 
-Two declarations are not transcriptions but DECLARED AHEAD OF THEIR
-PRODUCER (ADR-0049), each describe opening `[PLANNED — not yet served]`
-until the change that serves it drops the marker:
-`PackageExportManifestSchema.withheldMaps` (#28640 ruling ③A, served by
-#29342) and `PackageExportBundleSchema` (`GET /packages/export`, #28914).
-Their own docblocks say what is not served yet.
-
 <Callout type="info">
 **Source:** `packages/spec/src/api/package-lifecycle.zod.ts`
 </Callout>
@@ -335,7 +328,7 @@ Whole-deployment export, the answer of `GET /packages/export` (`os package expor
 | **namespace** | `string` | optional | The namespace the package was installed with, as its registry row's manifest declares it; absent when the row declares none. An install of the export keeps it instead of deriving one from the id, so a `.custom` pair is reinstalled under its own namespace rather than `custom`. |
 | **dependencies** | `Record<string, string>` | optional | The packages this package depends on, each id mapped to its version range, as its registry row's manifest declares them; absent when the row declares none. An install of the export orders it after each of them (ADR-0141 D5), and a `.custom` pair keeps the edge to its base that admits its overrides (ADR-0146 D2). |
 | **label** | `string` | optional | Display label, when the package declares one. |
-| **withheldMaps** | `{ type: 'connector'; name: string; path: Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …> }[]` | optional | [PLANNED — not yet served] Declared ahead of its producer (ADR-0049): no export writes this list yet and no install door reads it yet. Every map the export withheld WHOLE because a served read never carries it: a connector's header and environment-variable maps. The item is written with that map absent, so once served an import reads this list to tell an incomplete map from one the package never had, and names each one for an operator to re-enter. Positions only: no header or variable name is listed. Absence says nothing about what was withheld when the exporter predates this key; from an exporter that writes it, absence means nothing was withheld. |
+| **withheldMaps** | `{ type: 'connector'; name: string; path: Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …> }[]` | optional | Every map the export withheld WHOLE because a served read never carries it: a connector's header and environment-variable maps. The item is written with that map absent, so an import reads this list to tell an incomplete map from one the package never had, and names each one for an operator to re-enter. Positions only: no header or variable name is listed. Absence says nothing about what was withheld when the exporter predates this key; from an exporter that writes it, absence means nothing was withheld. |
 
 
 ---
@@ -352,7 +345,7 @@ Whole-deployment export, the answer of `GET /packages/export` (`os package expor
 | **namespace** | `string` | optional | The namespace the package was installed with, as its registry row's manifest declares it; absent when the row declares none. An install of the export keeps it instead of deriving one from the id, so a `.custom` pair is reinstalled under its own namespace rather than `custom`. |
 | **dependencies** | `Record<string, string>` | optional | The packages this package depends on, each id mapped to its version range, as its registry row's manifest declares them; absent when the row declares none. An install of the export orders it after each of them (ADR-0141 D5), and a `.custom` pair keeps the edge to its base that admits its overrides (ADR-0146 D2). |
 | **label** | `string` | optional | Display label, when the package declares one. |
-| **withheldMaps** | `{ type: 'connector'; name: string; path: Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …> }[]` | optional | [PLANNED — not yet served] Declared ahead of its producer (ADR-0049): no export writes this list yet and no install door reads it yet. Every map the export withheld WHOLE because a served read never carries it: a connector's header and environment-variable maps. The item is written with that map absent, so once served an import reads this list to tell an incomplete map from one the package never had, and names each one for an operator to re-enter. Positions only: no header or variable name is listed. Absence says nothing about what was withheld when the exporter predates this key; from an exporter that writes it, absence means nothing was withheld. |
+| **withheldMaps** | `{ type: 'connector'; name: string; path: Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …> }[]` | optional | Every map the export withheld WHOLE because a served read never carries it: a connector's header and environment-variable maps. The item is written with that map absent, so an import reads this list to tell an incomplete map from one the package never had, and names each one for an operator to re-enter. Positions only: no header or variable name is listed. Absence says nothing about what was withheld when the exporter predates this key; from an exporter that writes it, absence means nothing was withheld. |
 
 ### Nested Shape: `PackageExportManifest.withheldMaps[number]`
 

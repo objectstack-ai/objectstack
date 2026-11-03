@@ -299,6 +299,8 @@ const pt = {
       takePhoto: 'Tirar foto',
       takeSelfie: 'Tirar selfie',
       cameraCapture: 'Captura da câmera',
+      choosePhoto: 'Escolher foto',
+      photoFailed: 'Não foi possível obter a foto',
       uploading: 'Enviando…',
       uploadingPct: 'Enviando… ({{pct}} %)',
       fileFallback: 'Arquivo',
@@ -3058,6 +3060,12 @@ const pt = {
       saved: "Preferência de idioma atualizada.",
       readOnly: "O idioma da sua conta é gerenciado pelo seu administrador.",
     },
+    appLock: {
+      title: "Bloqueio do app",
+      off: "Desativado",
+      onImmediately: "Ativado, bloqueia assim que você sai do app",
+      onAfter: "Ativado, bloqueia {{duration}} depois que você sai do app",
+    },
     password: {
       changeTitle: "Alterar senha",
       setTitle: "Definir senha local",
@@ -4057,25 +4065,12 @@ const pt = {
     buyCredits: "Comprar um pacote de créditos",
     upgradePlan: "Fazer upgrade do plano",
   },
-  planTier: {
-    teamAndUp: "A partir do plano Team",
-  },
   environment: {
     setUpProduction: "Configure seu ambiente de produção",
-    addDevelopment: "Adicionar ambiente de desenvolvimento",
-    developmentLocked: "Ambientes de desenvolvimento · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "Você já tem seu ambiente de produção",
       productionLimitBody: "Cada organização inclui exatamente um ambiente de produção. Crie uma organização separada para ter outro, ou fale conosco sobre um acordo Enterprise.",
-      planLockedTitle: "Ambientes de desenvolvimento são um recurso pago",
-      planLockedBody: "Seu {{plan}} inclui um ambiente de produção. Faça upgrade para adicionar ambientes de desenvolvimento — construa em desenvolvimento e depois publique em produção.",
-      limitTitle: "Limite de ambientes de desenvolvimento atingido",
-      limitBody: "A capacidade cresce com os assentos de IA. Adicione um assento de IA, ou arquive um ambiente de desenvolvimento sem uso para liberar espaço.",
-      limitBodyWithCount: "Você está usando {{used}} de {{limit}} ambientes de desenvolvimento. A capacidade cresce com os assentos de IA — adicione um assento de IA, ou arquive um ambiente de desenvolvimento sem uso.",
-      freePlan: "plano gratuito",
-      namedPlan: "plano {{plan}}",
-      upgradeCta: "Fazer upgrade do plano",
       contactSalesCta: "Falar com vendas",
     },
   },
@@ -4601,6 +4596,7 @@ const pt = {
       draftedByMcp: 'Inclui alterações rascunhadas por um cliente MCP',
       detailChangedKeys: 'Também alterado:',
       detailNewKeys: 'Inclui:',
+      detailNewItem: 'Publicar adiciona este item.',
       generatedGroup: 'Gerado pela plataforma ({{n}})',
       confirmNote: 'Publicar libera juntos todos os {{count}} rascunhos pendentes deste pacote: ou todos entram no ar, ou nenhum.',
       confirmNote_one: 'Publicar libera {{count}} rascunho pendente deste pacote: ele entra no ar, ou nada muda.',
@@ -4665,6 +4661,10 @@ const pt = {
         email_template_one: '{{count}} modelo de e-mail',
         email_template_many: '{{count}} de modelos de e-mail',
         email_template_other: '{{count}} modelos de e-mail',
+        object_extension: '{{count}} extensões de objeto',
+        object_extension_one: '{{count}} extensão de objeto',
+        object_extension_many: '{{count}} de extensões de objeto',
+        object_extension_other: '{{count}} extensões de objeto',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
