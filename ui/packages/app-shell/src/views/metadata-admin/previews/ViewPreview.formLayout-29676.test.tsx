@@ -14,16 +14,21 @@
  * `horizontal` carries the label-column grid classes (`sm:grid`, the
  * two-column template), and one under `vertical` or no layout carries none.
  * Pixel positions are the live measurement's (PR body), not jsdom's.
+ *
+ * The same builder dropped the other form view keys `ObjectForm` and its
+ * layouts read — `columns`, `defaultTab`, `tabPosition`, `allowSkip`,
+ * `showStepIndicator` — so each is pinned on the schema the canvas renders,
+ * and `defaultTab` once more on the drawn tab strip.
  */
 
 import '@testing-library/jest-dom/vitest';
 import '@object-ui/plugin-form';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, cleanup, waitFor } from '@testing-library/react';
+import { render, cleanup, waitFor, screen } from '@testing-library/react';
 import { SchemaRendererProvider } from '@object-ui/react';
 import type { DataSource } from '@object-ui/types';
-import { ViewPreview } from './ViewPreview';
+import { ViewPreview, buildFormPreviewSchema } from './ViewPreview';
 
 afterEach(cleanup);
 
@@ -109,5 +114,66 @@ describe('objectstack#29676 — the form view canvas honours layout', () => {
     const item = await renderItem(formView());
     expect(isHorizontal(item)).toBe(false);
     expect(item.className).not.toContain('sm:grid');
+  });
+});
+
+describe('objectstack#29676 — the canvas schema carries the form view keys ObjectForm reads', () => {
+  const build = (config: Record<string, unknown>) => buildFormPreviewSchema('task', config, 'en-US');
+
+  it('layout: the console hosts\' mapping (resolveFormViewChrome), horizontal kept', () => {
+    expect(build({ type: 'simple', layout: 'horizontal' }).layout).toBe('horizontal');
+    expect(build({ type: 'simple', layout: 'vertical' }).layout).toBe('vertical');
+    // Unset reads the renderer default, as on the record page.
+    expect(build({ type: 'simple' }).layout).toBe('vertical');
+  });
+
+  it('columns, defaultTab, tabPosition, allowSkip and showStepIndicator reach the schema as authored', () => {
+    const schema = build({
+      type: 'tabbed',
+      columns: 3,
+      defaultTab: 'details',
+      tabPosition: 'left',
+      allowSkip: true,
+      showStepIndicator: false,
+    });
+    expect(schema).toMatchObject({
+      type: 'object-form',
+      formType: 'tabbed',
+      columns: 3,
+      defaultTab: 'details',
+      tabPosition: 'left',
+      allowSkip: true,
+      showStepIndicator: false,
+    });
+  });
+
+  it('CONTROL: unauthored keys stay unset, and the canvas still draws no submit or cancel', () => {
+    const schema = build({ type: 'simple' });
+    for (const key of ['columns', 'defaultTab', 'tabPosition', 'allowSkip', 'showStepIndicator']) {
+      expect(schema[key]).toBeUndefined();
+    }
+    expect(schema).toMatchObject({ showSubmit: false, showCancel: false, mode: 'create' });
+  });
+
+  it('defaultTab opens the authored tab on the drawn tabbed form', async () => {
+    const draft = {
+      ...formView(undefined, 'tabbed'),
+      config: {
+        type: 'tabbed',
+        defaultTab: 'details',
+        sections: [
+          { name: 'overview', label: 'Overview', fields: ['title'] },
+          { name: 'details', label: 'Details', fields: ['status'] },
+        ],
+      },
+    };
+    render(
+      <SchemaRendererProvider dataSource={createDataSource()}>
+        <ViewPreview type="view" name="task.intake" draft={draft} locale="en-US" />
+      </SchemaRendererProvider>,
+    );
+    const details = await screen.findByRole('tab', { name: 'Details' });
+    expect(details).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'false');
   });
 });
