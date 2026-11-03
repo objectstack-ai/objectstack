@@ -296,6 +296,8 @@ const ja = {
       takePhoto: '写真を撮る',
       takeSelfie: '自撮り',
       cameraCapture: 'カメラ撮影',
+      choosePhoto: '写真を選択',
+      photoFailed: '写真を取得できませんでした',
       uploading: 'アップロード中…',
       uploadingPct: 'アップロード中…（{{pct}}%）',
       fileFallback: 'ファイル',
