@@ -162,6 +162,7 @@ vi.mock('./AssignedUsersSection', () => ({
 }));
 
 import { PermissionMatrixEditPage } from './PermissionMatrixEditor';
+import { t, tFormat } from './i18n';
 
 // The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
@@ -179,12 +180,12 @@ interface Call {
 let doorAnswer: { status: number; body: unknown } = { status: 200, body: null };
 const calls: Call[] = [];
 
-function okAnswer(name = CLONE_NAME) {
+function okAnswer(name = CLONE_NAME, landing?: { noticeCode: string; package: string | null }) {
   return {
     status: 200,
     body: {
       success: true,
-      data: { permissionSet: { ...SET_BODY, name, label: CLONE_LABEL }, notice: NOTICE },
+      data: { permissionSet: { ...SET_BODY, name, label: CLONE_LABEL }, notice: NOTICE, ...landing },
     },
   };
 }
@@ -693,5 +694,39 @@ describe('PermissionMatrixEditPage — the clone notice is point-in-time: a save
     await screen.findByRole('button', { name: /^Save$/ });
     expect(screen.getByTestId('assigned-users-stub')).toHaveTextContent(CLONE_NAME);
     expect(screen.getByTestId('perm-clone-notice')).toHaveTextContent(NOTICE);
+  });
+});
+
+/**
+ * objectstack#29727 — the door names its notice by a code, and the package the
+ * sentence names is `data.package`; a zh editor shows the sentence in zh. The
+ * wire `notice` stays the sentence for a code this console does not know
+ * (CONTROL; the cases above pin an answer with no code).
+ */
+describe('PermissionMatrixEditPage — the clone notice in the reader\'s language (objectstack#29727)', () => {
+  const PAIR = 'com.example.showcase.custom';
+
+  async function cloneEmbeddedInZh(): Promise<HTMLElement> {
+    localeFixture = 'zh-CN';
+    await renderPlain({ embedded: true });
+    fireEvent.click(screen.getByRole('button', { name: CLONE_ZH }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(t('perm.clone.name', 'zh-CN')), { target: { value: CLONE_NAME } });
+    fireEvent.change(within(dialog).getByLabelText(t('perm.clone.label', 'zh-CN')), { target: { value: CLONE_LABEL } });
+    fireEvent.click(within(dialog).getByRole('button', { name: t('perm.clone.confirm', 'zh-CN') }));
+    return screen.findByTestId('perm-clone-notice');
+  }
+
+  it('zh-CN: a known code shows its zh sentence, naming the package the answer names', async () => {
+    doorAnswer = okAnswer(CLONE_NAME, { noticeCode: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE', package: PAIR });
+    const notice = await cloneEmbeddedInZh();
+    expect(notice).not.toHaveTextContent(NOTICE);
+    expect(t('perm.clone.notice.inCreatedPackage', 'zh-CN')).not.toBe('perm.clone.notice.inCreatedPackage');
+    expect(notice).toHaveTextContent(tFormat('perm.clone.notice.inCreatedPackage', 'zh-CN', { package: PAIR }));
+  });
+
+  it('CONTROL zh-CN: a code this console does not know shows the wire notice as sent', async () => {
+    doorAnswer = okAnswer(CLONE_NAME, { noticeCode: 'PERMISSION_SET_CLONE_SOMEWHERE_NEWER', package: PAIR });
+    expect(await cloneEmbeddedInZh()).toHaveTextContent(NOTICE);
   });
 });
