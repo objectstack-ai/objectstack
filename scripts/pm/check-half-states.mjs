@@ -14950,14 +14950,14 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// The stale-`finding` screen — ONE rule, two readers (#16904)
+// The stale-`finding` screen — the rule H63 reads (#16904)
 //
 // `finding` is defined by the state model as a TRANSIENT marker — 「观察类记录,
 // 恒 = 待首次定级;定级即离标;不占队列不进收件箱」 — so `label:finding` answers
 // exactly one question: what has not been graded yet. It does not. The filing
 // card measured 385 of 395 carriers already graded across both boards; a later
 // triage round re-measured 185 of 226; a hand strip cleared 38 more; and the
-// one-time sweep that closes the backlog left objectstack and objectui at 0.
+// one-time sweep that closed the backlog left objectstack and objectui at 0.
 //
 // A population that was refilled three times by hand is a population that
 // refills, and the reason is an API shape rather than carelessness: the strip
@@ -15084,23 +15084,19 @@ export function staleFindingScreen(issue) {
 // ---------------------------------------------------------------------------
 // H63 (#16904) — a graded card still wearing the ungraded marker
 //
-// The row over the screen above. ⛔ Report-only, like everything here: the
-// one-time sweep is the tool that strips, it is run once per board by the seat
-// that owns that board, and this row exists precisely because that run is a
-// point measurement of a population that refills. The remedy a row prescribes
-// is a grading write that also drops the marker, never a strip performed from
-// this script.
+// The row over the screen above. ⛔ Report-only, like everything here: triage
+// removes the marker by hand when it grades the card, and this row exists
+// because that step is easy to forget, so the population refills. The remedy a
+// row prescribes is a grading write that also drops the marker, never a strip
+// performed from this script.
 //
-// ## Why it fires on the SWEEP's set exactly, `pm:seat` skip included
+// ## Why it fires on the screen's set exactly, `pm:seat` skip included
 //
-// The row's job is to make the refill visible, and "the refill" is only
-// meaningful against the thing that was emptied. A row whose population were
-// merely similar would drift from the tool's over the first change to either;
-// sharing the screen makes 「what the sweep would strip today」 the row's literal
-// reading. The `pm:seat` exclusion travels with it for the same reason it
-// exists in the tool: a seat registry post is not a card in the grading pool,
-// so its marker is not an ungraded card's marker, and reporting it would send a
-// reader to strip a label that is doing its job.
+// The row's job is to make the refill visible, so its population is the
+// screen's stale set itself rather than something merely similar. The `pm:seat`
+// exclusion is part of that set: a seat registry post is not a card in the
+// grading pool, so its marker is not an ungraded card's marker, and reporting
+// it would send a reader to strip a label that is doing its job.
 //
 // ## Population and cost
 //
@@ -15133,8 +15129,8 @@ export function h63StaleFindingBesideGrade(issue) {
     'returns four wrong rows in five is discharged by sampling or skipped. Two lanes have already ' +
     'declined to dispatch a card in this shape, which is the strict reading of 不占队列. Remedy — WHO ' +
     'and HOW: the seat that next writes a grade on this card, dropping the marker in the SAME write ' +
-    '(「定级即离标」); the standing backlog is the one-time sweep\'s, run once per board by the seat ' +
-    'that owns it, ⛔ never a loop from here. ⛔ Report-only: no label is written from this script, and ' +
+    '(「定级即离标」); a carrier already in this shape is the triage round\'s to fix by hand, removing ' +
+    'the marker when it grades the card, ⛔ never a loop from here. ⛔ Report-only: no label is written from this script, and ' +
     '⛔ no grade is ever synthesised — a card with no priority has not been read and belongs in the ' +
     'ungraded pool, not in the queue. Boundaries: a card carrying ONLY the marker is the pool the ' +
     'index exists for and is clean here; a `pm:seat` post is never judged; closed-card residue is ' +
@@ -23749,8 +23745,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // H63 (#16904) — the same listing for the same reason: `finding` is not one
     // of the labels the label loop pages, so a carrier holding no `pm:*` state
     // is first visible HERE. One label read on a row this listing already
-    // holds, through the screen the one-time sweep strips on — so the row's
-    // population IS the sweep's target set rather than an approximation of it.
+    // holds, through the stale-`finding` screen — so the row's population IS
+    // the screen's stale set rather than an approximation of it.
     const staleFinding = h63StaleFindingBesideGrade(issue);
     if (staleFinding) findings.push([issue, 'H63', staleFinding]);
     // H68 (#18901) — the class-(b) declaration with no `Seam:` line, on this
@@ -28120,7 +28116,7 @@ async function selfTest() {
   t('H63: …naming BOTH triggers, state first', row63(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])).includes('`pm:queue`, `priority:p3`'), true);
   t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', GOVERNED_PR_DECISION_LABEL])), 'string');
 
-  // ── Direction 2: it is SILENT where the sweep leaves the card, each silence
+  // ── Direction 2: it is SILENT where the screen leaves the card, each silence
   //    with a lit control on the byte-identical card ─────────────────────────
   t('⛔ H63: `finding` ALONE is NOT a finding — that is the pool the index exists FOR', h63StaleFindingBesideGrade(gradedCarrier(['finding'])), null);
   t('H63 control: …and the same card with one grading state fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocked'])), 'string');
@@ -28136,10 +28132,10 @@ async function selfTest() {
   t('H63 control: …and the byte-identical OPEN row fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'])), 'string');
   t('⛔ H63: a PULL REQUEST row that slipped into the listing is not a card', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'], { pull_request: {} })), null);
   t('⛔ H63: a card without the marker is not this row\'s business', h63StaleFindingBesideGrade(gradedCarrier(['pm:queue', 'priority:p2'])), null);
-  t('⛔ H63: an unreadable `labels` reads as no marker and is silent — the SCREEN\'s behaviour, shared with the tool that writes', h63StaleFindingBesideGrade(gradedCarrier([], { labels: undefined })), null);
+  t('⛔ H63: an unreadable `labels` reads as no marker and is silent — the SCREEN\'s behaviour', h63StaleFindingBesideGrade(gradedCarrier([], { labels: undefined })), null);
   t('⛔ H63: a missing row does not crash', h63StaleFindingBesideGrade(undefined), null);
 
-  // ── The screen itself, as the sweep judges it ────────────────────────────
+  // ── The screen itself ─────────────────────────────────────────────────────
   t('H63 screen: a graded carrier is `stale`', staleFindingScreen(gradedCarrier(['finding', 'pm:queue'])).verdict, 'stale');
   t('H63 screen: …the ungraded pool is `leave`, and REPORTED rather than dropped', staleFindingScreen(gradedCarrier(['finding'])).kind, 'ungraded');
   t('H63 screen: …and the seat post is `skip`, with the reason on the row', staleFindingScreen(gradedCarrier(['finding', 'pm:seat'])).detail.includes('pm:seat'), true);
@@ -28161,7 +28157,7 @@ async function selfTest() {
   t('H63 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row63(gradedCarrier(['finding', 'pm:queue']))), false);
   t('H63 text: the state model is QUOTED, not paraphrased', row63(gradedCarrier(['finding', 'pm:queue'])).includes('定级即离标'), true);
   t('H63 text: WHO acts — the seat that next writes a grade, in the SAME write', row63(gradedCarrier(['finding', 'pm:queue'])).includes('SAME write'), true);
-  t('H63 text: …and the standing backlog is named as the one-time sweep\'s, ⛔ never a loop from here', row63(gradedCarrier(['finding', 'pm:queue'])).includes('⛔ never a loop from here'), true);
+  t('H63 text: …and a carrier already in the shape is triage\'s to fix by hand, ⛔ never a loop from here', row63(gradedCarrier(['finding', 'pm:queue'])).includes('⛔ never a loop from here'), true);
   t('H63 text: ⛔ no label is written from this script', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no label is written from this script'), true);
   t('H63 text: ⛔ and no grade is ever synthesised — the constraint a hand sweep learned by breaking it', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no grade is ever synthesised'), true);
   t('H63 text: the marker constant is printed, ⛔ never a re-typed literal', row63(gradedCarrier(['finding', 'pm:queue'])).includes(`\`${STALE_FINDING_LABEL}\``), true);
