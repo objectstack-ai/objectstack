@@ -317,6 +317,32 @@ describe.each(URL_FAMILY)('$name — URL-embedded credential refusal', (f) => {
       expect(f.schema.parse(config)).toEqual(before.data);
     }
   });
+
+  describe('a URL is judged after trimming its leading and trailing C0 control characters and spaces', () => {
+    /** The userinfo refusal at `f.key` — other refusals at the same key (a driver's own URL grammar) are not this rule's. */
+    const userinfoRefusalAt = (config: Record<string, unknown>) => {
+      const result = f.schema.safeParse(config);
+      if (result.success) return undefined;
+      return result.error.issues.find(
+        (i) => i.path.join('.') === f.key && i.message.includes('embeds a password in its userinfo'),
+      );
+    };
+    const SURROUNDINGS: Array<[label: string, lead: string, trail: string]> = [
+      ['a leading space', ' ', ''],
+      ['a leading tab', String.fromCharCode(0x09), ''],
+      ['a leading NUL', String.fromCharCode(0x00), ''],
+      ['a trailing newline', '', String.fromCharCode(0x0a)],
+      ['a leading space and a trailing carriage return', ' ', String.fromCharCode(0x0d)],
+    ];
+
+    it.each(SURROUNDINGS)('refuses `user:password@host` behind %s', (_label, lead, trail) => {
+      expect(userinfoRefusalAt(f.make(`${lead}${f.sample('svc:hunter2@')}${trail}`))).toBeDefined();
+    });
+
+    it.each(SURROUNDINGS)('CONTROL: a bare username (`user@host`) behind %s carries no password and is not refused for one', (_label, lead, trail) => {
+      expect(userinfoRefusalAt(f.make(`${lead}${f.sample('svc@')}${trail}`))).toBeUndefined();
+    });
+  });
 });
 
 /**
@@ -507,6 +533,20 @@ describe('urlUserinfoPassword — the shared value-level parse', () => {
   it('scheme-relative URLs are judged too — the authority is the authority, named scheme or not', () => {
     expect(urlUserinfoPassword('//u:p@h/db')).toBe('p');
     expect(urlUserinfoPassword('//u@h/db')).toBeUndefined();
+  });
+
+  it('a URL is judged trimmed of its leading and trailing C0 control characters and spaces, as a URL parser reads it', () => {
+    const TAB = String.fromCharCode(0x09);
+    const LF = String.fromCharCode(0x0a);
+    const NUL = String.fromCharCode(0x00);
+    expect(urlUserinfoPassword(' mysql://u:p@h:3306/db')).toBe('p');
+    expect(urlUserinfoPassword(`${TAB}postgresql://u:p@h/db`)).toBe('p');
+    expect(urlUserinfoPassword(`${NUL}mongodb://u:p@h/db${LF}`)).toBe('p');
+    expect(urlUserinfoPassword(' //u:p@h/db ')).toBe('p');
+    // CONTROL: the same strings with no password, and a bare word, carry none.
+    expect(urlUserinfoPassword(' mysql://u@h:3306/db')).toBeUndefined();
+    expect(urlUserinfoPassword(`${TAB}postgresql://h/db${LF}`)).toBeUndefined();
+    expect(urlUserinfoPassword(' a:b@c ')).toBeUndefined();
   });
 
   it('userinfo ends at the LAST `@`, so a malformed literal-`@` password is caught whole', () => {

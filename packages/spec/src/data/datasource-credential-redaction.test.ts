@@ -263,6 +263,56 @@ describe('write-door alignment: redactUrlPassword removes exactly what urlUserin
   });
 });
 
+describe('the datasource read rewrites a URL\'s userinfo password exactly where the write door judges it', () => {
+  const TAB = String.fromCharCode(0x09);
+  const LF = String.fromCharCode(0x0a);
+  const CR = String.fromCharCode(0x0d);
+  const NUL = String.fromCharCode(0x00);
+
+  // [stored, served]: the URL is judged trimmed of its leading and trailing C0
+  // control characters and spaces, as a URL parser reads it, and the password
+  // is removed at that trimmed position — every other character, the
+  // surrounding ones included, is served byte for byte.
+  const TRIMMED: Array<[string, string]> = [
+    [' mysql://svc:hunter2@db:3306/app', ' mysql://svc@db:3306/app'],
+    [`${TAB}postgresql://svc:hunter2@db:5432/app`, `${TAB}postgresql://svc@db:5432/app`],
+    [`${NUL}mongodb://svc:hunter2@db:27017/app${LF}`, `${NUL}mongodb://svc@db:27017/app${LF}`],
+    [` postgres://svc:p@ss@host/db${CR}`, ` postgres://svc@host/db${CR}`],
+  ];
+  // [stored, served]: the write door's own userinfo boundaries — a
+  // scheme-relative authority, and a userinfo that ends at the LAST `@` of the
+  // authority whatever precedes its first `:`.
+  const BOUNDARIES: Array<[string, string]> = [
+    ['//svc:hunter2@db:5432/app', '//svc@db:5432/app'],
+    [' //svc:hunter2@db:5432/app', ' //svc@db:5432/app'],
+    ['postgres://svc@corp:hunter2@db:5432/app', 'postgres://svc@corp@db:5432/app'],
+  ];
+
+  it.each([...TRIMMED, ...BOUNDARIES])('%j is served as %j, which the write door accepts', (stored, served) => {
+    expect(urlUserinfoPassword(stored), 'the write door refuses the stored URL').toBeDefined();
+    expect(redactUrlPassword(stored)).toBe(served);
+    expect(urlUserinfoPassword(served), 'the served URL passes the write door').toBeUndefined();
+    expect(urlUserinfoUsername(served), 'the username is kept').toBe(urlUserinfoUsername(stored));
+  });
+
+  it.each([
+    ' mysql://svc@db:3306/app',
+    `${TAB}postgresql://db:5432/app${LF}`,
+    ' //svc@db/app',
+    ' a:b@c ',
+    ` https://host/a:b@c${CR}`,
+  ])('CONTROL: %j holds no password, passes the write door, and is served byte for byte', (url) => {
+    expect(urlUserinfoPassword(url)).toBeUndefined();
+    expect(redactUrlPassword(url)).toBe(url);
+  });
+
+  it('redactDatasourceConfig serves a stored URL behind surrounding whitespace with its password removed, naming `url`', () => {
+    const { config, redactedKeys } = redactDatasourceConfig('mysql', { url: ' mysql://svc:hunter2@db:3306/app' });
+    expect(config).toEqual({ url: ' mysql://svc@db:3306/app' });
+    expect(redactedKeys).toEqual(['url']);
+  });
+});
+
 describe('redactUrlCredentialQueryParams — the read half: a credential query parameter is never served back', () => {
   it('strips the credential pair whole and serves the parameter-absent shape', () => {
     expect(redactUrlCredentialQueryParams('libsql://x.turso.io?authToken=eyJhbGci.x.y'))
