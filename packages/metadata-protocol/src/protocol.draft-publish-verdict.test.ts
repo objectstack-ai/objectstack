@@ -1179,7 +1179,10 @@ describe('[#29696] a flow read judges a stored legacy D2 row in its D2-converted
     });
 
     it('the layered read reads valid: true', async () => {
-        const { protocol } = await seeded(fetchFlow('legacy_fetch', 'filters'));
+        const { engine, protocol } = await seeded(fetchFlow('legacy_fetch', 'filters'));
+        // The layered read asks the registry for the shipped layer; this
+        // double ships none.
+        engine.registry.getItem = () => undefined;
 
         const layered: any = await protocol.getMetaItemLayered({ type: 'flow', name: 'legacy_fetch', packageId: PKG } as any);
 
