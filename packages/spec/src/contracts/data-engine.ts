@@ -346,6 +346,14 @@ export interface EngineDatasourceDef {
      * engine reality.
      */
     credentialsRef?: string;
+    /**
+     * [#29762] The most rows the engine reads from this datasource's plugin
+     * driver for one request (`rowCap` on `ExternalDatasourceSettingsSchema`,
+     * at most `EXTERNAL_ROW_CAP_CEILING`). Read by the engine's floor on every
+     * read; absent means `EXTERNAL_ROW_CAP_DEFAULT`. Inert on a datasource the
+     * engine does not floor.
+     */
+    rowCap?: number;
   };
 }
 
