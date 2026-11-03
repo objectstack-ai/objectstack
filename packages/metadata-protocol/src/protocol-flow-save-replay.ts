@@ -39,6 +39,12 @@
  * publish verdict (`draftPublishVerdict`) judge. One judge, one spelling: a
  * legacy D2 spelling the save door accepted and stored raw is accepted at
  * publish too, and what goes live is still the stored bytes.
+ *
+ * [#29696] The two other judges of a flow at rest judge through it too: the
+ * read's `_diagnostics` schema half (`computeMetadataDiagnostics`, every read
+ * exit that decorates) and the restore doors' runtime rules
+ * (`refuseRestoredBodyTheSaveDoorRefuses`, for `rollbackMetaItem` and
+ * `revertCommit`). Each serves or restores the body as stored.
  */
 
 import { ALL_CONVERSIONS, applyConversionsToFlow, type ConversionNotice } from '@objectstack/spec';
@@ -141,19 +147,32 @@ export function flowVerdictBody(body: unknown, options: { includeRetired: boolea
 }
 
 /**
- * [#29557] The body a publish judges a STORED draft in: for a `flow`, the
- * {@link flowVerdictBody} of the draft row with the retired entries included;
- * every other type, the draft as stored. The two publish doors and the draft
- * read's publish verdict judge through here and promote, store and serve the
- * draft as stored.
+ * [#29557] The body a STORED flow is judged in: for a `flow`, the
+ * {@link flowVerdictBody} of the row with the retired entries included; every
+ * other type, the row as stored. The two publish doors and the draft read's
+ * publish verdict judge a stored draft through here, [#29696] the read's
+ * `_diagnostics` schema half judges a served row and the restore doors' runtime
+ * rules a history version; each promotes, serves or restores the row as stored.
  *
- * A stored draft is a row at rest, so the chain is the full one: the one the
- * automation engine replays when it registers the published row (its stored-
- * flow canonicalizer, which every caller but the save door calls with no
- * options) and the one `applyConversionsToStoredItem` replays on read. The
- * retired-entry predicate of the save door ({@link flowSaveReplaysRetired},
+ * A stored row is data at rest, so the chain is the one the automation engine
+ * replays when it registers the row: its stored-flow canonicalizer
+ * (`canonicalizeFlow` in `service-automation/src/flow-definitions.ts`), which
+ * every caller but the save door calls with no options, so retired entries
+ * included, and which excludes `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION`. That
+ * list and {@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED} name the same one entry,
+ * `flow-decision-mode-inclusive-explicit`, so this verdict replays exactly the
+ * engine's chain. The entry is a DEFAULT FLIP, not a rescue: it writes
+ * `mode: 'inclusive'` where a decision omits `mode`, and an omitted `mode`
+ * parses (it means exclusive), so leaving it out never turns an accepted body
+ * into a refused one; it only keeps the verdict from judging a meaning the row
+ * does not have. By maintainer ruling (letter C on #15429) it is not replayed
+ * over stored flows at all. No read path converts a flow either:
+ * `convertStoredItem` skips `flow`, and `applyConversionsToStoredItem` is not
+ * applied to it.
+ *
+ * The retired-entry predicate of the save door ({@link flowSaveReplaysRetired},
  * #23903 ruling B') is not asked again: it judges authored input, and the
- * draft's own save asked it, in draft mode as in publish mode. `type` is the
+ * row's own save asked it, in draft mode as in publish mode. `type` is the
  * singular type name.
  */
 export function storedFlowVerdictBody(type: string, body: unknown): unknown {

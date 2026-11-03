@@ -93,6 +93,8 @@
 // ADR-0067 D2 in the same breath — nothing promoted, no commit row, no
 // `allowed` row. See that block's header.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
 // `@objectstack/metadata-core` and NOT from `@objectstack/objectql`: objectql

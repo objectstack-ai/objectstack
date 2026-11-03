@@ -35,6 +35,8 @@
  * Refusals are asserted as the envelope an HTTP boundary answers with
  * (`resolveThrownHttpError`).
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { resolveThrownHttpError } from '@objectstack/types';

@@ -12,10 +12,15 @@
  * `owner-fixed-rule.ts`'s, shared with `sys_personal_view`.
  *
  * What it leaves alone: a create is the row scope's (a preference created in
- * another member's name is refused there); the console's preference writer
+ * another member's name is refused there, pinned over REST as `[member-create]`
+ * in `user-preference-owner-fixed.dogfood.test.ts`); the console's preference writer
  * (`userState.ts` in `@object-ui/data-objectstack`) updates `value` only and
  * creates in the caller's own name; a system write is never judged, and no
- * shipped system writer moves a preference.
+ * shipped system writer moves a preference. A system write includes
+ * app-authored automation elevated to system (a `runAs: 'system'` flow, a
+ * hook's `runAs: 'system'` api or `ctx.api.sudo()`, an action body's
+ * `ctx.api`; the family plugin-security's `flow-system-identity-write-refusal.ts`
+ * names), so an app's automation can move one.
  *
  * Registered by every plugin that registers the object (`AuthPlugin`, and
  * `IdentityObjectsPlugin` on a kernel without it), so the rule travels with the

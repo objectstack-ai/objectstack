@@ -306,14 +306,53 @@ function boundPackageOf(packageId: unknown): string | undefined {
  * no reader the row does not. `view` is not here: it has its own, wider rule
  * (#22057, `anotherPackageShips`).
  *
- * ⛔ A closed list, judged on the canonical type. `page`, `app`, `dataset`,
- * `doc` and `book` are left out on purpose: their reads serve a `.custom`
- * pair's override FROM the bare entry (the by-name read, the list, and
- * `registry.getAllApps`), so they need a row-served path before their bare
- * entry can go. `flow` registers with no artifact envelope at all (Regime C,
+ * ⛔ A closed list, judged on the canonical type. [#29613] It includes the
+ * five {@link SEALED_ROW_SERVED_OVERRIDE_TYPES} since their reads serve a
+ * `.custom` pair's declared override from its row, as these three types'
+ * reads do. `flow` registers with no artifact envelope at all (Regime C,
  * #20913), and the boot pull arms its declared override from the bare slot.
  */
-const BORROWED_ENVELOPE_DECLINED_TYPES: ReadonlySet<string> = new Set(['dashboard', 'report', 'email_template']);
+const BORROWED_ENVELOPE_DECLINED_TYPES: ReadonlySet<string> = new Set([
+    'dashboard',
+    'report',
+    'email_template',
+    // [#29613] The SEALED_ROW_SERVED_OVERRIDE_TYPES, spelled out (`protocol-package-bindings.sealed-override.test.ts` pins both lists).
+    'page',
+    'app',
+    'dataset',
+    'doc',
+    'book',
+]);
+
+/**
+ * [#29613, ADR-0146 D8 item 2] The SEALED types (ADR-0131 D6: a registry
+ * entry with `allowEnvironmentOverlay: false`) whose stored row the reads
+ * serve when it is the shipping package's declared `.custom` override
+ * ({@link isServedOverrideRowOf}): `page`, `app`, `dataset`, `doc` and
+ * `book`, the overridable types of ADR-0146 D2 that open no environment
+ * overlay. Every other stored row of a name a managed package ships stays
+ * unserved for them ({@link isUnservedSealedOverlay}).
+ *
+ * Before, the reads declined the override's row with the rest, and the
+ * override was served only from the registry's bare slot, where the hydrator
+ * registered it wearing the base's envelope. With a metadata service (every
+ * real boot) the by-name read answered the service's copy of the base's body
+ * instead, while the lists answered the override, and the layered read's
+ * effective layer and the pair's per-package layer never saw it.
+ *
+ * ⛔ A closed list, judged on the canonical type. `mapping` is overridable and
+ * sealed too, and is not here: no card has measured its reads. `action` and
+ * `flow` wait for ADR-0146 D9's conditions (`flow` has its own admission,
+ * `declinesStoredRow`'s first branch). Every type here is also in
+ * {@link BORROWED_ENVELOPE_DECLINED_TYPES}: the bare entry served no reader
+ * the row does not serve now.
+ */
+const SEALED_ROW_SERVED_OVERRIDE_TYPES: ReadonlySet<string> = new Set(['page', 'app', 'dataset', 'doc', 'book']);
+
+/** [#29613] Whether `type` is one of {@link SEALED_ROW_SERVED_OVERRIDE_TYPES}, folded to the canonical singular. */
+function servesSealedOverrideRow(type: string): boolean {
+    return SEALED_ROW_SERVED_OVERRIDE_TYPES.has(canonicalMetaType(type));
+}
 
 /**
  * [#29600] Whether the hydrator keeps a stored row of `canonicalType`, bound
@@ -462,6 +501,7 @@ export {
     isShippedViewItem,
     mergeArtifactProtection,
     perPackageLayerEnvelope,
+    servesSealedOverrideRow,
     stateTenantAuthorship,
     stripDerivedProvenance,
 };

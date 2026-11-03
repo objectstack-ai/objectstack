@@ -370,14 +370,15 @@ describe('PackageExportBundleSchema declares the whole-deployment export as comp
     expect((result.error.issues[0] as { keys?: string[] }).keys).toEqual(['cycles']);
   });
 
-  // Declared before it is served (ADR-0049): no runtime mounts
-  // `GET /packages/export` until the server slice of #28914 lands. That
-  // change drops the marker, adds the route's ledger row and flips this test.
-  it('is PLANNED until a runtime serves the route: the describe says so, naming no tracker id', () => {
+  // Served (#28914's server slice mounted `GET /packages/export` on the runtime
+  // dispatcher, with its ledger row): the ADR-0049 marker is gone, and the
+  // describe names the route and the command that calls it.
+  it('is served: the describe carries no PLANNED marker, names the route and the command, and no tracker id', () => {
     const description = PackageExportBundleSchema.description ?? '';
-    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(description).toContain('ADR-0049');
-    expect(description).toContain('no runtime serves `GET /packages/export` yet');
+    expect(description).not.toMatch(/PLANNED/);
+    expect(description).not.toMatch(/not yet served/);
+    expect(description).toContain('`GET /packages/export`');
+    expect(description).toContain('`os package export`');
     // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the comments.
     expect(description).not.toMatch(/#\d{3,}/);
   });
@@ -576,27 +577,27 @@ describe('GetPackageCustomizationsResponseSchema.contributions: the entry shape 
   });
 });
 
-describe('the `nav` kind of `contributions` is declared ahead of its producer (ADR-0049)', () => {
+describe('the `nav` kind of `contributions` is served: no planned marker is left (ADR-0049)', () => {
   type Described = { description?: string };
   const member = (GetPackageCustomizationsResponseSchema as unknown as {
     shape: { contributions: Described & { element: { options: Described[] } } };
   }).shape.contributions;
   const [objectArm, navArm] = member.element.options;
 
-  it('the nav arm\'s describe opens with the planned marker and names the ADR, never a tracker id', () => {
-    expect(navArm.description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(navArm.description).toContain('ADR-0049');
+  it('the nav arm\'s describe carries no planned marker and names no tracker id', () => {
+    expect(navArm.description).not.toMatch(/PLANNED|not yet served/);
     expect(navArm.description).not.toMatch(/#\d{3,}/);
   });
 
-  it('the member and the field / flow arm say the nav kind is not yet served, and the field / flow arm carries no marker', () => {
-    expect(member.description).toContain('not yet served');
-    expect(objectArm.description).not.toMatch(/PLANNED/);
+  it('neither the member nor the field / flow arm says any kind is not yet served', () => {
+    expect(member.description).not.toMatch(/PLANNED|not yet served/);
+    expect(objectArm.description).not.toMatch(/PLANNED|not yet served/);
     expect(member.description).not.toMatch(/#\d{3,}/);
   });
 
-  it('the schema-level describe says the navigation items are not yet served, so serving them drops that too', () => {
-    expect(GetPackageCustomizationsResponseSchema.description).toContain('not yet served');
+  it('the schema-level describe no longer says the navigation items are not yet served', () => {
+    expect(GetPackageCustomizationsResponseSchema.description).not.toContain('not yet served');
+    expect(GetPackageCustomizationsResponseSchema.description).toContain('navigation items');
   });
 
   it('the nav arm says an item with no id (a separator may omit it) is not an entry: `name` is required', () => {
