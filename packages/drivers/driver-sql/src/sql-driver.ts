@@ -72,6 +72,11 @@ import {
   isAcceptedFilterComparand,
   ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE,
 } from '@objectstack/spec/data';
+// [#29611] The operator split's list half (`$in` / `$nin` / `$between`): the
+// operators whose comparand is a LIST, so each member is bind-tested on its own
+// (see {@link assertCompilableComparand}). Asked of the spec, the one source the
+// comparand faces read, so this driver keeps no copy to drift from it.
+import { isListComparandOperator } from '@objectstack/spec/data';
 // [#7536] `$like`/`$ilike`'s pattern language, defined once in the spec: the
 // dangling-escape gate every face refuses on, and the LIKE→GLOB translation the
 // SQLite dialects need because GLOB is the only case-exact pattern operator
@@ -2487,7 +2492,7 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  * their own `whereIn` / `whereBetween` arms. Only their MEMBERS are inspected —
  * for `$field` (#5041) and, since #5234, for bindability — never their arity:
  * the existing descriptive `$between` refusal stays the one that answers a
- * malformed range. See {@link LIST_COMPARAND_OPERATORS}.
+ * malformed range. See {@link isListComparandOperator}.
  */
 const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
@@ -2568,17 +2573,6 @@ const TEXT_OPERATORS: ReadonlySet<string> = new Set([
   ...TEXT_PATTERN_OPERATORS,
   ...LIKE_PATTERN_OPERATORS,
 ]);
-
-/**
- * [#5234] Operators for which an ARRAY is the legitimate comparand, so it is
- * each MEMBER that must be individually compilable.
- *
- * Scoping the member scan to these three is what keeps a scalar operator that
- * received an array answering with its own message ("requires a single
- * comparable value") instead of reporting the first bad member of a list it
- * should never have been given.
- */
-const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$between']);
 
 /**
  * [#5234] Does this value have a faithful rendering as the text of a LIKE
@@ -2687,10 +2681,13 @@ function assertCompilableComparand(
       if (nowAnchorOf(member) !== null) throw nowAnchorPositionError(field, op, member, index);
       // [#5234] Every member of a list operator's array is a comparand in its
       // own right and gets the same bind test the whole comparand gets. Scoped
-      // to the operators for which an array is legitimate, so a scalar operator
-      // handed an array keeps answering with its own message below.
+      // to the operators for which an array is legitimate (the spec's list
+      // half, {@link isListComparandOperator}), so a scalar operator handed an
+      // array keeps answering with its own message ("requires a single
+      // comparable value") instead of reporting the first bad member of a list
+      // it should never have been given.
       // [#20039] The member when it is an object, else the list that holds it.
-      if (LIST_COMPARAND_OPERATORS.has(op) && !isBindableComparand(member)) {
+      if (isListComparandOperator(op) && !isBindableComparand(member)) {
         throw unbindableListMemberError(field, op, member, index, refusalSubtree(member, value));
       }
     }
