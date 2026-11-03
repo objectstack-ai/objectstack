@@ -146,9 +146,12 @@ previous run as `from_date`, or `docusign_get_envelope` for one envelope.
   against the DocuSign sandbox (connect, send, read, poll) is owed to the
   acceptance run, and the DocuSign console steps under Credentials follow
   DocuSign's documentation.
-- The response and body schemas in the packaged document are expanded two
-  levels deep (see Provenance); deeper schemas are described by their type
-  and title only. The answer itself is DocuSign's full JSON.
+- The request body and response schemas in the packaged document are not
+  expanded (see Provenance): `Envelopes_PostEnvelopes` takes DocuSign's
+  envelope definition as one JSON object, described by its type and
+  description only, so its fields are DocuSign's documented ones (the
+  `docusign_send_envelope` flow shows the minimal set). The answer itself is
+  DocuSign's full JSON.
 
 ## Provenance
 
@@ -163,17 +166,23 @@ above by this repository's offline normalizer:
 pnpm --filter @objectstack/connector-openapi normalize-openapi \
   --in https://raw.githubusercontent.com/docusign/OpenAPI-Specifications/858a3ae59b0edbc8beea4fa3a6d7fe803833dd68/esignature.rest.swagger-v2.1.json \
   --include-pattern '^Envelopes_(PostEnvelopes|GetEnvelope|GetEnvelopes)$' \
-  --trim --empty-consumes application/json \
+  --trim --empty-consumes application/json --max-depth 0 \
   --out packages/apps/connector-docusign/openapi/docusign-esignature.openapi.json
 ```
 
-It printed OpenAPI 3.0.4, 553,922 bytes, 3 operations trimmed from 414, 187
-empty `consumes` lists filled with `application/json`, 126 schema references
-cut (4 recursive, 122 deeper than the default `--max-depth` of 2) and none
-left, and sha256
-`e1051eb4bbc381d879e979beac8cb64ead24531c93a19fc26e950a12d9fc961d`, the hash
+It printed OpenAPI 3.0.4, 304,080 bytes, 3 operations trimmed from 414, 187
+empty `consumes` lists filled with `application/json`, 7 schema references cut
+at `--max-depth 0` and none left, and sha256
+`b741ded5cfc4d0291d7f0e26559f8583f8c9a783f8711d8f9a98405cb27f7cb4`, the hash
 of the committed file. The package's tests recompute that hash and fail when
 the file and this record disagree.
+
+`--max-depth 0` keeps every parameter schema as DocuSign wrote it, and
+replaces each named schema (the envelope definition the create operation
+takes, and each response) with its type, title and description. At the
+default depth of 2 the same three operations write 553,922 bytes (sha256
+`e1051eb4bbc381d879e979beac8cb64ead24531c93a19fc26e950a12d9fc961d`), with the
+envelope definition's fields expanded two levels.
 
 `--empty-consumes application/json` is required: DocuSign's document clears
 the request media type on its operations (`consumes: []`), which would leave

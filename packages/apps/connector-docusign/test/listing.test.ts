@@ -218,12 +218,13 @@ describe('connector-docusign packaged OpenAPI document', () => {
 
   it('gives Envelopes_PostEnvelopes a JSON request body (the --empty-consumes repair landed)', () => {
     const post = (document.paths?.['/v2.1/accounts/{accountId}/envelopes'] as Record<string, unknown>)?.post as {
-      requestBody?: { content?: Record<string, { schema?: { properties?: Record<string, unknown> } }> };
+      requestBody?: { content?: Record<string, { schema?: { type?: string; description?: string } }> };
     };
+    expect(Object.keys(post?.requestBody?.content ?? {})).toEqual(['application/json']);
+    // `--max-depth 0`: the envelope definition is a typed, explained stub.
     const schema = post?.requestBody?.content?.['application/json']?.schema;
-    expect(schema?.properties).toHaveProperty('emailSubject');
-    expect(schema?.properties).toHaveProperty('documents');
-    expect(schema?.properties).toHaveProperty('recipients');
+    expect(schema?.type).toBe('object');
+    expect(schema?.description).toContain('envelopeDefinition');
   });
 
   it("ships the upstream document's MIT licence notice beside it", () => {
