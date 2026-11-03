@@ -606,9 +606,11 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(eager.output).toMatch(
         rx(DELETED_VIA_UNREGISTERED_KIND, 'def reachable from the metadata-type roots; .*was LIVE'),
       );
-      // Specifically NOT the proof-2 waiver, for this key. Asserting the absence
-      // is the pin: narrow the roots back to `listMetadataTypeSchemaTypes()` and
-      // the run exits 0 printing exactly the string below.
+      // Specifically NOT the proof-2 waiver, for this key. Narrowing the roots
+      // back to `listMetadataTypeSchemaTypes()` no longer prints that waiver for
+      // the root's own def: its bookkeeping keys bridge it as a derived clone,
+      // so the run still exits 1 and only the wording above moves (measured,
+      // #29668). The depth key below is the one that is waived then.
       expect(eager.output).not.toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def not reachable from the'));
       // Direction 1 at DEPTH (#29668) — the walk descends below that root. The
       // root's own def above is refused under the pre-#17356 roots too (its
