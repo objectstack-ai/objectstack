@@ -120,22 +120,38 @@ export interface HandoffRedirect {
   holdForSignIn: boolean;
 }
 
+/** The page's judgement of one session, and the session the first session check answered. */
+interface SessionVerdict {
+  session: unknown;
+  fresh: boolean;
+  arrival: { session: unknown };
+}
+
 /**
  * The hand-off decision for a sign-in page, from its `?redirect=` and the auth
- * state. Remembers the session the first session check answered, which is
- * what tells a session found on arrival from one a sign-in on the page made.
+ * state.
+ *
+ * Each session the page holds is judged once, when it arrives, in a layout
+ * effect (the clock is read there, never during render); until it is judged
+ * the page holds the form rather than forward. The first judgement also
+ * records the session the first session check answered, which is what tells
+ * a session found on arrival from one a sign-in on the page made.
  */
 export function useHandoffRedirect(
   redirect: string | null,
   { user, session, isLoading }: { user: unknown; session: unknown; isLoading: boolean },
 ): HandoffRedirect {
-  const [arrival, setArrival] = useState<{ session: unknown } | null>(null);
-  useLayoutEffect(() => {
-    if (!isLoading && arrival === null) setArrival({ session });
-  }, [isLoading, arrival, session]);
-
   const target = handoffNavigationTarget(redirect);
-  const holdForSignIn =
-    target !== null && !!user && !isHandoffSessionFresh(session, { arrival, now: Date.now() });
-  return { target, holdForSignIn };
+  const [verdict, setVerdict] = useState<SessionVerdict | null>(null);
+  useLayoutEffect(() => {
+    if (target === null) return;
+    // The first session check has not answered yet: nothing has arrived.
+    if (verdict === null && isLoading) return;
+    if (verdict !== null && verdict.session === session) return;
+    const arrival = verdict?.arrival ?? { session };
+    setVerdict({ session, arrival, fresh: isHandoffSessionFresh(session, { arrival, now: Date.now() }) });
+  }, [target, isLoading, session, verdict]);
+
+  const judgedFresh = verdict !== null && verdict.session === session && verdict.fresh;
+  return { target, holdForSignIn: target !== null && !!user && !judgedFresh };
 }

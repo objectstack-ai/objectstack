@@ -186,14 +186,17 @@ describe('LoginPage — rule 3: before the organization steps', () => {
     expect(await exitTarget()).toBe(HANDOFF);
   });
 
-  it('a single organization and none active: no switchOrganization wait', async () => {
+  it('a single organization and none active: no wait for it to become active', async () => {
     const client = createMockClient({
       arrival: { createdAt: minutesAgo(1) },
       organizations: [{ id: 'org_1', name: 'One', slug: 'one' }],
     });
+    // Activating the organization never answers: a page that waited on it
+    // (the provider's own activation or the page's switchOrganization) would
+    // never navigate.
+    client.setActiveOrganization.mockImplementation(() => new Promise(() => {}));
     renderPage('login', client, HANDOFF);
     expect(await exitTarget()).toBe(HANDOFF);
-    expect(client.setActiveOrganization).not.toHaveBeenCalled();
   });
 });
 

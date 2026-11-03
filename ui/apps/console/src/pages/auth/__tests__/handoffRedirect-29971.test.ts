@@ -77,7 +77,7 @@ describe('handoffNavigationTarget — the hand-off route and nothing wider', () 
     }
   });
 
-  it('refuses when the auth base is on another origin (the route is not this page's to reach)', () => {
+  it('refuses when the auth base is on another origin: that route is not reachable from this page', () => {
     expect(target(`${HANDOFF_PATH}${QUERY}`, 'https://api.example.com/api/v1/auth')).toBeNull();
   });
 
