@@ -131,7 +131,6 @@ const fr = {
   actions: {
     decisionOutput: {
       help: 'Transmis au flux comme sortie de décision.',
-      helpMultiValue: 'Transmis au flux comme sortie de décision. Séparez les valeurs multiples par des virgules.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -1164,7 +1163,6 @@ const fr = {
     undo: "Annuler",
     redo: "Rétablir",
     canvasMinimap: "Mini-carte du canevas",
-    versionHistory: "Historique des versions",
   },
   detail: {
     editInlineHint: "Double-cliquez pour modifier",

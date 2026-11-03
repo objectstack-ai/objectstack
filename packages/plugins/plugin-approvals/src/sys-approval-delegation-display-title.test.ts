@@ -42,12 +42,23 @@ import { resolveDisplayField } from '@objectstack/spec/data';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
+/**
+ * The `titleFormat` template each object declared before the ruling of record
+ * on #29007 (6574393684, letter B) retired it: an object definition that
+ * declares one is refused at the metadata save gate and by `os validate`, so
+ * the object no longer carries it. Kept here as the reference text the title
+ * has to reproduce — the text the template drew — not as a title resolver.
+ */
+const RETIRED_TITLE_TEMPLATES: Readonly<Record<string, string>> = {
+  sys_approval_delegation: '{delegator_id} → {delegate_id}',
+};
+
 const SYS = { context: { isSystem: true } } as any;
 const OBJECT = 'sys_approval_delegation';
 
 /** The `titleFormat` source: the parsed schema carries it as an envelope. */
 function titleFormatSource(schema: unknown): string {
-  const tf = (schema as { titleFormat?: unknown }).titleFormat;
+  const tf = RETIRED_TITLE_TEMPLATES[(schema as { name: string }).name];
   const source = typeof tf === 'string' ? tf : (tf as { source?: unknown })?.source;
   if (typeof source !== 'string') throw new Error(`titleFormat carries no template source: ${JSON.stringify(tf)}`);
   return source;

@@ -544,7 +544,7 @@
  *       (2026-08-22); a blocking posture for this surface is a later card on
  *       its own baseline.
  *
- * ## H24 + H25 — the queue/assignee contradiction, and the state that closes it
+ * ## H24 — the queue/assignee contradiction
  *
  *   H24 an OPEN card carrying `pm:queue` with a NON-EMPTY assignee — the queue
  *       view reads it as dispatchable, the claim rule reads it as taken, and
@@ -573,21 +573,6 @@
  *       true-ownership exemption in an explicit marker LATER, never the other
  *       way round. It names the login instead, and states the asymmetric
  *       remedy (an agent may clear agent residue; ⛔ never a human's).
- *   H25 `pm:awaiting-maintainer` coexisting with another pm STATE label — the
- *       exclusivity half of the new state ruled in on 2026-08-23 (「可以新标
- *       签,最好 pm: 开头」). The state exists because the board had no legal
- *       place for "everything mechanical is done, a human must now act":
- *       `needs-user-decision` is the ruling inbox (the ruling here is already
- *       given) and `pm:on-hold` requires a machine-fireable `Restart-when:`
- *       (H9), which this card can never have. Each forbidden pairing is a
- *       specific lie about which mechanism will release the card, and the row
- *       names the one it found. Written while the population is zero, which is
- *       the cheapest moment to pin a vocabulary. The label also joins H11's
- *       parked inventory, H13's state vocabulary and H22's residue set, so the
- *       new state is a first-class citizen of every reader rather than a hole
- *       four rows wide. ⛔ Deferred, declared rather than dropped: the SKILL.md
- *       state-model row (its protocol face) and applying the label to the
- *       specimen card, which is a seat's write.
  *
  * ## H26 — the block nothing is SCHEDULED or DECLARED to release
  *
@@ -1175,7 +1160,7 @@ export function canonicalLane(label) {
  *
  * ⛔ It is defined here, at the top of the predicates, and not beside the item
  * that introduced it: four separate readers key on it (H11's parked inventory,
- * H13's state vocabulary, H22's residue set, H25's exclusivity) and a module
+ * H13's state vocabulary, H22's residue set, H29's exclusivity) and a module
  * constant they all import cannot drift the way four string literals would —
  * which is the failure family this whole file belongs to.
  *
@@ -6756,47 +6741,6 @@ export function h24QueuedWithAssignee(issue) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// H25 — `pm:awaiting-maintainer` coexisting with another pm STATE label
-// (#11196 fix 5, the exclusivity half of the new state).
-//
-// The state model makes the pm state labels ONE-OF: each is a claim about
-// where the card is, and two of them at once leaves every reader to pick. H3
-// is the same invariant for the one pair that was measured drifting, and this
-// row is the same invariant for the newest state — written now, while the
-// population is zero, because the cheapest moment to pin a vocabulary is
-// before anything can carry it.
-//
-// Each coexistence is a specific lie, not a generic tidiness complaint:
-//
-//   + `pm:queue`             dispatchable AND waiting on a human — H24's
-//                            two-views contradiction with a different second
-//                            half, and the shape this whole family is about.
-//   + `pm:dispatched`        a dev is on it AND nobody is: the label pair says
-//                            an agent is working a card whose next act is the
-//                            maintainer's.
-//   + `pm:blocked`           two different release mechanisms are declared at
-//                            once (an unlock scan over `Blocked-by:`, and a
-//                            human act), so neither reader can tell which one
-//                            will actually free it.
-//   + `pm:on-hold`           the hold requires a machine-fireable
-//                            `Restart-when:` (H9) and this state exists
-//                            precisely for the card that cannot have one.
-//                            Carrying both claims an exit that does not exist.
-//   + `needs-user-decision`  the decision inbox says a RULING is owed; this
-//                            state says a ruling was already given and an ACT
-//                            is owed. Both at once inflates the inbox with a
-//                            question nobody has to answer.
-//
-// ⛔ Deliberately NOT here: any requirement that the card NAME the awaited
-// action. When this row was written that was a grammar for a protocol face the
-// SKILL.md state-model row had not been written for, and inventing one in the
-// sweeper would have made the sweeper the author of the protocol it audits.
-// ⚖️ That face exists now — `references/state-machine.md` specifies the
-// `Maintainer-action:` entry line — and H55 reads it. H25 stays the EXCLUSIVITY half
-// and H55 is the ENTRY half; neither is widened into the other.
-// ---------------------------------------------------------------------------
-
 /** The states `pm:awaiting-maintainer` must never coexist with. */
 export const AWAITING_MAINTAINER_EXCLUSIVE_LABELS = [
   'pm:queue',
@@ -6806,47 +6750,13 @@ export const AWAITING_MAINTAINER_EXCLUSIVE_LABELS = [
   'needs-user-decision',
 ];
 
-/**
- * Why each coexistence is a contradiction — one clause per label, so the
- * finding names the specific lie rather than "these two labels disagree".
- */
-const AWAITING_MAINTAINER_CONFLICT_REASON = {
-  'pm:queue': 'dispatchable now AND waiting on a human act',
-  'pm:dispatched': 'an agent is working it AND the next act is the maintainer\'s',
-  'pm:blocked': 'two different release mechanisms declared at once (unlock scan vs. a human act)',
-  'pm:on-hold': 'a hold owes a machine-fireable `Restart-when:` (H9) and this state is for the card that cannot have one',
-  'needs-user-decision': 'the decision inbox says a ruling is owed; this state says one was already given',
-};
-
-/** H25 — null when clean, else the finding sentence. */
-export function h25AwaitingMaintainerExclusivity(issue) {
-  if (issue?.state === 'closed') return null;
-  const labels = labelNames(issue ?? {});
-  if (!labels.includes(AWAITING_MAINTAINER_LABEL)) return null;
-  const conflicts = AWAITING_MAINTAINER_EXCLUSIVE_LABELS.filter((l) => labels.includes(l));
-  if (conflicts.length === 0) return null;
-  const named = conflicts
-    .map((l) => `\`${l}\` (${AWAITING_MAINTAINER_CONFLICT_REASON[l]})`)
-    .join('; ');
-  return (
-    `\`${AWAITING_MAINTAINER_LABEL}\` coexists with ${named} — the pm state labels are ONE-OF, ` +
-    'and two state claims on one card leave every reader to pick which is true. The awaiting ' +
-    'state is the card whose remaining work is a MANUAL maintainer action, which is exactly why ' +
-    'it has no machine exit; pairing it with a state that declares a different exit tells the ' +
-    'unlock scan, the queue view and the decision inbox three different stories. Keep the ONE ' +
-    'state that is true and drop the other(s) in a single write.'
-  );
-}
-
 // ---------------------------------------------------------------------------
 // H29 — the pm state labels are ONE-OF, GENERALLY (#11179).
 //
-// H3 and H25 are both this invariant, each pinned to the carrier that was
-// measured drifting: H3 to the one pair (`pm:queue` + `pm:dispatched`), H25 to
-// the one label (`pm:awaiting-maintainer`, written while its population was
-// still zero). Between them the vocabulary has six members and fifteen pairs,
-// and eleven of those pairs had no reader at all — including the two this card
-// was filed on:
+// H3 is this invariant pinned to the one pair that was measured drifting
+// (`pm:queue` + `pm:dispatched`). The vocabulary has six members and fifteen
+// pairs, and every other pair is this row's — including the two this card was
+// filed on:
 //
 //   • `pm:queue` + `needs-user-decision` — the state model defines `pm:queue`
 //     as 「无可问之事」, so the pair is a card that is simultaneously ready to
@@ -6866,13 +6776,11 @@ export function h25AwaitingMaintainerExclusivity(issue) {
 // ## It reports the pairs no other row owns, and only those
 //
 // A breach must be reported ONCE. H3 owns `pm:queue` + `pm:dispatched` (with
-// its own measured specimen and its own sentence) and H25 owns every pair
-// containing `pm:awaiting-maintainer` (with a per-label clause naming the
-// specific lie). So this row skips exactly those and reports the remainder —
-// and on a card carrying THREE states it still reports the pairs the others do
-// not, rather than going silent because one of them fired. Both exclusions are
-// pinned in the self-test, in both directions: the excluded pair is silent
-// HERE and the owning row does fire on it.
+// its own measured specimen and its own sentence), so this row skips exactly
+// that pair and reports the remainder — and on a card carrying THREE states it
+// still reports the pairs H3 does not, rather than going silent because H3
+// fired. The exclusion is pinned in the self-test, in both directions: the pair
+// is silent HERE and H3 does fire on it.
 //
 // ## Free, and report-only
 //
@@ -6885,8 +6793,8 @@ export function h25AwaitingMaintainerExclusivity(issue) {
 
 /**
  * The ONE-OF vocabulary, in ONE place: the awaiting state plus the five it
- * excludes. Derived from H25's list rather than re-typed, so the two rows can
- * never disagree about what a "pm state" is — the same single-constant
+ * excludes. Derived from that list rather than re-typed, so no two readers can
+ * ever disagree about what a "pm state" is — the same single-constant
  * discipline `AWAITING_MAINTAINER_LABEL` itself was introduced with, and the
  * failure family this whole file belongs to.
  *
@@ -6903,7 +6811,7 @@ export function h25AwaitingMaintainerExclusivity(issue) {
  *                          so it carries `pm:blocking` (a derived priority
  *                          cache, not a state) and drops `needs-user-decision`
  *                          (a fine state to close in).
- *   `PM_EXCLUSIVE_STATE_LABELS` (H25/H29) "is this a position the card can be
+ *   `PM_EXCLUSIVE_STATE_LABELS` (H29) "is this a position the card can be
  *                          IN, such that two of them contradict?" — identity
  *                          stickers (`pm:seat`, `pm:epic`) legally coexist
  *                          with any state and are out; `pm:blocking` and
@@ -6921,11 +6829,6 @@ export const PM_EXCLUSIVE_STATE_LABELS = [
 /**
  * What each state claims ON ITS OWN — one clause, so a row names the two
  * contradicting claims rather than complaining that two labels are present.
- *
- * Deliberately NOT merged with H25's `AWAITING_MAINTAINER_CONFLICT_REASON`:
- * that map says what a pairing WITH THE AWAITING STATE specifically lies about
- * (it reads as the second half of one sentence), while this one says what the
- * label asserts by itself, which is what a general pair needs on both sides.
  * The self-test pins that every `PM_EXCLUSIVE_STATE_LABELS` member has an entry, so the
  * vocabulary cannot be half-extended the way four string literals would be.
  */
@@ -6942,10 +6845,8 @@ export const PM_STATE_CLAIM = {
 const pmStatePairKey = (a, b) => [a, b].sort().join('|');
 
 /**
- * The pairs another row already reports, by key. `pm:queue` + `pm:dispatched`
- * is H3's; every pair containing the awaiting label is H25's (handled by the
- * label test below rather than enumerated, so a future member added to
- * `AWAITING_MAINTAINER_EXCLUSIVE_LABELS` is covered without a second edit).
+ * The one pair another row already reports, by key: `pm:queue` + `pm:dispatched`
+ * is H3's.
  */
 const H3_PAIR_KEY = pmStatePairKey('pm:queue', 'pm:dispatched');
 
@@ -6960,7 +6861,6 @@ export function h29PmStateExclusivity(issue) {
     for (let j = i + 1; j < present.length; j++) {
       const a = present[i];
       const b = present[j];
-      if (a === AWAITING_MAINTAINER_LABEL || b === AWAITING_MAINTAINER_LABEL) continue; // H25's
       if (pmStatePairKey(a, b) === H3_PAIR_KEY) continue; // H3's
       pairs.push([a, b]);
     }
@@ -11537,7 +11437,7 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
  *
  * ⚠️ On a PULL REQUEST this label means「awaiting the maintainer's review」and
  * it is NOT one of the six card states — ⛔ never add it to a card-state table
- * here (H24/H25/H29 own that vocabulary) and ⛔ never read a card's copy of it
+ * here (H24/H29 own that vocabulary) and ⛔ never read a card's copy of it
  * through this constant.
  */
 export const GOVERNED_PR_DECISION_LABEL = 'needs-user-decision';
@@ -13036,7 +12936,7 @@ export function h54DecisionTitledQueueCard(issue) {
 
 // ---------------------------------------------------------------------------
 // H55 — `pm:awaiting-maintainer` entered WITHOUT its `Maintainer-action:` line
-// (#17017): the ENTRY half of the awaiting state, beside H25's exclusivity half.
+// (#17017): the ENTRY half of the awaiting state, beside H29's exclusivity half.
 //
 // ## The defect this row reads
 //
@@ -13052,7 +12952,7 @@ export function h54DecisionTitledQueueCard(issue) {
 // 55 → 55 across ~14h while `pm:queue` moved −84 — because a wrong entry had
 // exactly one reviewer, the director seat, and no machine could notice it:
 // the state has no machine EXIT by construction (H11's note says so, and it
-// is right) and, until this row, no machine ENTRY either. H25, H29 and H30
+// is right) and, until this row, no machine ENTRY either. H29 and H30
 // read the label's SHAPE and the important-parked ager reads its TIME;
 // nothing read its MEANING.
 //
@@ -15360,7 +15260,7 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
 //   `PM_RESIDUE_LABELS`         (H22) does this label CLAIM work is in flight?
 //                               — drops `finding`, a fine state to close in.
 //                               This row is OPEN-only, so the two never meet.
-//   `PM_EXCLUSIVE_STATE_LABELS` (H25/H29) is this a POSITION the card can be
+//   `PM_EXCLUSIVE_STATE_LABELS` (H29)     is this a POSITION the card can be
 //                               in, such that two of them contradict? — drops
 //                               `finding` because it is a card KIND rather than
 //                               a position. ⚠️ That pin is the one this row
@@ -16975,7 +16875,7 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
 //
 // The `pm:queue` label page the sweep's loop already consumes, minus every card
 // another row already contradicts: a second member of `PM_EXCLUSIVE_STATE_LABELS`
-// beside `pm:queue` is H3's, H25's or H29's pair and a card the board still reads
+// beside `pm:queue` is H3's or H29's pair and a card the board still reads
 // as somewhere else has not exited anything here (H47 leg (b)'s refusal, taken
 // for its reason and against the same vocabulary rather than a second list). An
 // ASSIGNED card is H24's row and is out.
@@ -17155,7 +17055,7 @@ export function h66ReleaseVerdict(body) {
  * one is residue the closed census already counts), ⛔ an unreadable `labels` out
  * rather than read as unlabelled (#4690 on the one field that decides
  * membership), ⛔ an ASSIGNED card out (that is H24's row), and ⛔ a card carrying
- * a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out — that pair is H3's, H25's
+ * a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out — that pair is H3's
  * or H29's contradiction, and a card the board still reads as somewhere else has
  * not exited anything here.
  */
@@ -17541,14 +17441,19 @@ export function h66ReleasedNonDispatchableRemainder(issue, commentRows) {
 // force is OLDEST FIRST. The cards a seat will reach for next are exactly the
 // cards this row must have read. So the plan sorts by the two legs of that
 // order this file can see for free off the label page — the priority rank, then
-// card AGE — and the cap eats the tail a seat reaches LAST.
+// the AUTHOR (a human-opened card before a fleet-opened one), then card AGE —
+// and the cap eats the tail a seat reaches LAST.
 //
 // ⛔ It models the full 取卡全序 only in part, and says so rather than implying
 // otherwise: `target:` board membership is a board read this file does not
-// make, and the same-priority 「先 `Bug`」 tiebreak is not taken. An unreadable
-// `created_at` sorts LAST rather than first (#4690's direction on every
-// timestamp here), with `number` as a total-order tiebreak so two runs over one
-// board agree.
+// make, and the same-priority 「先 `Bug`」 tiebreak is not taken. The author leg
+// IS taken: within one rank a non-fleet card sorts before a fleet card, and ⛔
+// it never lifts a card out of its rank. A card is the fleet's when an App
+// opened it (`user.type` `Bot`, every `[bot]` login) OR its body opens with a
+// seat signature (`readSignatureLine`), since seat-operated human accounts file
+// cards too. An unreadable author reads as the fleet's, ⛔ never promoted. An unreadable `created_at` sorts LAST rather than first (#4690's
+// direction on every timestamp here), with `number` as a total-order tiebreak
+// so two runs over one board agree.
 // ---------------------------------------------------------------------------
 
 /**
@@ -17642,7 +17547,7 @@ export const H67_CLOSING_CONDITION_ANCHOR_CAP = 5;
  * for H66's reasons: ⛔ ISSUES only, ⛔ closed cards out, ⛔ an unreadable
  * `labels` out rather than read as unlabelled (#4690 on the one field that
  * decides membership), ⛔ an ASSIGNED card out (H24's row), and ⛔ a card
- * carrying a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out (H3's, H25's or
+ * carrying a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out (H3's or
  * H29's contradiction — a card the board still reads as somewhere else has not
  * been offered to anybody).
  *
@@ -17656,7 +17561,8 @@ export function h67SpeaksAbout(issue) {
 
 /**
  * Which candidates this run buys a page for, and which it defers — OLDEST
- * FIRST, by the two legs of 取卡全序 this file can read for free.
+ * FIRST, by the legs of 取卡全序 this file can read for free: rank, then a
+ * non-fleet card before a fleet one (App author or seat-signed body), then age.
  *
  * ⛔ The opposite of `h66BuyOrder`, deliberately, and the header carries the
  * argument: H66 chases a fresh write, this one chases the card a dispatching
@@ -17668,7 +17574,7 @@ export function h67SpeaksAbout(issue) {
  * what gets READ AT ALL is where a silent hole would live, and a plan the
  * self-test can drive offline is the only kind that can be pinned.
  *
- * @param {{ number?: number, created_at?: string, labels?: object[] }[]} issues
+ * @param {{ number?: number, created_at?: string, labels?: object[], user?: object }[]} issues
  * @param {number} [cap]
  * @returns {{ read: object[], deferred: object[] }}
  */
@@ -17679,13 +17585,23 @@ export function h67ReadOrder(issues, cap = H67_TIMELINE_READ_CAP) {
     const at = H67_SELECTION_ORDER_LABELS.findIndex((l) => labels.includes(l));
     return at === -1 ? H67_SELECTION_ORDER_LABELS.length : at;
   };
+  // Non-fleet before fleet, inside one rank only; a seat-signed body or an
+  // unreadable author reads as the fleet's.
+  const fleet = (issue) => {
+    if (readSignatureLine(issue?.body) !== null) return 1;
+    const author = artefactAuthor(issue);
+    return author && !author.isApp ? 0 : 1;
+  };
   const age = (issue) => {
     const parsed = Date.parse(issue?.created_at ?? '');
     return Number.isFinite(parsed) ? parsed : Infinity;
   };
   const ordered = [...rows].sort(
     (a, b) =>
-      rank(a) - rank(b) || age(a) - age(b) || Number(a?.number ?? 0) - Number(b?.number ?? 0),
+      rank(a) - rank(b) ||
+      fleet(a) - fleet(b) ||
+      age(a) - age(b) ||
+      Number(a?.number ?? 0) - Number(b?.number ?? 0),
   );
   const limit = Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : 0;
   return { read: ordered.slice(0, limit), deferred: ordered.slice(limit) };
@@ -19656,7 +19572,6 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H21: 'state',
   H23: 'state',
   H24: 'state',
-  H25: 'state',
   H29: 'state',
   H30: 'state',
   H34: 'state',
@@ -22903,7 +22818,7 @@ async function listAllOpenIssues(stats = {}) {
  * untimestamped-reading and dangling-reference rows read.
  *
  * `pm:awaiting-maintainer` is listed like every other state label (#11196
- * fix 5). H25's exclusivity carriers would be reachable through the label
+ * fix 5). H29's awaiting-pair carriers would be reachable through the label
  * they wrongly coexist with, but a card in the state ALONE would otherwise be
  * swept by nothing at all — no H2 claim check, no H11 parked inventory — and
  * "the patrol's input set is narrower than the states the board produces" is
@@ -23378,15 +23293,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // the sweep did not list.
     const decisionInQueue = h54DecisionTitledQueueCard(issue);
     if (decisionInQueue) findings.push([issue, 'H54', decisionInQueue]);
-    // H24 + H25 — two field/label intersections over cards this loop already
-    // holds, so neither costs a request. H24's population is the `pm:queue`
-    // listing; H25's carriers are all listed too, either by the awaiting label
-    // page below or by the very state label they wrongly coexist with.
+    // H24 — a field/label intersection over cards this loop already holds, so
+    // it costs no request. Its population is the `pm:queue` listing.
     const queuedAndTaken = h24QueuedWithAssignee(issue);
     if (queuedAndTaken) findings.push([issue, 'H24', queuedAndTaken]);
-    const doubleState = h25AwaitingMaintainerExclusivity(issue);
-    if (doubleState) findings.push([issue, 'H25', doubleState]);
-    // H55 (#17017) — the ENTRY half of the awaiting state, H25 above being the
+    // H55 (#17017) — the ENTRY half of the awaiting state, H29 below being the
     // exclusivity half. Membership is free (the awaiting label page is one this
     // loop consumes); the thread is bought only for a judged, body-clean card
     // (`needsMaintainerActionComments`); legacy entries are counted into the
@@ -25234,8 +25145,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // `Part of` card must never read as a candidate for closing, and an OPEN PR
   // must stand the row down. A listing whose discriminators quietly stopped
   // being asserted would still print rows, and every one of them would read as
-  // 「close this」, which is the one thing the card forbids.
-  'H67 queued merged-delivery reading': 142,
+  // 「close this」, which is the one thing the card forbids. Pinned AT the count
+  // since the read order took the author leg, so the same-priority pair cannot go.
+  'H67 queued merged-delivery reading': 158,
   // Registered with the decorated ownership-marker reading (#18680); the pin
   // sits just under the count on its neighbours' grounds. What this battery
   // floors is a WIDENING of the two markers' READING, so the FIRING CONTROLS
@@ -25423,7 +25335,6 @@ async function selfTest() {
   // ⚖️ #14072: H22 returns LABELS, not a sentence, so its helper joins them.
   const h22labels = (...args) => (h22ClosedCardPmResidue(...args) ?? []).join(',');
   const h24row = (...args) => String(h24QueuedWithAssignee(...args) ?? '');
-  const h25row = (...args) => String(h25AwaitingMaintainerExclusivity(...args) ?? '');
   const h26row = (...args) => String(h26BlockOnIndefiniteTarget(...args) ?? '');
   const h32row = (...args) => String(h32SeatIdleOverQueue(...args) ?? '');
   const h38row = (...args) => String(h38SeatPostStale(...args) ?? '');
@@ -30646,21 +30557,9 @@ async function selfTest() {
   t('H19: …with the rule line unbroken there too', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes(RELEASE_RULE_LINE), true);
   t('H19: …and the retired coinage gone from that branch as well', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes(RETIRED_ASSIGNEE_COINAGE), false);
 
-  // -- H25 + the `pm:awaiting-maintainer` vocabulary (#11196 fix 5) -----------
+  // -- the `pm:awaiting-maintainer` vocabulary (#11196 fix 5) ----------------
   t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
-  t('H25: awaiting + pm:queue -> finding', typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])), 'string');
-  t('H25: …and the row names the coexisting label', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])).includes('`pm:queue`'), true);
-  t('H25: …and the specific lie, not a tidiness complaint', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:on-hold'])).includes('Restart-when'), true);
-  t('H25: awaiting ALONE -> clean', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL])), null);
-  t('H25: awaiting + a non-state label -> clean', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'domain:skills', 'priority:p0', 'pm:blocking'])), null);
-  t('H25: no awaiting label -> out of scope however many states', h25AwaitingMaintainerExclusivity(queued(['pm:queue', 'pm:dispatched'])), null);
-  t('H25: a CLOSED card is H22 residue, not a live exclusivity breach', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'], [], { state: 'closed' })), null);
-  t('H25: a missing issue does not crash', h25AwaitingMaintainerExclusivity(undefined), null);
-  t('H25: several conflicts are ALL named', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue', 'needs-user-decision'])).includes('`needs-user-decision`'), true);
-  for (const conflicting of AWAITING_MAINTAINER_EXCLUSIVE_LABELS) {
-    t(`H25: awaiting + \`${conflicting}\` -> finding`, typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, conflicting])), 'string');
-  }
-  // The four readers the new state joins — each pinned in BOTH directions, so
+  // The readers the new state joins — each pinned in BOTH directions, so
   // the vocabulary cannot be half-added (the defect class this family is about).
   t('vocabulary: H13 treats awaiting as a real state -> clean', h13DomainWithoutPmState(domainCard(['domain:skills', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
   t('vocabulary: …while the same card without it is still H13', typeof h13DomainWithoutPmState(domainCard(['domain:skills'], hoursAgo(200)), NOW), 'string');
@@ -30727,10 +30626,9 @@ async function selfTest() {
   // owning row does fire on the same card. One breach, one row.
   t('H29: pm:queue + pm:dispatched is H3\'s pair, not this row', h29(['pm:queue', 'pm:dispatched']), null);
   t('H29: …and H3 does fire on it', h3QueueAndDispatched(queued(['pm:queue', 'pm:dispatched'])), true);
-  t('H29: any pair containing the awaiting state is H25\'s', h29([AWAITING_MAINTAINER_LABEL, 'pm:blocked']), null);
-  t('H29: …and H25 does fire on it', typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:blocked'])), 'string');
+  t('H29: a pair containing the awaiting state is this row\'s', typeof h29([AWAITING_MAINTAINER_LABEL, 'pm:blocked']), 'string');
   for (const other of AWAITING_MAINTAINER_EXCLUSIVE_LABELS) {
-    t(`H29: awaiting + \`${other}\` stays H25's row`, h29([AWAITING_MAINTAINER_LABEL, other]), null);
+    t(`H29: awaiting + \`${other}\` fires here`, typeof h29([AWAITING_MAINTAINER_LABEL, other]), 'string');
   }
   // …and an excluded pair does not silence the pairs no one else owns.
   const three29 = h29(['pm:queue', 'pm:dispatched', 'pm:blocked']);
@@ -30738,8 +30636,8 @@ async function selfTest() {
   t('H29: …naming queue + blocked', says(three29, '`pm:queue` (dispatchable NOW, with nothing left to ask) + `pm:blocked`'), true);
   t('H29: …and dispatched + blocked', says(three29, '`pm:dispatched` (an agent is working it under a live claim) + `pm:blocked`'), true);
   const awaitingPlusTwo = h29([AWAITING_MAINTAINER_LABEL, 'pm:queue', 'pm:blocked']);
-  t('H29: awaiting alongside two others still reports the pair H25 cannot', typeof awaitingPlusTwo, 'string');
-  t('H29: …and does not re-report the awaiting pairs', says(awaitingPlusTwo, AWAITING_MAINTAINER_LABEL), false);
+  t('H29: awaiting alongside two others is reported', typeof awaitingPlusTwo, 'string');
+  t('H29: …and names the awaiting pairs too', says(awaitingPlusTwo, AWAITING_MAINTAINER_LABEL), true);
 
   // -- H30: a `pm:queue` card rotting unclaimed --------------------------------
   const queueCard = (labels, updatedAt, extra = {}) => ({
@@ -34442,8 +34340,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H55 census: …and a missing list is too', h55LegacyCensus(undefined).oldest, null);
 
   // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
-  t('H55 adjacency: H25 is silent — one pm state label, not two', h25AwaitingMaintainerExclusivity(card55()), null);
-  t('H55 adjacency: H29 is silent for the same reason', h29PmStateExclusivity(card55()), null);
+  t('H55 adjacency: H29 is silent — one pm state label, not two', h29PmStateExclusivity(card55()), null);
   t('H55 adjacency: H11 is silent — no importance signal on the specimen', h11ImportantParked(card55({ created_at: '2026-08-01T00:00:00Z' })), null);
 
   // The row's own sentence — the halves the ruling requires.
@@ -34490,7 +34387,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const SELF55 = readFileSync(SELF_PATH, 'utf8');
   t('H55 reconciliation: the ager\'s note still says the state has no machine EXIT by construction', SELF55.includes(['has no machine exit', 'BY CONSTRUCTION'].join(' ')), true);
   t('H55 reconciliation: …and now says the state has an ENTRY predicate', SELF55.split(['now has an', 'ENTRY predicate'].join(' ')).length - 1, 1);
-  t('H55 reconciliation: H25\'s deferral points at this row instead of deferring', SELF55.split(['H25 stays the', 'EXCLUSIVITY half'].join(' ')).length - 1, 1);
   t('H55 reconciliation: …and the ager\'s remedy reads the line before re-asking', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Maintainer-action'), true);
   t('H55 reconciliation: …without prescribing the re-check this state cannot have', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Restart-when'), false);
 
@@ -35683,7 +35579,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY66, 'H66 population: a card with no `pm:queue` is out', h66SpeaksAbout(card66({ labels: [{ name: 'bug' }] })), false);
   b(BATTERY66, 'H66 population: `pm:queue` + `pm:dispatched` is out — H3\'s contradiction', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'pm:dispatched' }] })), false);
   b(BATTERY66, 'H66 population: `pm:queue` + `needs-user-decision` is out — H29\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'needs-user-decision' }] })), false);
-  b(BATTERY66, 'H66 population: `pm:queue` + `pm:awaiting-maintainer` is out — H25\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: AWAITING_MAINTAINER_LABEL }] })), false);
+  b(BATTERY66, 'H66 population: `pm:queue` + `pm:awaiting-maintainer` is out — H29\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: AWAITING_MAINTAINER_LABEL }] })), false);
   b(BATTERY66, 'H66 population: …and the exclusion reads ONE vocabulary, ⛔ not a second list', PM_EXCLUSIVE_STATE_LABELS.includes('pm:queue'), true);
   b(BATTERY66, 'H66 population: `pm:retriage` is an ANNOTATION and does NOT exclude', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'pm:retriage' }] })), true);
   b(BATTERY66, 'H66 population: a missing card is out, never a crash', h66SpeaksAbout(undefined), false);
@@ -36112,6 +36008,19 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY67, 'H67 order: `priority:p0` is reached FIRST, whatever its age', order67(CAND67, 4), '3,2,1,4');
   b(BATTERY67, 'H67 order: …then OLDEST-FIRST among equals, which is the order in force', order67(CAND67.filter((i) => i.number !== 3), 3), '2,1,4');
   b(BATTERY67, 'H67 order: ⛔ an unreadable `created_at` sorts LAST, ⛔ never promoted', order67([CAND67[3], CAND67[1]], 2), '2,4');
+  const human67 = { login: 'outside-user', type: 'User' };
+  const fleet67 = { login: 'objectstack-fleet[bot]', type: 'Bot' };
+  const PAIR67 = [
+    { number: 21, created_at: '2026-08-01T00:00:00Z', labels: [{ name: 'priority:p2' }], user: fleet67 },
+    { number: 22, created_at: '2026-09-20T00:00:00Z', labels: [{ name: 'priority:p2' }], user: human67 },
+  ];
+  b(BATTERY67, '⭐ H67 order: within ONE priority a human-opened card is reached before an OLDER fleet-opened one', order67(PAIR67, 2), '22,21');
+  b(BATTERY67, 'H67 order: …and the author leg is the ONLY reason — two fleet cards of that priority stay oldest-first', order67([PAIR67[0], { ...PAIR67[1], user: fleet67 }], 2), '21,22');
+  b(BATTERY67, '⛔ H67 order: the author leg never lifts a card OUT of its priority, and never past p0', order67([{ ...PAIR67[1], labels: [{ name: 'priority:p3' }] }, PAIR67[0], { ...PAIR67[0], number: 23, labels: [{ name: 'priority:p0' }] }], 3), '23,21,22');
+  const SIGNED67 = 'domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\nFiling gate ③ …';
+  b(BATTERY67, '⭐ H67 order: a HUMAN account whose body opens with a seat signature is the fleet\'s — it stays behind the older fleet card', order67([{ ...PAIR67[1], body: SIGNED67 }, PAIR67[0]], 2), '21,22');
+  b(BATTERY67, 'H67 order: …while the same human card with the signature off its first line is still reached first', order67([{ ...PAIR67[1], body: `A user report.\n\n${SIGNED67}` }, PAIR67[0]], 2), '22,21');
+  b(BATTERY67, 'H67 order: every App author is the fleet\'s (`github-actions[bot]` too), and an unreadable author ⛔ is never promoted', order67([{ ...PAIR67[1], user: { login: 'github-actions[bot]', type: 'Bot' } }, { ...PAIR67[1], number: 24, user: undefined }, PAIR67[0]], 3), '21,22,24');
   b(BATTERY67, 'H67 order: `pm:blocking` ranks above p1, as the selection order does', order67([{ number: 8, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'priority:p1' }] }, { number: 9, created_at: '2026-09-11T00:00:00Z', labels: [{ name: 'pm:blocking' }] }], 2), '9,8');
   b(BATTERY67, 'H67 order: ⭐ it is the OPPOSITE of H66\'s, and that is the point', order67(CAND67.filter((i) => i.number !== 3 && i.number !== 4), 2) === h66BuyOrder(CAND67.filter((i) => i.number !== 3 && i.number !== 4).map((i) => ({ ...i, updated_at: i.created_at })), 2).buy.map((i) => i.number).join(','), false);
   b(BATTERY67, 'H67 cap: the rest are DEFERRED, ⛔ not dropped silently', h67ReadOrder(CAND67, 2).deferred.map((i) => i.number).join(','), '1,4');

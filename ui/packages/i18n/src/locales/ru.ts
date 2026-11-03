@@ -136,7 +136,6 @@ const ru = {
   actions: {
     decisionOutput: {
       help: 'Передаётся в поток как результат решения.',
-      helpMultiValue: 'Передаётся в поток как результат решения. Несколько значений разделяйте запятыми.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -1198,7 +1197,6 @@ const ru = {
     undo: "Отменить",
     redo: "Повторить",
     canvasMinimap: "Миникарта холста",
-    versionHistory: "История версий",
   },
   detail: {
     editInlineHint: "Дважды щёлкните для редактирования",

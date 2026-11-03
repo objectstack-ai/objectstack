@@ -85,7 +85,6 @@ export const SysExchangeRate = ObjectSchema.create({
     'the rates foreign-currency amounts are converted to the home currency with.',
   displayNameField: 'currency',
   nameField: 'currency', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{currency} · {effective_date}',
   highlightFields: ['currency', 'rate', 'effective_date', 'source'],
 
   fields: {

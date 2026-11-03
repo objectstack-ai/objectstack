@@ -256,6 +256,52 @@ describe('FAIL-CLOSED: the connector redactor is a BUILT-IN as well', () => {
   });
 });
 
+// [#28640 ②B, ruling 6566912252] `notCarriedForwardKeys` is a SUBSET of
+// `redactedKeys`: a reader that knows only `redactedKeys` still withholds a
+// not-carried-forward position, and every redactor that does not set it means
+// "carry every withheld position forward".
+describe('notCarriedForwardKeys — the withheld positions a save drops', () => {
+  const onlyUndeclaredAuth = {
+    name: 'vendor',
+    label: 'Vendor',
+    type: 'api',
+    provider: 'rest',
+    providerConfig: { baseUrl: 'https://vendor.example.com' },
+    auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: 'TEST_PLACEHOLDER_ONLY_AUTH' },
+  };
+
+  it('the connector names its undeclared `auth` key in both lists', () => {
+    const result = getMetadataTypeRedactor('connector')!(onlyUndeclaredAuth);
+    expect(result.redactedKeys).toEqual(['auth.token']);
+    expect(result.notCarriedForwardKeys).toEqual(['auth.token']);
+  });
+
+  it('a row whose ONLY withheld position is not carried forward is still redacted by the stored-row seam (subset, never disjoint)', () => {
+    const row = { id: 'r1', type: 'connector', name: 'vendor', metadata: JSON.stringify(onlyUndeclaredAuth) };
+    const served = redactStoredMetadataRow('sys_metadata', row);
+    expect(served.metadata).not.toMatch(/TEST_PLACEHOLDER_ONLY_AUTH/);
+    expect(JSON.parse(served.metadata as string).auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_TOKEN' });
+  });
+
+  it('CONTROL: the datasource built-in and a derived redactor never set it — every withheld position is carried forward', () => {
+    const datasource = getMetadataTypeRedactor('datasource')!({
+      name: 'warehouse', driver: 'postgres', config: { host: 'db', password: 'TEST_PLACEHOLDER_PW' }, ssl: { key: 'TEST_PLACEHOLDER_KEY' },
+    });
+    expect(datasource.redactedKeys.length).toBeGreaterThan(0);
+    expect(datasource).not.toHaveProperty('notCarriedForwardKeys');
+    const webhook = getMetadataTypeRedactor('webhook')!({
+      name: 'w', object: 'o', triggers: ['create'], url: 'https://hooks.example', secret: 'TEST_PLACEHOLDER_S',
+    });
+    expect(webhook.redactedKeys).toEqual(['secret']);
+    expect(webhook).not.toHaveProperty('notCarriedForwardKeys');
+  });
+
+  it('a registered redactor that does not set it type-checks unchanged (the member is optional)', () => {
+    const legacyShape: MetadataTypeRedactor = (item): MetadataRedactionResult => ({ item, redactedKeys: [] });
+    expect(legacyShape({ a: 1 })).toEqual({ item: { a: 1 }, redactedKeys: [] });
+  });
+});
+
 describe('absence is distinguishable from "nothing to redact" (the consumer contract of the per-type redaction hook)', () => {
   it('a type with no redactor answers undefined — a fact, not a failure', () => {
     expect(getMetadataTypeRedactor('object')).toBeUndefined();

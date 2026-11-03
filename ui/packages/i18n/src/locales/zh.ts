@@ -134,7 +134,6 @@ const zh = {
   actions: {
     decisionOutput: {
       help: '作为决策输出传递给流程。',
-      helpMultiValue: '作为决策输出传递给流程。多个值请用逗号分隔。',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -1159,7 +1158,6 @@ const zh = {
     undo: '撤销',
     redo: '重做',
     canvasMinimap: '画布缩略图',
-    versionHistory: '版本历史',
   },
   detail: {
     back: '返回',

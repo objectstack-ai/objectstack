@@ -129,7 +129,6 @@ const ko = {
   actions: {
     decisionOutput: {
       help: '결정 출력으로 플로우에 전달됩니다.',
-      helpMultiValue: '결정 출력으로 플로우에 전달됩니다. 여러 값은 쉼표로 구분하세요.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -1136,7 +1135,6 @@ const ko = {
     undo: "실행 취소",
     redo: "다시 실행",
     canvasMinimap: "캔버스 미니맵",
-    versionHistory: "버전 기록",
   },
   detail: {
     editInlineHint: "더블클릭하여 편집",

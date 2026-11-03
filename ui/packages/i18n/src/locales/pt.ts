@@ -131,7 +131,6 @@ const pt = {
   actions: {
     decisionOutput: {
       help: 'Entregue ao fluxo como saída da decisão.',
-      helpMultiValue: 'Entregue ao fluxo como saída da decisão. Separe vários valores por vírgulas.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -1164,7 +1163,6 @@ const pt = {
     undo: "Desfazer",
     redo: "Refazer",
     canvasMinimap: "Minimapa da tela",
-    versionHistory: "Histórico de versões",
   },
   detail: {
     editInlineHint: "Clique duas vezes para editar",

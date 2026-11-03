@@ -108,7 +108,7 @@ const REPO_ROOT = resolve(HERE, '..');
  * reddens here rather than turning this gate silently unnameable by any
  * dispatch brief. */
 export const WORKSPACE_FILE = 'pnpm-workspace.yaml';
-export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
+export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**', 'ui/**'];
 
 const TEST_FILE_RE = /\.(?:test|spec)\.[a-z]+$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', 'build']);

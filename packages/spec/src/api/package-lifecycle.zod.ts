@@ -37,6 +37,13 @@
  * declared a VERSION rollback against the live COMMIT-rollback path;
  * `RollbackToPackageCommitResponseSchema` below is the true contract,
  * authored after that retirement per the ruling's sequencing (3A).
+ *
+ * Two members are not transcriptions but DECLARED AHEAD OF THEIR PRODUCER
+ * (ADR-0049), each describe opening `[PLANNED — not yet served]` until the
+ * change that serves it drops the marker: the `nav` arm of
+ * `GetPackageCustomizationsResponseSchema.contributions` (#27928) and
+ * `PackageExportManifestSchema.withheldMaps` (#28640 ruling ③A, served by
+ * #29342). Their own docblocks say what is not served yet.
  */
 
 import { z } from 'zod';
@@ -175,21 +182,159 @@ export const RollbackToPackageCommitResponseSchema = lazySchema(() => z.object({
  * (`runtime/src/domains/packages.ts`) builds the key set DYNAMICALLY from the
  * metadata type registry — one plural key per type present
  * (`manifest[plural] = items.map(clean)`), partitioning `views` per #5320 —
- * plus the four fixed keys below. Only the fixed keys are pinnable;
+ * plus the five fixed keys below. Only the fixed keys are pinnable;
  * enumerating the registry here would freeze this contract against future
  * metadata types, so everything else deliberately falls to the open
  * catch-all. Freezes nothing.
+ *
+ * `withheldMaps` (#28640 ruling ③A) names each map position the export
+ * withheld whole. The export reads SERVED items, so the connector redactor
+ * (`CONNECTOR_CREDENTIAL_MAP_PATHS`, `integration/connector-credential-redaction.ts`)
+ * has already dropped each of its four header / env maps, and the item is
+ * written with the map simply absent; this list is how an import tells an
+ * incomplete map from one that was never written. Positions only — never a
+ * header or variable name — so the credential heuristic stays the
+ * redactor's, not a contract of the export. The path vocabulary is the
+ * redactor's own `redactedKeys` spelling of those four positions, and
+ * `package-lifecycle.test.ts` holds the two equal.
+ *
+ * DECLARED AHEAD OF ITS PRODUCER (ADR-0049): `withheldMaps` is declared
+ * before any export writes it and before any install door reads it. Until the
+ * server half (#29342) makes `assemblePackageManifest` write the list and both
+ * install doors name each incomplete map, no export carries it; its describe
+ * opens `[PLANNED — not yet served]`, and #29342 drops the marker in the change
+ * that serves it (the pin is in `package-lifecycle.test.ts`). Its `door` row in
+ * `UNMANAGED_INSTALL_KEY_DISPOSITIONS` is live today: it keeps the unmanaged
+ * import from refusing an export that carries the key.
  */
 export const PackageExportManifestSchema = lazySchema(() => z.object({
   id: z.string().describe('The exported package\'s id.'),
   name: z.string().describe('The exported package\'s machine name.'),
   version: z.string().describe('The exported package\'s version.'),
   label: z.string().optional().describe('Display label, when the package declares one.'),
+  // Declared ahead of its producer: #29342 writes and reads it, and drops the
+  // `[PLANNED — not yet served]` marker in that change.
+  withheldMaps: z.array(z.object({
+    type: z.literal('connector').describe('Metadata type of the item whose map was withheld.'),
+    name: z.string().describe('Name of the item whose map was withheld.'),
+    path: z.enum([
+      'providerConfig.headers',
+      'providerConfig.defaultHeaders',
+      'providerConfig.transport.headers',
+      'providerConfig.transport.env',
+    ]).describe('Dot path of the withheld map inside the item.'),
+  }).strict()).optional().describe(
+    '[PLANNED — not yet served] Declared ahead of its producer (ADR-0049): no export writes this list '
+    + 'yet and no install door reads it yet. Every map the export withheld WHOLE because a served read '
+    + 'never carries it: a connector\'s header and environment-variable maps. The item is written with '
+    + 'that map absent, so once served an import reads this list to tell an incomplete map from one the '
+    + 'package never had, and names each one for an operator to re-enter. Positions only: no header or '
+    + 'variable name is listed. Absence says nothing about what was withheld when the exporter predates '
+    + 'this key; from an exporter that writes it, absence means nothing was withheld.',
+  ),
 }).catchall(z.unknown().describe(
   'One key per metadata type present in the package (plural spelling, e.g. '
   + '`objects`, `views`), each an array of cleaned item bodies. The key set '
   + 'is registry-derived at runtime and deliberately NOT enumerated here.',
 )));
+
+/**
+ * `GET /packages/export` — the deployment's whole ontology as installable
+ * packages, in one read (#28914): the exit right that
+ * {@link PackageExportManifestSchema}'s route grants one package at a time.
+ *
+ * ⚠️ DECLARED AHEAD OF ITS PRODUCER (ADR-0049). No runtime serves
+ * `GET /packages/export` yet: no handler mounts it, so a call today is not
+ * answered with this shape. This declaration is the contract the server slice
+ * of #28914 must meet (Clause-②, widening): it mounts the route on the runtime
+ * dispatcher, enveloped like its lifecycle siblings (`{ success, data }`), and
+ * answers this schema as the `data`. Until it does, the describe carries
+ * `[PLANNED — not yet served]`. The house has no other planned channel for an
+ * API response: the liveness ledgers are per metadata type, and the runtime
+ * route ledger records only what the dispatcher serves. So the change that
+ * mounts the route drops the marker, adds the route's ledger row and flips the
+ * test that pins the marker.
+ *
+ * Everything below is what that door MUST do. None of it is served today.
+ *
+ * ## One producer
+ *
+ * Each entry must be exactly what `GET /packages/:id/export` (served today)
+ * answers for that package. The bundle composes the per-package export and
+ * must never assemble, clean or redact an item a second way, so the two reads
+ * cannot disagree about a package. Two consequences follow on purpose:
+ *
+ * - **A `.custom` pair is its own entry**, carrying its overriding items with
+ *   their `overrides` blocks (ADR-0146 D8 item 3), and its base's entry carries
+ *   the base unchanged. Environment-scope customizations stay where the
+ *   per-package export already places them: under the package that owns them.
+ * - **No credential value leaves.** The per-package export already withholds
+ *   credential positions, as every served metadata read does. The bundle must
+ *   add no rule of its own: a `credentialRef` stays the reference it is.
+ *
+ * ## Which packages, in which order
+ *
+ * Every package whose registry row's `source` (`InstalledPackageSourceSchema`,
+ * kernel/package-registry.zod.ts) is not `code`, each once: the marketplace
+ * and authored packages, a `.custom` pair among them. A `code` package is
+ * registered by the running deployment's own code (a `defineStack()` host's
+ * packages, a plugin's bundled manifest, a platform package), so it travels
+ * with that code and not with the bundle: an install of the bundle never
+ * re-installs it. The row's `source` is the one key that says so: the
+ * registry's own ⛔ forbids deriving it from `manifest.scope` or `writable`,
+ * and the per-package export already reads the row that carries it. A pair of
+ * a `code` base is still exported. A metadata item bound to no package is in
+ * no entry; ADR-0146 D11's migration binds it to one first.
+ *
+ * Enabled or not, every such package is exported, and the bundle carries no
+ * enabled state: the per-package export has no `enabled` or `status` key, so an
+ * install of the bundle installs every entry enabled. A package the tenant
+ * switched off comes back on, and the consumer disables it again if it wants it
+ * off.
+ *
+ * The order must be ADR-0141 D5's, the order a boot hydrates installed
+ * packages in: dependencies first. An entry comes after every entry its
+ * package's `manifest.dependencies` names, so a pair comes after its base.
+ * Installing the entries in the order listed is the whole consumption rule: a
+ * consumer never re-sorts. Members of a dependency cycle keep the read's
+ * listing order among themselves, as a boot hydrates them.
+ *
+ * ## The door
+ *
+ * The read gate must be the per-package export's: `studio.access` or
+ * `setup.access`, or a system context, asked before anything is read. The
+ * query set must be CLOSED and empty: the door refuses a query parameter
+ * `400 VALIDATION_ERROR`, naming it. No request schema is declared, because
+ * the door reads no path id, no body and no parameter. `export` can never be a
+ * package id (one has at least two dot-separated segments,
+ * `MANIFEST_ID_PATTERN`), so the path never shadows `GET /packages/:id`.
+ *
+ * The answer must be whole or absent: a package whose export cannot be
+ * assembled fails the read, naming that package. ⛔ Never a bundle that
+ * silently lacks a package. Strict at the top level: a member the door starts
+ * serving is a change to this declaration first. Each entry stays open, as
+ * ruled for {@link PackageExportManifestSchema}.
+ */
+export const PackageExportBundleSchema = lazySchema(() => z.object({
+  packages: z.array(PackageExportManifestSchema).describe(
+    'Every package whose registry row\'s `source` is not `code` (the marketplace and authored packages, a `.custom` '
+    + 'pair among them), enabled or not, each once and each as `GET /packages/:id/export` answers it, dependencies '
+    + 'first: an entry comes after every entry its package\'s `manifest.dependencies` names, so a `.custom` pair '
+    + 'comes after its base. Install the entries in this order; never re-sort them. No entry carries an enabled '
+    + 'state, so every entry installs enabled. Empty when every package of the deployment is registered by its '
+    + 'own code.',
+  ),
+  // Declared before it is served (ADR-0049): the marker comes off when the
+  // server slice of #28914 mounts `GET /packages/export`, in the same change
+  // as the route's ledger row.
+}).strict().describe(
+  '[PLANNED — not yet served] Whole-deployment export: every installed package the deployment\'s own code does '
+  + 'not register (registry `source` other than `code`), as installable packages in dependency order. Carries no '
+  + 'credential value and no enabled state. Declared ahead of its producer '
+  + '(ADR-0049): no runtime serves `GET /packages/export` yet. The server half of the whole-deployment package '
+  + 'export mounts it, together with a future CLI command that calls it; until then this is the contract that '
+  + 'door must answer, not a read a client can make.',
+));
 
 /**
  * `POST /packages/:id/adopt-orphans` — bulk-rebind package-less (orphaned)
@@ -560,6 +705,9 @@ export type RollbackToPackageCommitResponseParsed = z.infer<typeof RollbackToPac
 export type PackageExportManifest = z.input<typeof PackageExportManifestSchema>;
 /** Post-parse shape of {@link PackageExportManifest} — defaults applied, transforms run (ADR-0122). */
 export type PackageExportManifestParsed = z.infer<typeof PackageExportManifestSchema>;
+export type PackageExportBundle = z.input<typeof PackageExportBundleSchema>;
+/** Post-parse shape of {@link PackageExportBundle} — defaults applied, transforms run (ADR-0122). */
+export type PackageExportBundleParsed = z.infer<typeof PackageExportBundleSchema>;
 export type ReassignOrphanedMetadataResponse = z.input<typeof ReassignOrphanedMetadataResponseSchema>;
 /** Post-parse shape of {@link ReassignOrphanedMetadataResponse} — defaults applied, transforms run (ADR-0122). */
 export type ReassignOrphanedMetadataResponseParsed = z.infer<typeof ReassignOrphanedMetadataResponseSchema>;

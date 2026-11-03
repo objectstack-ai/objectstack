@@ -15,7 +15,8 @@
  * {@link useMetadataAreaHost}:
  *
  *  - which package is open. A page that would otherwise pick and repair its own
- *    `?package=` scope (the directory, the list) stays on the area's package;
+ *    `?package=` scope (the directory, the list) stays on the area's package,
+ *    or on none in the cross-package leg;
  *  - whether that package is read-only. Every write the pages offer is then
  *    withheld: rollback, source save, reset, delete, the overlay save and the
  *    create doors. The server stays the authority; this is the courtesy gate
@@ -36,7 +37,8 @@ import { SETUP_CATALOG_TYPES } from './catalog-scope.js';
 export interface MetadataAreaHost {
   /**
    * The package the area is open on, or `null` in the cross-package leg, which
-   * serves the environment catalog (`?scope=environment`) with no package.
+   * serves the environment catalog (`?scope=environment`) and a type's list
+   * across every package (objectstack#29566), with no package.
    */
   packageId: string | null;
   /**
