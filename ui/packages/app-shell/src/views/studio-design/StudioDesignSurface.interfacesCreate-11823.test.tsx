@@ -112,7 +112,9 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 
 vi.mock('./packages-io', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./packages-io')>();
-  return { ...mod, fetchPackages: vi.fn(async () => []) };
+  // objectstack#29851 — the no-app empty state asks the package list whether
+  // the package contributes navigation elsewhere; this package lists none.
+  return { ...mod, fetchPackages: vi.fn(async () => []), fetchListedPackageManifests: vi.fn(async () => new Map()) };
 });
 
 vi.mock('@object-ui/react', async (importOriginal) => {
