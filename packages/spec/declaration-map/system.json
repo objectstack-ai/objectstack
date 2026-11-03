@@ -537,6 +537,8 @@
     "TranslationDiffStatusSchema": "system/TranslationDiffStatus",
     "TranslationItem": "system/TranslationItem",
     "TranslationItemSchema": "system/TranslationItem",
+    "TrustedAppScheme": "system/TrustedAppScheme",
+    "TrustedAppSchemeSchema": "system/TrustedAppScheme",
     "UserActivityStatus": "system/UserActivityStatus",
     "UserDevice": "system/UserDevice",
     "UserDeviceSchema": "system/UserDevice",
