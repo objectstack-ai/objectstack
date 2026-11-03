@@ -12,8 +12,8 @@
  * with extra `<Route>` children.
  */
 
-import { lazy, Suspense, useEffect, useMemo } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { lazy, Suspense, useCallback, useEffect, useMemo } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom';
 import { useNativeHostRouting } from '@object-ui/mobile';
 import { AuthProvider, useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { UploadProvider, createObjectStackUploadAdapter } from '@object-ui/providers';
@@ -37,7 +37,7 @@ import {
   DefaultInvitationsPage,
   DefaultSettingsPage,
   DefaultAcceptInvitationPage,
-  RedirectWithSplash,
+  useMetadata,
 } from '@object-ui/app-shell';
 
 import { AppContent, ConsolePermissionsRequest, ConsolePermissionsScope } from './AppContent';
@@ -47,6 +47,8 @@ import { RootLandingRedirect } from './components/RootLandingRedirect';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { studioRoutes } from './components/StudioRoute';
 import { SetupRoute } from './components/SetupRoute';
+import { UnmatchedRoute } from './components/UnmatchedRoute';
+import { nativeShellRouteTarget } from './nativeShellRoute';
 import { FormPage } from './components/FormPage';
 import { InternalFormRoute } from './components/InternalFormRoute';
 import { MetadataHmrReloader } from './components/MetadataHmrReloader';
@@ -148,13 +150,33 @@ const BASENAME = resolveBasename();
  * the page. `data-os-native-shell` on the root element names the platform, so
  * a stylesheet can tell shell mode apart. Without the bridge this renders
  * nothing and installs nothing.
+ *
+ * The shell's route is a push route, the notification's `actionUrl`, and is
+ * never navigated verbatim (objectstack#29750): it is hosted the way the inbox
+ * hosts that link (`nativeShellRouteTarget`). Inside an app it goes under the
+ * app the URL names. Anywhere else (Home, a cold start) the route goes to the
+ * router as given, and the catch-all's `UnmatchedRoute` hosts it once the app
+ * list is loaded: under the app the person last had open while it is still
+ * active, else the first active app. The shell's published `currentAppName` is
+ * left to that guard because it is an app NAME, and only the app list turns a
+ * name into the address its route uses.
  */
 function NativeShellRouting() {
   const location = useLocation();
   const navigate = useNavigate();
+  // Outside every `MetadataProvider`, so the empty list; see `nativeShellRouteTarget`.
+  const { apps } = useMetadata();
+  const hostHint = matchPath('/apps/:appName/*', location.pathname)?.params.appName;
+  const navigateShellRoute = useCallback(
+    (route: string) => {
+      const path = nativeShellRouteTarget(route, hostHint, apps);
+      if (path !== null) navigate(path);
+    },
+    [apps, hostHint, navigate],
+  );
   const host = useNativeHostRouting({
     route: `${location.pathname}${location.search}${location.hash}`,
-    navigate,
+    navigate: navigateShellRoute,
   });
   const platform = host?.platform;
   useEffect(() => {
@@ -486,7 +508,11 @@ export function App() {
               * `index` redirect above is deliberately NOT changed — it fires
               * under an already-painted organization layout, where covering the
               * screen with a splash would be the regression. */}
-            <Route path="*" element={<RedirectWithSplash to="/" replace />} />
+            {/* objectstack#29750 — an app-relative path (a push route such as
+              * `/opportunity/123`, arriving as the first URL or handed over by
+              * `NativeShellRouting`) is hosted under an app the way the inbox
+              * hosts it; a stale Console link still redirects to `/`. */}
+            <Route path="*" element={<UnmatchedRoute />} />
           </Routes>
         </ConsoleShell>
         </UploadProvider>

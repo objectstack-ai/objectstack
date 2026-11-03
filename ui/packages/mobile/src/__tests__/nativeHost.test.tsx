@@ -34,6 +34,8 @@ import {
   nativeResetServer,
   nativeScan,
   nativeShowConnectionSwitcher,
+  nativeGetAppLock,
+  nativeOpenAppLockSettings,
   postNativeReady,
   postNativeRouteChanged,
   resetNativeHostEventsForTests,
@@ -55,6 +57,8 @@ const ALL_METHODS: NativeHostMethod[] = [
   'resetServer',
   'scan',
   'showConnectionSwitcher',
+  'getAppLock',
+  'openAppLockSettings',
 ];
 
 function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackNative & {
@@ -75,6 +79,8 @@ function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackN
     resetServer: vi.fn(async () => null),
     scan: vi.fn(async () => 'ASSET-0042'),
     showConnectionSwitcher: vi.fn(async () => null),
+    getAppLock: vi.fn(async () => ({ enabled: true, timeoutSeconds: 300 })),
+    openAppLockSettings: vi.fn(async () => null),
     ready: vi.fn<() => void>(),
     routeChanged: vi.fn<(route: string) => void>(),
   };
@@ -240,6 +246,8 @@ describe('typed call wrappers feature-detect and never throw', () => {
     ['resetServer', () => nativeResetServer()],
     ['scan', () => nativeScan()],
     ['showConnectionSwitcher', () => nativeShowConnectionSwitcher()],
+    ['getAppLock', () => nativeGetAppLock()],
+    ['openAppLockSettings', () => nativeOpenAppLockSettings()],
   ];
 
   it.each(calls)('%s resolves "unavailable" without a bridge', async (_method, call) => {
@@ -272,6 +280,29 @@ describe('typed call wrappers feature-detect and never throw', () => {
     expect(bridge.navigate).toHaveBeenCalledWith('/apps/crm');
     await expect(nativeShowConnectionSwitcher()).resolves.toEqual({ status: 'ok', value: null });
     expect(bridge.showConnectionSwitcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('the app-lock pair reads the setting and opens the native screen, with no arguments', async () => {
+    const bridge = fakeBridge();
+    install(bridge);
+    await expect(nativeGetAppLock()).resolves.toEqual({ status: 'ok', value: { enabled: true, timeoutSeconds: 300 } });
+    expect(bridge.getAppLock).toHaveBeenCalledWith();
+    await expect(nativeOpenAppLockSettings()).resolves.toEqual({ status: 'ok', value: null });
+    expect(bridge.openAppLockSettings).toHaveBeenCalledTimes(1);
+    expect(bridge.openAppLockSettings).toHaveBeenCalledWith();
+  });
+
+  it('openAppLockSettings refused while the app is locked resolves "failed" with the shell\'s message', async () => {
+    const bridge = fakeBridge();
+    bridge.openAppLockSettings = vi.fn(async () => {
+      throw Object.assign(new Error('The app is locked'), { code: 'failed' });
+    });
+    install(bridge);
+    await expect(nativeOpenAppLockSettings()).resolves.toEqual({
+      status: 'failed',
+      code: 'failed',
+      message: 'The app is locked',
+    });
   });
 
   it('nativeHostCan answers what a wrapper would: announced and carried, nothing else', () => {
