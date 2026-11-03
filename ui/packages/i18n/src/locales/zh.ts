@@ -3395,6 +3395,8 @@ const zh = {
     appNothingAvailableGrantDescription: '此应用中没有你的账号可以打开的页面。你可以在 Setup 中授予访问权限。',
     appNoReadableObjectDescription: '你的账号暂时无法读取此应用中的任何记录。请联系管理员为你分配权限集。',
     appNoReadableObjectGrantDescription: '你的账号暂时无法读取此应用中的任何记录。你可以在 Setup 中授予访问权限。',
+    appOpensFromMenu: '{{app}} 的内容都在菜单里',
+    appOpensFromMenuDescription: '此应用没有自己的页面。请在菜单中选择一个条目，打开链接或执行操作。',
     openSetup: '打开 Setup',
     createFirstApp: '创建您的第一个应用',
     systemSettings: '系统设置',

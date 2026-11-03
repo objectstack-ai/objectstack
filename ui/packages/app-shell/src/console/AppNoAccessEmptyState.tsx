@@ -23,10 +23,17 @@
  * still draws its dashboards and pages, but every tile on them would refuse,
  * so the description says the caller can read nothing here yet and asks for a
  * permission set, instead of claiming the app has no pages.
+ *
+ * objectstack-ai/objectstack#29771 — and a third: an app that shows the caller
+ * entries, none of which opens a page inside the app (every one is a `url` or
+ * `action` link, in `navigation` and in every area). The caller has access;
+ * the app simply has no page of its own. So this reason has its own title and
+ * description, which point at the menu, a menu icon instead of the lock, and
+ * no Setup link: there is nothing to grant.
  */
 
 import { Link } from 'react-router-dom';
-import { Lock } from 'lucide-react';
+import { Lock, PanelLeft } from 'lucide-react';
 // The shared empty state (objectstack#25915): it draws the muted icon square
 // this screen used to hand-copy, and it is `role="status"`, so "nothing here
 // for you" is announced instead of being an unlabelled block. `AppContent.tsx`
@@ -47,9 +54,13 @@ export interface AppNoAccessEmptyStateProps {
   /**
    * Why the app has nothing for this caller: it shows them no navigation
    * (`'no-navigation'`, the default), or it names only objects they may not
-   * read (`'no-readable-object'`, objectstack#25338).
+   * read (`'no-readable-object'`, objectstack#25338), or every entry it
+   * shows them is a `url` or `action` link, so the app opens from its menu
+   * and has no page of its own (`'menu-only'`,
+   * objectstack-ai/objectstack#29771). `setupPath` is not read for
+   * `'menu-only'`: the caller has access, so there is nothing to grant.
    */
-  reason?: 'no-navigation' | 'no-readable-object';
+  reason?: 'no-navigation' | 'no-readable-object' | 'menu-only';
 }
 
 export function AppNoAccessEmptyState({ app, setupPath, reason = 'no-navigation' }: AppNoAccessEmptyStateProps) {
@@ -57,6 +68,24 @@ export function AppNoAccessEmptyState({ app, setupPath, reason = 'no-navigation'
   const { appLabel } = useObjectLabel();
   // The same label the header's app switcher shows for this app.
   const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
+
+  if (reason === 'menu-only') {
+    return (
+      <div className="flex h-full w-full items-center justify-center p-8" data-testid="app-no-access-empty-state">
+        <DataEmptyState
+          data-reason={reason}
+          icon={<PanelLeft className="size-5 text-muted-foreground" aria-hidden="true" />}
+          title={t('empty.appOpensFromMenu', {
+            app: label,
+            defaultValue: '{{app}} opens from its menu',
+          })}
+          description={t('empty.appOpensFromMenuDescription', {
+            defaultValue: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
+          })}
+        />
+      </div>
+    );
+  }
 
   const description =
     reason === 'no-readable-object'

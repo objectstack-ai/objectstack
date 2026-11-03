@@ -23,6 +23,15 @@
  *   - CONTROL: a pending read ahead of the doc still holds the skeleton, and
  *     the doc is landed on only once that read fails.
  *
+ * objectstack-ai/objectstack#29771 — the rest of that blank page, pinned in
+ * its own `describe` below on the same harness:
+ *   - an app whose entries live only under `areas` lands on the first working
+ *     entry across the area trees, and a working entry in an area outranks a
+ *     `doc` entry in the top-level navigation;
+ *   - an app whose every shown entry is a `url` or `action` link draws the
+ *     menu-only empty state (`data-reason="menu-only"`), with no Setup link;
+ *   - CONTROL: a pending read in an area still holds the skeleton.
+ *
  * NOTE ON SCOPE: routing only. `ConsoleLayout`, the lazily imported pages and
  * the host's docs portal are stubbed.
  */
@@ -324,5 +333,119 @@ describe('objectstack-ai/objectstack#29678 — a doc-only app opens its first do
     await answer(envUrl, 500);
     expect(await screen.findByTestId('docs-probe')).toHaveTextContent('crm_manual');
     expect(pathname()).toBe('/apps/crm/docs/crm_manual');
+  });
+});
+
+const urlEntry = (id: string) => ({ id, type: 'url', label: id, url: 'https://example.com' });
+const actionEntry = (id: string) => ({ id, type: 'action', label: id, actionDef: { actionName: 'export_data' } });
+
+describe('objectstack-ai/objectstack#29771 — an areas-only app lands; a url/action-only app says it opens from its menu', () => {
+  beforeEach(() => {
+    metadataApps = [];
+  });
+
+  it('lands on the first working entry of its areas when the top-level navigation is empty', async () => {
+    metadataApps = [
+      {
+        name: 'crm',
+        label: 'CRM',
+        navigation: [],
+        areas: [
+          { id: 'area_links', label: 'Links', navigation: [urlEntry('nav_site')] },
+          { id: 'area_sales', label: 'Sales', navigation: [docEntry('nav_manual', { book: 'crm_manual' }), plainEntry('nav_deals', 'crm_deal')] },
+        ],
+      },
+    ];
+    const { apiFetch } = heldApiFetch();
+    renderConsoleAt('/apps/crm', apiFetch);
+
+    expect(await screen.findByTestId('object-view')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/crm/crm_deal');
+    expect(screen.queryByTestId('app-no-access-empty-state')).not.toBeInTheDocument();
+  });
+
+  it('prefers a working entry in an area over a doc entry in the top-level navigation', async () => {
+    metadataApps = [
+      {
+        name: 'crm',
+        label: 'CRM',
+        navigation: [docEntry('nav_manual', { book: 'crm_manual' })],
+        areas: [{ id: 'area_sales', label: 'Sales', navigation: [plainEntry('nav_deals', 'crm_deal')] }],
+      },
+    ];
+    const { apiFetch } = heldApiFetch();
+    renderConsoleAt('/apps/crm', apiFetch);
+
+    expect(await screen.findByTestId('object-view')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/crm/crm_deal');
+    expect(screen.queryByTestId('docs-probe')).not.toBeInTheDocument();
+  });
+
+  it('lands on a doc in an area when no tree holds a working entry', async () => {
+    metadataApps = [
+      {
+        name: 'crm_help',
+        label: 'CRM Help',
+        navigation: [urlEntry('nav_site')],
+        areas: [{ id: 'area_help', label: 'Help', navigation: [docEntry('nav_manual', { book: 'crm_manual' })] }],
+      },
+    ];
+    const { apiFetch } = heldApiFetch();
+    renderConsoleAt('/apps/crm_help', apiFetch);
+
+    expect(await screen.findByTestId('docs-probe')).toHaveTextContent('crm_manual');
+    expect(pathname()).toBe('/apps/crm_help/docs/crm_manual');
+  });
+
+  it('draws the menu-only empty state when every shown entry is a `url` or `action` link', async () => {
+    metadataApps = [
+      {
+        name: 'links',
+        label: 'Links',
+        navigation: [urlEntry('nav_site'), { id: 'group_tools', type: 'group', label: 'Tools', children: [actionEntry('nav_run')] }],
+        areas: [{ id: 'area_more', label: 'More', navigation: [urlEntry('nav_wiki')] }],
+      },
+    ];
+    const { apiFetch } = heldApiFetch();
+    renderConsoleAt('/apps/links', apiFetch);
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveAttribute('data-reason', 'menu-only');
+    expect(screen.getByTestId('app-no-access-empty-state')).toContainElement(status);
+    expect(status).toHaveTextContent('Links opens from its menu');
+    expect(status).not.toHaveTextContent('available to you yet');
+    expect(screen.queryByTestId('app-no-access-open-setup')).not.toBeInTheDocument();
+    expect(pathname()).toBe('/apps/links');
+  });
+
+  it('CONTROL: an app that shows the member no navigation keeps the no-access reason', async () => {
+    metadataApps = [{ name: 'links', label: 'Links', navigation: [], areas: [{ id: 'area_empty', label: 'Empty', navigation: [] }] }];
+    const { apiFetch } = heldApiFetch();
+    renderConsoleAt('/apps/links', apiFetch);
+
+    expect(await screen.findByRole('status')).toHaveAttribute('data-reason', 'no-navigation');
+    expect(screen.getByRole('status')).toHaveTextContent('Nothing in Links is available to you yet');
+  });
+
+  it('CONTROL: a pending read in an area holds the skeleton, then lands on the bound entry once shown', async () => {
+    const envUrl = freshUrl();
+    metadataApps = [
+      {
+        name: 'crm',
+        label: 'CRM',
+        navigation: [urlEntry('nav_site')],
+        areas: [{ id: 'area_ops', label: 'Ops', navigation: [boundEntry('nav_env', 'crm_env', envUrl), docEntry('nav_manual', { book: 'crm_manual' })] }],
+      },
+    ];
+    const { apiFetch, answer } = heldApiFetch();
+    renderConsoleAt('/apps/crm', apiFetch);
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(envUrl, expect.objectContaining({ method: 'GET' })));
+    expect(screen.getByTestId('app-landing-pending')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/crm');
+
+    await answer(envUrl, 200, SHOWN);
+    expect(await screen.findByTestId('object-view')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/crm/crm_env');
   });
 });

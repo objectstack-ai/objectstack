@@ -16,6 +16,11 @@
  *   - locale map: both keys resolve in the designer `locale`, never as
  *     `[object Object]`;
  *   - the list's heading is designer chrome, read in the designer `locale`.
+ *
+ * objectstack-ai/objectstack#29771, in its own `describe`: the landing the
+ * preview names walks the areas' trees after the top-level one, as the
+ * console's `firstRouteAcross` does, so an areas-only app names the entry it
+ * opens on, and a working entry in an area outranks a top-level `doc`.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -111,5 +116,34 @@ describe('AppPreview renders each area with its description (objectui#11027)', (
       />,
     );
     expect(areaItem('Sales').textContent).toContain('Pipeline work');
+  });
+});
+
+describe('AppPreview names the landing across the area trees (objectstack-ai/objectstack#29771)', () => {
+  it('names the first working entry of the areas for an app with no top-level navigation', () => {
+    renderApp({
+      areas: [
+        { id: 'area_links', label: 'Links', navigation: [{ id: 'site', type: 'url', label: 'Website', url: 'https://example.com' }] },
+        { id: 'area_sales', label: 'Sales', navigation: [{ id: 'deals', type: 'object', label: 'Deals', objectName: 'deal' }] },
+      ],
+    });
+    expect(screen.getByText('→ Deals')).toBeTruthy();
+  });
+
+  it('prefers a working entry in an area over a top-level doc entry', () => {
+    renderApp({
+      navigation: [{ id: 'manual', type: 'doc', label: 'Manual', book: 'crm_manual' }],
+      areas: [{ id: 'area_sales', label: 'Sales', navigation: [{ id: 'deals', type: 'object', label: 'Deals', objectName: 'deal' }] }],
+    });
+    expect(screen.getByText('→ Deals')).toBeTruthy();
+    expect(screen.queryByText('→ Manual')).toBeNull();
+  });
+
+  it('CONTROL: a top-level working entry still wins over an area entry', () => {
+    renderApp({
+      navigation: NAV,
+      areas: [{ id: 'area_sales', label: 'Sales', navigation: [{ id: 'deals', type: 'object', label: 'Deals', objectName: 'deal' }] }],
+    });
+    expect(screen.getByText('→ Accounts')).toBeTruthy();
   });
 });

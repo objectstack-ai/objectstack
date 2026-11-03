@@ -3377,6 +3377,8 @@ const es = {
     appNothingAvailableGrantDescription: "Esta aplicación no tiene páginas que su cuenta pueda abrir. Puede conceder el acceso en la configuración.",
     appNoReadableObjectDescription: "Su cuenta aún no puede leer ningún registro de esta aplicación. Pida a un administrador que le asigne un conjunto de permisos.",
     appNoReadableObjectGrantDescription: "Su cuenta aún no puede leer ningún registro de esta aplicación. Puede conceder el acceso en la configuración.",
+    appOpensFromMenu: "{{app}} se usa desde su menú",
+    appOpensFromMenuDescription: "Esta aplicación no tiene una página propia. Elija una entrada de su menú para abrir un enlace o ejecutar una acción.",
     openSetup: "Abrir la configuración",
     createFirstApp: "Crear primera aplicación",
     systemSettings: "Configuración del sistema",
