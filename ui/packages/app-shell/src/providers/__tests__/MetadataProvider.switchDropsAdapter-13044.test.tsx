@@ -37,6 +37,8 @@ import { MetadataProvider } from '../MetadataProvider';
 type Ctx = ReturnType<typeof useMetadata>;
 const OBJECT_URL = '/api/v1/meta/object/sys_member';
 const VIEW_URL = '/api/v1/meta/view';
+/** objectstack#29550: one object's views, the read `listViews` asks while no whole list is held. */
+const ACCOUNT_VIEWS_URL = '/api/v1/meta/view?object=account';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -53,6 +55,8 @@ function makeServer() {
       return json({ success: true, data: { type: 'object', name: 'sys_member', item: { name: 'sys_member', fields: {} } } });
     }
     if (path === VIEW_URL) return json({ success: true, data: { type: 'view', items: [] } });
+    // objectstack#29550: one object's views (none here, as in the whole list).
+    if (path.startsWith(`${VIEW_URL}?object=`)) return json({ success: true, data: { type: 'view', items: [] } });
     return json({ success: true, data: { type: 'x', items: [] } });
   };
   const adapter = new ObjectStackAdapter({
@@ -126,9 +130,45 @@ describe('a switch drops the adapter metadata the provider read through it (obje
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     const views = adapter.listViews('account');
-    await waitFor(() => expect(count(calls, VIEW_URL)).toBe(2));
+    // objectstack#29550: the read after the switch asks again (one object's
+    // views); it does not join the other organization's request on the wire.
+    await waitFor(() => expect(count(calls, ACCOUNT_VIEWS_URL)).toBe(1));
+    expect(count(calls, VIEW_URL)).toBe(1);
     release();
     await views;
+  });
+
+  it('an organization or session switch drops a stored one-object view answer: the next read asks again (objectstack#29550)', async () => {
+    for (const change of [
+      () => {
+        authState.activeOrganization = { id: 'org_b' };
+      },
+      () => {
+        authState.user = { id: 'user_b' };
+      },
+    ]) {
+      const { adapter, calls } = makeServer();
+      authState.activeOrganization = { id: 'org_a' };
+      authState.user = { id: 'user_a' };
+      const m = mount(adapter);
+      // No whole list is read: the object route's read is one object's views,
+      // and its answer serves the next read within the open.
+      await adapter.listViews('account');
+      await adapter.listViewOverrides('account');
+      expect(count(calls, ACCOUNT_VIEWS_URL)).toBe(1);
+
+      change();
+      m.rerender();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await adapter.listViews('account');
+      expect(count(calls, ACCOUNT_VIEWS_URL)).toBe(2);
+      expect(count(calls, VIEW_URL)).toBe(0);
+      cleanup();
+      authState.activeOrganization = null;
+      authState.user = null;
+    }
   });
 
   it('an organization or session switch drops the stored view list: the next list read asks again (objectui#13057)', async () => {
@@ -160,7 +200,12 @@ describe('a switch drops the adapter metadata the provider read through it (obje
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
       await adapter.listViews('account');
-      expect(count(calls, VIEW_URL)).toBe(2);
+      // objectstack#29550: it asks again, for one object's views; nothing
+      // stored in the other organization or session answers it.
+      expect(count(calls, ACCOUNT_VIEWS_URL)).toBe(1);
+      expect(count(calls, VIEW_URL)).toBe(1);
+      await adapter.listViews('account');
+      expect(count(calls, ACCOUNT_VIEWS_URL)).toBe(1);
       cleanup();
       authState.activeOrganization = null;
       authState.user = null;

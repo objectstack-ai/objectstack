@@ -229,6 +229,17 @@ export const fieldForm = defineForm({
         // `helpText` is identical on both — they share one i18n key
         // (`metadataForms.field.fields.deleteBehavior`), so divergent text would
         // collide silently.
+        // #29171 (director ruling 6574398310, letter B) — the declared name
+        // exposure, now that it is served (`$expand` answers
+        // `{ id, name, readRefused: true }` for a target the reader is refused)
+        // and drawn (the console's lookup and user cells show that name as
+        // text, with no link). `visibleWhen` is the key's PARSE gate, not only
+        // a meaningfulness gate: `FieldSchema` refuses the key on every other
+        // type, an authored `false` included, so the row is offered exactly
+        // where a value can be saved. `user` has no `reference` row (its
+        // target is always `sys_user`), which is why this row is not grouped
+        // under that one's visibility.
+        { field: 'referenceNameVisible', label: 'Show Name When Unreadable', visibleWhen: "data.type in ['lookup','user']", helpText: "Lets a reader of this record see the referenced record's name, as plain text with no link, even when they may not open that record. Nothing else of it is shown, and a field-level rule on the name still holds (the name then reads Record # and the id). Unset: such a reference shows as a restricted record." },
         { field: 'deleteBehavior', visibleWhen: "data.type in ['lookup','user']", helpText: 'What happens when referenced record is deleted' },
         { field: 'deleteBehavior', type: 'select', visibleWhen: "data.type == 'master_detail'", helpText: 'What happens when referenced record is deleted', options: [
           { label: 'Cascade (delete children)', value: 'cascade' },
