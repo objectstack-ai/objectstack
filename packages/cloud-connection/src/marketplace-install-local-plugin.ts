@@ -3598,7 +3598,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *    (uncopyable content, collisions, an owned namespace, an existing
      *    target) and this door answers each with the verb's own code and
      *    status, the message when the verb declared it a refusal, and
-     *    `details`; a 5xx's message is withheld and logged;
+     *    `details`; any other message is withheld and logged, at any
+     *    status, so the log line the answer points at exists;
      *  - translation bundles are COPIED by the verb as `translation` items, so
      *    they reload at every boot with the environment's translations — this
      *    install writes no ledger entry for a rehydrate to replay;
@@ -3651,9 +3652,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             } as Parameters<NonNullable<UnmanagedImporter['importUnmanagedPackage']>>[0]);
         } catch (err: any) {
             const resolved = resolveThrownHttpError(err, 500);
-            if (resolved.status >= 500) {
+            // [#29822] One rule, whatever the status: the fallback sentence
+            // promises a log line, so whenever it IS the answer, the line is
+            // written. `clientFacingFailureText` quotes only a refusal that
+            // declared a 4xx `status`; a 4xx this door resolves from another
+            // declaration (`statusCode`, the validation shape) gets the
+            // fallback too, and used to get no log line. A quoted reason
+            // needs no log line: the caller already has it.
+            const fallback = `The unmanaged install of '${manifestId}' failed; the reason is in the server log.`;
+            const message = clientFacingFailureText(err, fallback);
+            if (message === fallback) {
                 ctx.logger?.warn?.(
-                    `[MarketplaceInstallLocal] the unmanaged install of ${manifestId} failed: ${err?.message ?? err}`,
+                    `[MarketplaceInstallLocal] the unmanaged install of ${manifestId} failed (${resolved.status} `
+                    + `${resolved.code}): ${err?.message ?? err}`,
                 );
             }
             const details = isPlainObject(err?.details) ? err.details : undefined;
@@ -3661,10 +3672,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 success: false,
                 error: {
                     code: resolved.code,
-                    message: clientFacingFailureText(
-                        err,
-                        `The unmanaged install of '${manifestId}' failed; the reason is in the server log.`,
-                    ),
+                    message,
                     ...(details ? { details } : {}),
                 },
             }, resolved.status as any);
