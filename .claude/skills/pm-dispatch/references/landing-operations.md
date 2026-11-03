@@ -89,7 +89,7 @@
 - 正文同写解除条件:依赖 PR 或锚卡修复合入;因 main 红停放者加行首 `Waits-on: main-red #n`。
 - 每个 CI-failure 事件与清单比对:签名匹配静默跳过,新签名才是真问题。
 - 依赖合入后:末轮同步走中继 `pr_update_branch`(`rest-channel.md`)→ 红清零 → 转 ready → 入队。
-- 收 `Notify: main-green` 即合 `origin/main`(中继 `pr_update_branch`)、删 `Waits-on:` 行,照上行续落地。
+- 收 `Notify: main-green` 即照上行合 `origin/main`、删 `Waits-on:` 行,续走 §C 落地。
 
 ## D. 串行接力:多个已实现 PR 全碰生成物时,一次只放行一个
 
