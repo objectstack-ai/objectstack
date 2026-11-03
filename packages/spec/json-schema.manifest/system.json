@@ -191,6 +191,8 @@
     "system/PlatformTranslationBundle",
     "system/PlatformTranslationData",
     "system/PresignedUrlConfig",
+    "system/PushDirectTransportConfig",
+    "system/PushRelayTransportConfig",
     "system/PushServiceConfig",
     "system/PushVendor",
     "system/QueueConfig",
