@@ -2,7 +2,7 @@
 
 /**
  * `os migrate option-codes` (#29643): the walk on a real engine (`ObjectQL` +
- * sqlite `SqlDriver`, and `InMemoryDriver`).
+ * sqlite `SqlDriver`).
  *
  * Since #29562 (PR #29638) the write door stores a number or boolean written
  * to an option field as its code string. Rows written before keep the form
@@ -10,7 +10,13 @@
  * value, raw JSON elements in a multi-value array on both drivers, and the raw
  * `3` / `true` on driver-memory. The legacy rows here are written through the
  * DRIVER, below the engine's door, which is exactly what the pre-#29562 door
- * handed it; the physical value is read with the driver's own reader.
+ * handed it; the physical value is read with the driver's own query builder.
+ *
+ * driver-memory's face (a raw `3` / `true` on a single-value field) is the
+ * `scalar` arm of `decideOptionCode`, pinned by the decision table below and,
+ * end to end, by the raw JSON elements every driver keeps in a multi-value
+ * array. driver-memory itself is not a test backend here: its test consumers
+ * are a closed census (`check:driver-memory-census`).
  *
  * Pinned: the decision table (`decideOptionCode`); a dry run counts and
  * writes nothing; `--apply` makes `{ f: "3" }` find every legacy row and a
@@ -23,7 +29,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 import { decideOptionCode, migrateOptionCodes, optionCodeFields } from './option-codes.js';
 
 const opts = (...codes: string[]) => codes.map((value) => ({ value, label: value }));
@@ -55,22 +60,21 @@ afterEach(async () => {
   }
 });
 
-type Boot = { engine: ObjectQL; driver: any; stored: (object: string, id: string) => Promise<Record<string, unknown>> };
-
-async function bootWith(driver: any, stored: Boot['stored'] | undefined): Promise<Boot> {
+async function boot() {
   const engine = new ObjectQL();
   live.push(engine);
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   engine.registerDriver(driver, true);
   await engine.init();
   for (const o of [OBJ, OTHER]) engine.registry.registerObject(o as any);
   await engine.syncSchemas();
-  return { engine, driver, stored: stored ?? (async (object, id) => (await driver.findOne(object, { where: { id } })) as any) };
+  const knex = (driver as any).knex;
+  const stored = async (object: string, id: string) =>
+    (await knex(object).where({ id }).first()) as Record<string, unknown>;
+  return { engine, driver, stored };
 }
-const bootSqlite = () => {
-  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
-  return bootWith(driver, async (object, id) => (await (driver as any).knex(object).where({ id }).first()) as any);
-};
-const bootMemory = () => bootWith(new InMemoryDriver(), undefined);
+type Boot = Awaited<ReturnType<typeof boot>>;
+const parse = (v: unknown) => (typeof v === 'string' ? JSON.parse(v) : v);
 
 const ids = async (ctx: Boot, where: Record<string, unknown>) =>
   ((await ctx.engine.find('oc_obj', { where, fields: ['id'] })) as Array<{ id: string }>).map((r) => r.id).sort();
@@ -128,15 +132,14 @@ describe('os migrate option-codes: the decision (#29643)', () => {
   });
 });
 
-describe.each([
-  ['sqlite', bootSqlite, { n3: '3.0', b1: '1.0', f0: '0.0' }],
-  ['driver-memory', bootMemory, { n3: 3, b1: true, f0: false }],
-] as const)('os migrate option-codes: the walk on %s (#29643)', (_name, boot, legacyCoded) => {
+describe('os migrate option-codes: the walk on sqlite (#29643)', () => {
   it('red before: the legacy form is what is stored, and { f: "3" } misses it', async () => {
     const ctx = await boot();
     await plantLegacy(ctx);
-    expect((await ctx.stored('oc_obj', 'n3')).coded).toEqual(legacyCoded.n3);
-    expect((await ctx.stored('oc_obj', 'b1')).coded).toEqual(legacyCoded.b1);
+    expect((await ctx.stored('oc_obj', 'n3')).coded).toBe('3.0');
+    expect((await ctx.stored('oc_obj', 'b1')).coded).toBe('1.0');
+    expect((await ctx.stored('oc_obj', 'f0')).coded).toBe('0.0');
+    expect(parse((await ctx.stored('oc_obj', 'n3')).multi)).toEqual([3, true]);
     expect(await ids(ctx, { coded: '3' })).toEqual([]);
     // A unique field's new "3" does not collide with the old form.
     await ctx.engine.insert('oc_obj', { id: 'new', uq: '3' });
@@ -175,22 +178,22 @@ describe.each([
     expect(await ids(ctx, { coded: '3' })).toEqual(['n3']);
     expect(await ids(ctx, { coded: 'true' })).toEqual(['b1']);
     expect(await ids(ctx, { radio: '2' })).toEqual(['n3']);
-    // A free field: driver-memory's raw 3 is decidable by type; SQLite's "3.0" is not (reported below).
-    const sqlite = ctx.driver instanceof SqlDriver;
-    expect(await ids(ctx, { free: '3' })).toEqual(sqlite ? [] : ['n3']);
+    // A free field's SQLite "3.0" is not decidable: reported below, still stored as it was.
+    expect(await ids(ctx, { free: '3' })).toEqual([]);
     const n3 = (await ctx.engine.findOne('oc_obj', { where: { id: 'n3' } })) as Record<string, unknown>;
     expect(n3.multi).toEqual(['3', 'true']);
     expect(n3.tags).toEqual(['0', 'k']);
+    expect(parse((await ctx.stored('oc_obj', 'n3')).multi)).toEqual(['3', 'true']);
     // Undecidable / out of scope: as stored.
-    expect((await ctx.stored('oc_obj', 'f0')).gone).toEqual(sqlite ? '3.0' : 3);
-    expect((await ctx.stored('oc_obj', 'n3')).title).toEqual(sqlite ? '42.0' : 42);
+    expect((await ctx.stored('oc_obj', 'f0')).gone).toEqual('3.0');
+    expect((await ctx.stored('oc_obj', 'n3')).title).toEqual('42.0');
     expect((await ctx.stored('oc_obj', 'held')).free).toBe('hello');
     // The unique key now sees one value.
     await expect(ctx.engine.insert('oc_obj', { id: 'dup', uq: '3' })).rejects.toMatchObject({ code: expect.stringMatching(/UNIQUE|DUPLICATE/i) });
 
     const again = await migrateOptionCodes(ctx.engine as any, silent, { apply: true });
-    // Reported values stay reported: SQLite free "3.0" / "1.0", ambiguous "1.0", undeclared "3.0"; memory's undeclared 3.
-    expect([again.rewriteValues, again.rewritten, again.reportedValues]).toEqual([0, 0, sqlite ? 4 : 1]);
+    // Reported values stay reported: free "3.0" / "1.0", ambiguous "1.0", undeclared "3.0".
+    expect([again.rewriteValues, again.rewritten, again.reportedValues]).toEqual([0, 0, 4]);
   });
 
   it('a unique collision with a row already holding the code is a per-row failure, not an abort', async () => {
@@ -210,13 +213,13 @@ describe.each([
     const report = await migrateOptionCodes(ctx.engine as any, silent, { apply: true, objects: ['oc_other'] });
     expect(report.scannedObjects).toEqual(['oc_other']);
     expect(report.rewritten).toBe(1);
-    expect((await ctx.stored('oc_obj', 'n3')).coded).toEqual(legacyCoded.n3);
+    expect((await ctx.stored('oc_obj', 'n3')).coded).toBe('3.0');
   });
 });
 
-describe('os migrate option-codes: SQLite "N.0" reports on sqlite (#29643)', () => {
+describe('os migrate option-codes: what is reported, not rewritten (#29643)', () => {
   it('a free field and an ambiguous "1.0" are reported and left as stored', async () => {
-    const ctx = await bootSqlite();
+    const ctx = await boot();
     await plantLegacy(ctx);
     const report = await migrateOptionCodes(ctx.engine as any, silent, { apply: true });
     const byCol = Object.fromEntries(report.columns.map((c) => [`${c.object}.${c.field}`, c.reported]));
