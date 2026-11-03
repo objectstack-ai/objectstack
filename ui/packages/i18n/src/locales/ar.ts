@@ -3567,6 +3567,8 @@ const ar = {
     appNothingAvailableGrantDescription: "لا يحتوي هذا التطبيق على صفحات يمكن لحسابك فتحها. يمكنك منح حق الوصول من الإعداد.",
     appNoReadableObjectDescription: "لا يمكن لحسابك قراءة أي سجلات في هذا التطبيق بعد. اطلب من المسؤول تعيين مجموعة أذونات لك.",
     appNoReadableObjectGrantDescription: "لا يمكن لحسابك قراءة أي سجلات في هذا التطبيق بعد. يمكنك منح حق الوصول من الإعداد.",
+    appOpensFromMenu: "يُستخدم {{app}} من قائمته",
+    appOpensFromMenuDescription: "لا يحتوي هذا التطبيق على صفحة خاصة به. اختر عنصرًا من قائمته لفتح رابط أو تنفيذ إجراء.",
     openSetup: "فتح الإعداد",
     createFirstApp: "إنشاء أول تطبيق",
     systemSettings: "إعدادات النظام",

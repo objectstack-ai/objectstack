@@ -3302,6 +3302,8 @@ const de = {
     appNothingAvailableGrantDescription: "Diese App enthält keine Seiten, die Ihr Konto öffnen kann. Sie können den Zugriff in der Einrichtung gewähren.",
     appNoReadableObjectDescription: "Ihr Konto kann noch keine Datensätze in dieser App lesen. Bitten Sie einen Administrator, Ihnen einen Berechtigungssatz zuzuweisen.",
     appNoReadableObjectGrantDescription: "Ihr Konto kann noch keine Datensätze in dieser App lesen. Sie können den Zugriff in der Einrichtung gewähren.",
+    appOpensFromMenu: "{{app}} wird über das Menü bedient",
+    appOpensFromMenuDescription: "Diese App hat keine eigene Seite. Wählen Sie einen Eintrag im Menü, um einen Link zu öffnen oder eine Aktion auszuführen.",
     openSetup: "Einrichtung öffnen",
     createFirstApp: "Erste App erstellen",
     systemSettings: "Systemeinstellungen",

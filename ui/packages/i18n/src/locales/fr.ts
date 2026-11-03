@@ -3365,6 +3365,8 @@ const fr = {
     appNothingAvailableGrantDescription: "Cette application ne contient aucune page que votre compte peut ouvrir. Vous pouvez accorder l'accès dans la configuration.",
     appNoReadableObjectDescription: "Votre compte ne peut encore lire aucun enregistrement de cette application. Demandez à un administrateur de vous attribuer un ensemble d'autorisations.",
     appNoReadableObjectGrantDescription: "Votre compte ne peut encore lire aucun enregistrement de cette application. Vous pouvez accorder l'accès dans la configuration.",
+    appOpensFromMenu: "{{app}} s'utilise depuis son menu",
+    appOpensFromMenuDescription: "Cette application n'a pas de page propre. Choisissez une entrée de son menu pour ouvrir un lien ou lancer une action.",
     openSetup: "Ouvrir la configuration",
     createFirstApp: "Créer la première application",
     systemSettings: "Paramètres système",
