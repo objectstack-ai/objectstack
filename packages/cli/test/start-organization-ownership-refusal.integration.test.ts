@@ -196,9 +196,14 @@ function recorded(name: string): Run {
   return result;
 }
 
-/** The two commands a refusal names: the plan, then the apply. */
+/**
+ * The two commands the refusal the boot PRINTED names: the plan, then the
+ * apply. Read from its `✗` line, never from the kernel's structured log of the
+ * same error, which carries the text JSON-escaped.
+ */
 function namedCommands(output: string): { plan: string; apply: string } {
-  const m = /Run '(.+? --out PLAN)' to write and review its plan, take a backup, then run '(.+? --apply --plan-file PLAN --backup-taken)'/.exec(output);
+  const printed = output.split('\n').find((line) => line.trimStart().startsWith('✗ ') && line.includes('organization-ownership')) ?? '';
+  const m = /Run '(.+? --out PLAN)' to write and review its plan, take a backup, then run '(.+? --apply --plan-file PLAN --backup-taken)'/.exec(printed);
   if (!m) throw new Error(`the refusal names no ceremony commands\n--- output ---\n${output.slice(-6000)}`);
   return { plan: m[1]!, apply: m[2]! };
 }
@@ -287,6 +292,9 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
     expect(existsSync(join(dir, 'plan.json'))).toBe(true);
     const apply = recorded('apply');
     expect(apply.code, apply.output.slice(-6000)).toBe(0);
+    expect(apply.output).toContain('The ceremony is complete');
+    // The plugin's own init line: the ceremony composed it, with the secret the command exported.
+    expect(apply.output).toContain('Security Plugin initialized');
     expect(apply.output).not.toMatch(/Did not compose the security plugin/);
   });
 
