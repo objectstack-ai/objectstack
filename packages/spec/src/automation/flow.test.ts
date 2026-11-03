@@ -152,6 +152,63 @@ describe('FlowVariableSchema', () => {
       expect(flow.variables?.map(v => v.defaultValue)).toEqual([false, 0]);
     });
   });
+
+  // #29425 ruling A — a start input may declare that it is the id of a record
+  // of a named object. The start doors that load it are the server half; this
+  // is the authorable surface they read.
+  describe('objectName — a start input declared a record reference', () => {
+    it('accepts the declaration on an input, and keeps it as authored', () => {
+      const parsed = FlowVariableSchema.parse({
+        name: 'accountId', type: 'text', isInput: true, objectName: 'crm_account',
+      });
+      expect(parsed.objectName).toBe('crm_account');
+      expect(parsed.isInput).toBe(true);
+    });
+
+    it('is OPTIONAL — an input without it parses exactly as before, and reads back absent', () => {
+      const parsed = FlowVariableSchema.parse({ name: 'accountId', type: 'text', isInput: true });
+      expect('objectName' in parsed).toBe(false);
+    });
+
+    it('refuses it on a variable that is not an input, at the key, naming the fix', () => {
+      for (const variable of [
+        { name: 'accountId', type: 'text', objectName: 'crm_account' },
+        { name: 'accountId', type: 'text', isInput: false, isOutput: true, objectName: 'crm_account' },
+      ]) {
+        const result = FlowVariableSchema.safeParse(variable);
+        expect(result.success).toBe(false);
+        const issue = result.error!.issues.find((i) => i.path.join('.') === 'objectName');
+        expect(issue?.code).toBe('custom');
+        expect(issue?.message).toContain('Set `isInput: true`');
+      }
+    });
+
+    it('refuses a name that is not an object name', () => {
+      for (const objectName of ['CrmAccount', 'crm-account', '', 'crm.account']) {
+        const result = FlowVariableSchema.safeParse({ name: 'accountId', type: 'text', isInput: true, objectName });
+        expect(result.success, objectName).toBe(false);
+        expect(result.error!.issues.some((i) => i.path.join('.') === 'objectName')).toBe(true);
+      }
+    });
+
+    it('a flow carries the declaration through FlowSchema', () => {
+      const flow = FlowSchema.parse({
+        name: 'close_account',
+        label: 'Close Account',
+        type: 'autolaunched',
+        variables: [
+          { name: 'accountId', type: 'text', isInput: true, objectName: 'crm_account' },
+          { name: 'note', type: 'text', isInput: true },
+        ],
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      });
+      expect(flow.variables?.map(v => v.objectName)).toEqual(['crm_account', undefined]);
+    });
+  });
 });
 
 describe('FlowNodeSchema', () => {
@@ -1887,6 +1944,15 @@ describe('unknown keys are rejected, not stripped', () => {
       for (const key of ['default', 'initialValue']) {
         expect(unknownKeyIssue(FlowVariableSchema, { name: 'v', type: 'boolean', [key]: false })!.message)
           .toContain(`\`${key}\` → \`defaultValue\``);
+      }
+    });
+
+    it('points `reference` / `object` at `objectName`', () => {
+      // A lookup field's word and a time-relative trigger's word for the
+      // object a reference points at. Still REJECTED; the alias names the key.
+      for (const key of ['reference', 'object']) {
+        expect(unknownKeyIssue(FlowVariableSchema, { name: 'v', type: 'text', isInput: true, [key]: 'crm_account' })!.message)
+          .toContain(`\`${key}\` → \`objectName\``);
       }
     });
   });

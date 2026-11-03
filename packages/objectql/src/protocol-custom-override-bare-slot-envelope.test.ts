@@ -35,6 +35,40 @@
  *
  * Test-path resolution: the protocol is `@objectstack/metadata-protocol`'s
  * `dist/`, so a change there is read here after that package is rebuilt.
+ *
+ * ## [#29613] The second describe: page, app, dataset, doc and book
+ *
+ * A `.custom` pair's published override of a base's
+ * page, app, dataset, doc or book is served from its ROW, as a dashboard's
+ * is, and no longer from a copy in the registry's bare slot wearing the
+ * base's envelope.
+ *
+ * These five types are SEALED (ADR-0131 D6: `allowEnvironmentOverlay:
+ * false`), so every read declined their stored row as an overlay of managed
+ * content (`declinesStoredRow`), the pair's declared override with the rest.
+ * The override was served only from the bare slot, where the hydrator
+ * registered it under the base's envelope. Measured on main 744211fc, the
+ * #29600 harness run without and with a metadata service (S = shipped,
+ * O = the override):
+ *
+ *  - by-name (no package, BASE, PAIR): O from the bare slot without a
+ *    metadata service; S with one (a real boot), the service's copy of the
+ *    base's body answering before the registry;
+ *  - the effective list (no package, BASE): O, from the bare slot;
+ *  - the layered read's effective layer naming BASE: S;
+ *  - the per-package layer naming PAIR: []; naming BASE: [S, O] without a
+ *    metadata service, [O] with one;
+ *  - `registry.getAllApps` (the app): [S, O].
+ *
+ * Pinned here, per type, with and without a metadata service, at once and
+ * after a restart: the served reads all answer O (ADR-0146 D8 item 2), the
+ * per-package layer lists S under BASE and O under PAIR (D8 item 3), and the
+ * registry's bare slot holds no copy of the override, so its direct reads
+ * (and `registry.getAllApps`) answer the base's own item. CONTROL: a sealed
+ * row that is not the pair's declared override (a package-less environment
+ * row of the base's name) stays unserved. Its boot is
+ * `environment-overlay-email-locale-restart.test.ts`'s: the hydration
+ * `ObjectQLPlugin.start()` runs, then the pair.
  */
 // Pays the lint root's first load at collection, never inside a clocked case.
 import './__fixtures__/lint-root-preload.testkit.js';
@@ -51,6 +85,10 @@ const OTHER = 'com.example.other';
 const DECLARATION = { package: BASE, basedOn: '1.0.0' };
 const SHIPPED = 'Shipped label';
 const EDITED = 'Edited label';
+/** [#29613] A sealed row that is not the pair's declared override. */
+const RESIDUE = 'Residue label';
+/** Unique across boots: a restart is a new driver over the same stores. */
+let nextId = 0;
 
 const sysMetadataObject: ServiceObject = {
     name: 'sys_metadata',
@@ -72,14 +110,13 @@ const sysMetadataObject: ServiceObject = {
     },
 };
 
-function makeMemoryDriver() {
-    const stores = new Map<string, Map<string, Record<string, unknown>>>();
+/** [#29613] `stores` shared by two boots = a restart over the same database. */
+function makeMemoryDriver(stores: Map<string, Map<string, Record<string, unknown>>> = new Map()) {
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
         if (!s) { s = new Map(); stores.set(obj, s); }
         return s;
     };
-    let nextId = 0;
     const matchesWhere = (row: Record<string, unknown>, where: any): boolean => {
         if (!where || typeof where !== 'object') return true;
         for (const [k, v] of Object.entries(where)) {
@@ -309,4 +346,146 @@ describe('[#29600] a pair\'s published override never takes the base\'s envelope
         expect(reading(bare)).toBe(`Other customized/${OTHER}`);
         expect(bare._provenance).toBe('package');
     });
+});
+
+const pageBody = (label: string) => ({ name: 'showcase_settings', label, type: 'app', regions: [] });
+const appBody = (label: string) => ({ name: 'showcase', label });
+const datasetBody = (label: string) => ({
+    name: 'showcase_task_metrics', label, object: 'showcase_task',
+    dimensions: [{ name: 'status', label: 'Status', field: 'status', type: 'string' }],
+    measures: [{ name: 'task_count', label: 'Tasks', aggregate: 'count' }],
+});
+const docBody = (label: string) => ({ name: 'showcase_index', label, content: '# Index' });
+const bookBody = (label: string) => ({
+    name: 'showcase_manual', label, groups: [{ key: 'start', label: 'Start', pages: ['showcase_index'] }],
+});
+
+/** Per type: its body and the manifest collection that ships it. */
+const SEALED_TYPES = [
+    { type: 'page', body: pageBody, collection: 'pages' },
+    { type: 'app', body: appBody, collection: 'apps' },
+    { type: 'dataset', body: datasetBody, collection: 'datasets' },
+    { type: 'doc', body: docBody, collection: 'docs' },
+    { type: 'book', body: bookBody, collection: 'books' },
+] as const;
+
+function sealedBaseManifest(): Record<string, unknown> {
+    const manifest: Record<string, unknown> = {
+        id: BASE, name: 'showcase', version: '1.0.0', namespace: 'showcase',
+        objects: [{
+            name: 'showcase_task', label: 'Task', sharingModel: 'private',
+            fields: {
+                title: { name: 'title', label: 'Title', type: 'text' },
+                status: { name: 'status', label: 'Status', type: 'text' },
+            },
+        }],
+    };
+    for (const t of SEALED_TYPES) manifest[t.collection] = [t.body(SHIPPED)];
+    return manifest;
+}
+
+type Stores = Map<string, Map<string, Record<string, unknown>>>;
+
+/**
+ * One boot over `stores`: engine, the base, the protocol, the hydration
+ * `ObjectQLPlugin.start()` runs, then the pair. Called twice over the same
+ * stores = a restart. `withService` registers a metadata service holding the
+ * code package's bodies, as every real boot's MetadataService holds them: the
+ * by-name read consults it before the registry.
+ */
+async function bootSealed(stores: Stores, withService: boolean) {
+    const engine = new ObjectQL();
+    engine.registerDriver(makeMemoryDriver(stores).driver, true);
+    await engine.init();
+    engine.registry.registerObject(sysMetadataObject, 'test-package');
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+        engine.registry.registerObject(o as any, 'test-package');
+    }
+    engine.registerApp(sealedBaseManifest());
+    const services = new Map<string, unknown>();
+    if (withService) {
+        const shipped = new Map(SEALED_TYPES.map((t) => [t.type as string, { ...t.body(SHIPPED), _packageId: BASE }]));
+        services.set('metadata', {
+            async get(type: string, name: string) {
+                const item = shipped.get(type);
+                return item && item.name === name ? item : undefined;
+            },
+            async list(type: string) {
+                const item = shipped.get(type);
+                return item ? [item] : [];
+            },
+        });
+    }
+    const protocol: any = new ObjectStackProtocolImplementation(engine, () => services as any);
+    const load = await protocol.loadMetaFromDb();
+    expect(load.errors, 'the boot hydration').toBe(0);
+    await protocol.ensureCustomizationPackage({ basePackageId: BASE });
+    return { engine, protocol };
+}
+
+const byNameReading = async (protocol: any, type: string, name: string, packageId?: string): Promise<string | null> =>
+    reading((await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) }))?.item);
+
+/** Every reading the card names, for one type and name. */
+async function sealedReadings(engine: ObjectQL, protocol: any, type: string, name: string) {
+    return {
+        byName: [await byNameReading(protocol, type, name), await byNameReading(protocol, type, name, BASE), await byNameReading(protocol, type, name, PAIR)],
+        list: [await effectiveList(protocol, type, name), await effectiveList(protocol, type, name, BASE)],
+        layered: (await protocol.getMetaItemLayered({ type, name, packageId: BASE }))?.effective?.label,
+        perPackage: {
+            base: await perPackage(protocol, type, name, BASE),
+            pair: await perPackage(protocol, type, name, PAIR),
+            unscoped: await perPackage(protocol, type, name),
+        },
+        bareSlot: reading((engine.registry as any).metadata.get(type)?.get(name)),
+        registryGetItem: reading(engine.registry.getItem(type, name)),
+        ...(type === 'app' ? { getAllApps: engine.registry.getAllApps().filter((a: any) => a?.name === name).map(reading) } : {}),
+    };
+}
+
+/** What every reading answers once the override is published (ADR-0146 D8 items 2 and 3). */
+const servedReadings = (type: string) => ({
+    byName: [`${EDITED}/${BASE}`, `${EDITED}/${BASE}`, `${EDITED}/${BASE}`],
+    list: [[EDITED], [EDITED]],
+    layered: EDITED,
+    perPackage: { base: [SHIPPED], pair: [EDITED], unscoped: [EDITED, SHIPPED] },
+    bareSlot: null,
+    registryGetItem: `${SHIPPED}/${BASE}`,
+    ...(type === 'app' ? { getAllApps: [`${SHIPPED}/${BASE}`] } : {}),
+});
+
+describe('[#29613] a pair\'s published override of a sealed type is served from its row', () => {
+    for (const withService of [false, true]) {
+        const shape = withService ? 'with a metadata service (a real boot)' : 'with no metadata service';
+        for (const { type, body } of SEALED_TYPES) {
+            const name = body(SHIPPED).name;
+
+            it(`${type}, ${shape}: every reader serves the override, at once and after a restart`, async () => {
+                const stores: Stores = new Map();
+                const first = await bootSealed(stores, withService);
+                await publishOverride(first.protocol, type, name, body(EDITED));
+                expect(await sealedReadings(first.engine, first.protocol, type, name), `${type} at once`).toEqual(servedReadings(type));
+
+                const restarted = await bootSealed(stores, withService);
+                expect(await sealedReadings(restarted.engine, restarted.protocol, type, name), `${type} after a restart`).toEqual(servedReadings(type));
+            });
+        }
+    }
+
+    for (const { type, body } of SEALED_TYPES) {
+        const name = body(SHIPPED).name;
+        it(`CONTROL, ${type}: a package-less environment row of the base's name is not the pair's override and stays unserved`, async () => {
+            const stores: Stores = new Map();
+            await bootSealed(stores, true);
+            // A row written through the hatch before the ADR-0131 D6 seal: bound to no package, no declaration.
+            stores.get('sys_metadata')!.set(`residue_${type}`, {
+                id: `residue_${type}`, type, name, organization_id: null, package_id: null, state: 'active', version: 1,
+                metadata: JSON.stringify(body(RESIDUE)),
+            });
+            const { protocol } = await bootSealed(stores, true);
+            expect(await byNameReading(protocol, type, name), `${type} by name`).toBe(`${SHIPPED}/${BASE}`);
+            expect(await byNameReading(protocol, type, name, BASE), `${type} by name, the base`).toBe(`${SHIPPED}/${BASE}`);
+            expect((await protocol.getMetaItemLayered({ type, name, packageId: BASE }))?.effective?.label, `${type} layered`).toBe(SHIPPED);
+        });
+    }
 });

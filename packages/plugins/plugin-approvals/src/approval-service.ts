@@ -1121,11 +1121,30 @@ const MEMBER_SCREEN_READ_LIMIT = 50000;
 /**
  * [#29362, #29503] Rows per page of the directory holder reads
  * ({@link ApprovalService.readHoldersToCompletion}: the membership tier, the
- * position assignments, the team members) — the bound each read always
+ * position assignments, the team members, the business-unit members) — the bound each read always
  * carried, so a group held by fewer people issues the one read it always did,
  * and one held by more is read in further pages rather than cut.
  */
 const HOLDER_PAGE_ROWS = 10000;
+
+/**
+ * [#29655] Rows per page of the business-unit descent's child-unit read — the
+ * bound that read always carried, so a parent with fewer children issues the
+ * one read it always did, and one with more is read in further pages.
+ */
+const CHILD_UNIT_PAGE_ROWS = 1000;
+
+/**
+ * [#29362, #29655] Why a directory read refused: what could not be read, the
+ * driver's reason, and why the answer is a refusal rather than nobody. The
+ * driver's error rides along as `cause`.
+ */
+function holderReadRefusal(scope: string, err: unknown): Error {
+  return Object.assign(new Error(
+    `[approvals] ${scope} could not be read: ${err instanceof Error ? err.message : String(err)}. `
+    + 'Routing to a shortened slate would leave holders unasked, so the expansion refuses instead.',
+  ), { cause: err });
+}
 
 /**
  * Approver types resolved by QUERYING a graph rather than by taking `value`
@@ -2695,12 +2714,7 @@ export class ApprovalService implements IApprovalService {
         // this is, and carry the error, so an operator does not go staffing a
         // position whose holders simply could not be read. The try above also
         // wraps the cross-org read filter (`bounded`), so the line names both.
-        this.logger?.warn?.(
-          `[approvals] approver '${type}:${a.value}' could not be expanded — a directory or read-filter lookup failed, so the `
-          + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
-          + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
-          { type, value: a.value, organizationId: organizationId ?? null, error: directoryFailure },
-        );
+        this.warnExpansionFailed(type, a.value, organizationId, directoryFailure);
       } else {
         this.logger?.warn?.(
           `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot names no one, so no one is `
@@ -2715,6 +2729,32 @@ export class ApprovalService implements IApprovalService {
     // phantom slot the existence check above exists to keep off the slate.
     if (type === 'user') return [];
     return [`${type}:${a.value}`];
+  }
+
+  /**
+   * [#29362, #29606] The one warning an approver slot logs when its expansion
+   * FAILED — a directory or read-filter lookup threw — rather than came back
+   * empty: the slot falls back to its literal, and the line carries the error.
+   * Shared by the static graph types ({@link resolveApproverSpec}) and an
+   * `expression` approver's `resolveAs` values ({@link resolveExpressionApprovers},
+   * which passes its source as `expression`), so the two cannot drift.
+   */
+  private warnExpansionFailed(
+    type: string,
+    value: unknown,
+    organizationId: string | null | undefined,
+    error: string,
+    expression?: string,
+  ): void {
+    this.logger?.warn?.(
+      `[approvals] approver '${type}:${value}' could not be expanded — a directory or read-filter lookup failed, so the `
+      + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
+      + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
+      {
+        type, value, organizationId: organizationId ?? null, error,
+        ...(expression === undefined ? {} : { expression }),
+      },
+    );
   }
 
   /**
@@ -2859,6 +2899,11 @@ export class ApprovalService implements IApprovalService {
         }
       } catch (err: any) {
         if (String(err?.message ?? '').startsWith('VALIDATION_FAILED')) throw err;
+        // [#29606] The literal slot below is the same fallback the static graph
+        // types take, and it says why exactly as they do: a failed read is not
+        // an unstaffed value, so an operator is pointed at the read rather than
+        // at staffing it.
+        this.warnExpansionFailed(resolveAs, key, organizationId, err instanceof Error ? err.message : String(err), source);
         users = [];
       }
       if (crossOrg && users.length) {
@@ -3188,42 +3233,55 @@ export class ApprovalService implements IApprovalService {
    */
   private async expandBusinessUnitUsers(businessUnitId: string, organizationId?: string | null): Promise<string[]> {
     if (!businessUnitId) return [];
+    const inOrg = organizationId ? ` in organization '${organizationId}'` : '';
     // Seed sanity check: skip if dept doesn't exist or is inactive within tenant.
+    // [#29655] A failed seed read refuses — the slot then says the read failed
+    // rather than "expanded to nobody". A stack with no `sys_business_unit`
+    // has no departments.
+    let live: boolean;
     try {
-      if (!(await this.businessUnitIsLive(businessUnitId, organizationId))) return [];
-    } catch { return []; }
+      live = await this.businessUnitIsLive(businessUnitId, organizationId);
+    } catch (err) {
+      if (isObjectAbsentError(err, 'sys_business_unit')) return [];
+      throw holderReadRefusal(`business unit '${businessUnitId}'${inOrg}`, err);
+    }
+    if (!live) return [];
 
     const seen = new Set<string>([businessUnitId]);
     const queue: string[] = [businessUnitId];
     while (queue.length) {
       const parent = queue.shift()!;
-      let kids: any[] = [];
-      try {
-        const filter = this.businessUnitOrgScope(
-          { parent_business_unit_id: parent, active: { $ne: false } },
-          organizationId,
-        );
-        kids = await this.engine.find('sys_business_unit', { filter, fields: ['id'], limit: 1000, context: SYSTEM_CTX } as any);
-      } catch { kids = []; }
+      // [#29655] Every active child unit, read to completion — or a refusal.
+      // It read once at a 1,000-row bound and answered `[]` on any failure:
+      // a child past the bound, or every child of a parent whose read failed,
+      // left the slate with its members and no signal.
+      const kids = await this.readRowsToCompletion(
+        'sys_business_unit',
+        this.businessUnitOrgScope({ parent_business_unit_id: parent, active: { $ne: false } }, organizationId),
+        [],
+        `the child units of business unit '${parent}'${inOrg}`,
+        CHILD_UNIT_PAGE_ROWS,
+      );
       for (const k of kids ?? []) {
-        const kid = String((k as any).id ?? '');
+        const kid = String(k?.id ?? '');
         if (kid && !seen.has(kid)) { seen.add(kid); queue.push(kid); }
       }
     }
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_business_unit_member', {
-        // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
-        // on purpose and is not {@link businessUnitOrgScope}. The units above
-        // proved their tenancy; these rows have not, and the
-        // shared seeded unit id is exactly where other tenants' rows sit.
-        where: this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      } as any);
-    } catch { rows = []; }
-    return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // [#29606] Every member of the subtree, read to completion — or a refusal
+    // that {@link resolveApproverSpec}'s directory catch reports as a failed
+    // read, never "expanded to nobody". It read once at a 10,000-row bound and
+    // answered `[]` on any failure: past the bound the slate silently lost the
+    // rest, and a failed read logged as an unstaffed unit. A stack with no
+    // `sys_business_unit_member` has no members.
+    return this.readHoldersToCompletion(
+      'sys_business_unit_member',
+      // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
+      // on purpose and is not {@link businessUnitOrgScope}. The units above
+      // proved their tenancy; these rows have not, and the
+      // shared seeded unit id is exactly where other tenants' rows sit.
+      this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
+      `the members of business unit '${businessUnitId}' and its descendant units${inOrg}`,
+    );
   }
 
   /**
@@ -3445,8 +3503,8 @@ export class ApprovalService implements IApprovalService {
   /**
    * [#29362, #29503] The `user_id`s of every `object` row matching `where`,
    * read to COMPLETION — or a refusal, never a shortened or an invented empty
-   * slate. The one read behind the membership tier, the position assignments
-   * and the team members.
+   * slate. The one read behind the membership tier, the position assignments,
+   * the team members and the business-unit members (#29606).
    *
    * Pages of {@link HOLDER_PAGE_ROWS} through the platform's one keyset walk
    * (`keysetWalk`, `@objectstack/types`), ordered by `id`, so a group held past
@@ -3460,24 +3518,40 @@ export class ApprovalService implements IApprovalService {
    * attributed to `object`, so an absence of another object is still loud.
    */
   private async readHoldersToCompletion(object: string, where: Record<string, unknown>, scope: string): Promise<string[]> {
+    const rows = await this.readRowsToCompletion(object, where, ['user_id'], scope, HOLDER_PAGE_ROWS);
     const users = new Set<string>();
+    for (const row of rows ?? []) {
+      const uid = String(row?.user_id ?? '');
+      if (uid) users.add(uid);
+    }
+    return Array.from(users);
+  }
+
+  /**
+   * [#29362, #29503, #29655] Every `object` row matching `where` (its `id`
+   * plus `fields`), read to COMPLETION through the platform's one keyset walk
+   * — or a refusal; `null` when `object` does not exist on this stack, so each
+   * caller says what absence means for it. The one walk behind
+   * {@link readHoldersToCompletion} and the business-unit descent of
+   * {@link expandBusinessUnitUsers}.
+   */
+  private async readRowsToCompletion(
+    object: string,
+    where: Record<string, unknown>,
+    fields: readonly string[],
+    scope: string,
+    pageSize: number,
+  ): Promise<Record<string, unknown>[] | null> {
+    const rows: Record<string, unknown>[] = [];
     const walk = keysetWalk<Record<string, unknown>>(
-      (page) => this.engine.find(object, { ...page, fields: ['id', 'user_id'], context: SYSTEM_CTX }),
-      { where, pageSize: HOLDER_PAGE_ROWS },
+      (page) => this.engine.find(object, { ...page, fields: ['id', ...fields], context: SYSTEM_CTX }),
+      { where, pageSize },
     );
     try {
-      for await (const page of walk.pages()) {
-        for (const row of page) {
-          const uid = String(row?.user_id ?? '');
-          if (uid) users.add(uid);
-        }
-      }
+      for await (const page of walk.pages()) rows.push(...page);
     } catch (err) {
-      if (isObjectAbsentError(err, object)) return [];
-      throw Object.assign(new Error(
-        `[approvals] ${scope} could not be read: ${err instanceof Error ? err.message : String(err)}. `
-        + 'Routing to a shortened slate would leave holders unasked, so the expansion refuses instead.',
-      ), { cause: err });
+      if (isObjectAbsentError(err, object)) return null;
+      throw holderReadRefusal(scope, err);
     }
     if (walk.truncated) {
       throw new Error(
@@ -3486,7 +3560,7 @@ export class ApprovalService implements IApprovalService {
         + 'holders unasked, so the expansion refuses instead.',
       );
     }
-    return Array.from(users);
+    return rows;
   }
 
   /**

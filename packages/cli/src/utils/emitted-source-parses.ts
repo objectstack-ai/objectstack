@@ -47,16 +47,15 @@
  *
  * ## Why `ts` arrives through a lazy import
  *
- * `ts-morph` is already a CLI runtime dependency and re-exports the full
- * TypeScript compiler namespace, so we use its `ts` rather than adding a
- * direct `typescript` dependency — the same call `detect-free-identifiers.ts`
- * makes, and for the same reason. It is imported *inside* the check rather
- * than at module top because the compiler is a heavy load and `os generate`
- * has no other use for it: a command that is refused pays for the parser, a
- * command that never reaches here does not.
+ * The compiler namespace comes from `typescript`, a direct CLI runtime
+ * dependency — the same source `detect-free-identifiers.ts` uses, and for the
+ * same reason. It is imported *inside* the check rather than at module top
+ * because the compiler is a heavy load and `os generate` has no other use for
+ * it: a command that is refused pays for the parser, a command that never
+ * reaches here does not.
  */
 
-import type { ts as TS } from 'ts-morph';
+import type TS from 'typescript';
 
 /** One file a command is about to write, and the bytes it would contain. */
 export interface EmittedSource {
@@ -117,7 +116,7 @@ export function syntacticDiagnostics(ts: typeof TS, source: string): string[] {
 export async function findEmissionParseFailures(
   emissions: readonly EmittedSource[],
 ): Promise<EmissionParseFailure[]> {
-  const { ts } = await import('ts-morph');
+  const { default: ts } = await import('typescript');
   const failures: EmissionParseFailure[] = [];
   for (const { label, source } of emissions) {
     const diagnostics = syntacticDiagnostics(ts, source);

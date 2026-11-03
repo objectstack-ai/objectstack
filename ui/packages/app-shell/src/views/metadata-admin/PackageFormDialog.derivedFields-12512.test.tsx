@@ -152,7 +152,8 @@ describe('Create stays disabled until the id, name, namespace and version valida
 
   it('a name that derives no id disables Create and the id says why', () => {
     const f = openCreate();
-    fireEvent.change(f.name(), { target: { value: '工单中心' } });
+    // A Japanese name: a Chinese one derives through its pinyin (objectstack#29690).
+    fireEvent.change(f.name(), { target: { value: 'チケットセンター' } });
     expect(f.id().value).toBe('');
     expect(f.submit()).toBeDisabled();
     expect(screen.getByTestId('package-form-id-missing')).toBeInTheDocument();
@@ -160,9 +161,9 @@ describe('Create stays disabled until the id, name, namespace and version valida
 
   // objectui#13389 — the line names the cause, and the "filled in from the
   // display name" mark does not sit over an empty box.
-  it('a name with no Latin letters says the id could not be made from it, with no filled-in mark', () => {
+  it('a name that yields no id segment says the id could not be made from it, with no filled-in mark', () => {
     const f = openCreate();
-    fireEvent.change(f.name(), { target: { value: '体验评审' } });
+    fireEvent.change(f.name(), { target: { value: 'レビュー' } });
     expect(screen.getByTestId('package-form-id-missing')).toHaveTextContent(
       tFormat('engine.packages.idRule.notDerived', 'en-US', { example: 'com.acme.crm' }),
     );

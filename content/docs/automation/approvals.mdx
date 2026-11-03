@@ -456,11 +456,14 @@ What an entry that resolves to nobody leaves on the slate depends on its kind:
   [Acting on requests in the console](#acting-on-requests-in-the-console)).
   Beside entries that do resolve, a literal is a slot like any other, so a
   `behavior` that needs every slot (`unanimous`) waits on it too. A `team`,
-  `position` or `org_membership_level` entry whose holder read failed
-  (`sys_team_member`, `sys_user_position` or `sys_member`) keeps its literal
-  the same way. It logs `could not be expanded — a directory or read-filter
-  lookup failed` with the `error`, instead of `expanded to nobody`, and never
-  routes to the holders that happened to read.
+  `position`, `department` or `org_membership_level` entry whose holder read
+  failed (`sys_team_member`, `sys_user_position`, `sys_business_unit_member`
+  or `sys_member`, and for a `department` also the `sys_business_unit` read of
+  the unit and of its child units) keeps its literal the same way. It logs `could not be
+  expanded — a directory or read-filter lookup failed` with the `error`,
+  instead of `expanded to nobody`, and never routes to the holders that
+  happened to read. An `expression` value whose `resolveAs` read failed keeps
+  its literal and logs the same line, with the `expression` source.
 - **A slate left empty, or holding only literals,** goes to the node's
   `onEmptyApprovers` policy, whose four values are listed under
   [Approving across organizations](#cross-org-approvers). Under the default,
