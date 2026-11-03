@@ -19,14 +19,16 @@
  *     `buildDefaultPageSchema(objectDef, { slots })` so omitted slots
  *     fall through to synthesized defaults.
  *
- * Selection is by the declared `PageSchema.isDefault`, then by DECLARATION
- * ORDER among pages that are not the default: the spec allows one default
- * record page per object, so the flag needs no tie-break here, and with no
- * default the first matching page wins. No match returns null, so callers can
+ * Selection, in order: the page scoped to the app the record opens in
+ * (`PageSchema.apps`, when the caller names that app), then the declared
+ * `PageSchema.isDefault`, then DECLARATION ORDER among the remaining pages.
+ * The spec allows one record page per object per app and one default record
+ * page per object, so neither slot needs a tie-break here, and with neither
+ * the first matching page wins. No match returns null, so callers can
  * deterministically fall back to the auto-generated DetailView when no record
  * Page is authored.
  *
- * Future work (deferred): recordType / profile / app / formFactor filtering.
+ * Future work (deferred): recordType / profile / formFactor filtering.
  * Any further author-driven ordering would have to be DECLARED on
  * `PageSchema` in `@objectstack/spec` first — see the note on the selection
  * itself below.
@@ -41,7 +43,13 @@ export interface PageAssignmentOptions {
   recordType?: string;
   /** User profile filter (reserved for future use). */
   profile?: string;
-  /** Owning app filter (reserved for future use). */
+  /**
+   * The app the record opens in, by its NAME (`AppSchema.name`): the page
+   * whose `PageSchema.apps` lists it opens before the object's default
+   * record page. ⛔ Never a route segment: `/apps/<segment>` carries the
+   * app's package id when it has one, so resolve the segment to its app
+   * first and pass `app.name`.
+   */
   app?: string;
   /** Form factor filter (reserved for future use). */
   formFactor?: 'desktop' | 'tablet' | 'phone';
@@ -170,6 +178,18 @@ export function usePageAssignment(
     });
 
     if (!candidates.length) return null;
+
+    // The page scoped to the record's app decides first (`PageSchema.apps`,
+    // maintainer ruling A on objectstack#28979): inside an app a record page
+    // names, that page opens. The spec refuses a second page naming the same
+    // app for the same object at the same doors that refuse a second default,
+    // through the same reading (`defaultRecordPageObject` with the app passed),
+    // so the first match is the only one. With no app named, or no page
+    // scoped to it, the default slot below decides, as it always has.
+    if (opts.app) {
+      const scoped = candidates.find(p => defaultRecordPageObject(p, opts.app) === objectName);
+      if (scoped) return scoped;
+    }
 
     // The object's DEFAULT record page decides; with none, declaration order.
     //

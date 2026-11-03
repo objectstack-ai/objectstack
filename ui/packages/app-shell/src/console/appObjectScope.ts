@@ -349,18 +349,25 @@ export interface PagesRead {
 /**
  * The record page a record route of `objectName` renders (objectui#13046), as
  * `RecordDetailView` picks it through `usePageAssignment`: the page the route
- * names, when it is a record page of the object; otherwise the object's
- * default record page (`defaultRecordPageObject`), else its first record page.
- * Only a full page is returned. A slotted page, or none, returns `null`: the
- * view synthesizes that page, and derives its related lists from every object
- * that points at the record's object.
+ * names, when it is a record page of the object; otherwise the page scoped to
+ * the route's app (`PageSchema.apps`, read by the app's NAME, never the route
+ * segment), else the object's default record page (`defaultRecordPageObject`),
+ * else its first record page. Only a full page is returned. A slotted page, or
+ * none, returns `null`: the view synthesizes that page, and derives its related
+ * lists from every object that points at the record's object.
  */
-function declaredRecordPage(pages: readonly unknown[], objectName: string, pageName: string | undefined): unknown {
+function declaredRecordPage(
+  pages: readonly unknown[],
+  objectName: string,
+  pageName: string | undefined,
+  appName: string | undefined,
+): unknown {
   const page = pageName
     ? pages.find((p) => isRecord(p) && p.name === pageName && isRecordPageOf(p, objectName))
     : (() => {
         const candidates = pages.filter((p) => isRecordPageOf(p, objectName));
-        return candidates.find((p) => defaultRecordPageObject(p) === objectName) ?? candidates[0];
+        const scoped = appName ? candidates.find((p) => defaultRecordPageObject(p, appName) === objectName) : undefined;
+        return scoped ?? candidates.find((p) => defaultRecordPageObject(p) === objectName) ?? candidates[0];
       })();
   return isRecord(page) && page.kind !== 'slotted' ? page : null;
 }
@@ -491,7 +498,7 @@ export function readAppObjectScope(
     if (!app) return { candidate, scope: null, ready: false, ...NOT_READ };
     const pagesRead = readPages?.();
     if (!pagesRead?.settled) return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
-    const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName);
+    const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined);
     if (!page) return { candidate, scope: null, ready: false, ...NOT_READ };
     const extra = [route.objectName, ...appRequiredObjectNames(app)];
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
