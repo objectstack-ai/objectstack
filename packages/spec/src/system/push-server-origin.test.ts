@@ -95,7 +95,7 @@ describe.each(CARRIERS)('%s.origin', (_name, parse) => {
 describe('the three origin members are one contract', () => {
   it('publishes the same pattern in each JSON Schema', () => {
     const patterns = [RegisterDeviceRequestSchema, UserDeviceSchema, PushDeliveryDataSchema].map((schema) => {
-      const json = z.toJSONSchema(schema, { io: 'input' }) as { properties: { origin: { pattern?: string } }; required?: string[] };
+      const json = z.toJSONSchema(schema, { io: 'input' }) as unknown as { properties: { origin: { pattern?: string } }; required?: string[] };
       expect(json.required ?? []).not.toContain('origin');
       return json.properties.origin.pattern;
     });
