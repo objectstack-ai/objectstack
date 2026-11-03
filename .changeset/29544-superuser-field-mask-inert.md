@@ -4,7 +4,7 @@
 
 feat(lint): warn when a permission set's own View All or Modify All makes its field mask inert
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 A permission set holding View All (`viewAllRecords`) or Modify All (`modifyAllRecords`) on an object votes on every field of it in the field-permission merge (ADR-0066 D2 as amended). So that set's own `readable: false` on the object hides the field from none of its holders, and under Modify All its edit lock (`editable: false`, or `editable` omitted) holds none of them back either. The new warning `security-superuser-field-mask-inert` names the entry, the bit that unbinds it and the fix: remove the bit and reach the rows with `readScope` / `writeScope` or a row-level policy, or delete the entry if the bypass is meant. View All beside an edit lock is not reported, because View All never widens a write.
