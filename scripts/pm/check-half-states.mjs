@@ -1197,9 +1197,9 @@ export function h1DispatchedNoAssignee(issue) {
  * 严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. So a dash-written or
  * fullwidth-written claim is a MALFORMED claim, not an unrecognised dialect,
  * and the repair direction is the WRITE side. ⛔ Do not widen this class to
- * accept another separator — that is the one change the ruling closes. What
- * the patrol gained instead is visibility: `h34ClaimShapedNonCanonicalSeparator`
- * reports the near miss on its own row without redefining what a claim IS.
+ * accept another separator — that is the one change the ruling closes. Such a
+ * card stays visible without redefining what a claim IS: assigned, it is H2's
+ * row (no claim the marker reads); unassigned, H1's.
  *
  * ⚠️ The class was `[::]` until #12090 — U+003A written TWICE, not "ASCII or
  * fullwidth" as three separate readers (this file's own H33 note, the filing
@@ -1207,7 +1207,7 @@ export function h1DispatchedNoAssignee(issue) {
  * never matched here, measured by codepoint and by a live probe over 172
  * dispatched cards (0 fullwidth claims). Collapsed to a single `:` so the code
  * stops implying an affordance it never honored; behaviour is byte-identical,
- * and the fullwidth spelling now surfaces on the H34 row like every other
+ * and the fullwidth spelling reads as no claim, like every other
  * non-canonical separator.
  */
 export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
@@ -1255,7 +1255,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 //
 //   LANE     a seat as the role table spells it: `domain:` or `repo:` plus a lowercase
 //            name (`domain:engine-core` carries a hyphen, measured on the label set),
-//            `epic:#` plus the parent card, `triage`, `director` or `coordinator`
+//            `epic:#` plus the parent card, `triage`, `director`, `coordinator` or `security`
 //   N        the seat number, from 1
 //   ACCOUNT  the login a claim's `Account:` line carries — GitHub's own login rule
 //   SESSION  the full id, in the relay envelope's shape (`SESSION_SHAPE`, fleet-write/ops.mjs,
@@ -1279,7 +1279,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 // ---------------------------------------------------------------------------
 
 /** The four parts' patterns, unanchored, in order — the ONE spelling every reader and writer composes from. */
-const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator)';
+const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security)';
 const SIGNATURE_ACCOUNT_SOURCE = '[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}';
 /** The relay envelope's session shape without its anchors — `SESSION_SHAPE` in `fleet-write/ops.mjs`. */
 export const SEAT_SIGNATURE_SESSION_SOURCE = 'session_[A-Za-z0-9]{6,}';
@@ -1417,8 +1417,7 @@ export function signatureRefusalText(row, { tool, where = 'the body' } = {}) {
 // markdown bullet `* Claim: …` would become ` Claim: …` and read as a claim.
 // This file already rules on that shape from the other side — H20's case
 // 「a bulleted `Claim:` is still not a claim comment」 pins `- Claim:` as NOT a
-// claim, and `CLAIM_NEAR_MISS_MARKER`'s docblock names the bullet hazard by
-// name — so undecorating a `*` bullet would accept through decoration exactly
+// claim — so undecorating a `*` bullet would accept through decoration exactly
 // what the `-` bullet is refused for. A bullet is a LIST, not a decoration:
 // the marker for one is followed by whitespace, the decoration for the other
 // is not, and that is the whole discriminator.
@@ -1432,8 +1431,8 @@ export function signatureRefusalText(row, { tool, where = 'the body' } = {}) {
  * A markdown LIST ITEM's opening — a bullet or an ordered marker — and the one
  * prefix `markerMatches` refuses to undecorate through.
  *
- * `[ \t]`, ⛔ never `\s`, on both sides: `\s` matches a NEWLINE, which is the
- * defect `CLAIM_NEAR_MISS_MARKER`'s docblock measured the hard way — a hyphen
+ * `[ \t]`, ⛔ never `\s`, on both sides: `\s` matches a NEWLINE, which is a
+ * defect this file has measured the hard way — a hyphen
  * is the commonest line-opening character in this repo's comment bodies, so a
  * class that can span lines reads an ordinary list as a directive.
  *
@@ -1500,12 +1499,9 @@ export function markerMatches(marker, text) {
  * word, which is exactly where every measured miss lives.
  *
  * ⚠️ Deliberate overlaps, stated rather than hidden:
- *   · `separator` overlaps H34 on the CLAIM side (`nearMissClaimSeparators`).
- *     H34 is a ROW with a remedy, gated to cards H2 is already reporting; this
- *     is a census over every thread the sweep already holds. Two readers of one
- *     shape answering two different questions, ⛔ not a second vocabulary for
- *     the claim separator: H34 keeps naming the codepoint and prescribing the
- *     rewrite.
+ *   · `separator` on the CLAIM side is the shape H2 reports as claimless on an
+ *     assigned card; this is a census over every thread the sweep already
+ *     holds, ⛔ not a second vocabulary for the claim separator.
  *   · `list-item` is the shape `markerMatches` refuses to undecorate through,
  *     named here so that refusal is a reading rather than a silence.
  *
@@ -1776,9 +1772,8 @@ export function releaseAnnouncementHeading(formId, prefix, line) {
  *
  * A form whose remainder is empty is skipped: 「Release:」 alone carries no
  * record, and reporting it would fill the clause with headings. That is the
- * conservative half, `looksLikeClaimContent`'s judgement at H34 applied one
- * notch looser — this is a census, and a threshold as strict as H34's would
- * recreate the silence it exists to end.
+ * conservative half — this is a census, and a stricter content threshold
+ * would recreate the silence it exists to end.
  *
  * @param {{ id?: number, body?: string }[]} commentRows — REST rows, NOT bodies:
  *   the row names the COMMENT, and an id is what a seat opens.
@@ -8155,9 +8150,8 @@ export function isTriageRulingComment(body) {
  * `CLAIM_COMMENT_MARKER` wants the colon directly after the word, and here the
  * word is followed by ` pointer`, so the marker has never matched it. Under the
  * same 2026-08-11 ruling that governs the dash spellings it is a MALFORMED
- * claim — and unlike those it is invisible to H34 as well, which reports only a
- * punctuation separator (that gap was measured and deliberately left open; see
- * H34's header). The paragraph's conclusion is unaffected: it rests on the
+ * claim, read as no claim at all like the dash spellings. The paragraph's
+ * conclusion is unaffected: it rests on the
  * first specimen, which is real, and on the live count above.
  *
  * ## ⚠️ The inherited blind spot, and what it is NOT (#12090)
@@ -8183,9 +8177,9 @@ export function isTriageRulingComment(body) {
  * takes on every unrecognised spelling (H17's extractor, H20's branch shape),
  * never a fabricated row.
  *
- * Where those claims DO surface is H34, which reports the near miss as its own
- * observation and points the seat at the canonical spelling — visibility
- * without redefining the vocabulary.
+ * Where those claims DO surface is H2 (an assigned card with no claim the
+ * marker reads) or H1 (an unassigned one) — visibility without redefining the
+ * vocabulary.
  *
  * @param {{ body?: string, created_at?: string }[]} commentRows
  * @returns {{ createdAt: string|null } | null}
@@ -8254,257 +8248,6 @@ export function h33ClaimPredatesRuling(issue, commentRows) {
     'so on the card so the dev is not left arbitrating between two orders. ⛔ This is not a new rule: the ' +
     're-read step exists, and the same session it failed on had already been saved by it twice that day. ' +
     'Report-only: ⛔ never a label written from this script.'
-  );
-}
-
-// ---------------------------------------------------------------------------
-// H34 — a claim-shaped comment with a NON-CANONICAL SEPARATOR (#12090).
-//
-// The card that filed this measured 24 of 54 open `pm:dispatched` cards
-// carrying 「Claim — <seat>, session …」 with an EM DASH, invisible to
-// `CLAIM_COMMENT_MARKER`, and proposed widening the class. That proposal is
-// CLOSED, and this row is what was taken instead.
-//
-// ## Why the predicate is not widened — the ruling, verbatim
-//
-// `.claude/skills/pm-dispatch/SKILL.md` (step 4 of the claim protocol) records
-// 「首行以字面 `Claim:` 开头是机器判据(维护者 2026-08-11 裁定;巡查谓词只认这
-// 一个拼写且保持严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. Under that
-// ruling a dash-written claim is a MALFORMED claim, H2's row on it is a CORRECT
-// report, and the repair is the write side converging on the documented
-// spelling. Widening the reader would make the enforced protocol drift away
-// from the written one permanently — the declared-≠-enforced shape this repo
-// treats as a defect everywhere else — and would do it by editing a maintainer
-// ruling's own text, which is not a patrol script's call.
-//
-// ## …and why the gap is nevertheless real, which is what this row closes
-//
-// The cost the card found is not only H2's loudness. `governingClaim` gates on
-// the same marker before reading `Branch:`, so a card claimed with a dash buys
-// no ref probe and can never produce an H20 「no remote ref」 or H27 「dead
-// claim」 row: it sits OUTSIDE dispatch-liveness entirely, silently, for as long
-// as it is in flight. H33 inherits the same blindness. So the malformed claim
-// costs one noisy row and three quiet ones, and the quiet ones are the
-// expensive direction.
-//
-// This row makes the malformed spelling VISIBLE without redefining what a claim
-// is. `Claim:` stays the single machine criterion — H2/H20/H27/H33 are
-// untouched, byte for byte — and the near miss is reported as its own,
-// separately-named observation whose remedy points at the canonical spelling.
-// The file therefore never disagrees with itself about its own vocabulary,
-// which is the objection that kept the gap open.
-//
-// ## Measured, fresh, at dispatch time (2026-08-25 ~15:00Z)
-//
-// Over the LIVE open `pm:dispatched` population (45 cards): 40 colon-form,
-// 1 dash-only, 0 hyphen, 0 fullwidth, 4 with no claim in any spelling. The
-// filing card's 24-of-54 has already decayed to 1-of-45 in a day — the
-// maintainer's prescribed convergence is working, which is precisely why the
-// widening was not worth a ruling. Over the 128 `pm:dispatched` cards closed
-// since 2026-08-24 the shape is recurring rather than historical: 13 dash-only
-// claims, clustered in identifiable seat batches. So this row's expected steady
-// state is quiet — H23's register, not H30's — and its value is that a seat
-// writing the wrong spelling learns about it while the card is still in flight,
-// which is how a fleet converges.
-//
-// ## Deliberately NOT the whole near-miss space
-//
-// Two suppressions, both under-reporting on purpose (H17's and H20's standing
-// direction — a fabricated row sends a reader to check something that was never
-// there):
-//
-//   • A thread that ALSO carries a canonical claim is silent here. That card is
-//     machine-visible, so the row would have no remedy to offer. The residual
-//     it accepts: a RE-claim written with a dash over an older colon claim
-//     leaves `governingClaim` reading the stale one. Narrower than the shape
-//     this row is for, and naming it would cost a row on every card that ever
-//     wrote a dash claim once.
-//   • A claim-shaped line whose remainder carries none of the protocol's own
-//     content (a session reference, the word "seat", or a protocol-shaped
-//     branch anywhere in the comment) is silent. 「Claim - see above」 in prose
-//     is not evidence that a claim was attempted.
-//
-// ## The WORD position — measured 2026-08-27, and NOT widened
-//
-// A filed finding asked whether the separator class should cover a WORD where
-// the punctuation goes, on the strength of 「Claim pointer: folded into the
-// 11678 family dispatch」 — a string `latestClaimComment`'s header cited as a
-// claim the marker reads, which it never was. Measured before answering,
-// because the header above says this row's strictness was paid for once and
-// a widening is exactly what it was paid to prevent.
-//
-// The census: 161 pm-tracked cards — 13 open `pm:dispatched`, 76 open
-// `pm:queue`, 72 `pm:dispatched` closed since 2026-08-26 — and all 343 comments
-// on them, classified by what follows a line-opening claim word. 19 canonical
-// `Claim:`; 2 with a declared punctuation separator (both EM DASH, both on
-// threads with no canonical claim — this row's live population, and it fires);
-// and ZERO with a distinct word in the separator position. The 「Claim pointer:」
-// specimen occurs nowhere on the board: its only live instance is the finding
-// card quoting this file quoting it.
-//
-// So the widening buys nothing measurable, and it would spend the conservative
-// half's whole margin to buy it. `Claim` followed by a word is ordinary English
-// — 「Claiming this card」, 「Claim comments are …」 — where `Claim` followed by
-// an em dash is not; `looksLikeClaimContent` would carry that load for a
-// population of zero. RECORDED, NOT WIDENED.
-//
-// The same census found three OTHER shapes invisible to both markers, recorded
-// so a later reader can reopen the question on numbers instead of re-measuring
-// — and each is already harmless for a DIFFERENT reason, which is the actual
-// finding:
-//
-//   • 2 「Claim (dev): …」 openings. Both threads ALSO carry a canonical claim,
-//     so the first suppression above already covers them: they are a SECOND
-//     claim comment on a machine-visible card, never a substitute for one.
-//   • 2 inflected openings (「Claiming this card. session …」) and 1 decorated
-//     with backticks (「`Claim:` devx@objectstack seat …」). All three sit on
-//     UNASSIGNED cards, which this row and H2 both decline to judge — the
-//     residual already declared above.
-//
-// Three different shapes, three different reasons, none of them this one. Each
-// is its own question with its own noise floor if it ever acquires a population.
-// ---------------------------------------------------------------------------
-
-/**
- * The separators a claim-shaped line is measured to carry INSTEAD of the
- * canonical colon, each with the name the row prints. Codepoints are spelled
- * out rather than pasted: these characters are visually near-identical to each
- * other and to the colon, and a row that says 「EM DASH (U+2014)」 tells a seat
- * what to search for in a way a rendered glyph cannot.
- *
- * U+FF1A is here, and it is the reason it can be: the claim marker's class
- * looked like it accepted it for the whole of this file's life and never did
- * (see `CLAIM_COMMENT_MARKER`). In a protocol whose own SKILL.md is written in
- * Chinese, 「Claim：」 is a plausible spelling; it was invisible to every reader
- * and is now merely non-canonical, which is a state a seat can act on.
- */
-export const NON_CANONICAL_CLAIM_SEPARATORS = [
-  ['—', 'EM DASH (U+2014)'],
-  ['–', 'EN DASH (U+2013)'],
-  ['-', 'HYPHEN-MINUS (U+002D)'],
-  ['：', 'FULLWIDTH COLON (U+FF1A)'],
-];
-
-/**
- * A claim-shaped opening whose separator is not the canonical colon.
- *
- * Mirrors `CLAIM_COMMENT_MARKER`'s strictness deliberately — same optional
- * blockquote, same must-BEGIN-with-the-word anchor, same absence of `g` — so
- * that the two markers partition claim-shaped openings rather than overlapping.
- * The prose control the strictness was paid for (#7488) is still excluded here
- * for the same reason it is there: 「the next seat should claim: only after the
- * ruling lands」 does not BEGIN with the word.
- *
- * ⚠️ `[ \t]*`, NOT `\s*`, on both sides of the word. `\s` matches a NEWLINE, so
- * `Claim\n- something` would put a markdown BULLET's hyphen in the separator
- * position and read an ordinary list as a malformed claim — and a hyphen is the
- * commonest line-opening character in this repo's comment bodies, where the
- * colon marker never had to care (a line starting with `:` is not a thing
- * anyone writes).
- *
- * Stated precisely, because it is easy to over-claim: `nearMissClaimSeparators`
- * already runs this regex per SPLIT LINE, so the reader below is safe either
- * way and the character class is not what saves it. What the class protects is
- * this constant AS AN EXPORT — it is `m`-flagged and reusable, and a future
- * caller doing `CLAIM_NEAR_MISS_MARKER.test(body)` over a whole comment gets
- * the right answer only because of it. Both properties are pinned separately in
- * the self-test, at the regex and at the reader, so neither can go green on the
- * other's behalf.
- *
- * Capture groups: 1 = the separator, 2 = the rest of the line.
- */
-export const CLAIM_NEAR_MISS_MARKER = new RegExp(
-  `^[ \\t]*>?[ \\t]*Claim(?:ed)?[ \\t]*([${NON_CANONICAL_CLAIM_SEPARATORS.map(([ch]) => `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`).join('')}])[ \\t]*(.*)$`,
-  'mi'
-);
-
-/**
- * Does this line's remainder carry the claim protocol's own content?
- *
- * The conservative half of the detection. The protocol's claim comment is
- * required to name a session ID and a branch, and the measured dash claims do:
- * 「Claim — skills seat `session_01RM…`. Folded dispatch …」 and 「Claim —
- * domain:cli lane execution seat, session 019siH5jDmk5hrayvfyojUqR, round
- * R36」. Requiring one of those tokens is what separates an attempted claim
- * from a line that merely opens with the word.
- *
- * A protocol-shaped branch is accepted from ANYWHERE in the comment rather than
- * from the opening line, because the template puts `Branch:` on its own line —
- * the same reason `claimedBranches` reads a directive line rather than the
- * first one.
- */
-export function looksLikeClaimContent(remainder, body) {
-  if (/\bsessions?\b|\bseat\b/iu.test(String(remainder ?? ''))) return true;
-  return claimedBranches(body).length > 0;
-}
-
-/**
- * Which non-canonical separators this comment body opens a claim-shaped line
- * with — de-duplicated, in the order declared, empty when none does.
- *
- * @param {string} body
- * @returns {string[]} the printable separator NAMES
- */
-export function nearMissClaimSeparators(body) {
-  const text = String(body ?? '');
-  const found = [];
-  for (const line of text.split('\n')) {
-    const hit = CLAIM_NEAR_MISS_MARKER.exec(line);
-    if (!hit) continue;
-    if (!looksLikeClaimContent(hit[2], text)) continue;
-    const name = NON_CANONICAL_CLAIM_SEPARATORS.find(([ch]) => ch === hit[1])?.[1];
-    if (name && !found.includes(name)) found.push(name);
-  }
-  return found;
-}
-
-/**
- * H34 — null when clean, else the finding sentence.
- *
- * Gated on the SAME population H2 judges (pm-tracked, assigned) and read off
- * the SAME comment bodies that branch already fetched, so the row costs no
- * request at all. It fires only where H2 fires — no canonical claim on the
- * thread — which makes every H34 row a companion that EXPLAINS its card's H2
- * row rather than a second accusation about the same fact.
- *
- * The residual that gate accepts, stated rather than dropped: an UNASSIGNED
- * `pm:dispatched` card buys no comment fetch here and so is never judged. That
- * card is H1's finding in its own right, and its dispatch is already the thing
- * being questioned.
- *
- * @param {object} issue — an OPEN issue.
- * @param {(string|null|undefined)[]} commentBodies
- */
-export function h34ClaimShapedNonCanonicalSeparator(issue, commentBodies) {
-  const labels = labelNames(issue ?? {});
-  const pmTracked = labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched');
-  if (!pmTracked || (issue?.assignees ?? []).length === 0) return null;
-  if (!Array.isArray(commentBodies)) return null;
-  // A card with a readable claim is machine-visible; the row has no remedy for it.
-  if (commentBodies.some((b) => markerMatches(CLAIM_COMMENT_MARKER, String(b ?? '')))) return null;
-
-  const separators = [];
-  let lines = 0;
-  for (const body of commentBodies) {
-    const names = nearMissClaimSeparators(body);
-    if (names.length === 0) continue;
-    lines += 1;
-    for (const name of names) if (!separators.includes(name)) separators.push(name);
-  }
-  if (separators.length === 0) return null;
-
-  return (
-    `a claim-shaped comment whose separator is NOT the canonical colon — ${lines} comment(s), ` +
-    `${separators.join(' + ')} where the protocol writes \`Claim:\` — and NO comment on this thread ` +
-    'matches the marker. So this card reads as CLAIMLESS to H2 (its row on this card is correct, not a ' +
-    'false positive) and sits outside dispatch-liveness entirely: `governingClaim` gates on the same ' +
-    'marker before reading `Branch:`, so H20 can never report a missing remote ref for it and H27 can ' +
-    'never report a dead claim — the two rows that exist to catch an abandoned dispatch. Remedy, and it ' +
-    'is the WRITE side: the claiming seat re-posts (or edits) the claim so its FIRST line begins with ' +
-    'the literal `Claim:`, per SKILL.md step 4 — 「首行以字面 `Claim:` 开头是机器判据(维护者 ' +
-    '2026-08-11 裁定;巡查谓词只认这一个拼写且保持严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. ' +
-    '⛔ The patrol predicate is NOT widened to accept the separator this card used; that is the one ' +
-    'repair the ruling closes. Report-only: ⛔ never a label written from this script.'
   );
 }
 
@@ -10339,8 +10082,8 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 // above — so an author test cannot separate a seat's reading from the
 // maintainer's prose. It is not merely unavailable, it is ill-posed.
 //
-// ⇒ So this row recognises the ARTEFACT, exactly as `CLAIM_COMMENT_MARKER`, H33,
-// H34 and H37 already do, and filters by nothing else. That is also what the
+// ⇒ So this row recognises the ARTEFACT, exactly as `CLAIM_COMMENT_MARKER`, H33
+// and H37 already do, and filters by nothing else. That is also what the
 // rule itself says: it is scoped to 「认领、派发令、复核、轮次报告、座位贴段落」
 // — five artefacts — and says nothing whatever about who typed them.
 //
@@ -11967,8 +11710,8 @@ export function h49PartialLandingUnreleased(issue, mergedPrs, openPrs, commentRo
 //             the claim, and exactly the population whose thread the
 //             dispatch-liveness loop already buys for H20/H27/H33.
 //   OUT       a closed card; a card with no `Claim:` this file's marker reads
-//             (H2's row where the card is assigned, H34's where the separator
-//             is the reason); a claim whose stamp does not parse — it cannot be
+//             (H2's row where the card is assigned, H1's where it is
+//             not); a claim whose stamp does not parse — it cannot be
 //             placed against the cutoff, so the row DECLINES rather than
 //             accuses; a predecessor whose id does not read — the "actual" half
 //             of the sentence would be invented.
@@ -15207,14 +14950,14 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// The stale-`finding` screen — ONE rule, two readers (#16904)
+// The stale-`finding` screen — the rule H63 reads (#16904)
 //
 // `finding` is defined by the state model as a TRANSIENT marker — 「观察类记录,
 // 恒 = 待首次定级;定级即离标;不占队列不进收件箱」 — so `label:finding` answers
 // exactly one question: what has not been graded yet. It does not. The filing
 // card measured 385 of 395 carriers already graded across both boards; a later
 // triage round re-measured 185 of 226; a hand strip cleared 38 more; and the
-// one-time sweep that closes the backlog left objectstack and objectui at 0.
+// one-time sweep that closed the backlog left objectstack and objectui at 0.
 //
 // A population that was refilled three times by hand is a population that
 // refills, and the reason is an API shape rather than carelessness: the strip
@@ -15222,29 +14965,6 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
 // the default outcome. The write-path half of that fix is its own card. This is
 // the READ half: the row that makes the refill visible on the patrol instead of
 // being re-measured by whoever next happens to look.
-//
-// ## Why the rule LIVES HERE and the sweep imports it, rather than the reverse
-//
-// `scripts/pm/sweep-stale-finding.mjs` owns the one-time strip and exports this
-// screen. Reusing it BY IMPORT is the ruling, and 「⛔ never a second copy of the
-// rule」 is the reason — but the import can only point one way, and that was
-// measured on this tree rather than assumed:
-//
-//   this file importing the sweep   a MODULE CYCLE that crashes. The sweep
-//                                   derives module-level constants from
-//                                   `PM_STATE_LABELS`, which lives here, so
-//                                   with THIS file as the entry point — every
-//                                   patrol run, every `--self-test` — the
-//                                   sweep's body evaluates first and throws
-//                                   `ReferenceError: Cannot access
-//                                   'PM_STATE_LABELS' before initialization`.
-//   the sweep importing this file   already how it works, for four symbols.
-//
-// So the rule moves DOWN to the module that already owns the vocabulary it is
-// derived from, and the sweep re-exports it under the names its own callers and
-// self-test already use. One source, one arrow, no copy — and the row's
-// population is not an approximation of the sweep's target set, it IS that set,
-// which is what lets the row say "this is what the sweep would strip today".
 //
 // ## The three `pm:*` label sets in this file are NOT this one, and must not be
 //
@@ -15364,23 +15084,19 @@ export function staleFindingScreen(issue) {
 // ---------------------------------------------------------------------------
 // H63 (#16904) — a graded card still wearing the ungraded marker
 //
-// The row over the screen above. ⛔ Report-only, like everything here: the
-// one-time sweep is the tool that strips, it is run once per board by the seat
-// that owns that board, and this row exists precisely because that run is a
-// point measurement of a population that refills. The remedy a row prescribes
-// is a grading write that also drops the marker, never a strip performed from
-// this script.
+// The row over the screen above. ⛔ Report-only, like everything here: triage
+// removes the marker by hand when it grades the card, and this row exists
+// because that step is easy to forget, so the population refills. The remedy a
+// row prescribes is a grading write that also drops the marker, never a strip
+// performed from this script.
 //
-// ## Why it fires on the SWEEP's set exactly, `pm:seat` skip included
+// ## Why it fires on the screen's set exactly, `pm:seat` skip included
 //
-// The row's job is to make the refill visible, and "the refill" is only
-// meaningful against the thing that was emptied. A row whose population were
-// merely similar would drift from the tool's over the first change to either;
-// sharing the screen makes 「what the sweep would strip today」 the row's literal
-// reading. The `pm:seat` exclusion travels with it for the same reason it
-// exists in the tool: a seat registry post is not a card in the grading pool,
-// so its marker is not an ungraded card's marker, and reporting it would send a
-// reader to strip a label that is doing its job.
+// The row's job is to make the refill visible, so its population is the
+// screen's stale set itself rather than something merely similar. The `pm:seat`
+// exclusion is part of that set: a seat registry post is not a card in the
+// grading pool, so its marker is not an ungraded card's marker, and reporting
+// it would send a reader to strip a label that is doing its job.
 //
 // ## Population and cost
 //
@@ -15413,8 +15129,8 @@ export function h63StaleFindingBesideGrade(issue) {
     'returns four wrong rows in five is discharged by sampling or skipped. Two lanes have already ' +
     'declined to dispatch a card in this shape, which is the strict reading of 不占队列. Remedy — WHO ' +
     'and HOW: the seat that next writes a grade on this card, dropping the marker in the SAME write ' +
-    '(「定级即离标」); the standing backlog is the one-time sweep\'s, run once per board by the seat ' +
-    'that owns it, ⛔ never a loop from here. ⛔ Report-only: no label is written from this script, and ' +
+    '(「定级即离标」); a carrier already in this shape is the triage round\'s to fix by hand, removing ' +
+    'the marker when it grades the card, ⛔ never a loop from here. ⛔ Report-only: no label is written from this script, and ' +
     '⛔ no grade is ever synthesised — a card with no priority has not been read and belongs in the ' +
     'ungraded pool, not in the queue. Boundaries: a card carrying ONLY the marker is the pool the ' +
     'index exists for and is clean here; a `pm:seat` post is never judged; closed-card residue is ' +
@@ -15797,7 +15513,7 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
 // login (H43's header), and the seat-post sticker login does not match comment
 // authorship. ⚠️ The direction is what makes the two rows agree rather than
 // collide: H44 refused an author test for FINDING seat artefacts and that
-// refusal stands — this row finds them exactly the structural way H44, H33, H34
+// refusal stands — this row finds them exactly the structural way H44, H33
 // and H37 do, and since the re-keying it does not read the author as the defect
 // at all.
 //
@@ -19574,7 +19290,6 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H24: 'state',
   H29: 'state',
   H30: 'state',
-  H34: 'state',
   H37: 'state',
   H44: 'state',
   H45: 'state',
@@ -19592,10 +19307,8 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H49: 'state',
   H50: 'state',
 
-  // H60 is a `state` for H34's reason, one field over. H34 reads a claim whose
-  // SEPARATOR the marker does not accept; this one reads a claim whose BRANCH
-  // line the directive reader does not accept. Both are a live card that
-  // contradicts itself — claimed to a human, unclaimed (or claimed elsewhere)
+  // H60 is a `state`: it reads a claim whose BRANCH line the directive reader
+  // does not accept. That is a live card that contradicts itself — claimed to a human, unclaimed (or claimed elsewhere)
   // to the machine — and both are repaired on the board by the claiming seat
   // re-writing one comment. ⛔ Not `stall`: this row does not claim the card is
   // stopped, and it fires on a card whose dev may be working perfectly well;
@@ -23429,13 +23142,6 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (h2AssigneeNoClaimComment(issue, comments)) {
         findings.push([issue, 'H2', 'assignee set but no claim comment on the thread']);
       }
-      // H34 (#12090) — the same bodies, asked WHY H2 is firing. Free by
-      // construction: it reads the page already in hand, on exactly H2's
-      // population, and fires only on cards H2 is already reporting. Judged
-      // here rather than in the dispatched loop below so a `pm:queue` claim
-      // written with a dash is covered too, and so the two rows land together.
-      const nearMiss = h34ClaimShapedNonCanonicalSeparator(issue, comments);
-      if (nearMiss) findings.push([issue, 'H34', nearMiss]);
     }
 
     // H17 — the trigger-file index. Gathering only: the card's own body plus
@@ -24039,8 +23745,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // H63 (#16904) — the same listing for the same reason: `finding` is not one
     // of the labels the label loop pages, so a carrier holding no `pm:*` state
     // is first visible HERE. One label read on a row this listing already
-    // holds, through the screen the one-time sweep strips on — so the row's
-    // population IS the sweep's target set rather than an approximation of it.
+    // holds, through the stale-`finding` screen — so the row's population IS
+    // the screen's stale set rather than an approximation of it.
     const staleFinding = h63StaleFindingBesideGrade(issue);
     if (staleFinding) findings.push([issue, 'H63', staleFinding]);
     // H68 (#18901) — the class-(b) declaration with no `Seam:` line, on this
@@ -25339,8 +25045,8 @@ async function selfTest() {
   const h32row = (...args) => String(h32SeatIdleOverQueue(...args) ?? '');
   const h38row = (...args) => String(h38SeatPostStale(...args) ?? '');
   const h33row = (...args) => String(h33ClaimPredatesRuling(...args) ?? '');
-  // H34's wrapper (the pattern this generalizes) stays beside its own block,
-  // as do H8's `halvesRow` and H27's `dead27Row` — all three wrap a helper
+  // H8's `halvesRow` and H27's `dead27Row` stay beside their own blocks —
+  // both wrap a helper
   // that is itself declared locally, next to the fixtures it closes over.
   // H29/H30 use a different reader, `says()`, declared at those blocks:
   // it returns a DESCRIBING string (`NO MESSAGE (null)`) rather than `''`, so
@@ -27864,7 +27570,7 @@ async function selfTest() {
   // The governing claim — the MOST RECENT one, H19's double-check ① reasoning.
   const gov = (rows) => governingClaim(rows);
   // ⚠️ `?? []` rather than a bare `.branches` on the three-valued return, for
-  // the reason H34's row wrapper carries: a case built to go NULL under a
+  // this reason: a case built to go NULL under a
   // mutation must report a NAMED failing case, not throw and abort the suite
   // before the remaining cases run — measured while ablating the #16170 anchor,
   // where the reverse run died on a TypeError naming neither row nor mutation.
@@ -28282,7 +27988,7 @@ async function selfTest() {
   t('⛔ H60: …and the claim marker still matches it, which is what makes this a STATE and not an absence', CLAIM_COMMENT_MARKER.test(INLINE_16322_NEW.body), true);
   t('⛔ H60: #16170\'s bulleted directive still parses, so its card stays clean', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n- Branch: `claude/issue-15511-zh-gap-helptext`')])), null);
   t('⛔ H60: …and the blockquoted template spelling too', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n> Branch: `claude/issue-6752-x`')])), null);
-  t('H60 band: the row is registered as a `state`, beside H34\'s claim-shape row', familyBand('H60'), familyBand('H34'));
+  t('H60 band: the row is registered as a `state`', familyBand('H60'), 'state');
 
   // -- H62 (#17009): a decision card whose FACE carries no four-facet block ---
   //
@@ -28390,10 +28096,8 @@ async function selfTest() {
 
   // -- H63 (#16904): a graded card still wearing the ungraded marker ---------
   //
-  // The row over the SHARED screen. Both directions, a lit control under every
-  // silence, and — because the point of sharing the screen is that the row and
-  // the one-time sweep can never disagree — a source-text pin that the sweep
-  // still ALIASES this definition instead of re-growing a copy of it.
+  // The row over the shared screen. Both directions, and a lit control under
+  // every silence.
   const gradedCarrier = (labels, over = {}) => ({
     number: 16904,
     state: 'open',
@@ -28412,7 +28116,7 @@ async function selfTest() {
   t('H63: …naming BOTH triggers, state first', row63(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])).includes('`pm:queue`, `priority:p3`'), true);
   t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', GOVERNED_PR_DECISION_LABEL])), 'string');
 
-  // ── Direction 2: it is SILENT where the sweep leaves the card, each silence
+  // ── Direction 2: it is SILENT where the screen leaves the card, each silence
   //    with a lit control on the byte-identical card ─────────────────────────
   t('⛔ H63: `finding` ALONE is NOT a finding — that is the pool the index exists FOR', h63StaleFindingBesideGrade(gradedCarrier(['finding'])), null);
   t('H63 control: …and the same card with one grading state fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocked'])), 'string');
@@ -28428,10 +28132,10 @@ async function selfTest() {
   t('H63 control: …and the byte-identical OPEN row fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'])), 'string');
   t('⛔ H63: a PULL REQUEST row that slipped into the listing is not a card', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'], { pull_request: {} })), null);
   t('⛔ H63: a card without the marker is not this row\'s business', h63StaleFindingBesideGrade(gradedCarrier(['pm:queue', 'priority:p2'])), null);
-  t('⛔ H63: an unreadable `labels` reads as no marker and is silent — the SCREEN\'s behaviour, shared with the tool that writes', h63StaleFindingBesideGrade(gradedCarrier([], { labels: undefined })), null);
+  t('⛔ H63: an unreadable `labels` reads as no marker and is silent — the SCREEN\'s behaviour', h63StaleFindingBesideGrade(gradedCarrier([], { labels: undefined })), null);
   t('⛔ H63: a missing row does not crash', h63StaleFindingBesideGrade(undefined), null);
 
-  // ── The screen itself, as the sweep judges it ────────────────────────────
+  // ── The screen itself ─────────────────────────────────────────────────────
   t('H63 screen: a graded carrier is `stale`', staleFindingScreen(gradedCarrier(['finding', 'pm:queue'])).verdict, 'stale');
   t('H63 screen: …the ungraded pool is `leave`, and REPORTED rather than dropped', staleFindingScreen(gradedCarrier(['finding'])).kind, 'ungraded');
   t('H63 screen: …and the seat post is `skip`, with the reason on the row', staleFindingScreen(gradedCarrier(['finding', 'pm:seat'])).detail.includes('pm:seat'), true);
@@ -28440,19 +28144,6 @@ async function selfTest() {
   t('H63 screen: ⛔ the marker is never its own trigger', GRADING_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
   t('H63 screen: a priority is a grade in every spelling the board uses', priorityLabelsIn(['priority:p0', 'priority:p3']).length, 2);
   t('H63 screen: ⛔ and priority-ish prose is not a priority label', priorityLabelsIn(['priorities', 'priority', 'prioritypX']).length, 0);
-
-  // ── ONE rule, two readers: the sweep must still ALIAS this definition ─────
-  let sweepSource63 = '';
-  try {
-    sweepSource63 = readFileSync(new URL('./sweep-stale-finding.mjs', import.meta.url), 'utf8');
-  } catch {
-    sweepSource63 = '';
-  }
-  t('H63 ↔ sweep: the sweep\'s source is readable at all (an unreadable one must not pass as clean)', sweepSource63.length > 0, true);
-  t('H63 ↔ sweep: it ALIASES this screen rather than defining one', sweepSource63.includes('export const screenCard = staleFindingScreen;'), true);
-  t('H63 ↔ sweep: …and ⛔ has not re-grown a copy of the screen', /export function screenCard\s*\(/.test(sweepSource63), false);
-  t('H63 ↔ sweep: …nor a second copy of the grading vocabulary', /export const GRADING_STATE_LABELS\s*=/.test(sweepSource63), false);
-  t('H63 ↔ sweep: its target label is this constant, not a second literal', sweepSource63.includes('export const TARGET_LABEL = STALE_FINDING_LABEL;'), true);
 
   // ── ⛔ The three `pm:*` sets stay four different questions ────────────────
   t('H63: H13\'s visibility set carries the marker — which is why H13 is silent on a graded carrier', PM_STATE_LABELS.includes(STALE_FINDING_LABEL), true);
@@ -28466,7 +28157,7 @@ async function selfTest() {
   t('H63 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row63(gradedCarrier(['finding', 'pm:queue']))), false);
   t('H63 text: the state model is QUOTED, not paraphrased', row63(gradedCarrier(['finding', 'pm:queue'])).includes('定级即离标'), true);
   t('H63 text: WHO acts — the seat that next writes a grade, in the SAME write', row63(gradedCarrier(['finding', 'pm:queue'])).includes('SAME write'), true);
-  t('H63 text: …and the standing backlog is named as the one-time sweep\'s, ⛔ never a loop from here', row63(gradedCarrier(['finding', 'pm:queue'])).includes('⛔ never a loop from here'), true);
+  t('H63 text: …and a carrier already in the shape is triage\'s to fix by hand, ⛔ never a loop from here', row63(gradedCarrier(['finding', 'pm:queue'])).includes('⛔ never a loop from here'), true);
   t('H63 text: ⛔ no label is written from this script', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no label is written from this script'), true);
   t('H63 text: ⛔ and no grade is ever synthesised — the constraint a hand sweep learned by breaking it', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no grade is ever synthesised'), true);
   t('H63 text: the marker constant is printed, ⛔ never a re-typed literal', row63(gradedCarrier(['finding', 'pm:queue'])).includes(`\`${STALE_FINDING_LABEL}\``), true);
@@ -31564,91 +31255,10 @@ async function selfTest() {
   // H2/H20/H27 use — a file that disagrees with itself about what a claim IS
   // would be the worse defect. The consequence is UNDER-reporting, this file's
   // standing direction for an unrecognised spelling (H17/H20), never a
-  // fabricated row. Where the malformed claim becomes VISIBLE is H34 (#12090),
-  // whose cases sit below.
+  // fabricated row. Where the malformed claim becomes VISIBLE is H2's row on
+  // an assigned card (and H1's on an unassigned one).
   t('H33 claim: an EM-DASH claim is invisible to the shared marker (malformed, by ruling)', latestClaimComment([row33(CLAIM_AT, 'Claim — skills seat `session_x`.')]), null);
   t('H33: …so a card claimed that way under-reports rather than fabricating', h33ClaimPredatesRuling(dispatched33(), [row33(CLAIM_AT, 'Claim — skills seat `session_x`.'), rulingRow33]), null);
-
-  // -- H34 — a claim-shaped comment with a non-canonical separator (#12090) ---
-  // The acceptance pair for this row is the FOUR-WAY split below: the marker's
-  // verdict and H34's verdict are asserted on the same specimen every time, so
-  // no case can go green by quietly redefining what a claim is.
-  const tracked34 = (labels = ['pm:dispatched']) => issue(labels, ['os-zhuang']);
-  // ⚠️ `?? ''` rather than a bare `.includes` on the predicate's return. A row
-  // that goes NULL under a mutation must report a NAMED failing case, not throw
-  // and abort the suite before the remaining 200 cases run — measured while
-  // reverse-verifying this row: widening the marker turned a red suite into a
-  // TypeError whose message named neither the row nor the mutation.
-  const h34row = (...args) => String(h34ClaimShapedNonCanonicalSeparator(...args) ?? '');
-  const DASH_CLAIM = 'Claim — skills seat `session_01RM`. Folded dispatch, patrol-predicates pack.';
-  const COLON_CLAIM = 'Claim: skills seat `session_01RM`.\nBranch: `claude/issue-12090-x`';
-  const PROSE_CONTROL = 'the next seat should claim: only after the ruling lands';
-  const FULLWIDTH_CLAIM = 'Claim：skills seat `session_01RM`, round R36.';
-
-  // 1. dash claim -> the near-miss row fires AND the marker stays false.
-  t('H34: an EM-DASH claim fires the near-miss row', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(), [DASH_CLAIM]), 'string');
-  t('H34: …and CLAIM_COMMENT_MARKER is still false on it (⛔ 不放宽谓词)', CLAIM_COMMENT_MARKER.test(DASH_CLAIM), false);
-  t('H34: …and the row NAMES the separator by codepoint', h34row(tracked34(), [DASH_CLAIM]).includes('EM DASH (U+2014)'), true);
-  t('H34: …and points the remedy at the canonical spelling', h34row(tracked34(), [DASH_CLAIM]).includes('begins with the literal `Claim:`'), true);
-  t('H34: …and says the predicate is NOT widened', h34row(tracked34(), [DASH_CLAIM]).includes('NOT widened'), true);
-  // …and H2 still reports the card, correctly, as claimless.
-  t('H34: H2 still fires on the same card, and that row is CORRECT', h2AssigneeNoClaimComment(tracked34(), [DASH_CLAIM]), true);
-
-  // 2. colon claim -> the marker is true and the near-miss row is silent.
-  t('H34: a COLON claim leaves the near-miss row silent', h34ClaimShapedNonCanonicalSeparator(tracked34(), [COLON_CLAIM]), null);
-  t('H34: …because the marker reads it', CLAIM_COMMENT_MARKER.test(COLON_CLAIM), true);
-  t('H34: …and H2 is clean', h2AssigneeNoClaimComment(tracked34(), [COLON_CLAIM]), false);
-
-  // 3. the #7488 prose control -> NEITHER reader sees a claim.
-  t('H34: the prose control fires neither reader (H34)', h34ClaimShapedNonCanonicalSeparator(tracked34(), [PROSE_CONTROL]), null);
-  t('H34: …nor the marker', CLAIM_COMMENT_MARKER.test(PROSE_CONTROL), false);
-
-  // 4. fullwidth colon -> a near miss, which is what the collapsed `[::]` class
-  // makes honest: U+FF1A never matched the marker and now says so out loud.
-  t('H34: a FULLWIDTH-COLON claim fires the near-miss row', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(), [FULLWIDTH_CLAIM]), 'string');
-  t('H34: …named as such', h34row(tracked34(), [FULLWIDTH_CLAIM]).includes('FULLWIDTH COLON (U+FF1A)'), true);
-  t('H34: …and the marker has never matched it (behaviour unchanged by #12090)', CLAIM_COMMENT_MARKER.test(FULLWIDTH_CLAIM), false);
-
-  // The remaining separators, each pinned by name.
-  t('H34: an EN DASH is a near miss', nearMissClaimSeparators('Claim – skills seat, session 019x').join(','), 'EN DASH (U+2013)');
-  t('H34: a HYPHEN-MINUS is a near miss', nearMissClaimSeparators('Claim - skills seat, session 019x').join(','), 'HYPHEN-MINUS (U+002D)');
-  t('H34: `Claimed —` is one too', nearMissClaimSeparators('Claimed — by the skills seat, session 019x').join(','), 'EM DASH (U+2014)');
-  t('H34: a BLOCKQUOTED near miss reads (the template is a blockquote)', nearMissClaimSeparators('> Claim — skills seat, session 019x').join(','), 'EM DASH (U+2014)');
-
-  // ⚠️ The `[ \t]*` decision, pinned TWICE and deliberately: once on the
-  // exported regex (where the character class is what answers) and once on the
-  // reader (where the per-line split answers). A single case would let the
-  // regex be relaxed to `\s*` with the suite still green — measured: the
-  // reader-level case alone survives that mutation untouched.
-  t('H34: the exported marker does not span lines (the class, not the split)', CLAIM_NEAR_MISS_MARKER.test('Claim\n- skills seat, session 019x'), false);
-  t('H34: a markdown bullet on the NEXT line is not a separator', nearMissClaimSeparators('Claim\n- skills seat, session 019x').length, 0);
-  t('H34: …the same shape with a colon claim is unaffected', CLAIM_COMMENT_MARKER.test('Claim\n- skills seat'), false);
-
-  // The conservative content half: a claim-shaped opening with none of the
-  // protocol's own content is NOT evidence that a claim was attempted.
-  t('H34: a contentless claim-shaped line is silent', nearMissClaimSeparators('Claim - see above').length, 0);
-  t('H34: …but a `Branch:` line elsewhere in the comment is content', nearMissClaimSeparators('Claim - see above\nBranch: `claude/issue-12090-x`').join(','), 'HYPHEN-MINUS (U+002D)');
-
-  // Suppression: a thread that ALSO carries a readable claim is machine-visible,
-  // so the row has no remedy to offer and stays quiet.
-  t('H34: a thread carrying BOTH spellings is silent', h34ClaimShapedNonCanonicalSeparator(tracked34(), [DASH_CLAIM, COLON_CLAIM]), null);
-  // Gates, mirroring H2's exactly — same population, same declines.
-  t('H34: `pm:queue` is in scope too', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(['pm:queue']), [DASH_CLAIM]), 'string');
-  t('H34: an untracked card is out of scope', h34ClaimShapedNonCanonicalSeparator(issue(['domain:skills'], ['os-zhuang']), [DASH_CLAIM]), null);
-  t('H34: an UNASSIGNED card is out of scope (H1 owns that card)', h34ClaimShapedNonCanonicalSeparator(issue(['pm:dispatched']), [DASH_CLAIM]), null);
-  t('H34: an unconsulted thread declines', h34ClaimShapedNonCanonicalSeparator(tracked34(), undefined), null);
-  t('H34: an unreadable thread declines', h34ClaimShapedNonCanonicalSeparator(tracked34(), null), null);
-  t('H34: an empty thread is clean', h34ClaimShapedNonCanonicalSeparator(tracked34(), []), null);
-  t('H34: a null body among the comments does not throw', h34ClaimShapedNonCanonicalSeparator(tracked34(), [null, DASH_CLAIM]) !== null, true);
-  // Two malformed comments, two separators, counted and de-duplicated.
-  const twoNearMiss = h34row(tracked34(), [DASH_CLAIM, 'Claim – other seat, session 019y']);
-  t('H34: multiple malformed comments are counted', twoNearMiss.includes('2 comment(s)'), true);
-  t('H34: …and both separators named', twoNearMiss.includes('EM DASH (U+2014) + EN DASH (U+2013)'), true);
-  t('H34: a separator is named once, not per comment', h34row(tracked34(), [DASH_CLAIM, DASH_CLAIM]).includes('EM DASH (U+2014) + EM DASH'), false);
-  // No `g` flag on the shared marker — the state bug the colon marker's header
-  // names, asserted here because this regex is exported and reused per line.
-  t('H34: the near-miss marker carries no `g` flag', CLAIM_NEAR_MISS_MARKER.global, false);
-  t('H34: …so repeated reads of one line agree', nearMissClaimSeparators(DASH_CLAIM).join() === nearMissClaimSeparators(DASH_CLAIM).join(), true);
 
   // -- H36 — cross-lane same-file holds (report-only patrol input, #12286) ---
   const h36pr = (number, opts = {}) => ({
@@ -33883,7 +33493,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H50 order: the predecessor is the previous ROW, whatever its kind', h50([GRADING50, cm50(77, 'os-dev-report\n{}', '2026-09-07T11:30:00Z'), cm50(2, claim50('77'), T50_AFTER)]), null);
   t('H50 order: the documented blockquote claim spelling reads the same', h50([TRIAGE50, GRADING50, cm50(4, `> ${claim50('5569655227').split('\n').join('\n> ')}`, T50_AFTER)]), null);
   t('H50 order: a thread with no claim at all is silent (H2\'s row where assigned)', h50([TRIAGE50, GRADING50]), null);
-  t('H50 order: a dash-written claim is invisible here, as it is to H2 (H34 reports it)', h50([GRADING50, cm50(2, 'Claim — PM loop round 1\nThread-read: 1', T50_AFTER)]), null);
+  t('H50 order: a dash-written claim is invisible here, as it is to H2 (H2 reports the card claimless)', h50([GRADING50, cm50(2, 'Claim — PM loop round 1\nThread-read: 1', T50_AFTER)]), null);
 
   // Population — `pm:dispatched`, open.
   t('H50 population: an open `pm:dispatched` card is in', h50SpeaksAbout(DISPATCHED50), true);
@@ -36187,7 +35797,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, 'control: …and the blockquoted prose control too', markerMatches(CLAIM_COMMENT_MARKER, '> the next seat should claim: only after the ruling lands'), false);
   b(BATTERY68, 'control: ⛔ `Released:` is still a MALFORMED release, ⛔ not a dialect', markerMatches(RELEASE_COMMENT_MARKER, 'Released: session `session_x`'), false);
   b(BATTERY68, 'control: ⛔ the FULLWIDTH colon still does not read — the 2026-08-11 ruling is untouched', markerMatches(RELEASE_COMMENT_MARKER, 'Release：session `session_x`'), false);
-  b(BATTERY68, 'control: ⛔ nor a dash-written claim, which is H34\'s row and ⛔ not a widening', markerMatches(CLAIM_COMMENT_MARKER, 'Claim — skills seat, session 019x'), false);
+  b(BATTERY68, 'control: ⛔ nor a dash-written claim, which is H2\'s claimless card and ⛔ not a widening', markerMatches(CLAIM_COMMENT_MARKER, 'Claim — skills seat, session 019x'), false);
 
   // THE LIST-ITEM GUARD — `undecorateProseLine` strips EVERY `*`, so a `*`
   // bullet would become a directive. H20 pins `- Claim:` as NOT a claim; a `*`
@@ -36253,7 +35863,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18831 ordering: the two additions are LAST on the roster, in that order', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(-2).map((f) => f.id).join(','), 'heading-bare,bare-word');
   b(BATTERY68, '#18831 ordering: a heading WITH the canonical colon is still `heading`, ⛔ not `heading-bare`', miss68('## Claim: seat, session `session_x`').form, 'heading');
   b(BATTERY68, '#18831 ordering: …an inflected word with a colon is still `inflected-word`', miss68('Claiming: seat, session `session_x`').form, 'inflected-word');
-  b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H34\'s row and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
+  b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H2\'s claimless card and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
   b(BATTERY68, '#18831 ordering: …a `-` bulleted claim with no colon is named by NEITHER addition — a list is not a heading and not a line start', ownershipMarkerNearMisses(rows68('- Claiming the producer half, seat `domain:spec`')).length, 0);
 
   // THE `leading-sigil` FORM (#18829 A) — the shape the sibling's retired

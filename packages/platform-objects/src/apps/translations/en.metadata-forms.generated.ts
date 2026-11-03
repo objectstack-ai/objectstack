@@ -721,6 +721,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Reference",
         helpText: "Referenced object name"
       },
+      referenceNameVisible: {
+        label: "Show Name When Unreadable",
+        helpText: "Lets a reader of this record see the referenced record's name, as plain text with no link, even when they may not open that record. Nothing else of it is shown, and a field-level rule on the name still holds (the name then reads Record # and the id). Unset: such a reference shows as a restricted record."
+      },
       deleteBehavior: {
         label: "Delete Behavior",
         helpText: "What happens when referenced record is deleted"
@@ -2252,6 +2256,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "variables.defaultValue": {
         label: "Default Value"
+      },
+      "variables.objectName": {
+        label: "Record Object"
       },
       status: {
         label: "Status",

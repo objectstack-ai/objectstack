@@ -65,6 +65,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 // namespace's catalogues as this module's engine strings BECAUSE this module
 // imports it: drop the import and the gates stop reading them.
 import { studioString, useStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+import { isZhLocale } from './schema-field-label.js';
 // Type-only (erased at build): the overlay-scope and lock-state label tables
 // below are keyed by their producer's own union rather than by hand — see
 // `LAYER_SCOPE_ZH` and `LOCK_STATE_ZH`.
@@ -193,10 +194,9 @@ const DOMAIN_LABELS_ZH: Record<string, string> = {
   other: '其他',
 };
 
-/** Whether a locale resolves to Chinese (the only non-English catalog). */
-export function isZhLocale(locale?: SupportedLocale | string): boolean {
-  return (locale ?? '').toLowerCase().startsWith('zh');
-}
+// `isZhLocale` and the raw schema-field labels live in the leaf
+// `./schema-field-label.ts`; re-exported here so every existing import keeps working.
+export { isZhLocale, translateSchemaFieldLabel, translateSchemaFieldHelp } from './schema-field-label.js';
 
 /** zh-CN overrides for one flow-node config field. English is the fallback. */
 interface FlowFieldZh {
@@ -755,63 +755,6 @@ export function translateEnumOption(
   return value;
 }
 
-/**
- * Generic zh-CN labels for raw JSON-Schema fields the metadata SchemaForm
- * renders without a client `fieldSpec.label` — chiefly the flow edge/node
- * sub-forms (Source / Target / Condition / …). Names here have one unambiguous
- * meaning across metadata types, so the zh label is universally correct; English
- * (and any name not listed) keeps the schema's own title. Applied only as a
- * fallback UNDER `fieldSpec.label`, so curated top-level forms are untouched.
- */
-const SCHEMA_FIELD_LABEL_ZH: Record<string, string> = {
-  id: 'ID',
-  name: '名称',
-  label: '标签',
-  type: '类型',
-  description: '描述',
-  source: '源节点',
-  target: '目标节点',
-  condition: '条件',
-  isDefault: '默认',
-  nodes: '节点',
-  edges: '连线',
-  config: '配置',
-  outputVariable: '输出变量',
-};
-
-/** zh-CN help text for the unambiguous (edge-specific) raw schema fields. */
-const SCHEMA_FIELD_HELP_ZH: Record<string, string> = {
-  source: '源节点 ID',
-  target: '目标节点 ID',
-  condition: '用于分支的 CEL 布尔表达式',
-  isDefault: '当没有其他条件匹配时,将此连线标记为默认路径',
-};
-
-/** Localized label for a raw schema field (falls back to the schema title). */
-export function translateSchemaFieldLabel(
-  name: string,
-  fallback: string | undefined,
-  locale?: SupportedLocale | string,
-): string | undefined {
-  if (isZhLocale(locale)) {
-    const v = SCHEMA_FIELD_LABEL_ZH[name];
-    if (v) return v;
-  }
-  return fallback;
-}
-
-/** Localized help for a raw schema field (falls back to the schema description). */
-export function translateSchemaFieldHelp(
-  name: string,
-  fallback: string | undefined,
-  locale?: SupportedLocale | string,
-): string | undefined {
-  if (isZhLocale(locale)) {
-    const v = SCHEMA_FIELD_HELP_ZH[name];
-    if (v) return v;
-  }
-  return fallback;
-}
 
 export function t(key: string, locale?: SupportedLocale | string): string {
   return lookupString(key, locale) ?? key;

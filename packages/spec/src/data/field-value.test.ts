@@ -32,6 +32,7 @@ import {
   referenceCarrierOf,
   LocationValueSchema,
   FileRefusedValueSchema,
+  ReferenceNameOnlyValueSchema,
 } from './field-value.zod';
 import { findClosestMatches } from '../shared/suggestions.zod';
 
@@ -311,6 +312,27 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
   it('expanded form admits the in-place $expand record object for references', () => {
     ok({ type: 'lookup' }, { id: 'acc_1', name: 'Acme' }, 'expanded');
     ok({ type: 'lookup' }, 'acc_1', 'expanded'); // unresolvable ids stay ids
+  });
+
+  it('a reader refused the target of a referenceNameVisible field reads the NAMED name-only value', () => {
+    // The served `{ id, name, readRefused: true }`, per element on a multi-value field.
+    for (const type of ['lookup', 'user']) {
+      ok({ type }, { id: 'acc_1', name: 'Acme', readRefused: true }, 'expanded');
+    }
+    ok({ type: 'lookup', multiple: true }, [{ id: 'acc_1', name: 'Record #acc_1', readRefused: true }, 'acc_2'], 'expanded');
+    // Closed on its own: the marker is a literal `true`, the id is a record id,
+    // the name is present, and nothing else of the target rides on it.
+    const parse = (v: unknown) => ReferenceNameOnlyValueSchema.safeParse(v);
+    expect(parse({ id: 'acc_1', name: 'Acme', readRefused: true }).success).toBe(true);
+    expect(parse({ id: 'acc_1', name: 'Acme', readRefused: false }).success).toBe(false);
+    expect(parse({ id: 'acc_1', readRefused: true }).success).toBe(false);
+    expect(parse({ id: 'acc_1', name: '', readRefused: true }).success).toBe(false);
+    expect(parse({ id: '{"id":"acc_1"}', name: 'Acme', readRefused: true }).success).toBe(false);
+    const widened = parse({ id: 'acc_1', name: 'Acme', readRefused: true, owner: 'usr_1' });
+    expect(widened.success).toBe(false);
+    expect(widened.error?.issues.map((i) => i.code)).toContain('unrecognized_keys');
+    // Read-only: the STORED form stays the bare id alone.
+    bad({ type: 'lookup' }, { id: 'acc_1', name: 'Acme', readRefused: true });
   });
 
   it('a SERIALIZED embedded record is not an id, in either form', () => {

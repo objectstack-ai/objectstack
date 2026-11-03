@@ -815,20 +815,22 @@ export function localRunsStand(reading) {
 
 /**
  * The `Contract-review-handoff:` key line -- the ONE way a dispatching seat
- * hands its contract review to the triage seat, read with `Reviewed-by:`'s own
- * key discipline.
+ * hands its contract review to a review seat or a sibling seat of its lane,
+ * read with `Reviewed-by:`'s own key discipline.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉, and the triage duties' round step): the seat that
- * dispatched the work runs the review at the contract-review tier. ONLY when
- * that tier's call is quota-refused does the seat hand the review over -- it
- * never reviews at a lower tier -- and the hand-off is one PR comment carrying
- * this line beside the existing `needs:contract-review` label:
+ * 〈复核归属与资格〉): the seat that dispatched the work runs the review in
+ * its own seat at the contract-review tier. ONLY when that tier's call is
+ * quota-refused does the seat hand the review over -- it never reviews at a
+ * lower tier -- and the hand-off is one PR comment carrying this line beside
+ * the existing `needs:contract-review` label:
  *
- *   Contract-review-handoff: triage — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
+ *   Contract-review-handoff: review#1 — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
  *
- * Three facts, each required: the TARGET (`triage`, the closed set of one), the
- * TIER that was unavailable -- the constant's NAME, exactly as `Served-tier:`
+ * Three facts, each required: the TARGET (a review seat `review#N`, or a
+ * sibling seat of the lane `domain:<lane>#N` while no review seat is seated --
+ * the closed set of two shapes; ⛔ never `triage`, which takes no contract
+ * review, so a line naming it is unreadable), the TIER that was unavailable -- the constant's NAME, exactly as `Served-tier:`
  * spells it, ⛔ never a model id -- with its reason and UTC time in the
  * parentheses, and the HEAD the hand-off is for, 7 to 40 hex. A line missing
  * any of them is started-and-unreadable: a hand-off nobody can date, or one
@@ -836,15 +838,23 @@ export function localRunsStand(reading) {
  *
  * ⛔ No gate reads it. The queue guard keeps reading the ONE `## Contract
  * review` record; this line decides only WHO renders that record, and the
- * triage seat's record is the same shape, `Reviewed-by:` naming the triage
- * seat. `contractReviewHandoff` below is the reading a seat or patrol takes.
+ * named seat's record is the same shape, `Reviewed-by:` naming that seat.
+ * `contractReviewHandoff` below is the reading a seat or patrol takes.
  */
 export const CONTRACT_REVIEW_HANDOFF_KEY = 'Contract-review-handoff';
+/**
+ * The line exactly as the rule text prints it, placeholders included. This file's self-test pins it
+ * VERBATIM in `references/contract-review.md`, so the text and `HANDOFF_TARGET` cannot drift apart.
+ */
+export const CONTRACT_REVIEW_HANDOFF_TEMPLATE = `${CONTRACT_REVIEW_HANDOFF_KEY}: <review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`;
 const CONTRACT_REVIEW_HANDOFF_LINE = keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY);
 /** The same key as a MARKER over a whole comment body -- `latestMarkedComment`'s convention (multiline, `g`-less). */
 const CONTRACT_REVIEW_HANDOFF_MARKER = new RegExp(CONTRACT_REVIEW_HANDOFF_LINE.source, 'm');
-/** `triage`, a separator (an em dash, a hyphen pair, a hyphen or a colon), then the rest. */
-const HANDOFF_TARGET = /^triage\b[ \t]*(?:—|--|-|:)?[ \t]*(.*)$/i;
+/**
+ * The target -- `review#N` or `domain:<lane>#N`, the seat number required -- a separator (an em dash, a
+ * hyphen pair, a hyphen or a colon), then the rest. `triage` and every other seat word match nothing.
+ */
+const HANDOFF_TARGET = /^(review#[1-9][0-9]*|domain:[a-z][a-z0-9._-]*#[1-9][0-9]*)(?![0-9])[ \t]*(?:—|--|-|:)?[ \t]*(.*)$/i;
 /** `(reason, UTC time)` then ` · head SHA` -- the time is the LAST comma-separated item in the parentheses. */
 const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t]+`?([0-9a-fA-F]{7,40})`?[ \t]*$/;
 
@@ -853,7 +863,8 @@ const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t
  *
  * @returns {{ state: 'missing' }
  *          | { state: 'unreadable', line: string }
- *          | { state: 'read', to: 'triage', tier: string, reason: string, at: string, head: string }}
+ *          | { state: 'read', to: string, tier: string, reason: string, at: string, head: string }}
+ *          `to` is the target seat, lower-cased (`review#1`, `domain:ui#2`).
  */
 export function readContractReviewHandoff(text) {
   for (const line of String(text ?? '').split(/\r?\n/)) {
@@ -864,14 +875,14 @@ export function readContractReviewHandoff(text) {
     if (!target) return unreadable;
     // The tier is read by NAME, through the one token reader `Served-tier:` uses, so a model id
     // written here is refused for the same reason it is refused there.
-    const named = stripValueDecoration(target[1]);
+    const named = stripValueDecoration(target[2]);
     const tier = TIER_TOKEN.exec(named);
     if (!tier || tier[1] !== CONTRACT_REVIEW_TIER_NAME) return unreadable;
     const rest = stripValueDecoration(named.slice(tier[0].length));
     const tail = /^unavailable\b[ \t]*(.*)$/i.exec(rest);
     const parts = tail ? HANDOFF_TAIL.exec(tail[1].trim()) : null;
     if (!parts || parts[1].trim() === '') return unreadable;
-    return { state: 'read', to: 'triage', tier: tier[1], reason: parts[1].trim(), at: parts[2].trim(), head: parts[3] };
+    return { state: 'read', to: target[1].toLowerCase(), tier: tier[1], reason: parts[1].trim(), at: parts[2].trim(), head: parts[3] };
   }
   return { state: 'missing' };
 }
@@ -880,10 +891,11 @@ export function readContractReviewHandoff(text) {
  * Whose review this pull request's contract review is, read off its comment thread:
  *
  *   absent    no hand-off line on any comment -- the dispatching seat's own review; a
- *             `needs:contract-review` label alone changes nothing here, and triage does not touch it
- *   triage    the NEWEST hand-off line names the current head -- the triage seat renders the record
+ *             `needs:contract-review` label alone changes nothing here
+ *   handed    the NEWEST hand-off line names the current head -- the seat it names (`to`, a review
+ *             seat or a sibling lane seat) renders the record
  *   stale     the newest hand-off line names an earlier head -- the head moved past the hand-off, so
- *             it needs a fresh line or the seat's own review; triage does not act on it
+ *             it needs a fresh line or the seat's own review; the named seat does not act on it
  *   unreadable  the thread or the head could not be read, or the newest hand-off line cannot be graded
  *
  * Newest governs, chosen by `latestMarkedComment` -- the one resolution this file's locator uses --
@@ -907,7 +919,7 @@ export function contractReviewHandoff(rows, headSha) {
   if (line.state !== 'read') return { state: 'unreadable', gaps: [`the newest hand-off line (comment ${stamp.id ?? '?'}) cannot be read: ${line.line ?? 'no line'}`], ...stamp };
   // PREFIX either way, as `regenChainToHead` meets two spellings of one commit: the line may abbreviate the head.
   const current = shaMeets(head, line.head.toLowerCase());
-  return { state: current ? 'triage' : 'stale', head: line.head, reason: line.reason, handedAt: line.at, ...stamp };
+  return { state: current ? 'handed' : 'stale', to: line.to, head: line.head, reason: line.reason, handedAt: line.at, ...stamp };
 }
 
 // ---------------------------------------------------------------------------
@@ -916,11 +928,11 @@ export function contractReviewHandoff(rows, headSha) {
 
 /**
  * The `Contract-review-claim:` key line -- who has STARTED the contract review
- * of one head, posted by that reviewer before it starts, lane seat or triage.
+ * of one head, posted by that reviewer before it starts, lane seat or review seat.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉): the lane reviews its own; the triage seat takes a review
- * only when nobody is doing it. Before starting, every reviewer reads the PR:
+ * 〈复核归属与资格〉): the lane reviews its own; a review seat, or a sibling
+ * lane seat, takes one only when it is handed over or nobody is doing it. Before starting, every reviewer reads the PR:
  * a record or a LIVE claim on the current head means do not start. Otherwise it
  * posts ONE comment carrying this line first, then reviews:
  *
@@ -939,10 +951,11 @@ export function contractReviewHandoff(rows, headSha) {
  * {@link CONTRACT_REVIEW_CLAIM_LAPSE_HOURS} hours after it was posted -- the
  * reviewer died -- after which the next reviewer may claim. A record on the
  * head settles the review whatever any claim says; that is the caller's read
- * (`locateReviewOfRecord`), never this one's. When a lane claim and a triage
- * claim are both live on one head the LANE wins: triage withdraws by replying
+ * (`locateReviewOfRecord`), never this one's. When two claims are both live on
+ * one head the EARLIEST posted holds: the later claimant withdraws by replying
  * once and discards its subagent's work (`contractReviewClaims` names the
- * holder).
+ * holder; a legacy `triage#N`-signed claim is the one claim that yields to a
+ * later one, as described there).
  *
  * ⛔ No gate reads it. The queue guard keeps reading the ONE `## Contract
  * review` record; this line is coordination between reviewers, never a merge
@@ -1014,16 +1027,17 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
 /**
  * Who holds this pull request's current head, read off its comment thread:
  *
- *   live        a live claim names the current head -- `holder` is the claim to respect: the LANE's
- *               when a lane claim and a triage claim are both live (`tie` true), else the earliest posted
+ *   live        a live claim names the current head -- `holder` is the claim to respect: the earliest
+ *               posted, except that a legacy `triage#N` claim yields to any other live claim (`tie` true)
  *   lapsed      claims named the current head, and every one has expired
  *   none        no claim names the current head (claims on earlier heads lapsed when it moved)
  *   unreadable  the thread, the head or the clock could not be read
  *
- * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): the triage seat
- * signs `triage#N · …`, and every other claim -- a lane seat's, a cross-account reviewer's, an
- * unsigned one -- is the `lane` side, which is the side the tie rule protects. Unreadable claim
- * lines are returned by comment id and hold nothing.
+ * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): a claim signed
+ * `triage#N · …` -- posted before triage stopped taking contract reviews -- is the `triage` side,
+ * and every other claim -- a lane seat's, a review seat's, a sibling lane seat's, an unsigned one
+ * -- is the `lane` side, among which the earliest posted holds. Unreadable claim lines are
+ * returned by comment id and hold nothing.
  *
  * @param {{ id?: number, body?: string, created_at?: string }[]} rows  the PR's comment rows
  * @param {string} headSha  the pull request's current head, full
@@ -1258,12 +1272,12 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * or a patrol takes; nothing here changes an exit.
  */
 export const MAILBOX_KEYS = Object.freeze([
-  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'triage', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
+  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'a review seat (`review#N`), or a sibling seat of the lane while none is seated', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
   { id: 'request:triage', kind: 'Request', key: 'triage', from: 'lane', to: 'triage', when: 'a question about a card\'s fate, route or grade', template: 'Request: triage · #n · ONE-LINE-QUESTION' },
   { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', when: 'a p0 suspect, main red, a deterministic queue red', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
   { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'triage, or the director when triage is absent', when: 'the anchor card is filed', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
   { id: 'notify:main-red', kind: 'Notify', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'the seat that landed the breaking PR, and the anchor card\'s lane', when: 'the anchor card is filed', template: 'Notify: main-red · anchor #n · breaking PR #m or none' },
-  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'triage', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
+  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the review seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
   { id: 'notify:release-blocker', kind: 'Notify', key: 'release-blocker', from: 'triage', to: 'the lane it is graded into', when: 'a p0/p1 release blocker is graded into a lane', template: 'Notify: release-blocker · #n' },
   { id: 'notify:unblocked', kind: 'Notify', key: 'unblocked', from: 'the seat that moved the card to `pm:queue` (triage or an epic seat)', to: 'the card\'s lane seats', when: 'a p0/p1 card\'s `Blocked-by` target closed', template: 'Notify: unblocked · #n · p0 or p1' },
   { id: 'notify:ruling', kind: 'Notify', key: 'ruling', from: 'the seat that recorded a maintainer ruling', to: 'the seat whose card or draft it changes', when: 'the ruling is recorded', template: 'Notify: ruling · #n · LETTER · record ID' },
@@ -1272,6 +1286,7 @@ export const MAILBOX_KEYS = Object.freeze([
   { id: 'notify:seat-online', kind: 'Notify', key: 'seat-online', from: 'the seating session (or a forced takeover, for the walled account)', to: 'the lane\'s sibling seats and triage', when: 'at seating', template: 'Notify: seat-online · LANE#N · LOGIN · mailbox #m · patrol TRIGGER_ID · takes: #a #b …' },
   { id: 'notify:seat-offline', kind: 'Notify', key: 'seat-offline', from: 'the signing-off session', to: 'the lane\'s sibling seats and triage', when: 'at sign-off', template: 'Notify: seat-offline · LANE#N · in-flight: … · stay-behind: … · brief ID' },
   { id: 'notify:split', kind: 'Notify', key: 'split', from: 'a seat of a multi-seat lane', to: 'its sibling seats', when: 'at round open, only when the list changed', template: 'Notify: split · LANE#N · takes: … · leaves: …' },
+  { id: 'notify:security', kind: 'Notify', key: 'security', from: 'the finder — any seat, dev or QA runner', to: 'security#1', when: 'its relay `advisory_create` draft landed; the opaque advisory id ALONE — never a mechanism, a path or an object name', template: 'Notify: security · GHSA-ID' },
 ]);
 /** One event, one line: the longest a mailbox line may be, in bytes (the text's 「≤200 字节」). */
 export const MAILBOX_LINE_MAX_BYTES = 200;
@@ -1300,6 +1315,13 @@ const UNBLOCKED_PRIORITY_REF = /^(p0|p1)$/;
 const SERIAL_REF = /^#([1-9][0-9]*) behind #([1-9][0-9]*)$/;
 /** A ruling's option LETTER as the record spells it (`A`, `B′`, `乙`): one short token, never a number reference. */
 const RULING_LETTER_REF = /^[^\s#`]{1,12}$/u;
+/**
+ * `GHSA-xxxx-xxxx-xxxx` — a repository security advisory's opaque id, the ONE field `Notify: security` carries
+ * (`security-findings.md`: the id alone, never a mechanism, a path or an object name). MIRRORED from the relay's
+ * `GHSA_ID_SHAPE` (`fleet-write/ops.mjs`, its reading of the id an advisory write lands) — not imported, so the
+ * patrol graph never loads the relay; the self-test holds the two equal.
+ */
+const ADVISORY_ID_REF = /^GHSA(-[0-9a-z]{4}){3}$/;
 /**
  * `patrol TRIGGER_ID` on `Notify: seat-online` — the seat's patrol routine, the value its post's `Patrol:` line
  * records (`trig_…`), or `patrol none` for a seat with no patrol by rule (the director seat). The template's own
@@ -1404,6 +1426,11 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     if (p.length !== 2) return null;
     const card = NUMBER_REF.exec(p[1]);
     return card ? { card: Number(card[1]), numbers: [Number(card[1])] } : null;
+  },
+  'notify:security': (p) => {
+    if (p.length !== 2) return null;
+    const advisory = ADVISORY_ID_REF.exec(p[1]);
+    return advisory ? { advisory: advisory[0], numbers: [] } : null;
   },
   'notify:contract-review': (p) => {
     if (p.length !== 3) return null;
@@ -2181,14 +2208,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
-  '⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own': 13,
+  '⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable': 17,
   // Raised 27 → 40 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
   // per new key reading, the patrol and `patrol none` readings, the both-ways table pin that replaced the
   // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout, the invented
   // keys that stay refused, and the two end-to-end pins through check-half-states H72 (31 → 44 cases).
   '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 40,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
-  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the lane wins a tie': 21,
+  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 21,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
 });
 
@@ -2611,23 +2638,28 @@ export async function selfTest() {
   // -- the `Contract-review-handoff:` line --------------------------------------
   //
   // The maintainer's rule: a seat with a working contract-review tier reviews
-  // its own dispatches; only an exhausted tier hands the review to triage, and
-  // triage must be able to TELL that case apart from a label alone. The line is
-  // the telling; these cases pin the three readings a seat or patrol takes.
-  battery('⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own');
+  // its own dispatches; only an exhausted tier hands the review to a review
+  // seat, or a sibling seat of the lane while none is seated -- never to
+  // triage, which takes no contract review. The line is the telling; these
+  // cases pin the readings a seat or patrol takes.
+  battery('⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable');
   const HO_HEAD = '1b03a9c36be249502c1160b1f262f835f7ccaf02';
-  const HO_LINE = (head = HO_HEAD, reason = 'HTTP 429', at = '2026-10-27T13:00Z') => `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (${reason}, ${at}) · head ${head}`;
+  const HO_LINE = (head = HO_HEAD, reason = 'HTTP 429', at = '2026-10-27T13:00Z') => `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (${reason}, ${at}) · head ${head}`;
   const HO_ROW = (line, id = 4401, at = '2026-10-27T13:01:00Z') => ({ id, created_at: at, body: `Seat note — the review tier was refused this round.\n\n${line}\n\nLabel kept.` });
-  t('⭐ the line names the CURRENT head ⇒ the review is triage\'s, with the reason, the time and the comment that handed it off', (() => { const r = contractReviewHandoff([HO_ROW(HO_LINE())], HO_HEAD); return r.state === 'triage' && r.head === HO_HEAD && r.reason === 'HTTP 429' && r.handedAt === '2026-10-27T13:00Z' && r.id === 4401; })());
+  t('⭐ the line names the CURRENT head ⇒ handed, to the seat it names, with the reason, the time and the comment that handed it off', (() => { const r = contractReviewHandoff([HO_ROW(HO_LINE())], HO_HEAD); return r.state === 'handed' && r.to === 'review#1' && r.head === HO_HEAD && r.reason === 'HTTP 429' && r.handedAt === '2026-10-27T13:00Z' && r.id === 4401; })());
   t('⭐ the head MOVED past the line ⇒ stale, naming the head the hand-off was for — a fresh line or the seat\'s own review', (() => { const r = contractReviewHandoff([HO_ROW(HO_LINE())], 'c260fddc'.padEnd(40, '0')); return r.state === 'stale' && r.head === HO_HEAD; })());
   t('⭐ NO hand-off line on any comment ⇒ absent, the seat\'s own review — a record, a seat note, a label mention change nothing', (() => { const r = contractReviewHandoff([RECORD_ON_9AF9, { id: 4402, created_at: '2026-10-27T13:02:00Z', body: 'ACCEPT — `needs:contract-review` stays until the seat reviews.' }], HO_HEAD); return r.state === 'absent' && r.read === 2; })());
-  t('the head is matched by PREFIX, as a record\'s span is: an abbreviated head on the line names the full head, and the reverse', contractReviewHandoff([HO_ROW(HO_LINE(HO_HEAD.slice(0, 7)))], HO_HEAD).state === 'triage' && contractReviewHandoff([HO_ROW(HO_LINE(HO_HEAD))], HO_HEAD.slice(0, 8)).state === 'triage');
-  t('NEWEST governs — an older line on an old head under a newer one on the current head reads triage\'s, and the reverse reads stale', contractReviewHandoff([HO_ROW(HO_LINE('deadbeef1'), 4403, '2026-10-27T12:00:00Z'), HO_ROW(HO_LINE(), 4404, '2026-10-27T13:30:00Z')], HO_HEAD).state === 'triage' && contractReviewHandoff([HO_ROW(HO_LINE(), 4403, '2026-10-27T12:00:00Z'), HO_ROW(HO_LINE('deadbeef1'), 4404, '2026-10-27T13:30:00Z')], HO_HEAD).state === 'stale');
-  t('decoration reads: a bulleted bolded key, a backticked tier name, a backticked head, a blockquoted line', (() => { const dec = `> - **${CONTRACT_REVIEW_HANDOFF_KEY}:** triage — \`${CONTRACT_REVIEW_TIER_NAME}\` unavailable (quota exhausted, 2026-10-27T13:00Z) · head \`${HO_HEAD.slice(0, 12)}\``; const r = readContractReviewHandoff(dec); return r.state === 'read' && r.head === HO_HEAD.slice(0, 12) && r.reason === 'quota exhausted' && contractReviewHandoff([HO_ROW(dec)], HO_HEAD).state === 'triage'; })());
-  t('the separator is any of the four spellings, and the reason may itself carry a comma — the time is the LAST item in the parentheses', ['—', '--', '-', ':'].every((sep) => readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage ${sep} ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, quota exhausted, 2026-10-27T13:00Z) · head ${HO_HEAD}`).reason === 'HTTP 429, quota exhausted'));
-  t('⛔ a line with no reason, no time or no head is started-and-unreadable, never a reading — the ambiguity the line exists to remove', [`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z)`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a`, `${CONTRACT_REVIEW_HANDOFF_KEY}:`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
-  t('⛔ the target is the closed set of one and the tier is the constant\'s NAME — another seat, the default tier or a model id is unreadable', [`${CONTRACT_REVIEW_HANDOFF_KEY}: director — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${TIER_DEFAULT_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
-  t('an unreadable NEWEST line makes the thread unreadable, naming the comment — never absent, never stale', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, 4405)], HO_HEAD); return r.state === 'unreadable' && r.gaps.length === 1 && r.gaps[0].includes('4405'); })());
+  t('the head is matched by PREFIX, as a record\'s span is: an abbreviated head on the line names the full head, and the reverse', contractReviewHandoff([HO_ROW(HO_LINE(HO_HEAD.slice(0, 7)))], HO_HEAD).state === 'handed' && contractReviewHandoff([HO_ROW(HO_LINE(HO_HEAD))], HO_HEAD.slice(0, 8)).state === 'handed');
+  t('NEWEST governs — an older line on an old head under a newer one on the current head reads handed, and the reverse reads stale', contractReviewHandoff([HO_ROW(HO_LINE('deadbeef1'), 4403, '2026-10-27T12:00:00Z'), HO_ROW(HO_LINE(), 4404, '2026-10-27T13:30:00Z')], HO_HEAD).state === 'handed' && contractReviewHandoff([HO_ROW(HO_LINE(), 4403, '2026-10-27T12:00:00Z'), HO_ROW(HO_LINE('deadbeef1'), 4404, '2026-10-27T13:30:00Z')], HO_HEAD).state === 'stale');
+  t('decoration reads: a bulleted bolded key, a backticked tier name, a backticked head, a blockquoted line', (() => { const dec = `> - **${CONTRACT_REVIEW_HANDOFF_KEY}:** review#1 — \`${CONTRACT_REVIEW_TIER_NAME}\` unavailable (quota exhausted, 2026-10-27T13:00Z) · head \`${HO_HEAD.slice(0, 12)}\``; const r = readContractReviewHandoff(dec); return r.state === 'read' && r.head === HO_HEAD.slice(0, 12) && r.reason === 'quota exhausted' && contractReviewHandoff([HO_ROW(dec)], HO_HEAD).state === 'handed'; })());
+  t('the separator is any of the four spellings, and the reason may itself carry a comma — the time is the LAST item in the parentheses', ['—', '--', '-', ':'].every((sep) => readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 ${sep} ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, quota exhausted, 2026-10-27T13:00Z) · head ${HO_HEAD}`).reason === 'HTTP 429, quota exhausted'));
+  t('⛔ a line with no reason, no time or no head is started-and-unreadable, never a reading — the ambiguity the line exists to remove', [`${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z)`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a`, `${CONTRACT_REVIEW_HANDOFF_KEY}:`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
+  t('⛔ the target is the closed set of two shapes and the tier is the constant\'s NAME — `triage`, `director`, a seat with no number, the default tier or a model id is unreadable', [`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: director — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: domain:ui — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${TIER_DEFAULT_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
+  t('⭐ the line is spelled VERBATIM, in a code span, in the rule text (`references/contract-review.md`) — the template and `HANDOFF_TARGET` cannot drift apart', (() => { const rules = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8'); return rules.includes(`\`${CONTRACT_REVIEW_HANDOFF_TEMPLATE}\``) && CONTRACT_REVIEW_HANDOFF_TEMPLATE.startsWith(`${CONTRACT_REVIEW_HANDOFF_KEY}: `); })());
+  t('⛔ the TEMPLATE sent verbatim is unreadable — a placeholder names no seat and no head', readContractReviewHandoff(CONTRACT_REVIEW_HANDOFF_TEMPLATE).state === 'unreadable' && contractReviewHandoff([HO_ROW(CONTRACT_REVIEW_HANDOFF_TEMPLATE, 4407)], HO_HEAD).state === 'unreadable');
+  t('⭐ a sibling seat of the lane is a target while no review seat is seated: `domain:<lane>#N` reads, lower-cased, and hands the head to it', (() => { const line = `${CONTRACT_REVIEW_HANDOFF_KEY}: Domain:UI#2 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line)], HO_HEAD); return readContractReviewHandoff(line).to === 'domain:ui#2' && r.state === 'handed' && r.to === 'domain:ui#2' && readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#12 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`).to === 'review#12'; })());
+  t('⛔ a line still naming `triage` hands the review to NOBODY: newest on the thread it is unreadable, never handed — triage takes no contract review', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, 4406)], HO_HEAD); return r.state === 'unreadable' && r.gaps[0].includes('4406'); })());
+  t('an unreadable NEWEST line makes the thread unreadable, naming the comment — never absent, never stale', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, 4405)], HO_HEAD); return r.state === 'unreadable' && r.gaps.length === 1 && r.gaps[0].includes('4405'); })());
   t('a thread that is not an array, or a head too short to match, is a read that could not be made', contractReviewHandoff(null, HO_HEAD).state === 'unreadable' && contractReviewHandoff([], 'abc').state === 'unreadable' && contractReviewHandoff([], HO_HEAD).state === 'absent');
   t('the key is ONE regex, built by the one key-line convention, and prose naming it mid-sentence is not the line', CONTRACT_REVIEW_HANDOFF_LINE.source === keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY).source && readContractReviewHandoff(`the ${CONTRACT_REVIEW_HANDOFF_KEY}: line goes on the PR`).state === 'missing' && contractReviewHandoff([HO_ROW(`the ${CONTRACT_REVIEW_HANDOFF_KEY}: line goes on the PR`)], HO_HEAD).state === 'absent');
   t('⛔ no gate reads it: the queue guard\'s record reading is untouched — a hand-off line beside a record on this head still reads FOUND', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, HO_ROW(HO_LINE(HEAD_9AF9))] })); return r.state === 'found' && r.id === 3301; })());
@@ -2639,7 +2671,7 @@ export async function selfTest() {
   // head. These cases read the line as the triage seat really posted it, with
   // and without the signature above it, refuse every shape that names no head
   // or no time, and pin the lapse arithmetic and the lane-wins tie.
-  battery('⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the lane wins a tie');
+  battery('⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds');
   const CL_HEAD = '3beee64fe77741d07f035f1b80eeaa07e7280ab4';
   const CL_SESSION = 'session_01AavokzJ5DndAwitDXvKy4U';
   const CL_LANE_SESSION = 'session_01JQwxbZeBv2y91towxasSUT';
@@ -2664,7 +2696,7 @@ export async function selfTest() {
   t('⭐ lapse: the current head under two hours ⇒ live; two hours or more ⇒ expired; another head ⇒ head-moved', (() => { const c = readContractReviewClaim(CL_LINE()); const at = c.at; return contractReviewClaimLapse(c, { headSha: CL_HEAD, now: at + 119 * 60000 }) === 'live' && contractReviewClaimLapse(c, { headSha: CL_HEAD, now: at + 120 * 60000 }) === 'expired' && contractReviewClaimLapse(c, { headSha: 'f'.repeat(40), now: at }) === 'head-moved' && CONTRACT_REVIEW_CLAIM_LAPSE_HOURS === 2; })());
   t('the lapse is timed from when the comment was POSTED when that stamp is held, else from the line\'s own time', (() => { const c = readContractReviewClaim(CL_LINE()); const posted = c.at + 90 * 60000; return contractReviewClaimLapse(c, { headSha: CL_HEAD, now: c.at + 150 * 60000, postedAt: posted }) === 'live' && contractReviewClaimLapse(c, { headSha: CL_HEAD, now: c.at + 150 * 60000 }) === 'expired'; })());
   t('⭐ the thread: a live claim on the current head holds it — named by session, comment and side', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.session === CL_SESSION && r.holder.id === 6468788431 && r.holder.side === 'triage' && r.tie === false; })());
-  t('⭐ the LANE wins a tie: a triage claim posted FIRST and a lane claim posted later, both live ⇒ the lane holds, tie named', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.tie === true && r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION; })());
+  t('⭐ a legacy `triage#N` claim YIELDS: a triage claim posted FIRST and a lane claim posted later, both live ⇒ the later claim holds, tie named', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.tie === true && r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION; })());
   t('two claims on one side: the EARLIEST posted holds, and no tie is declared', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 2, '2026-10-28T12:30:00Z'), CL_ROW(CL_BODY(null, CL_LINE(CL_SESSION)), 1, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.tie === false; })());
   t('an UNSIGNED claim is the lane side — only a `triage#N` signature makes a claim triage\'s', contractReviewClaims([CL_ROW(CL_BODY(null))], CL_HEAD, { now: CL_NOW }).holder.side === 'lane');
   t('⭐ the head MOVED past every claim ⇒ none; every claim on this head expired ⇒ lapsed; nothing holds either way', (() => { const moved = contractReviewClaims([CL_ROW(CL_BODY())], 'a'.repeat(40), { now: CL_NOW }); const old = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: Date.parse('2026-10-28T14:19:00Z') }); return moved.state === 'none' && moved.holder === null && old.state === 'lapsed' && old.holder === null && old.claims[0].lapse === 'expired'; })());
@@ -2739,7 +2771,7 @@ export async function selfTest() {
   // A message: the addressee line, then the key line.
   const MSG = (line, to = 'domain:skills#2') => `To: ${to}\n${line}`;
   const DB = {
-    cr: MSG(`Request: contract-review · PR #26766 · head ${HO_HEAD} · ${CONTRACT_REVIEW_TIER_NAME} refused, HTTP 429`, 'triage'),
+    cr: MSG(`Request: contract-review · PR #26766 · head ${HO_HEAD} · ${CONTRACT_REVIEW_TIER_NAME} refused, HTTP 429`),
     ut: MSG('Request: urgent-triage · #27047 · main red on the merge group, deterministic', 'triage'),
     mr: MSG('Request: main-red · Test Core · anchor #27090 · suggested lane server', 'triage'),
     nc: MSG('Notify: contract-review PASS · PR #26766 · record 6450011111'),
@@ -2753,6 +2785,7 @@ export async function selfTest() {
     ru: MSG('Notify: ruling · #28117 · A · record 6545646924', 'domain:server#2'),
     se: MSG('Notify: serial · #28572 behind #28562', 'domain:ui#5'),
     la: MSG('Notify: landed · #28562', 'domain:ui#5'),
+    sec: MSG('Notify: security · GHSA-7q4h-9x2m-5c8v', 'security#1'),
   };
   t('⭐ `Request: contract-review` reads the PR, the head (7–40 hex) and the reason — the reason may carry a comma', (() => { const r = readMailboxLine(DB.cr); return r.state === 'read' && r.id === 'request:contract-review' && r.kind === 'Request' && r.key === 'contract-review' && r.pr === 26766 && r.head === HO_HEAD && r.reason === `${CONTRACT_REVIEW_TIER_NAME} refused, HTTP 429` && r.numbers.join() === '26766'; })());
   t('⭐ `Request: urgent-triage` reads the card and the one-line criterion', (() => { const r = readMailboxLine(DB.ut); return r.state === 'read' && r.id === 'request:urgent-triage' && r.card === 27047 && r.criterion === 'main red on the merge group, deterministic' && r.numbers.join() === '27047'; })());
@@ -2769,10 +2802,12 @@ export async function selfTest() {
   t('⭐ `Notify: unblocked` reads the card and its priority — p0 and p1 only, the priorities it is owed for', (() => { const r = readMailboxLine(DB.ub); const p0 = readMailboxLine(DB.ub.replace('p1', 'p0')); return r.state === 'read' && r.id === 'notify:unblocked' && r.card === 28560 && r.priority === 'p1' && p0.priority === 'p0' && r.numbers.join() === '28560' && ['p2', 'P1', 'p0 or p1'].every((v) => readMailboxLine(DB.ub.replace('p1', v)).state === 'unreadable'); })());
   t('⭐ `Notify: ruling` reads the card, the letter and the record id — a primed or CJK letter reads, a sentence does not', (() => { const r = readMailboxLine(DB.ru); return r.state === 'read' && r.id === 'notify:ruling' && r.card === 28117 && r.letter === 'A' && r.record === 6545646924 && r.numbers.join() === '28117' && readMailboxLine(DB.ru.replace(' A ', ' B′ ')).letter === 'B′' && readMailboxLine(DB.ru.replace(' A ', ' 乙 ')).letter === '乙' && readMailboxLine(MSG('Notify: ruling · #28117 A (record 6545646924, 「同意」) · your draft #28430')).state === 'unreadable'; })());
   t('⭐ `Notify: serial` reads the waiting card and the card it waits for; `Notify: landed` releases it', (() => { const r = readMailboxLine(DB.se); const l = readMailboxLine(DB.la); return r.state === 'read' && r.id === 'notify:serial' && r.card === 28572 && r.behind === 28562 && r.numbers.join() === '28572,28562' && l.state === 'read' && l.id === 'notify:landed' && l.card === 28562 && l.numbers.join() === '28562' && readMailboxLine(MSG('Notify: serial · #28572 · #28562')).state === 'unreadable'; })());
+  t('⭐ `Notify: security` under `To: security#1` reads to the security seat (a bare lane `seatKey` spells) with the advisory\'s opaque id and nothing else — it names no card, so `numbers` is empty', (() => { const r = readMailboxLine(DB.sec); return r.state === 'read' && r.to === 'security#1' && r.id === 'notify:security' && r.kind === 'Notify' && r.key === 'security' && r.advisory === 'GHSA-7q4h-9x2m-5c8v' && r.numbers.length === 0 && readMailboxLine(MSG('Notify: security · GHSA-7q4h-9x2m-5c8v', 'security')).to === 'security#1'; })());
+  t('⛔ `Notify: security` carrying free text, a second field, a card number, an upper-case or short id, or no id at all is unreadable — nothing but the opaque id rides the doorbell', ['Notify: security · see the advisory', 'Notify: security · GHSA-7q4h-9x2m-5c8v · packages/x/src/door.ts', 'Notify: security · GHSA-7q4h-9x2m-5c8v · see the advisory', 'Notify: security · #28001', 'Notify: security · GHSA-7Q4H-9X2M-5C8V', 'Notify: security · GHSA-7q4h-9x2m', 'Notify: security'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'));
   t('⭐ every key of the table is named, as `Kind: key` in a code span, in the protocol text (`references/project-forms.md` 〈信箱 PR〉), and that section names NO other key — the table in both directions — and points at `--mailbox-keys` for the full spellings', (() => { const forms = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/project-forms.md', import.meta.url), 'utf8'); const at = forms.indexOf('\n## 信箱 PR\n'); const section = at < 0 ? '' : forms.slice(at + 1).split(/\n## /)[0]; const named = new Set([...section.matchAll(/`(Request|Notify): ([a-z-]+)`/g)].map((m) => `${m[1]}: ${m[2]}`)); const table = new Set(MAILBOX_KEYS.map((k) => `${k.kind}: ${k.key}`)); return section !== '' && named.size === table.size && [...table].every((k) => named.has(k)) && section.includes('--mailbox-keys'); })());
   t('⭐ every template, sent VERBATIM, is not an event — a placeholder (`#n`, `SHA`, `LANE#N`, `p0 or p1`, `TRIGGER_ID`, `ID`) never reads as one', MAILBOX_KEYS.every((k) => readMailboxLine(MSG(k.template)).state === 'unreadable'));
   t('⭐ `--mailbox-keys` prints exactly `mailboxKeyLines()` — every template, with its row under it — and exits 0', (() => { const r = faceCli(['--mailbox-keys']); return r.status === 0 && r.stdout === `${mailboxKeyLines().join('\n')}\n` && MAILBOX_KEYS.every((k) => r.stdout.includes(`${k.template}\n    ${k.from} → ${k.to}; ${k.when}\n`)) && usageLines().join('\n').includes('--mailbox-keys'); })());
-  t('decoration reads: a bulleted bolded key and a blockquoted message are the same event', (() => { const a = readMailboxLine(MSG(`- **Request:** contract-review · PR #26766 · head ${HO_HEAD} · quota exhausted`, 'triage')); const b = readMailboxLine(DB.sp.split('\n').map((l) => `> ${l}`).join('\n')); return a.state === 'read' && a.pr === 26766 && b.state === 'read' && b.id === 'notify:split' && b.to === 'domain:skills#1'; })());
+  t('decoration reads: a bulleted bolded key and a blockquoted message are the same event', (() => { const a = readMailboxLine(MSG(`- **Request:** contract-review · PR #26766 · head ${HO_HEAD} · quota exhausted`)); const b = readMailboxLine(DB.sp.split('\n').map((l) => `> ${l}`).join('\n')); return a.state === 'read' && a.pr === 26766 && b.state === 'read' && b.id === 'notify:split' && b.to === 'domain:skills#1'; })());
   t('the attribution block the platform APPENDS (bare or session-URL footer under a rule line) is not a second line', ['\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_', `\n\n---\n_Generated by [Claude Code](https://claude.ai/code/${RECORD_SESSION})_`].every((tail) => readMailboxLine(`${DB.on}${tail}`).state === 'read'));
   t('⛔ free text, an acknowledgement and an empty comment are REFUSED, naming the line — the half-state the text names', (() => { const a = readMailboxLine(MSG('Seat note: picking up the review now, will report on the card.')); const b = readMailboxLine(MSG('收到,谢谢!')); const c = readMailboxLine(''); const bare = readMailboxLine('收到,谢谢!'); return a.state === 'refused' && /not a `Request:` or `Notify:` key line/.test(a.reason) && typeof a.line === 'string' && b.state === 'refused' && c.state === 'refused' && bare.state === 'refused'; })());
   t('⛔ a key OUTSIDE the table is refused, whatever its kind — the vocabulary is closed — and the kinds are case-sensitive', ['Request: coffee · #27077', 'Notify: ack · #27077', 'Ack: #27077', 'request: urgent-triage · #27047 · x', 'Request: contract-review-done · PR #1', 'Notify: unblocked-soon · #1 · p1'].every((l) => readMailboxLine(MSG(l)).state === 'refused'));
@@ -2786,7 +2821,7 @@ export async function selfTest() {
   t('a seat with no number reads as seat 1 (`triage` → `triage#1`, as `seatKey` spells it), and the `LANE#N` placeholder itself does not', (() => { const r = readMailboxLine(MSG('Notify: split · triage · takes: none · leaves: none')); return r.seat.lane === 'triage' && r.seat.n === 1 && r.seat.key === 'triage#1' && readMailboxLine(MSG('Notify: split · LANE#N · takes: none · leaves: none')).state === 'unreadable'; })());
   t('⭐ a key\'s `LANE#N` field is read with `seatKey` — ONE seat grammar (#27891): a well-formed `domain:X#N` reads as before, carries its canonical `key`, and is read lower-cased', (() => { const r = readMailboxLine(DB.on); const u = readMailboxLine(MSG('Notify: seat-online · Domain:Skills#2 · os-bill · mailbox #27120 · patrol none · takes: none')); return r.state === 'read' && r.seat.key === 'domain:skills#2' && r.seat.lane === 'domain:skills' && r.seat.n === 2 && u.state === 'read' && u.seat.key === 'domain:skills#2'; })());
   t('⛔ the short form `skills#2` is refused in a key field, the same as on `To:` — the key does not spell its template', ['Notify: seat-online · skills#2 · os-bill · mailbox #27120 · patrol none · takes: none', 'Notify: seat-offline · skills#2 · in-flight: none · stay-behind: none · brief 6450022222', 'Notify: split · skills#2 · takes: none · leaves: none', 'Notify: split · server · takes: none · leaves: none'].every((l) => { const r = readMailboxLine(MSG(l)); return r.state === 'unreadable' && /does not spell/.test(r.reason); }) && readMailboxLine('To: skills#2\nRequest: urgent-triage · #27047 · x').state === 'refused');
-  t('⛔ a `domain:` lane named after a reserved lane word is refused in a key field and on `To:` alike — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1'].every((seat) => readMailboxLine(MSG(`Notify: split · ${seat} · takes: none · leaves: none`)).state === 'unreadable' && readMailboxLine(`To: ${seat}\nRequest: urgent-triage · #27047 · x`).state === 'refused') && readMailboxLine(MSG('Notify: split · domain:triage-tools#1 · takes: none · leaves: none')).seat.key === 'domain:triage-tools#1');
+  t('⛔ a `domain:` lane named after a reserved lane word is refused in a key field and on `To:` alike — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1', 'domain:security#1'].every((seat) => readMailboxLine(MSG(`Notify: split · ${seat} · takes: none · leaves: none`)).state === 'unreadable' && readMailboxLine(`To: ${seat}\nRequest: urgent-triage · #27047 · x`).state === 'refused') && readMailboxLine(MSG('Notify: split · domain:triage-tools#1 · takes: none · leaves: none')).seat.key === 'domain:triage-tools#1');
   t('⭐ `To: <seat>` reads as the addressed seat\'s canonical key (`seatKey`\'s), beside the key\'s own fields — `to` never shadows a key\'s own `seat`', (() => { const r = readMailboxLine(DB.sp); return r.to === 'domain:skills#1' && r.seat.lane === 'domain:skills' && r.seat.n === 2 && readMailboxLine(DB.ut).to === 'triage#1' && readMailboxLine(MSG('Notify: split · triage · takes: none · leaves: none', 'Domain:UI#4')).to === 'domain:ui#4'; })());
   t('⛔ a key on the FIRST line — the shape a mailbox took before the seat key — is REFUSED, naming the missing `To:`', ['Notify: split · domain:skills#2 · takes: none · leaves: none', `Request: contract-review · PR #26766 · head ${HO_HEAD} · x`].every((l) => { const r = readMailboxLine(l); return r.state === 'refused' && /`To: <seat>`/.test(r.reason) && typeof r.line === 'string'; }));
   t('⛔ a `To:` naming a login, or no seat at all, is REFUSED — a login is not a seat', ['os-bill', 'marchtian', '', 'domain:ui#0', 'ui 4'].every((to) => { const r = readMailboxLine(`To: ${to}\nRequest: urgent-triage · #27047 · x`); return r.state === 'refused' && /names no seat/.test(r.reason); }));
@@ -2812,7 +2847,7 @@ export async function selfTest() {
     t('⭐ ONE reader: check-half-states H72 judges the REAL reader\'s readings — a free-form question, an off-table key and a five-field `seat-online` are listed, a table key is not, and a bell older than the window has aged out', row.includes('3 comment(s)') && ['comment 7002', 'comment 7003', 'comment 7004'].every((c) => row.includes(c)) && !row.includes('comment 7001') && !row.includes('comment 7005') && hs.h72OffTableMailboxLines(mailboxEvents([rows72[0]]), NOW72) === null);
     t('⭐ …and its population is the OPENER\'s label — an open mailbox touched inside the window owes a page, the same PR without the label does not', hs.h72NeedsThread({ number: 28646, state: 'open', labels: [{ name: MAILBOX_LABEL }], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === true && hs.h72NeedsThread({ number: 28646, state: 'open', labels: [], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === false);
   }
-  t('the roster: fourteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 14 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 14 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 14 && MAILBOX_LINE_MAX_BYTES === 200);
+  t('the roster: fifteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 15 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 15 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 15 && MAILBOX_LINE_MAX_BYTES === 200);
 
   // -- the signature line (#27113) ----------------------------------------------
   //
@@ -2825,7 +2860,7 @@ export async function selfTest() {
   battery('⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading');
   {
     const hs = await import('./check-half-states.mjs');
-    const { SESSION_SHAPE } = await import('./fleet-write/ops.mjs');
+    const { SESSION_SHAPE, GHSA_ID_SHAPE } = await import('./fleet-write/ops.mjs');
     const { SEAT_RECORD_MARKER } = await import('./seat-record.mjs');
     const { classifyRulingComment } = await import('./check-prior-rulings.mjs');
     const SIG = 'domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg';
@@ -2835,7 +2870,8 @@ export async function selfTest() {
 
     // The reader's own shape.
     t('the four parts read: lane, seat number, account, session', J(hs.readSignatureLine(SIG)) === J({ lane: 'domain:skills', seat: 2, account: 'os-justin', session: 'session_01QSeKYmhU5KEj1nukYhp1Tg', line: SIG }));
-    t('every lane the role table names reads — a hyphenated lane, a repo seat, an epic, triage, director, coordinator', ['domain:engine-core#1', 'repo:cloud#2', 'epic:#26000#1', 'triage#1', 'director#1', 'coordinator#3'].every((lane) => hs.readSignatureLine(`${lane} · os-zhuang · session_01JQwxbZeBv2y91towxasSUT`)?.lane === lane.replace(/#[0-9]+$/u, '')));
+    t('every lane the role table names reads — a hyphenated lane, a repo seat, an epic, triage, director, coordinator, security', ['domain:engine-core#1', 'repo:cloud#2', 'epic:#26000#1', 'triage#1', 'director#1', 'coordinator#3', 'security#1'].every((lane) => hs.readSignatureLine(`${lane} · os-zhuang · session_01JQwxbZeBv2y91towxasSUT`)?.lane === lane.replace(/#[0-9]+$/u, '')));
+    t('⛔ a word that names no lane is not a signature; the security seat signs bare (`security#1`), and a writer refuses nothing of it', ['reviewer#1 · os-zhuang · session_01JQwxbZeBv2y91towxasSUT', 'finder#1 · os-zhuang · session_01JQwxbZeBv2y91towxasSUT'].every((line) => hs.readSignatureLine(line) === null) && hs.signatureRefusal('security#1 · os-zhuang · session_01JQwxbZeBv2y91towxasSUT\nbody') === null);
     t('a container-derived session (`cse_` tail) reads: the relay envelope\'s shape, not only the desktop one', hs.readSignatureLine('triage#1 · huangyiirene · session_01ABCDEFGHJKMNPQRSTVWXYZ')?.session === 'session_01ABCDEFGHJKMNPQRSTVWXYZ');
     t('⛔ the near misses are NOT signatures: no seat number, seat 0, a bare lane, a capital, hyphens or doubled spaces for the dot, a short session, bold wrapping, trailing words', [
       'triage · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg',
@@ -2850,6 +2886,7 @@ export async function selfTest() {
     ].every((line) => hs.readSignatureLine(line) === null));
     t('the FIRST non-empty line decides: blank lines above it and a CRLF read; a signature on line two does not', hs.readSignatureLine(`\n\n${SIG}\r\nbody`) !== null && hs.readSignatureLine(`body\n${SIG}`) === null && hs.readSignatureLine('') === null);
     t('⭐ the session half IS the relay envelope\'s `SESSION_SHAPE` (fleet-write/ops.mjs) — mirrored, held equal here', SESSION_SHAPE.source === `^${hs.SEAT_SIGNATURE_SESSION_SOURCE}$`);
+    t('⭐ the advisory id on `Notify: security` IS the relay\'s `GHSA_ID_SHAPE` (fleet-write/ops.mjs) — mirrored, held equal here', GHSA_ID_SHAPE.source === ADVISORY_ID_REF.source && GHSA_ID_SHAPE.flags === ADVISORY_ID_REF.flags);
     t('the separator is the doorbell\'s dot, exactly: one space, U+00B7, one space', hs.SEAT_SIGNATURE_SEPARATOR === ' · ' && hs.SEAT_SIGNATURE_SEPARATOR.split(MAILBOX_SEPARATOR).length === 2);
     t('`stripSignatureLine` leaves an unsigned body byte-identical, leading blank lines and all', ['', '\n\nClaim: x\n', 'os-dev-report\n{}', `body\n${SIG}`].every((b) => hs.stripSignatureLine(b) === b));
     t('…removes ONE signature line and the blank lines after it, and only one', hs.stripSignatureLine(`${SIG}\n\n\nClaim: x`) === 'Claim: x' && hs.stripSignatureLine(`${SIG}\n${SIG}\nClaim: x`) === `${SIG}\nClaim: x` && hs.stripSignatureLine(SIG) === '');
@@ -2862,7 +2899,7 @@ export async function selfTest() {
     const report = 'os-dev-report\n```json\n{"issue": 1}\n```';
     t('`os-dev-report`: the marker reads with and without, and the newest report is found on a signed thread', hs.OS_DEV_REPORT_MARKER.test(report) && hs.OS_DEV_REPORT_MARKER.test(signed(report)) && hs.latestMarkedComment([{ body: signed(report), created_at: '2026-10-28T09:00:00Z' }], hs.OS_DEV_REPORT_MARKER) !== null);
     t('⛔ …while a marker on a LATER line, below anything but one signature, is still no report', hs.OS_DEV_REPORT_MARKER.test(`${SIG}\n## PM review\n\nos-dev-report\n`) === false && hs.OS_DEV_REPORT_MARKER.test(`${SIG}\n${SIG}\nos-dev-report\n`) === false);
-    t('`Contract-review-handoff:` reads the same newest-line verdict on a signed thread', (() => { const a = contractReviewHandoff([HO_ROW(HO_LINE())], HO_HEAD); const b = contractReviewHandoff([{ ...HO_ROW(HO_LINE()), body: signed(HO_ROW(HO_LINE()).body) }], HO_HEAD); return a.state === 'triage' && J(a) === J(b); })());
+    t('`Contract-review-handoff:` reads the same newest-line verdict on a signed thread', (() => { const a = contractReviewHandoff([HO_ROW(HO_LINE())], HO_HEAD); const b = contractReviewHandoff([{ ...HO_ROW(HO_LINE()), body: signed(HO_ROW(HO_LINE()).body) }], HO_HEAD); return a.state === 'handed' && J(a) === J(b); })());
     const claim = 'Claim: PM loop round 1 · 2026-10-28T12:44Z\nSession: `session_01QSeKYmhU5KEj1nukYhp1Tg`\nSeat: `domain:skills#2`\nBranch: `claude/issue-1-x`';
     t('claim lines: the `Claim:` marker and the seat number read the same signed', hs.markerMatches(hs.CLAIM_COMMENT_MARKER, signed(claim)) && same(hs.claimSeatNumber, claim) && hs.claimSeatNumber(signed(claim)) === 2);
     t('release lines: the `Release:` marker reads the same signed', hs.markerMatches(hs.RELEASE_COMMENT_MARKER, 'Release: session_x · reason · back to pm:queue') && hs.markerMatches(hs.RELEASE_COMMENT_MARKER, signed('Release: session_x · reason · back to pm:queue')));
@@ -3119,7 +3156,7 @@ export async function selfTest() {
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; the mailbox '
       + 'doorbell — `To: <seat>` then each of the table\'s keys read, the table named both ways in the protocol text and printed by `--mailbox-keys`, and a key with no `To:`, a `To:` naming a login, free text, an acknowledgement, '
       + 'a key outside the table, a second line and an over-long line refused; the review claim line — read signed and unsigned, '
-      + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the lane winning a tie; the review hold '
+      + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the earliest live claim holding; the review hold '
       + 'line — read signed and unsigned, spelled verbatim in the rule text, per head and cleared only by a new head, an unreadable '
       + 'line listed and voiding nothing, its 24-hour age a reading '
       + 'that still holds; and the ONE '

@@ -50,6 +50,7 @@ import { canonicalMetaType } from './protocol.js';
 import type { ItemLock } from './item-lock.js';
 import { isOriginGatedType } from './packaged-base-regime.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
+import { servesSealedOverrideRow } from './protocol-package-bindings.js';
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import {
@@ -147,7 +148,15 @@ export function declinesStoredRow(
         return !isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }));
     }
     if (typeof name !== 'string' || name === '') return false;
-    return this.isDeclaredCodeDatasource(type, name) || this.isUnservedSealedOverlay(type, name);
+    if (this.isDeclaredCodeDatasource(type, name)) return true;
+    if (!this.isUnservedSealedOverlay(type, name)) return false;
+    // [#29613, ADR-0146 D8 item 2] …except, for a page, app, dataset, doc or
+    // book, the shipping package's declared override: judged as the flow's
+    // above, on the row's own `package_id` and body, against the package
+    // that ships the name. The reads then serve it from its row, as they
+    // serve a dashboard's. Every other sealed row of the name stays declined.
+    return !(servesSealedOverrideRow(type)
+        && isServedOverrideRowOf(row, this.packagedArtifactOwner({ type, name })));
 }
 
 /** The body of `ObjectStackProtocolImplementation#isUnservedSealedOverlay`; the method's docblock there is its contract. */

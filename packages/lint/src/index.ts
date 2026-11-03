@@ -138,6 +138,7 @@ export {
   validateFlowTriggerReadiness,
   validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
+  FLOW_INPUT_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
@@ -360,6 +361,8 @@ export {
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  holdsSuperuserBypass,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
 

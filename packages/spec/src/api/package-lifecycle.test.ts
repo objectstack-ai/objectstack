@@ -198,7 +198,7 @@ describe('RollbackToPackageCommitResponseSchema declares the COMMIT-rollback bod
   });
 });
 
-describe('PackageExportManifestSchema declares the five fixed keys and stays open', () => {
+describe('PackageExportManifestSchema declares the seven fixed keys and stays open', () => {
   /** A verbatim-shaped capture of a real `assemblePackageManifest` return. */
   const realResponse = {
     id: 'com.example.crm',
@@ -370,14 +370,15 @@ describe('PackageExportBundleSchema declares the whole-deployment export as comp
     expect((result.error.issues[0] as { keys?: string[] }).keys).toEqual(['cycles']);
   });
 
-  // Declared before it is served (ADR-0049): no runtime mounts
-  // `GET /packages/export` until the server slice of #28914 lands. That
-  // change drops the marker, adds the route's ledger row and flips this test.
-  it('is PLANNED until a runtime serves the route: the describe says so, naming no tracker id', () => {
+  // Served (#28914's server slice mounted `GET /packages/export` on the runtime
+  // dispatcher, with its ledger row): the ADR-0049 marker is gone, and the
+  // describe names the route and the command that calls it.
+  it('is served: the describe carries no PLANNED marker, names the route and the command, and no tracker id', () => {
     const description = PackageExportBundleSchema.description ?? '';
-    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(description).toContain('ADR-0049');
-    expect(description).toContain('no runtime serves `GET /packages/export` yet');
+    expect(description).not.toMatch(/PLANNED/);
+    expect(description).not.toMatch(/not yet served/);
+    expect(description).toContain('`GET /packages/export`');
+    expect(description).toContain('`os package export`');
     // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the comments.
     expect(description).not.toMatch(/#\d{3,}/);
   });
@@ -576,32 +577,68 @@ describe('GetPackageCustomizationsResponseSchema.contributions: the entry shape 
   });
 });
 
-describe('the `nav` kind of `contributions` is declared ahead of its producer (ADR-0049)', () => {
+describe('the `nav` kind of `contributions` is served: no planned marker is left (ADR-0049)', () => {
   type Described = { description?: string };
   const member = (GetPackageCustomizationsResponseSchema as unknown as {
     shape: { contributions: Described & { element: { options: Described[] } } };
   }).shape.contributions;
   const [objectArm, navArm] = member.element.options;
 
-  it('the nav arm\'s describe opens with the planned marker and names the ADR, never a tracker id', () => {
-    expect(navArm.description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(navArm.description).toContain('ADR-0049');
+  it('the nav arm\'s describe carries no planned marker and names no tracker id', () => {
+    expect(navArm.description).not.toMatch(/PLANNED|not yet served/);
     expect(navArm.description).not.toMatch(/#\d{3,}/);
   });
 
-  it('the member and the field / flow arm say the nav kind is not yet served, and the field / flow arm carries no marker', () => {
-    expect(member.description).toContain('not yet served');
-    expect(objectArm.description).not.toMatch(/PLANNED/);
+  it('neither the member nor the field / flow arm says any kind is not yet served', () => {
+    expect(member.description).not.toMatch(/PLANNED|not yet served/);
+    expect(objectArm.description).not.toMatch(/PLANNED|not yet served/);
     expect(member.description).not.toMatch(/#\d{3,}/);
   });
 
-  it('the schema-level describe says the navigation items are not yet served, so serving them drops that too', () => {
-    expect(GetPackageCustomizationsResponseSchema.description).toContain('not yet served');
+  it('the schema-level describe no longer says the navigation items are not yet served', () => {
+    expect(GetPackageCustomizationsResponseSchema.description).not.toContain('not yet served');
+    expect(GetPackageCustomizationsResponseSchema.description).toContain('navigation items');
   });
 
   it('the nav arm says an item with no id (a separator may omit it) is not an entry: `name` is required', () => {
     expect(navArm.description).toContain('An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry.');
     const { name: _dropped, ...noName } = { kind: 'nav', app: 'crm', name: 'nav_sep', packageId: 'com.example.acme-sync' };
     expect(GetPackageCustomizationsResponseSchema.shape.contributions.element.safeParse(noName).success).toBe(false);
+  });
+});
+
+describe('PackageExportManifestSchema declares the install-manifest keys an install of the export decides by', () => {
+  const identity = { id: 'com.example.crm.custom', name: 'example-crm-custom', version: '0.1.0' };
+  /** A `.custom` pair's export, as `assemblePackageManifest` writes it from the pair's registry row. */
+  const pairExport = {
+    ...identity,
+    namespace: 'crm_custom',
+    dependencies: { 'com.example.crm': '^1' },
+    dashboards: [{ name: 'crm_board', label: 'Board', overrides: { package: 'com.example.crm', basedOn: '2.1.0' } }],
+  };
+
+  it('parses a pair\'s export and PRESERVES its namespace and its base edge', () => {
+    const result = PackageExportManifestSchema.safeParse(pairExport);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(pairExport);
+  });
+
+  it('both are optional: an export of a package whose row declares neither still parses', () => {
+    expect(PackageExportManifestSchema.safeParse(identity).success).toBe(true);
+  });
+
+  it('each is the install manifest\'s own declaration, refusing what an install would refuse', () => {
+    expect(PackageExportManifestSchema.safeParse({ ...identity, namespace: '1crm' }).success).toBe(false);
+    expect(PackageExportManifestSchema.safeParse({ ...identity, namespace: 'Crm' }).success).toBe(false);
+    expect(PackageExportManifestSchema.safeParse({ ...identity, dependencies: { 'com.example.crm': 1 } }).success).toBe(false);
+    expect(PackageExportManifestSchema.safeParse({ ...identity, dependencies: ['com.example.crm'] }).success).toBe(false);
+  });
+
+  it('each describe says where the value comes from and why an install needs it, citing no tracker id', () => {
+    const { namespace, dependencies } = PackageExportManifestSchema.shape;
+    expect(namespace.description).toContain('registry row');
+    expect(dependencies.description).toContain('ADR-0141 D5');
+    expect(dependencies.description).toContain('ADR-0146 D2');
+    for (const d of [namespace.description, dependencies.description]) expect(d).not.toMatch(/#\d{3,}/);
   });
 });

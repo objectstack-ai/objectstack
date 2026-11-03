@@ -265,6 +265,43 @@ describe('the connector redactor — credentials inside a URL under `providerCon
   });
 });
 
+describe('the connector redactor — credentials inside a URL under `auth`', () => {
+  const oauth2 = (over: Record<string, unknown>) => ({
+    type: 'oauth2', grant: 'authorization_code', clientId: 'client-1', credentialRef: 'V_CLIENT_SECRET',
+    authorizationUrl: 'https://auth.vendor.example/authorize', tokenUrl: 'https://auth.vendor.example/token', ...over,
+  });
+
+  it('rewrites the userinfo out of `auth.tokenUrl` and `auth.authorizationUrl`, keeping the rest byte for byte', () => {
+    const { item: served, redactedKeys } = redactConnectorItem({
+      ...base,
+      auth: oauth2({
+        tokenUrl: `https://c:${P(60)}@auth.vendor.example:8443/oauth/token?region=eu`,
+        authorizationUrl: `https://${P(61)}@auth.vendor.example/authorize`,
+      }),
+    });
+    expect(redactedKeys).toEqual(['auth.authorizationUrl', 'auth.tokenUrl']);
+    expect(served.auth).toEqual(oauth2({
+      tokenUrl: 'https://auth.vendor.example:8443/oauth/token?region=eu',
+      authorizationUrl: 'https://auth.vendor.example/authorize',
+    }));
+    expect(holds(served, P(60), P(61))).toBe(false);
+  });
+
+  it('strips a credential query parameter from `auth.resource`', () => {
+    const { item: served, redactedKeys } = redactConnectorItem({
+      ...base,
+      auth: oauth2({ resource: `https://api.vendor.example/?audience=v1&token=${P(62)}` }),
+    });
+    expect(redactedKeys).toEqual(['auth.resource']);
+    expect((served.auth as Record<string, unknown>).resource).toBe('https://api.vendor.example/?audience=v1');
+  });
+
+  it('declared `auth` URLs with no credential part are untouched', () => {
+    const item = { ...base, auth: oauth2({ resource: 'https://api.vendor.example/' }) };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+});
+
 describe('the connector redactor — top-level keys the entry does not declare', () => {
   it.each([
     ['a credential-shaped scalar', { apiKey: P(50) }, ['apiKey']],
@@ -419,8 +456,9 @@ describe('the connector redactor — purity and the untouched remainder', () => 
   });
 });
 
-// [#28640 ②B, ruling 6566912252] Which withheld positions a save does NOT carry
-// forward: the undeclared `auth` keys, and nothing else.
+// [#28640 ②B, ruling 6566912252; ruling 6593804783] Which withheld positions a
+// save does NOT carry forward: the undeclared `auth` keys and the undeclared
+// keys of an object `retryConfig`, and nothing else.
 describe('the connector redactor — withheld and not carried forward', () => {
   it('names every undeclared `auth` key in `notCarriedForwardKeys` as well as in `redactedKeys`', () => {
     const { item: served, redactedKeys, notCarriedForwardKeys } = redactConnectorItem({
@@ -459,7 +497,6 @@ describe('the connector redactor — withheld and not carried forward', () => {
       ...base,
       apiKey: P(73),
       authentication: { type: 'api-key', key: P(74) },
-      retryConfig: { strategy: 'exponential_backoff', secret: P(75) },
       actions: [{ key: 'get_invoice', label: 'Get invoice', token: P(76) }],
       providerConfig: {
         baseUrl: `https://u:${P(77)}@v.example`,
@@ -471,9 +508,40 @@ describe('the connector redactor — withheld and not carried forward', () => {
     });
     expect(result.redactedKeys).toEqual([
       'actions.0.token', 'apiKey', 'authentication.key', 'providerConfig.baseUrl', 'providerConfig.defaultHeaders',
-      'providerConfig.headers', 'providerConfig.transport.env', 'providerConfig.transport.headers', 'retryConfig.secret',
+      'providerConfig.headers', 'providerConfig.transport.env', 'providerConfig.transport.headers',
     ]);
     expect(result).not.toHaveProperty('notCarriedForwardKeys');
+  });
+
+  it('names every undeclared key of an object `retryConfig` in `notCarriedForwardKeys` as well as in `redactedKeys`', () => {
+    const { item: served, redactedKeys, notCarriedForwardKeys } = redactConnectorItem({
+      ...base, retryConfig: { strategy: 'exponential_backoff', maxAttempts: 2, secret: P(75), token: P(85) },
+    });
+    expect(redactedKeys).toEqual(['retryConfig.secret', 'retryConfig.token']);
+    expect(notCarriedForwardKeys).toEqual(['retryConfig.secret', 'retryConfig.token']);
+    expect(served.retryConfig).toEqual({ strategy: 'exponential_backoff', maxAttempts: 2 });
+  });
+
+  it('a cleared undeclared `retryConfig` key is withheld and not carried forward too', () => {
+    const { redactedKeys, notCarriedForwardKeys } = redactConnectorItem({ ...base, retryConfig: { maxAttempts: 2, secret: null } });
+    expect(redactedKeys).toEqual(['retryConfig.secret']);
+    expect(notCarriedForwardKeys).toEqual(['retryConfig.secret']);
+  });
+
+  it('CONTROL: a `retryConfig` that is not an object is withheld whole and still carried forward', () => {
+    const result = redactConnectorItem({ ...base, retryConfig: P(86) });
+    expect(result.redactedKeys).toEqual(['retryConfig']);
+    expect(result).not.toHaveProperty('notCarriedForwardKeys');
+  });
+
+  it('beside an `actions` element\'s undeclared key, only the `retryConfig` key is marked', () => {
+    const { redactedKeys, notCarriedForwardKeys } = redactConnectorItem({
+      ...base,
+      retryConfig: { strategy: 'exponential_backoff', secret: P(87) },
+      actions: [{ key: 'get_invoice', label: 'Get invoice', token: P(88) }],
+    });
+    expect(redactedKeys).toEqual(['actions.0.token', 'retryConfig.secret']);
+    expect(notCarriedForwardKeys).toEqual(['retryConfig.secret']);
   });
 
   it('CONTROL: `auth` that is not an object is withheld whole and still carried forward', () => {

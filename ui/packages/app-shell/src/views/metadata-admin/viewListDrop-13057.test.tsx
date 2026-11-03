@@ -66,7 +66,9 @@ function makeAdapter() {
       return json(200, { success: true, data: {} });
     }) as typeof fetch,
   });
-  return { adapter, viewReads: () => calls.filter((c) => c === VIEW_URL).length };
+  // objectstack#29550: a read of the published views is the whole list or one
+  // object's (`?object=`); both count.
+  return { adapter, viewReads: () => calls.filter((c) => c.split('?')[0] === VIEW_URL).length };
 }
 
 /** The console client, as a page gets it, under `adapter`. */

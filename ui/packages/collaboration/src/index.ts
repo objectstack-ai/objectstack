@@ -63,12 +63,6 @@ export {
 } from './useCollaborationTranslation.js';
 
 export {
-  useMentionNotifications,
-  type MentionNotificationsConfig,
-  type MentionNotificationsResult,
-} from './useMentionNotifications.js';
-
-export {
   PresenceAvatars,
   type PresenceAvatarsProps,
 } from './PresenceAvatars.js';
