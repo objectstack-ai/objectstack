@@ -86,5 +86,6 @@
   "src/ui/view-item-owner-hidden-retirement.test.ts",
   "src/ui/view-list-filterable-fields-retirement.test.ts",
   "src/ui/view-list-tabs-retirement.test.ts",
+  "src/ui/view-personal-declarations-retirement.test.ts",
   "src/ui/visibility-alias-keys-retirement.test.ts"
 ]

@@ -134,7 +134,6 @@ const zh = {
   actions: {
     decisionOutput: {
       help: '作为决策输出传递给流程。',
-      helpMultiValue: '作为决策输出传递给流程。多个值请用逗号分隔。',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -291,6 +290,11 @@ const zh = {
       uploadIncomplete: '“{{name}}” 上传未完成：未返回文件 ID，未保存任何内容',
       restricted: '受限文件',
       restrictedHint: '你无权查看此文件的详细信息',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: '扫码',
+      failed: '扫码失败',
     },
     image: {
       upload: '上传图片',
@@ -882,8 +886,6 @@ const zh = {
     pullToRefresh: '下拉刷新',
     refreshing: '刷新中…',
     share: '分享',
-    sharingPersonal: '个人视图',
-    sharingCollaborative: '共享视图',
     sharingLockedBy: '由 {{user}} 锁定',
     print: '打印',
     hideFieldsTitle: '隐藏字段',
@@ -1156,7 +1158,6 @@ const zh = {
     undo: '撤销',
     redo: '重做',
     canvasMinimap: '画布缩略图',
-    versionHistory: '版本历史',
   },
   detail: {
     back: '返回',
@@ -4933,6 +4934,18 @@ const zh = {
     retry: "重试",
     emptyTitle: "没有需要连接的连接器",
     emptyBody: "已安装的应用中没有需要管理员通过 OAuth 登录的连接器。",
+    clientKeptWithSecret: "OAuth 客户端 {{clientId}}，已存储密钥",
+    clientKept: "OAuth 客户端 {{clientId}}，无密钥",
+    clientTitle: "{{name}} 的 OAuth 客户端",
+    clientIntro: "此连接器使用贵组织为本部署在供应商处注册的 OAuth 客户端登录。请输入其客户端 ID，若供应商签发了客户端密钥也一并输入，然后继续前往供应商登录。需要为该客户端登记的重定向 URI 请参阅“连接器”文档。",
+    clientStored: "已存储的客户端：{{clientId}}",
+    clientStoredSecret: "已随其存储客户端密钥，该密钥永不显示。",
+    clientStoredNoSecret: "未随其存储客户端密钥。",
+    clientResend: "重新连接会再次发送客户端：保留客户端 ID，若有密钥请重新输入；或输入另一个客户端以替换它。",
+    clientId: "客户端 ID",
+    clientSecret: "客户端密钥",
+    clientSecretHint: "公共客户端请留空。密钥随连接加密存储，之后不再显示。",
+    clientContinue: "继续登录",
   },
   setupAssignments: {
     positionsTitle: '岗位持有人',

@@ -131,7 +131,6 @@ const fr = {
   actions: {
     decisionOutput: {
       help: 'Transmis au flux comme sortie de décision.',
-      helpMultiValue: 'Transmis au flux comme sortie de décision. Séparez les valeurs multiples par des virgules.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -263,6 +262,11 @@ const fr = {
       copy: 'Copier la valeur',
       show: 'Afficher le code QR',
       hide: 'Masquer le code QR',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Scanner un code',
+      failed: 'Échec du scan',
     },
     image: {
       upload: "Téléverser une image",
@@ -884,8 +888,6 @@ const fr = {
     pullToRefresh: "Tirer pour actualiser",
     refreshing: "Actualisation…",
     share: "Partager",
-    sharingPersonal: "Vue personnelle",
-    sharingCollaborative: "Vue partagée",
     sharingLockedBy: "Verrouillée par {{user}}",
     print: "Imprimer",
     hideFieldsTitle: "Masquer les champs",
@@ -1161,7 +1163,6 @@ const fr = {
     undo: "Annuler",
     redo: "Rétablir",
     canvasMinimap: "Mini-carte du canevas",
-    versionHistory: "Historique des versions",
   },
   detail: {
     editInlineHint: "Double-cliquez pour modifier",
@@ -4994,6 +4995,18 @@ const fr = {
     retry: "Réessayer",
     emptyTitle: "Aucun connecteur à connecter",
     emptyBody: "Aucune des applications installées n'a de connecteur auquel un administrateur se connecte avec OAuth.",
+    clientKeptWithSecret: "Client OAuth {{clientId}}, secret enregistré",
+    clientKept: "Client OAuth {{clientId}}, sans secret",
+    clientTitle: "Client OAuth pour {{name}}",
+    clientIntro: "Ce connecteur se connecte avec un client OAuth que votre organisation enregistre auprès du fournisseur pour ce déploiement. Saisissez son identifiant client et, si le fournisseur en a émis un, son secret client, puis poursuivez vers la connexion du fournisseur. La documentation des connecteurs décrit l'URI de redirection à enregistrer pour le client.",
+    clientStored: "Client enregistré : {{clientId}}",
+    clientStoredSecret: "Un secret client est enregistré avec lui. Il n'est jamais affiché.",
+    clientStoredNoSecret: "Aucun secret client n'est enregistré avec lui.",
+    clientResend: "La reconnexion renvoie le client : conservez l'identifiant client et saisissez à nouveau son secret s'il en a un, ou saisissez un autre client pour le remplacer.",
+    clientId: "Identifiant client",
+    clientSecret: "Secret client",
+    clientSecretHint: "Laissez vide pour un client public. Le secret est stocké chiffré avec la connexion et n'est plus jamais affiché.",
+    clientContinue: "Continuer vers la connexion",
   },
   setupAssignments: {
     positionsTitle: "Titulaires de postes",

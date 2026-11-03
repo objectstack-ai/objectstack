@@ -17,11 +17,23 @@
  * stores the connection; this page re-reads the status until the connect
  * lands, the window is closed, or the begun connect expires.
  *
- * ⛔ It never displays a token, a code or the authorization URL: none of the
- * door's status answers carries a token, and the URL goes only to the window.
+ * An instance declaring `clientSource: 'installer'` (ADR-0143 D2.1, the
+ * 2026-11-02 amendment) first asks for the OAuth client the administrator
+ * registered with the vendor: its client id and, when the vendor issued one,
+ * its secret. Continue opens the window on that click and begins the connect
+ * with the client. The secret input is masked, starts empty on every opening
+ * (a reconnect included: the stored secret is never read back, only whether
+ * one is kept), and is cleared the moment the begin is sent. A reconnect
+ * shows the stored client id and whether a secret is kept, and sends the
+ * client again: the server takes a client on every begin of such an
+ * instance. Every other instance connects with no form.
+ *
+ * ⛔ It never displays a token, a code, a client secret or the authorization
+ * URL: none of the door's status answers carries a token or a secret, and
+ * the URL goes only to the window.
  */
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { AlertCircle, Info, Plug } from 'lucide-react';
 import {
   Badge,
@@ -35,6 +47,8 @@ import {
   Empty,
   EmptyDescription,
   EmptyTitle,
+  Input,
+  Label,
   Skeleton,
   Table,
   TableBody,
@@ -53,6 +67,7 @@ import {
   revokeConnection,
   type ConnectionListing,
   type ConnectionRead,
+  type InstallerClientInput,
 } from './connectorConnections.js';
 
 const STATUS_CLASS: Record<ConnectorConnectionState['status'], string> = {
@@ -81,6 +96,24 @@ type Notice =
   | { tone: 'error'; kind: 'popupBlocked' }
   | { tone: 'error'; kind: 'refusal'; text: string };
 
+/**
+ * The OAuth client form of an installer-client instance. The secret lives
+ * here only while it is typed: cleared when the begin is sent, and the whole
+ * draft is dropped when the form closes.
+ */
+interface ClientDraft {
+  name: string;
+  label: string;
+  /** The status's `connectedAt` before this connect, as the wait compares it. */
+  before?: string;
+  /** The client the connection keeps (`client` on the status), shown on a reconnect. */
+  stored?: { clientId: string; hasSecret: boolean };
+  clientId: string;
+  clientSecret: string;
+  busy: boolean;
+  refusal: string | null;
+}
+
 interface RevokeDraft {
   name: string;
   busy: boolean;
@@ -100,6 +133,9 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
   const [notice, setNotice] = useState<Notice | null>(null);
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [revokeDraft, setRevokeDraft] = useState<RevokeDraft | null>(null);
+  const [clientDraft, setClientDraft] = useState<ClientDraft | null>(null);
+  const clientIdInput = useId();
+  const clientSecretInput = useId();
 
   const reload = () => {
     setListing(null);
@@ -151,25 +187,70 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
     };
   }, [waiting, pollMs]);
 
-  const connect = async (name: string, before?: string) => {
-    if (waiting) return;
+  /**
+   * Begin a connect: open the sign-in window (on the click), begin, and wait.
+   * Answers the server's refusal when the begin is refused, `null` otherwise
+   * (a blocked window included: that notice is the page's).
+   */
+  const connect = async (name: string, before?: string, client?: InstallerClientInput): Promise<string | null> => {
+    if (waiting) return null;
     setNotice(null);
     const signIn = window.open('about:blank', SIGN_IN_WINDOW, SIGN_IN_FEATURES);
     if (!signIn) {
       setNotice({ tone: 'error', kind: 'popupBlocked' });
-      return;
+      return null;
     }
     // Detach the window before it reaches the vendor: the vendor's page gets no handle on this one.
     signIn.opener = null;
-    const begun = await beginConnection(name);
+    const begun = await beginConnection(name, client);
     if (!begun.ok) {
       signIn.close();
-      setNotice({ tone: 'error', kind: 'refusal', text: begun.message });
-      return;
+      return begun.message;
     }
     signIn.location.href = begun.authorizationUrl;
     const until = Date.parse(begun.expiresAt);
     setWaiting({ name, window: signIn, before, ...(Number.isNaN(until) ? {} : { until }) });
+    return null;
+  };
+
+  /** Connect / Reconnect: an installer-client instance asks for its client first; every other one connects at once. */
+  const startConnect = (instance: { name: string; label: string; installerClient?: true }, state: ConnectorConnectionState) => {
+    if (!instance.installerClient) {
+      void connect(instance.name, state.connectedAt).then((refusal) => {
+        if (refusal !== null) setNotice({ tone: 'error', kind: 'refusal', text: refusal });
+      });
+      return;
+    }
+    setNotice(null);
+    setClientDraft({
+      name: instance.name,
+      label: instance.label,
+      before: state.connectedAt,
+      ...(state.client ? { stored: { clientId: state.client.clientId, hasSecret: state.client.hasSecret } } : {}),
+      clientId: state.client?.clientId ?? '',
+      clientSecret: '',
+      busy: false,
+      refusal: null,
+    });
+  };
+
+  const submitClient = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!clientDraft || clientDraft.busy) return;
+    const clientId = clientDraft.clientId.trim();
+    if (clientId.length === 0) return;
+    const client: InstallerClientInput = {
+      clientId,
+      ...(clientDraft.clientSecret.length > 0 ? { clientSecret: clientDraft.clientSecret } : {}),
+    };
+    // The secret leaves the form with this begin: clear it before anything is awaited.
+    setClientDraft({ ...clientDraft, clientId, clientSecret: '', busy: true, refusal: null });
+    const refusal = await connect(clientDraft.name, clientDraft.before, client);
+    if (refusal === null) {
+      setClientDraft(null);
+      return;
+    }
+    setClientDraft((cur) => (cur ? { ...cur, busy: false, refusal } : cur));
   };
 
   const confirmRevoke = async () => {
@@ -315,10 +396,23 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
                   {state?.scopes ? (
                     <p>{t('connectorConnections.scopes', { defaultValue: 'Scopes: {{scopes}}', scopes: state.scopes })}</p>
                   ) : null}
+                  {state?.client ? (
+                    <p data-testid={`connection-client-${name}`}>
+                      {state.client.hasSecret
+                        ? t('connectorConnections.clientKeptWithSecret', {
+                          defaultValue: 'OAuth client {{clientId}}, secret stored',
+                          clientId: state.client.clientId,
+                        })
+                        : t('connectorConnections.clientKept', {
+                          defaultValue: 'OAuth client {{clientId}}, no secret',
+                          clientId: state.client.clientId,
+                        })}
+                    </p>
+                  ) : null}
                   {expiresAt ? (
                     <p>{t('connectorConnections.tokenExpires', { defaultValue: 'Access token renews by {{at}}', at: expiresAt })}</p>
                   ) : null}
-                  {!connectedAt && !state?.scopes && !expiresAt ? <p aria-hidden="true">{'—'}</p> : null}
+                  {!connectedAt && !state?.scopes && !expiresAt && !state?.client ? <p aria-hidden="true">{'—'}</p> : null}
                 </TableCell>
                 <TableCell className="align-top">
                   {state ? (
@@ -332,7 +426,7 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
                           size="sm"
                           variant={state.status === 'connected' ? 'outline' : 'default'}
                           disabled={waiting !== null}
-                          onClick={() => void connect(name, state.connectedAt)}
+                          onClick={() => startConnect(instance, state)}
                         >
                           {state.status === 'not_connected'
                             ? t('connectorConnections.connect', { defaultValue: 'Connect' })
@@ -387,6 +481,83 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
         ) : null}
         {body}
       </div>
+
+      <Dialog open={clientDraft !== null} onOpenChange={(open) => { if (!open && !clientDraft?.busy) setClientDraft(null); }}>
+        <DialogContent data-testid="connector-client-form">
+          <form onSubmit={(e) => void submitClient(e)} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>
+                {t('connectorConnections.clientTitle', { defaultValue: 'OAuth client for {{name}}', name: clientDraft?.label ?? '' })}
+              </DialogTitle>
+              <DialogDescription>
+                {t('connectorConnections.clientIntro', {
+                  defaultValue:
+                    'This connector signs in with an OAuth client your organization registers with the vendor for this deployment. Enter its client ID, and its client secret if the vendor issued one, then continue to the vendor\'s sign-in. The Connectors documentation describes the redirect URI to register with the client.',
+                })}
+              </DialogDescription>
+            </DialogHeader>
+            {clientDraft?.stored ? (
+              <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground" data-testid="connector-client-stored">
+                <p className="font-medium text-foreground">
+                  {t('connectorConnections.clientStored', { defaultValue: 'Stored client: {{clientId}}', clientId: clientDraft.stored.clientId })}
+                </p>
+                <p>
+                  {clientDraft.stored.hasSecret
+                    ? t('connectorConnections.clientStoredSecret', { defaultValue: 'A client secret is stored with it. It is never shown.' })
+                    : t('connectorConnections.clientStoredNoSecret', { defaultValue: 'No client secret is stored with it.' })}
+                </p>
+                <p className="mt-1">
+                  {t('connectorConnections.clientResend', {
+                    defaultValue:
+                      'Reconnecting sends the client again: keep the client ID and enter its secret again if it has one, or enter another client to replace it.',
+                  })}
+                </p>
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label htmlFor={clientIdInput}>{t('connectorConnections.clientId', { defaultValue: 'Client ID' })}</Label>
+              <Input
+                id={clientIdInput}
+                autoComplete="off"
+                spellCheck={false}
+                value={clientDraft?.clientId ?? ''}
+                onChange={(e) => setClientDraft((cur) => (cur ? { ...cur, clientId: e.target.value } : cur))}
+                disabled={clientDraft?.busy}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={clientSecretInput}>{t('connectorConnections.clientSecret', { defaultValue: 'Client secret' })}</Label>
+              <Input
+                id={clientSecretInput}
+                type="password"
+                autoComplete="new-password"
+                spellCheck={false}
+                value={clientDraft?.clientSecret ?? ''}
+                onChange={(e) => setClientDraft((cur) => (cur ? { ...cur, clientSecret: e.target.value } : cur))}
+                disabled={clientDraft?.busy}
+                className="font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                {t('connectorConnections.clientSecretHint', {
+                  defaultValue: 'Leave it empty for a public client. The secret is stored encrypted with the connection and never shown again.',
+                })}
+              </p>
+            </div>
+            {clientDraft?.refusal ? (
+              <p role="alert" className="text-sm text-destructive">{clientDraft.refusal}</p>
+            ) : null}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setClientDraft(null)} disabled={clientDraft?.busy}>
+                {t('connectorConnections.cancel', { defaultValue: 'Cancel' })}
+              </Button>
+              <Button type="submit" disabled={clientDraft?.busy || (clientDraft?.clientId.trim().length ?? 0) === 0}>
+                {t('connectorConnections.clientContinue', { defaultValue: 'Continue to sign-in' })}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={revokeDraft !== null} onOpenChange={(open) => { if (!open && !revokeDraft?.busy) setRevokeDraft(null); }}>
         <DialogContent>

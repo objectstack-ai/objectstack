@@ -112,7 +112,7 @@
 //      under the ablation and `'object'` again after the restore.)
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -349,9 +349,21 @@ describe('[#9111] the `hydrateOverlayIntoRegistry` caller set stays closed', () 
         'utf8',
     );
 
+    // [#25467 E2] A member body moved out of protocol.ts (ruling E's host split)
+    // calls the member as `host.hydrateOverlayIntoRegistry(` in its
+    // `protocol-*.ts` module; the caller set is the union, every module read.
+    const splitSources = readdirSync(fileURLToPath(new URL('.', import.meta.url)))
+        .filter((file) => /^protocol-[a-z0-9-]+\.ts$/.test(file))
+        .map((file) => readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8'));
+
     it('has exactly three call sites, all traced in this file’s header', () => {
-        const callSites = source.match(/this\.hydrateOverlayIntoRegistry\(/g) ?? [];
+        const callSites = [
+            ...(source.match(/this\.hydrateOverlayIntoRegistry\(/g) ?? []),
+            ...splitSources.flatMap((text) => text.match(/\bhost\.hydrateOverlayIntoRegistry\(/g) ?? []),
+        ];
         expect(callSites).toHaveLength(3);
+        // Non-vacuity: the list read's call is read where its body moved.
+        expect(splitSources.some((text) => /\bhost\.hydrateOverlayIntoRegistry\(/.test(text))).toBe(true);
     });
 
     it('the assert is present and reads the URL map, not the manifest map', () => {

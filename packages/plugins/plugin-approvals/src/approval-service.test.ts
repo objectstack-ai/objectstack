@@ -632,8 +632,10 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('decision outputs: accepted keys return from decideNode and snapshot as __decisionOutputs', async () => {
+    // A list answer needs `multiple: true` on its declaration: a bare key takes
+    // one value since #28658.
     const req = await svc.openNodeRequest(
-      openInput(['u9'], {}, { decisionOutputs: ['next_reviewers', 'note'] }), CTX,
+      openInput(['u9'], {}, { decisionOutputs: [{ key: 'next_reviewers', multiple: true }, 'note'] }), CTX,
     );
     const out = await svc.decideNode(req.id, {
       decision: 'approve', actorId: 'u9', outputs: { next_reviewers: ['u2', 'u3'] },
@@ -661,8 +663,8 @@ describe('ApprovalService (node era)', () => {
 
   // ── required decision outputs (objectui#2955) ───────────────────
   //
-  // `type`/`multiple` only shape the input widget; `required` is the one
-  // declaration the RUNTIME enforces. Without it the author's only backstop
+  // `required` is enforced by the RUNTIME (and, since #28658, `type` and
+  // `multiple` too — see the block below). Without it the author's only backstop
   // was `onEmptyApprovers`: the approve went through with the key missing, the
   // next node's `expression` approver resolved nobody, and the run stalled for
   // an admin rescue — long after the approver who could have supplied it left.
@@ -717,6 +719,12 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('required outputs: a filled approve goes through and hands the value to the flow', async () => {
+    // The values are position machine names someone holds: `type: 'position'`
+    // is judged at the decision since #28658.
+    engine._tables['sys_user_position'] = [
+      { id: 'up1', user_id: 'u5', position: 'pos_1', organization_id: 't1' },
+      { id: 'up2', user_id: 'u2', position: 'pos_2', organization_id: 't1' },
+    ];
     const req = await svc.openNodeRequest(requiredInput(), CTX);
     const out = await svc.decideNode(req.id, {
       decision: 'approve', actorId: 'u9', outputs: { parallel_positions: ['pos_1', 'pos_2'] },
@@ -752,6 +760,8 @@ describe('ApprovalService (node era)', () => {
         decisionOutputs: [{ key: 'co_signer', type: 'user', required: true }],
       }), CTX,
     );
+    // `u7` and `u8` must be accounts: `type: 'user'` is judged at the decision since #28658.
+    engine._tables['sys_user'].push({ id: 'u7' }, { id: 'u8' });
     await expect(svc.decideNode(req.id, {
       decision: 'approve', actorId: 'u1',
     }, SYS)).rejects.toThrow(/VALIDATION_FAILED.*co_signer.*required to approve/s);
@@ -766,6 +776,269 @@ describe('ApprovalService (node era)', () => {
     // Last decision wins the merge — the finalizing approver's pick is what
     // the flow resumes with.
     expect(second.outputs).toEqual({ co_signer: 'u8' });
+  });
+
+  // ── typed decision outputs: `type` and `multiple` at the decision (#28658) ──
+  //
+  // Ruling 6566731522 letter A: a typed output's declared `type` and `multiple`
+  // are enforced at the decision. A value the next step cannot use is refused
+  // with VALIDATION_FAILED naming `outputs.KEY` (the approvals door answers it
+  // 400), before any write: no action row, no snapshot, the request pending.
+  // Before this a wrong user id was recorded as an approval, and a stage-2
+  // `expression` approver with `onEmptyApprovers: 'fail'` then stranded the run.
+
+  describe('typed decision outputs are judged against their declaration (#28658)', () => {
+    const typedInput = (defs: unknown[], extra: Record<string, any> = {}) =>
+      openInput(['u9'], {}, { decisionOutputs: defs, ...extra });
+    const NEXT_REVIEWERS = { key: 'next_reviewers', type: 'user', multiple: true, required: true };
+
+    /** The refusal wrote nothing: the open's submit row only, the request pending, no output snapshot. */
+    const expectNothingRecorded = () => {
+      expect((engine._tables['sys_approval_action'] ?? []).map((a: any) => a.action)).toEqual(['submit']);
+      const raw = engine._tables['sys_approval_request'][0];
+      expect(raw.status).toBe('pending');
+      expect(raw.pending_approvers).toBe('u9');
+      expect(JSON.parse(raw.node_config_json).__decisionOutputs).toBeUndefined();
+    };
+
+    const refusal = async (defs: unknown[], outputs: Record<string, unknown>, decision: 'approve' | 'reject' = 'approve') => {
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      return svc.decideNode(req.id, { decision, actorId: 'u9', outputs }, SYS).then(
+        () => { throw new Error('expected a refusal'); },
+        (e: any) => String(e?.message ?? e),
+      );
+    };
+
+    it('user: an id no account carries is refused, naming the output, and nothing is recorded', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: ['u2', 'usr_does_not_exist'] });
+      expect(msg).toMatch(/^VALIDATION_FAILED: /);
+      expect(msg).toContain('`outputs.next_reviewers`');
+      expect(msg).toContain("'usr_does_not_exist' names no user");
+      expectNothingRecorded();
+    });
+
+    it('user: a slot address or an email is not a user id', async () => {
+      for (const v of ['position:sales_manager', 'alice@example.test']) {
+        engine._tables['sys_approval_request'] = [];
+        engine._tables['sys_approval_action'] = [];
+        const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: [v] });
+        expect(msg, v).toContain(`\`outputs.next_reviewers\`: '${v}' is not a user id`);
+        expectNothingRecorded();
+      }
+    });
+
+    it('multiple: true takes a list — a single value is refused', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: 'u2' });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.next_reviewers` takes a list of user ids/);
+      expectNothingRecorded();
+    });
+
+    it('multiple absent takes one value — a list is refused', async () => {
+      const msg = await refusal([{ key: 'co_signer', type: 'user' }], { co_signer: ['u2'] });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.co_signer` takes one user id/);
+      expectNothingRecorded();
+    });
+
+    it('multiple: false takes one value too', async () => {
+      const msg = await refusal([{ key: 'co_signer', type: 'user', multiple: false }], { co_signer: ['u2', 'u3'] });
+      expect(msg).toMatch(/`outputs\.co_signer` takes one user id/);
+      expectNothingRecorded();
+    });
+
+    it('a list holds no entry twice', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: ['u2', 'u3', 'u2'] });
+      expect(msg).toContain("`outputs.next_reviewers` lists 'u2' more than once");
+      expectNothingRecorded();
+    });
+
+    it('a picker value that is not text is refused', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: ['u2', 42] });
+      expect(msg).toContain('`outputs.next_reviewers` must hold user ids as text');
+      expectNothingRecorded();
+    });
+
+    it('every mismatched output is named in the one refusal', async () => {
+      const msg = await refusal(
+        [NEXT_REVIEWERS, { key: 'co_signer', type: 'user' }],
+        { next_reviewers: 'u2', co_signer: 'nobody_here' },
+      );
+      expect(msg).toContain('`outputs.next_reviewers` takes a list');
+      expect(msg).toContain("`outputs.co_signer`: 'nobody_here' names no user");
+      expectNothingRecorded();
+    });
+
+    it('a valid user list is recorded and handed to the flow', async () => {
+      const req: any = await svc.openNodeRequest(typedInput([NEXT_REVIEWERS]), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { next_reviewers: ['u2', 'u3'] },
+      }, SYS);
+      expect(out.finalized).toBe(true);
+      expect(out.outputs).toEqual({ next_reviewers: ['u2', 'u3'] });
+      expect(engine._tables['sys_approval_request'][0].status).toBe('approved');
+    });
+
+    it('position: judged by machine name — a held name passes, a sys_position id is refused', async () => {
+      engine._tables['sys_position'] = [{ id: 'pos_7f3a', name: 'sales_manager', active: true }];
+      engine._tables['sys_user_position'] = [
+        { id: 'up1', user_id: 'u5', position: 'sales_manager', organization_id: 't1' },
+      ];
+      const defs = [{ key: 'co_sign', type: 'position', multiple: true }];
+      const msg = await refusal(defs, { co_sign: ['pos_7f3a'] });
+      expect(msg).toContain("`outputs.co_sign`: 'pos_7f3a' is not a position anyone holds in this request's organization");
+      expectNothingRecorded();
+
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { co_sign: ['sales_manager'] },
+      }, SYS);
+      expect(out.outputs).toEqual({ co_sign: ['sales_manager'] });
+    });
+
+    it("position: a name held only in another organization does not resolve in this request's", async () => {
+      engine._tables['sys_user_position'] = [
+        { id: 'up1', user_id: 'u5', position: 'cfo', organization_id: 't2' },
+      ];
+      const msg = await refusal([{ key: 'escalate_to', type: 'position' }], { escalate_to: 'cfo' });
+      expect(msg).toContain("`outputs.escalate_to`: 'cfo' is not a position anyone holds");
+      expectNothingRecorded();
+    });
+
+    it('department: an active department of the organization passes; unknown, inactive or foreign ones are refused', async () => {
+      engine._tables['sys_business_unit'] = [
+        { id: 'd1', active: true, organization_id: 't1' },
+        { id: 'd_off', active: false, organization_id: 't1' },
+        { id: 'd_t2', active: true, organization_id: 't2' },
+      ];
+      const defs = [{ key: 'route_to', type: 'department', multiple: true }];
+      const msg = await refusal(defs, { route_to: ['d1', 'd_none', 'd_off', 'd_t2'] });
+      for (const id of ['d_none', 'd_off', 'd_t2']) {
+        expect(msg, id).toContain(`\`outputs.route_to\`: '${id}' names no active department in this request's organization`);
+      }
+      expect(msg).not.toContain("'d1'");
+      expectNothingRecorded();
+
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { route_to: ['d1'] },
+      }, SYS);
+      expect(out.outputs).toEqual({ route_to: ['d1'] });
+    });
+
+    it("team: a team row passes; an unknown team or another organization's team is refused", async () => {
+      engine._tables['sys_team'] = [
+        { id: 'tm1', organization_id: 't1' },
+        { id: 'tm_t2', organization_id: 't2' },
+      ];
+      const defs = [{ key: 'reviewers', type: 'team', multiple: true }];
+      const msg = await refusal(defs, { reviewers: ['tm1', 'tm_none', 'tm_t2'] });
+      expect(msg).toContain("`outputs.reviewers`: 'tm_none' names no team");
+      expect(msg).toContain("`outputs.reviewers`: 'tm_t2' is a team of another organization");
+      expect(msg).not.toContain("'tm1'");
+      expectNothingRecorded();
+
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { reviewers: ['tm1'] },
+      }, SYS);
+      expect(out.outputs).toEqual({ reviewers: ['tm1'] });
+    });
+
+    it('a REJECT that carries a mismatched output is refused too; a reject with none goes through', async () => {
+      const msg = await refusal([NEXT_REVIEWERS], { next_reviewers: ['usr_does_not_exist'] }, 'reject');
+      expect(msg).toContain("`outputs.next_reviewers`: 'usr_does_not_exist' names no user");
+      expectNothingRecorded();
+
+      engine._tables['sys_approval_request'] = [];
+      engine._tables['sys_approval_action'] = [];
+      const req: any = await svc.openNodeRequest(typedInput([NEXT_REVIEWERS]), CTX);
+      const out = await svc.decideNode(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
+      expect(out.finalized).toBe(true);
+    });
+
+    it('a mid-tally co-sign vote is judged before it is counted', async () => {
+      const req: any = await svc.openNodeRequest(
+        openInput(['u1', 'u2'], {}, { behavior: 'unanimous', decisionOutputs: [{ key: 'co_signer', type: 'user' }] }), CTX,
+      );
+      await expect(svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u1', outputs: { co_signer: 'ghost' },
+      }, SYS)).rejects.toThrow(/VALIDATION_FAILED: `outputs\.co_signer`: 'ghost' names no user/);
+      expect((engine._tables['sys_approval_action'] ?? []).map((a: any) => a.action)).toEqual(['submit']);
+      expect(engine._tables['sys_approval_request'][0].pending_approvers).toBe('u1,u2');
+    });
+
+    it('text: free values in the declared shape are accepted, unresolved', async () => {
+      const req: any = await svc.openNodeRequest(
+        typedInput(['note', { key: 'reason', type: 'text' }, { key: 'tags', type: 'text', multiple: true }]), CTX,
+      );
+      const outputs = { note: 'looks fine', reason: 7, tags: ['urgent', 'nobody_resolves_this'] };
+      const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', outputs }, SYS);
+      expect(out.outputs).toEqual(outputs);
+    });
+
+    it('text with multiple: true takes a list — a single value is refused', async () => {
+      const msg = await refusal([{ key: 'tags', type: 'text', multiple: true }], { tags: 'urgent' });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.tags` takes a list of values/);
+      expectNothingRecorded();
+    });
+
+    it('text without multiple takes one value — a list is refused, a bare key included', async () => {
+      for (const defs of [[{ key: 'note', type: 'text' }], ['note']]) {
+        engine._tables['sys_approval_request'] = [];
+        engine._tables['sys_approval_action'] = [];
+        const msg = await refusal(defs, { note: ['a', 'b'] });
+        expect(msg, JSON.stringify(defs)).toMatch(/^VALIDATION_FAILED: `outputs\.note` takes one value/);
+        expectNothingRecorded();
+      }
+    });
+
+    it('a text list holds no entry twice', async () => {
+      const msg = await refusal([{ key: 'tags', type: 'text', multiple: true }], { tags: ['urgent', 'later', 'urgent'] });
+      expect(msg).toContain("`outputs.tags` lists 'urgent' more than once");
+      expectNothingRecorded();
+    });
+
+    it("the Console's decide body passes: a tags list for a list output, one string (comma and all) otherwise", async () => {
+      // The shape `decisionOutputParams` + `TagsField` send from both decision
+      // surfaces (ui/packages/app-shell): a `multiple: true` free-value output
+      // as a trimmed, distinct string list, a single-value one as one string
+      // whose comma is literal, a picker list as record ids.
+      const defs = [
+        NEXT_REVIEWERS,
+        { key: 'labels', type: 'text', multiple: true },
+        { key: 'watchers', multiple: true },
+        'note',
+      ];
+      const outputs = {
+        next_reviewers: ['u2', 'u3'],
+        labels: ['alpha', 'beta', 'gamma'],
+        watchers: ['ops'],
+        note: 'a, b',
+      };
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', outputs }, SYS);
+      expect(out.finalized).toBe(true);
+      expect(out.outputs).toEqual(outputs);
+    });
+
+    it('the comma string the Console used to send for a list output is refused', async () => {
+      const msg = await refusal([{ key: 'labels', type: 'text', multiple: true }], { labels: 'alpha, beta' });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.labels` takes a list of values/);
+      expectNothingRecorded();
+    });
+
+    it('a blank optional picker output is left to `required`, not judged', async () => {
+      const req: any = await svc.openNodeRequest(typedInput([{ key: 'co_signer', type: 'user', multiple: true }]), CTX);
+      const out = await svc.decideNode(req.id, {
+        decision: 'approve', actorId: 'u9', outputs: { co_signer: [] },
+      }, SYS);
+      expect(out.finalized).toBe(true);
+    });
   });
 
   // ── approver expansion: position (ADR-0090 D3) ──────────────────

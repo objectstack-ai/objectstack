@@ -129,7 +129,6 @@ const de = {
   actions: {
     decisionOutput: {
       help: 'Wird dem Flow als Entscheidungsausgabe übergeben.',
-      helpMultiValue: 'Wird dem Flow als Entscheidungsausgabe übergeben. Mehrere Werte durch Komma trennen.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -261,6 +260,11 @@ const de = {
       copy: 'Wert kopieren',
       show: 'QR-Code anzeigen',
       hide: 'QR-Code verbergen',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Code scannen',
+      failed: 'Scannen fehlgeschlagen',
     },
     image: {
       upload: "Bild hochladen",
@@ -859,8 +863,6 @@ const de = {
     pullToRefresh: "Zum Aktualisieren ziehen",
     refreshing: "Aktualisiere…",
     share: "Teilen",
-    sharingPersonal: "Persönliche Ansicht",
-    sharingCollaborative: "Geteilte Ansicht",
     sharingLockedBy: "Gesperrt von {{user}}",
     print: "Drucken",
     hideFieldsTitle: "Felder ausblenden",
@@ -1133,7 +1135,6 @@ const de = {
     undo: "Rückgängig",
     redo: "Wiederholen",
     canvasMinimap: "Minikarte der Arbeitsfläche",
-    versionHistory: "Versionsverlauf",
   },
   detail: {
     editInlineHint: "Zum Bearbeiten doppelklicken",
@@ -4875,6 +4876,18 @@ const de = {
     retry: "Erneut versuchen",
     emptyTitle: "Kein Connector muss verbunden werden",
     emptyBody: "Keine der installierten Apps hat einen Connector, bei dem sich ein Administrator per OAuth anmeldet.",
+    clientKeptWithSecret: "OAuth-Client {{clientId}}, Secret gespeichert",
+    clientKept: "OAuth-Client {{clientId}}, kein Secret",
+    clientTitle: "OAuth-Client für {{name}}",
+    clientIntro: "Dieser Connector meldet sich mit einem OAuth-Client an, den Ihre Organisation für diese Bereitstellung beim Anbieter registriert. Geben Sie seine Client-ID und, falls der Anbieter eines ausgestellt hat, sein Client-Secret ein und fahren Sie mit der Anmeldung beim Anbieter fort. Die Connector-Dokumentation beschreibt den Weiterleitungs-URI, der beim Client zu registrieren ist.",
+    clientStored: "Gespeicherter Client: {{clientId}}",
+    clientStoredSecret: "Ein Client-Secret ist dazu gespeichert. Es wird nie angezeigt.",
+    clientStoredNoSecret: "Dazu ist kein Client-Secret gespeichert.",
+    clientResend: "Beim erneuten Verbinden wird der Client erneut gesendet: Behalten Sie die Client-ID und geben Sie das Secret erneut ein, falls er eines hat, oder geben Sie einen anderen Client ein, um ihn zu ersetzen.",
+    clientId: "Client-ID",
+    clientSecret: "Client-Secret",
+    clientSecretHint: "Für einen öffentlichen Client leer lassen. Das Secret wird verschlüsselt mit der Verbindung gespeichert und nie wieder angezeigt.",
+    clientContinue: "Weiter zur Anmeldung",
   },
   setupAssignments: {
     positionsTitle: "Positionsinhaber",

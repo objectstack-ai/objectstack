@@ -146,7 +146,6 @@ const en = {
   actions: {
     decisionOutput: {
       help: 'Handed to the flow as a decision output.',
-      helpMultiValue: 'Handed to the flow as a decision output. Comma-separate multiple values.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -423,6 +422,11 @@ const en = {
       uploadIncomplete: 'Upload of "{{name}}" did not complete: no file id was returned, so nothing was saved',
       restricted: 'Restricted file',
       restrictedHint: 'You do not have access to the details of this file',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Scan code',
+      failed: 'Could not scan',
     },
     image: {
       upload: 'Upload image',
@@ -1125,8 +1129,6 @@ const en = {
     pullToRefresh: 'Pull to refresh',
     refreshing: 'Refreshing…',
     share: 'Share',
-    sharingPersonal: 'Personal view',
-    sharingCollaborative: 'Shared view',
     sharingLockedBy: 'Locked by {{user}}',
     print: 'Print',
     hideFieldsTitle: 'Hide Fields',
@@ -1859,7 +1861,6 @@ const en = {
     undo: 'Undo',
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
-    versionHistory: 'Version history',
   },
   dashboard: {
     total: 'Total',
@@ -5677,6 +5678,18 @@ const en = {
     retry: 'Try again',
     emptyTitle: 'No connector needs connecting',
     emptyBody: 'None of the installed apps has a connector that an administrator signs in to with OAuth.',
+    clientKeptWithSecret: 'OAuth client {{clientId}}, secret stored',
+    clientKept: 'OAuth client {{clientId}}, no secret',
+    clientTitle: 'OAuth client for {{name}}',
+    clientIntro: 'This connector signs in with an OAuth client your organization registers with the vendor for this deployment. Enter its client ID, and its client secret if the vendor issued one, then continue to the vendor\'s sign-in. The Connectors documentation describes the redirect URI to register with the client.',
+    clientStored: 'Stored client: {{clientId}}',
+    clientStoredSecret: 'A client secret is stored with it. It is never shown.',
+    clientStoredNoSecret: 'No client secret is stored with it.',
+    clientResend: 'Reconnecting sends the client again: keep the client ID and enter its secret again if it has one, or enter another client to replace it.',
+    clientId: 'Client ID',
+    clientSecret: 'Client secret',
+    clientSecretHint: 'Leave it empty for a public client. The secret is stored encrypted with the connection and never shown again.',
+    clientContinue: 'Continue to sign-in',
   },
   // Setup → People & organization: Position holders and Permission set
   // assignment (ADR-0146 D7).

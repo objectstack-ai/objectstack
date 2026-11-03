@@ -47,29 +47,27 @@ export const SysApprovalRequest = ObjectSchema.create({
   description: 'Live approval instance tracked per submission',
   // [ADR-0079, ADR-0085] The record title is the flow's label, `process_label`:
   // a STORED column, so every door that serves the row serves its title. The
-  // approvals get (`rowFromRequest`) serves it by the display-label chain —
-  // the column, else the config snapshot's label, else the humanized machine
-  // name — so the request page reached through that get always has a title,
-  // and it is never `flow:NAME`. The pointer used to be `display_title`, a
-  // formula: a formula has no column, the approvals get served no value for
-  // it, and the page fell through to `titleFormat`, the machine name and the
-  // raw subject record id.
+  // approvals get (`rowFromRequest`) serves it by the display-label chain — the
+  // column, else the config snapshot's label, else the humanized machine name —
+  // so the request page reached through that get always has a title, and it is
+  // never `flow:NAME`. The pointer used to be `display_title`, a formula: a
+  // formula has no column, the approvals get served no value for it, and the
+  // page fell through to the since-retired `titleFormat`, the machine name and
+  // the raw subject record id.
   //
   // The title names no subject record. The request page names the subject on
   // the card the `record_id` / `object_name` pair draws in the Details tab,
   // which says so when the reader may not read the record or it was deleted;
   // a title cannot, so a bare record id is never shown there.
   //
-  // `titleFormat` is the deprecated fallback a renderer reaches only where
-  // `process_label` is empty: a row written before the column, until the boot
-  // fill labels it (`display-label-backfill.ts`). It names `{process_name}`,
-  // the machine source, because a placeholder template cannot say "else" —
-  // the same fallback `display_title` draws, so every door agrees on such a
-  // row too. `sys-approval-display-title.test.ts` and
-  // `sys-approval-request-title.integration.test.ts` pin both.
+  // Where `process_label` is empty — a row written before the column, until the
+  // boot fill labels it (`display-label-backfill.ts`) — the retired
+  // `titleFormat` template `{process_name}` drew the machine source; it is gone
+  // (refused at save and by `os validate`), and `display_title` draws that same
+  // fallback. `sys-approval-display-title.test.ts` and
+  // `sys-approval-request-title.integration.test.ts` pin the title.
   displayNameField: 'process_label',
   nameField: 'process_label', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{process_name}',
   // [ADR-0085] The flow is named by its label, `process_label`, never by the
   // machine source `process_name` (`flow:NAME`), and the step by its label,
   // `current_step_label`, never by the node id `current_step`, as the request
@@ -179,9 +177,9 @@ export const SysApprovalRequest = ObjectSchema.create({
     // [ADR-0079] The title text the data API computes on read: the flow's
     // label, `process_label`, else the machine source `process_name` (required)
     // where no label is stored — the text the title ladder draws from
-    // `nameField` and `titleFormat` above, on every row the engine writes (a
-    // writer stores a label or null, never a blank). A formula has no
-    // stored column. It names no subject record, as the title does not.
+    // `nameField` above, on every row the engine writes (a writer stores a
+    // label or null, never a blank). A formula has no stored column. It names
+    // no subject record, as the title does not.
     //
     // It is no longer the title pointer (the approvals get serves no formula
     // value), and it stays declared because stored activity rows name it: the

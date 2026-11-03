@@ -188,16 +188,14 @@ export function ruleArrayFilterError(options: RuleArrayFilterErrorOptions): z.co
     }
     const named = combinators.map((key) => `\`${key}\``).join(' and ');
     // [#28020] The rule array gained ONE combinator spelling, the any-of group
-    // element, and this sentence names it — with its status, because no console
-    // applies it yet: prescribing it bare would send an author to a filter that
-    // does not narrow the rows (`ViewFilterOrGroupSchema`'s PLANNED note).
+    // element, and this sentence names it as the shape a `$or` over flat rules
+    // is written in (`ViewFilterOrGroupSchema`).
     const combinatorSentence = combinators.length === 0
       ? ''
       : ` ${named} ${combinators.length === 1 ? 'is a combinator, not a field' : 'are combinators, not fields'}, `
         + `and the rule array spells a combinator only as its own elements: they AND, so \`$and\` is `
         + `the separate rules it joins, \`$or\` over flat rules is one any-of group element `
-        + `\`{ or: [{ field, operator, value }, ...] }\` (declared, but no console applies it yet, so it `
-        + `does not narrow the rows today), and \`$not\` cannot be written at all. Nothing rewrites a `
+        + `\`{ or: [{ field, operator, value }, ...] }\`, and \`$not\` cannot be written at all. Nothing rewrites a `
         + `combinator for you — flattening one changes which rows the filter selects — so decide which `
         + `rows this filter should select, and write the rules that select exactly those.`;
 

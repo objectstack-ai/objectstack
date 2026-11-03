@@ -144,6 +144,7 @@ import {
   checkDashboardWidgetStageOrder,
   checkDashboardWidgetMetricMeasureArity,
   checkDashboardWidgetChartMeasureArity,
+  checkDashboardReservedDateRangeGlobalFilters,
   checkPageRequiresKind,
   checkPageRegionPlacement,
   checkPageDefaultPlacement,
@@ -728,6 +729,9 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // `PageNodeSchema` and `PageKindNodeSchema`.
       ['checkDashboardWidgetChartMeasureArity', checkDashboardWidgetChartMeasureArity],
       ['checkPageRequiresKind', checkPageRequiresKind],
+      // objectstack#29213: the spec's reserved-`dateRange` dashboard check, re-attached on
+      // `DashboardComponentSchema` under the same ruling.
+      ['checkDashboardReservedDateRangeGlobalFilters', checkDashboardReservedDateRangeGlobalFilters],
       // objectui#12030's page slot-pair check left this list with the `tabs`
       // slot (objectstack#27053): the spec no longer carries it.
       // objectui#12370's page view-data check left this list with objectui#12666: objectstack#23784

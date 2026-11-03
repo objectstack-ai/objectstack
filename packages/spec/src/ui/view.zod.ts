@@ -65,7 +65,7 @@ import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../share
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
-import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
+import { acceptRetiredDefaultResidue, enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // [#19088] The decimal-places ceiling every renderer enforces, and the refusal
 // text that explains it. A `src/shared/` leaf that no package entry re-exports,
 // so the bound this row applies costs no published export — see that module's
@@ -1163,16 +1163,16 @@ export function isViewFilterOrGroup(value: unknown): value is { [VIEW_FILTER_OR_
  * rule never carries `or`, so it is routed to {@link ViewFilterRuleSchema}
  * exactly as before.
  *
- * ## [PLANNED — not yet rendered]
+ * ## Applied by the console
  *
- * No reader applies the group yet. The query a list view runs is built by the
- * console (`ui/packages/core/src/utils/filter-converter.ts#toFilterNode`), which
- * lowers flat rules only and passes a group through untouched, so the server
- * refuses the query as a malformed filter (400 `INVALID_FILTER`) and the list
- * shows that error and no rows. It fails closed: a stored group never widens
- * what a view, a related list or a picker shows. The describe below says so,
- * so no author is told it works.
- * The console half is #28370; the marker leaves when it lands.
+ * The query a list view runs is built by the console
+ * (`ui/packages/core/src/utils/filter-converter.ts#toFilterNode`), which lowers
+ * a group to one `or` node of its rules, a child of the list's AND like any
+ * rule, so a group is ANDed with its sibling elements. The console's filter
+ * builder edits a filter that is exactly one group as its OR logic, and saves
+ * its OR logic over two or more rules as one group; a filter holding a group
+ * beside other elements is applied, and shown read-only in the builder rather
+ * than flattened on save (`builderRulesOfSpecFilter`).
  *
  * @example
  * ```ts
@@ -1214,13 +1214,12 @@ export const ViewFilterOrGroupSchema = lazySchema(() => strictObject({
       + 'each judged exactly as a rule at the top level of the filter. A group cannot hold a group.',
     ),
 }).describe(
-  '[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its '
+  'An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its '
   + 'rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, '
   + 'so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", '
   + 'operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the '
-  + 'last 7 days. One level only: its members are flat rules. No console reads it yet: until the list '
-  + 'query build reads the group, a view that stores one is refused when it loads (the list reports a '
-  + 'malformed filter and shows no rows).',
+  + 'last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its '
+  + 'sibling elements, and its filter builder edits a filter that is exactly one group.',
 ));
 
 export type ViewFilterOrGroup = z.input<typeof ViewFilterOrGroupSchema>;
@@ -1833,17 +1832,49 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
 }).describe('Timeline view configuration'));
 
+// [#29037] `sharing.type` retirement prescription (ADR-0049 enforce-or-remove;
+// ruling of record 6570568131 on #28971, letter C). Declared with `//` on
+// purpose: a tombstone consumes it, it is no documented surface.
+//
+// Measured before removal: the one reader in either tree was the console list
+// toolbar's read-only badge (`ui/packages/plugin-list/src/ListView.tsx`), which
+// drew "Personal view" or "Shared view" from the value. Nothing filtered a view
+// by it: both switcher read paths list every view bound to the object, so a
+// view marked `personal` was listed for every user who can read the object,
+// under a badge that said otherwise. With `personal` refused, the key would
+// carry one value that describes every view, so it leaves whole.
+const VIEW_SHARING_TYPE_RETIRED =
+  '`view.list.sharing.type` was removed in @objectstack/spec 18.3.0 (ADR-0049 enforce-or-remove) — nothing '
+  + 'enforced it: a `personal` view was listed for every user who can read the object, and `collaborative` '
+  + 'described every view, so the key only ever drew a badge. Delete the key; `sharing.lockedBy` is unchanged. '
+  + 'A view is visible to everyone who can read its object; personal named views are a user-owned record, '
+  + 'not view metadata (ADR-0017). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+// [#29037] The default the retired `sharing.type` emitted, captured as a
+// literal at retirement (`acceptRetiredDefaultResidue`, the #12840 rule for a
+// retired DEFAULTED key). Every view a released toolchain parsed with a
+// `sharing` block carries `type: 'collaborative'` written out although no
+// author wrote it; that residue is accepted and stripped, and `personal` (the
+// value an author did write) keeps the tombstone's refusal.
+const VIEW_SHARING_RETIRED_KEY_RESIDUE = { type: 'collaborative' } as const;
+
 /**
- * View Sharing Configuration (Airtable-style)
- * Defines who can see and modify a view.
+ * View Sharing Configuration (Airtable-style).
+ *
+ * Carries one live key, `lockedBy`. The ownership `type` it used to declare
+ * (`personal` | `collaborative`) was retired (#29037, ADR-0049): nothing ever
+ * restricted a view to one user, and personal named views are ruled to be a
+ * user-owned record, not view metadata (#28971; the ADR-0017 / ADR-0131 D13
+ * notes, PR #29321).
  */
-export const ViewSharingSchema = lazySchema(() => strictObject({
+export const ViewSharingSchema = lazySchema(() => acceptRetiredDefaultResidue(strictObject({
   surface: 'this view sharing',
   history: VIEW_HISTORY,
 }, {
-  type: z.enum(['personal', 'collaborative']).default('collaborative').describe('View ownership type'),
+  type: retiredKey(VIEW_SHARING_TYPE_RETIRED),
   lockedBy: z.string().optional().describe('User who locked the view configuration'),
-}).describe('View sharing and access configuration'));
+}).describe('View sharing configuration — who locked the view configuration'), VIEW_SHARING_RETIRED_KEY_RESIDUE));
 
 /**
  * Row Color Configuration (Airtable-style)
@@ -3465,7 +3496,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
   /** View Metadata (Airtable-style view management) */
   description: I18nLabelSchema.optional().describe('View description for documentation/tooltips'),
-  sharing: ViewSharingSchema.optional().describe('View sharing and access configuration'),
+  sharing: ViewSharingSchema.optional().describe('View sharing configuration: who locked the view configuration'),
 
   /**
    * [#22611] The audience gate — the platform's one capability key, with the
@@ -5798,6 +5829,23 @@ export const ViewItemNameSchema = z
   )
   .describe('Globally-unique view id, `<object>.<viewKey>`.');
 
+// [#29037] `scope: 'personal'` retired member — the prescription it answers
+// with at parse (`enumWithRetiredValues`, `../shared/retired-key.ts`). Declared
+// with `//` on purpose: an enum's error map consumes it, it is no documented
+// surface. Declared ABOVE `ViewScopeSchema`, which is built at module init.
+// The `view-personal-declarations-removed` conversion (ADR-0087 D2,
+// `conversions/registry.ts`) deletes the member from existing sources and
+// stored rows.
+const VIEW_SCOPE_RETIRED = {
+  personal:
+    "`view.scope: 'personal'` was removed in @objectstack/spec 18.3.0 (ADR-0049 enforce-or-remove) — nothing "
+    + 'ever restricted a `personal` view item to one user: the view switcher lists every item bound to the '
+    + 'object, so a view marked personal was listed for every user who can read the object. Delete the value; '
+    + 'a view item without `scope` from source is a `package` item, and a runtime-authored one is `shared`. '
+    + 'Personal named views are a user-owned record, not a view item (ADR-0017). '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+} as const;
+
 /**
  * Identity layer for a view item — its visibility scope and ownership.
  *
@@ -5806,20 +5854,24 @@ export const ViewItemNameSchema = z
  *                override layer.
  * - `shared`   — authored at runtime, visible org-wide. Creating one is gated
  *                by the `view.manageShared` capability.
- * - `personal` — the per-user layer. Per-user view scoping is a PARKED
- *                direction (ADR-0017, amended 2026-09-04), not a shipped
- *                mechanism: the item-level `owner` key that was to name the
- *                user was retired with `hidden` (ADR-0049 — see
- *                {@link VIEW_ITEM_OWNER_RETIRED}), so nothing restricts a
- *                `personal` item to one user today.
+ *
+ * `personal` was retired (#29037, ADR-0049 enforce-or-remove) and is refused
+ * at parse with {@link VIEW_SCOPE_RETIRED}'s prescription. It promised a
+ * per-user layer and nothing ever delivered one: the item-level `owner` key
+ * that was to name the user was retired with `hidden` (see
+ * {@link VIEW_ITEM_OWNER_RETIRED}), and both switcher read paths list every
+ * item bound to the object, so a `personal` item was shown to every user who
+ * can read the object. Per-user scoping is no longer a parked direction for
+ * view items: the maintainer ruled (#28971, letter C) that personal named
+ * views are a user-owned record, not a view item, and that they do not reuse
+ * this value (the ADR-0017 / ADR-0131 D13 notes, PR #29321).
  *
  * Named `scope` (not `provenance`) to avoid colliding with the loader-set
  * `_provenance` envelope field, which tracks a different axis
  * (package | org | env-forced).
  */
-export const ViewScopeSchema = z
-  .enum(['package', 'shared', 'personal'])
-  .describe('View identity layer: package | shared | personal.');
+export const ViewScopeSchema = enumWithRetiredValues(['package', 'shared'], VIEW_SCOPE_RETIRED)
+  .describe('View identity layer: package | shared.');
 
 /** Discriminator for the kind of view a {@link ViewItemSchema} carries. */
 export const ViewKindSchema = z
@@ -5863,8 +5915,8 @@ const VIEW_ITEM_OWNER_RETIRED =
   + 'user a `personal` view item belonged to, and nothing ever read it: the view switcher '
   + '(`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a '
   + 'view marked as one user\'s was listed for every user who can read the object. Delete the key. '
-  + 'Nothing restricts a view item to one user today — per-user view scoping is a parked direction '
-  + '(ADR-0017), not a shipped mechanism — so a view item is visible to everyone who can read its object. '
+  + 'Nothing restricts a view item to one user — personal named views are a user-owned record, not a view '
+  + 'item (ADR-0017) — so a view item is visible to everyone who can read its object. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const VIEW_ITEM_HIDDEN_RETIRED =
@@ -6144,9 +6196,9 @@ const VIEW_SWITCHER_VISIBILITY_GROUPS = ['private', 'team', 'organization', 'pub
  * in the contract.
  *
  * None of the three is per-user. A stored `view` row is environment metadata
- * with no per-user scope (ADR-0017, amended: per-user view scoping is a parked
- * direction), so a pin, a position or a group applies to everyone who reads
- * the view.
+ * with no per-user scope (ADR-0017, amended: personal named views are a
+ * user-owned record, not view metadata — #28971, letter C), so a pin, a
+ * position or a group applies to everyone who reads the view.
  *
  * ⛔ Not authorable. The authoring doors ({@link ViewItemSchema},
  * `ListViewSchema`) do not declare them and refuse them by name.

@@ -47,7 +47,7 @@ definePermissionSet({
 
 Every business app meets this shape: a contract's legal terms after approval, an order's amount after shipping, an invoice after posting, a purchase order's supplier after approval. The answer is a field permission with a **row condition**, `when`, on the permission set that should lose the edit.
 
-**In the permission-set editor** (Setup → Access Control → Permission Sets, then open the set):
+**In the permission-set editor** (Studio → **All metadata** → Permission Set, then open the set):
 
 1. Expand the object (`clm_contract`) to show its field rows.
 2. On each field row to lock (`governing_law`, `liability_cap`), set **Read** on and **Edit** off.

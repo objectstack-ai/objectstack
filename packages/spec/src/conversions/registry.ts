@@ -2690,6 +2690,179 @@ const permissionSetManagedByRemoved: MetadataConversion = {
 };
 
 /**
+ * The two inert `personal` declarations leave the view (protocol 18, #29037 —
+ * ADR-0049 enforce-or-remove; ruling of record 6570568131 on #28971, letter C:
+ * personal named views are a user-owned record, not a view item, and they do
+ * not reuse either key).
+ *
+ * - `scope: 'personal'` on a view item record or a flattened overlay
+ *   (`ViewScopeSchema`, now `enumWithRetiredValues`): nothing ever restricted
+ *   such an item to one user — both switcher read paths list every item bound
+ *   to the object. The member is DELETED: the item lands on an absent
+ *   `scope`, which is what the prescription tells an author to do by hand, and
+ *   what every reader saw anyway. The conversion invents no `shared`.
+ * - `sharing.type` on every list payload (`ViewSharingSchema`, now a
+ *   `retiredKey()` tombstone with the `collaborative` default accepted as
+ *   residue): its one reader was the console list toolbar's badge, which
+ *   claimed "Personal view" for a view everyone could read. The KEY is deleted,
+ *   both values; `sharing.lockedBy` stays, and a block left with no key stays
+ *   as an empty block, the choice `navigation-mode-overlay-values-removed`
+ *   makes for its own container.
+ *
+ * Reach — every carrier of either declaration:
+ *
+ * - `scope`: the `views` collection and the assembled-manifest `viewItems`
+ *   channel ({@link ASSEMBLED_VIEW_ITEMS_KEY}), on a record (`config` present)
+ *   or a flattened overlay; a container declares no `scope` and is skipped;
+ * - `sharing.type`: every list payload {@link mapViewPayloads} reaches (a
+ *   container's `list` / `listViews.*`, a list item's `config`, a flattened
+ *   list overlay), the same three spellings in `viewItems`, and an object's
+ *   `listViews.*`. No page block declares `sharing`.
+ *
+ * `PUT /meta/view` persisted both through 18.2.0, so a stored `view` row CAN
+ * carry them, and every artifact a released toolchain built carries
+ * `type: 'collaborative'` wherever a `sharing` block was authored. **Retired
+ * from the load path from day one**: a live author meets the parse's
+ * prescription, and this entry serves stored-row rehydration, assembled
+ * artifacts and `os migrate meta`. Idempotent by construction: a converted
+ * row carries neither declaration.
+ *
+ * The D3 entry `ui-view-personal-declarations-retired` carries what the edit
+ * cannot decide: whether a view its author meant as personal should stay as a
+ * view everyone sees, be deleted, or wait for the user-owned personal view.
+ */
+const personalViewDeclarationsRemoved: MetadataConversion = {
+  id: 'view-personal-declarations-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.2.0',
+  surface:
+    "view.scope ('personal') — on a view item record or a flattened overlay / view.list.sharing.type / "
+    + 'view.listViews.<key>.sharing.type / object.listViews.<key>.sharing.type',
+  summary:
+    "the two inert `personal` declarations removed: `scope: 'personal'` (nothing restricted a view item to one "
+    + 'user) and `sharing.type` (it only drew a badge, and claimed "personal" for a view everyone could read). '
+    + 'The `personal` member and the `type` key, whichever value it holds, are deleted; `sharing.lockedBy` is '
+    + 'unchanged',
+  apply(stack, emit) {
+    const stripScope = (view: Dict, path: string): Dict => {
+      if (view.scope !== 'personal') return view;
+      if (view.list !== undefined || view.form !== undefined) return view;
+      if (view.listViews !== undefined || view.formViews !== undefined) return view;
+      emit({ from: 'personal', to: '(removed)', path: `${path}.scope` });
+      const next: Dict = { ...view };
+      delete next.scope;
+      return next;
+    };
+    const convertList = (payload: Dict, path: string): Dict => {
+      const sharing = payload.sharing;
+      if (!isDict(sharing)) return payload;
+      const stripped = stripKeys(sharing, ['type'], emit, `${path}.sharing`);
+      return stripped === sharing ? payload : { ...payload, sharing: stripped };
+    };
+
+    let next = mapCollection(mapCollection(stack, 'views', stripScope), ASSEMBLED_VIEW_ITEMS_KEY, stripScope);
+    next = mapViewPayloads(next, (payload, kind, path) => (kind === 'list' ? convertList(payload, path) : payload));
+    next = mapCollection(next, ASSEMBLED_VIEW_ITEMS_KEY, (item, path) => {
+      if (item.viewKind !== 'list') return item;
+      if (isDict(item.config)) {
+        const config = convertList(item.config, `${path}.config`);
+        return config === item.config ? item : { ...item, config };
+      }
+      // A flattened list overlay — the body IS the payload. A present but
+      // malformed `config` is neither shape and is left for the parse.
+      return item.config === undefined ? convertList(item, path) : item;
+    });
+    return mapCollection(next, 'objects', (obj, path) => {
+      const listViews = obj.listViews;
+      if (!isDict(listViews)) return obj;
+      let changed = false;
+      const rebuilt: Dict = { ...listViews };
+      for (const [name, entry] of Object.entries(listViews)) {
+        if (!isDict(entry)) continue;
+        const mapped = convertList(entry, `${path}.listViews.${name}`);
+        if (mapped === entry) continue;
+        rebuilt[name] = mapped;
+        changed = true;
+      }
+      return changed ? { ...obj, listViews: rebuilt } : obj;
+    });
+  },
+  fixture: {
+    before: {
+      // The assembled-manifest channel: a record a package export carried
+      // before this release, with both declarations.
+      viewItems: [
+        {
+          name: 'vpd_lead.mine',
+          object: 'vpd_lead',
+          viewKind: 'list',
+          scope: 'personal',
+          config: { type: 'grid', columns: ['name'], sharing: { type: 'personal', lockedBy: 'usr_7' } },
+        },
+      ],
+      views: [
+        // A record: the member and the key both go; `label` rides through.
+        {
+          name: 'vpd_lead.hot',
+          object: 'vpd_lead',
+          viewKind: 'list',
+          label: 'Hot leads',
+          scope: 'personal',
+          config: { type: 'grid', columns: ['name'], sharing: { type: 'collaborative' } },
+        },
+        // A live `scope` member rides through by reference.
+        { name: 'vpd_lead.team', object: 'vpd_lead', viewKind: 'list', scope: 'shared', config: { type: 'grid', columns: ['name'] } },
+        // A flattened list overlay: its own `scope` and its `sharing.type`.
+        { name: 'vpd_lead.board', object: 'vpd_lead', viewKind: 'list', scope: 'personal', sharing: { type: 'personal' } },
+        // A container: `sharing.type` goes from each list payload, `lockedBy` stays.
+        {
+          object: 'vpd_lead',
+          list: { type: 'grid', columns: ['name'], sharing: { type: 'personal', lockedBy: 'usr_9' } },
+          listViews: { quiet: { type: 'grid', columns: ['name'], sharing: { lockedBy: 'usr_9' } } },
+        },
+      ],
+      objects: [
+        { name: 'vpd_lead', label: 'Lead', listViews: { mine: { type: 'grid', columns: ['name'], sharing: { type: 'collaborative' } } } },
+      ],
+    },
+    after: {
+      viewItems: [
+        {
+          name: 'vpd_lead.mine',
+          object: 'vpd_lead',
+          viewKind: 'list',
+          config: { type: 'grid', columns: ['name'], sharing: { lockedBy: 'usr_7' } },
+        },
+      ],
+      views: [
+        {
+          name: 'vpd_lead.hot',
+          object: 'vpd_lead',
+          viewKind: 'list',
+          label: 'Hot leads',
+          config: { type: 'grid', columns: ['name'], sharing: {} },
+        },
+        { name: 'vpd_lead.team', object: 'vpd_lead', viewKind: 'list', scope: 'shared', config: { type: 'grid', columns: ['name'] } },
+        { name: 'vpd_lead.board', object: 'vpd_lead', viewKind: 'list', sharing: {} },
+        {
+          object: 'vpd_lead',
+          list: { type: 'grid', columns: ['name'], sharing: { lockedBy: 'usr_9' } },
+          listViews: { quiet: { type: 'grid', columns: ['name'], sharing: { lockedBy: 'usr_9' } } },
+        },
+      ],
+      objects: [
+        { name: 'vpd_lead', label: 'Lead', listViews: { mine: { type: 'grid', columns: ['name'], sharing: {} } } },
+      ],
+    },
+    // One notice per declaration removed: `scope` + `sharing.type` on the
+    // `viewItems` record, on the `views` record and on the overlay (six), the
+    // container's `list` (one), the object's list view (one).
+    expectedNotices: 8,
+  },
+};
+
+/**
  * `record:chatter` / `record:discussion` `position` converges on the
  * renderer's vocabulary (protocol 18, #8762 — maintainer ruling 2026-08-15:
  * one vocabulary, no mapping layer).
@@ -13182,8 +13355,10 @@ const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
  * (`VIEW_ITEM_OWNER_RETIRED` / `VIEW_ITEM_HIDDEN_RETIRED`): no writer and no
  * reader in this framework, in objectui at its pin and at `main`, or in cloud;
  * both switcher read paths filter on `viewKind` + `object` and sort on `order`.
- * Per-user view scoping, which `owner` was to carry, is a parked direction
- * (ADR-0017, amended 2026-09-04).
+ * Per-user view scoping, which `owner` was to carry, is no view-item
+ * mechanism: personal named views are a user-owned record (#28971, letter C;
+ * the same ruling retired `scope: 'personal'` in
+ * `view-personal-declarations-removed`).
  *
  * **Retired from the load path** — both keys are `retiredKey()` tombstones on
  * the shared shape, so a live author is refused at parse with the
@@ -13260,7 +13435,10 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
           object: 'crm_lead',
           viewKind: 'list',
           label: 'My hot leads',
-          scope: 'personal',
+          // [#29037] A LIVE `scope` member: `personal` left the enum, and
+          // `view-personal-declarations-removed` deletes it, so the bystander
+          // is `shared` to keep the fixtures disjoint under whole-table replay.
+          scope: 'shared',
           owner: 'usr_7',
           hidden: true,
           config: { type: 'grid', columns: ['name'] },
@@ -13289,7 +13467,7 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
           object: 'crm_lead',
           viewKind: 'list',
           label: 'My hot leads',
-          scope: 'personal',
+          scope: 'shared',
           config: { type: 'grid', columns: ['name'] },
         },
         { name: 'crm_lead.intake', object: 'crm_lead', viewKind: 'form', config: { type: 'simple' } },
@@ -13749,8 +13927,8 @@ function dollarKeysReason(keys: readonly string[]): string {
       : ` (its top-level ${quoteKeys(others)} ${others.length === 1 ? 'is' : 'are'} not a field either)`;
     return `carries the combinator${combinators.length === 1 ? '' : 's'} ${quoteKeys(combinators)}`
       + `${alsoNotFields}: a rule array's elements AND, so \`$and\` is only the separate rules it `
-      + 'joins, `$or` over flat rules only an any-of group element `{ or: [rule, ...] }` (declared, '
-      + 'not yet applied by any console) that this conversion does not write, and `$not` has no rule '
+      + 'joins, `$or` over flat rules only an any-of group element `{ or: [rule, ...] }` that this '
+      + 'conversion does not write, and `$not` has no rule '
       + 'spelling; a combinator is never flattened — '
       + 'that would change which rows the filter selects. Decide which rows it should select, and '
       + 'write the rules that select exactly those';
@@ -15579,6 +15757,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: permissionModifyAllAllowDeleteFalseToTrue, order: 75 },
   { conversion: permissionRlsTagsRemoved, order: 42 },
   { conversion: permissionSetManagedByRemoved, order: 67 },
+  { conversion: personalViewDeclarationsRemoved, order: 82 },
   { conversion: recordChatterPositionVocabulary, order: 2 },
   { conversion: recordHighlightsFieldIconRemoved, order: 10 },
   { conversion: reportJoinedChartRemoved, order: 38 },

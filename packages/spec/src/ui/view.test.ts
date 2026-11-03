@@ -2777,29 +2777,15 @@ describe('groupByField — a padded field name is refused', () => {
 });
 
 describe('ViewSharingSchema', () => {
-  it('should default to collaborative', () => {
-    const sharing = {};
-
-    const result = ViewSharingSchema.parse(sharing);
-    expect(result.type).toBe('collaborative');
+  // [#29037] `type` is retired (ADR-0049): the block carries `lockedBy` only,
+  // and parsing an empty block no longer writes an ownership type.
+  it('emits no ownership type for an empty block', () => {
+    const result = ViewSharingSchema.parse({});
+    expect(result).toEqual({});
   });
 
-  it('should accept personal view', () => {
-    const sharing = {
-      type: 'personal' as const,
-      lockedBy: 'user_123',
-    };
-
-    expect(() => ViewSharingSchema.parse(sharing)).not.toThrow();
-  });
-
-  it('should accept collaborative view with lock', () => {
-    const sharing = {
-      type: 'collaborative' as const,
-      lockedBy: 'admin_user',
-    };
-
-    expect(() => ViewSharingSchema.parse(sharing)).not.toThrow();
+  it('should accept a lock', () => {
+    expect(ViewSharingSchema.parse({ lockedBy: 'admin_user' })).toEqual({ lockedBy: 'admin_user' });
   });
 });
 
@@ -3032,9 +3018,9 @@ describe('Airtable-style ListView enhancements', () => {
       name: 'my_pipeline',
       label: 'My Pipeline',
       columns: ['name', 'stage'],
-      description: 'Personal view for tracking deals',
+      description: 'Pipeline view for tracking deals',
       sharing: {
-        type: 'personal',
+        lockedBy: 'admin',
       },
     };
 
@@ -3108,7 +3094,6 @@ describe('Airtable-style ListView enhancements', () => {
       hiddenFields: ['internal_id', 'sys_updated_at'],
       fieldOrder: ['project_name', 'status', 'priority', 'budget', 'completion', 'department'],
       sharing: {
-        type: 'collaborative',
         lockedBy: 'admin',
       },
       resizable: true,
@@ -3144,7 +3129,7 @@ describe('Airtable-style ListView enhancements', () => {
             summarizeField: 'amount',
             columns: ['name', 'owner', 'close_date'],
           },
-          sharing: { type: 'collaborative' },
+          sharing: { lockedBy: 'admin' },
         },
         gallery: {
           type: 'gallery',

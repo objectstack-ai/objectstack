@@ -3915,6 +3915,9 @@ importers:
       '@object-ui/layout':
         specifier: workspace:*
         version: link:../layout
+      '@object-ui/mobile':
+        specifier: workspace:*
+        version: link:../mobile
       '@object-ui/permissions':
         specifier: workspace:*
         version: link:../permissions
@@ -4436,6 +4439,9 @@ importers:
       '@object-ui/i18n':
         specifier: workspace:*
         version: link:../i18n
+      '@object-ui/mobile':
+        specifier: workspace:*
+        version: link:../mobile
       '@object-ui/permissions':
         specifier: workspace:*
         version: link:../permissions

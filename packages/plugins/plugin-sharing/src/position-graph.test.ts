@@ -8,7 +8,7 @@ import { PositionGraphService } from './position-graph.js';
 
 // Minimal engine: resolves find('sys_user_position') and find('sys_member').
 function makeEngine(
-  assignments: Array<{ position: string; user_id: string; organization_id?: string | null }>,
+  assignments: Array<{ id: string; position: string; user_id: string; organization_id?: string | null }>,
   members: Array<{ role: string; user_id: string }>,
 ) {
   return {
@@ -27,14 +27,18 @@ function makeEngine(
   } as any;
 }
 
+// Every `sys_user_position` row carries its `id`, as a stored one does: the
+// assignment read pages by it (#29503) and refuses a row it cannot resume after.
 const ASSIGNMENTS = [
-  { position: 'sales_manager', user_id: 'u_mgr' },
-  { position: 'sales_rep', user_id: 'u_rep1' },
-  { position: 'sales_rep', user_id: 'u_rep2' },
+  { id: 'up_1', position: 'sales_manager', user_id: 'u_mgr' },
+  { id: 'up_2', position: 'sales_rep', user_id: 'u_rep1' },
+  { id: 'up_3', position: 'sales_rep', user_id: 'u_rep2' },
 ];
+// Every `sys_member` row carries its `id`, as a stored one does: the role read
+// pages by it (#29362) and refuses a row it cannot resume after.
 const MEMBERS = [
-  { role: 'sales_rep', user_id: 'u_legacy_rep' }, // better-auth transition source
-  { role: 'exec', user_id: 'u_exec' },
+  { id: 'm_legacy_rep', role: 'sales_rep', user_id: 'u_legacy_rep' }, // better-auth transition source
+  { id: 'm_exec', role: 'exec', user_id: 'u_exec' },
 ];
 
 describe('PositionGraphService (ADR-0090 D3 — flat expansion)', () => {
@@ -46,7 +50,7 @@ describe('PositionGraphService (ADR-0090 D3 — flat expansion)', () => {
 
   it('unions the better-auth membership transition source (no duplicates)', async () => {
     const g = new PositionGraphService({
-      engine: makeEngine([...ASSIGNMENTS, { position: 'sales_rep', user_id: 'u_legacy_rep' }], MEMBERS),
+      engine: makeEngine([...ASSIGNMENTS, { id: 'up_4', position: 'sales_rep', user_id: 'u_legacy_rep' }], MEMBERS),
     });
     const users = (await g.expandPositionUsers('sales_rep')).sort();
     expect(users).toEqual(['u_legacy_rep', 'u_rep1', 'u_rep2']);
@@ -69,10 +73,10 @@ describe('PositionGraphService (ADR-0090 D3 — flat expansion)', () => {
     const g = new PositionGraphService({
       engine: makeEngine(
         [
-          { position: 'sales_rep', user_id: 'u_active' },
-          { position: 'sales_rep', user_id: 'u_expired', valid_until: past } as any,
-          { position: 'sales_rep', user_id: 'u_pending', valid_from: future } as any,
-          { position: 'sales_rep', user_id: 'u_windowed', valid_from: past, valid_until: future } as any,
+          { id: 'up_5', position: 'sales_rep', user_id: 'u_active' },
+          { id: 'up_6', position: 'sales_rep', user_id: 'u_expired', valid_until: past } as any,
+          { id: 'up_7', position: 'sales_rep', user_id: 'u_pending', valid_from: future } as any,
+          { id: 'up_8', position: 'sales_rep', user_id: 'u_windowed', valid_from: past, valid_until: future } as any,
         ],
         [],
       ),
@@ -85,7 +89,7 @@ describe('PositionGraphService (ADR-0090 D3 — flat expansion)', () => {
     const engine = {
       async find(object: string, options: any) {
         calls++;
-        if (object === 'sys_user_position') return [{ position: 'p', user_id: 'u1' }];
+        if (object === 'sys_user_position') return [{ id: 'up_9', position: 'p', user_id: 'u1' }];
         return [];
       },
     } as any;
@@ -101,18 +105,18 @@ describe('PositionGraphService.holdsPosition — the user-scoped twin of the exp
   const past = '2000-01-01T00:00:00Z';
   const future = '2999-01-01T00:00:00Z';
   const ASSIGN = [
-    { position: 'rep', user_id: 'u_a', organization_id: 'org_a' },
-    { position: 'rep', user_id: 'u_b', organization_id: 'org_b' },
-    { position: 'rep', user_id: 'u_global', organization_id: null },
-    { position: 'rep', user_id: 'u_expired', organization_id: 'org_a', valid_until: past },
-    { position: 'rep', user_id: 'u_pending', organization_id: 'org_a', valid_from: future },
-    { position: 'rep', user_id: 'u_mixed', organization_id: 'org_a', valid_until: past },
-    { position: 'rep', user_id: 'u_mixed', organization_id: 'org_a', valid_from: past, valid_until: future },
-    { position: 'mgr', user_id: 'u_a', organization_id: 'org_a' },
+    { id: 'up_10', position: 'rep', user_id: 'u_a', organization_id: 'org_a' },
+    { id: 'up_11', position: 'rep', user_id: 'u_b', organization_id: 'org_b' },
+    { id: 'up_12', position: 'rep', user_id: 'u_global', organization_id: null },
+    { id: 'up_13', position: 'rep', user_id: 'u_expired', organization_id: 'org_a', valid_until: past },
+    { id: 'up_14', position: 'rep', user_id: 'u_pending', organization_id: 'org_a', valid_from: future },
+    { id: 'up_15', position: 'rep', user_id: 'u_mixed', organization_id: 'org_a', valid_until: past },
+    { id: 'up_16', position: 'rep', user_id: 'u_mixed', organization_id: 'org_a', valid_from: past, valid_until: future },
+    { id: 'up_17', position: 'mgr', user_id: 'u_a', organization_id: 'org_a' },
   ];
   const MEMBER = [
-    { role: 'rep', user_id: 'u_role_a', organization_id: 'org_a' },
-    { role: 'rep', user_id: 'u_role_b', organization_id: 'org_b' },
+    { id: 'm_role_a', role: 'rep', user_id: 'u_role_a', organization_id: 'org_a' },
+    { id: 'm_role_b', role: 'rep', user_id: 'u_role_b', organization_id: 'org_b' },
   ];
   /** Honours every predicate key both reads send: position / role, organization_id, user_id. */
   const engine = {

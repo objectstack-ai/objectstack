@@ -22,8 +22,9 @@
  *    of a declared `indexes[]` entry carrying `unique`;
  *  - its edges, each a control: a column no unique constraint covers keeps
  *    `''` (the spec's `str_empty` side of the line); whitespace is a value, as
- *    the `$empty` operator's ruled table reads it; `select` / `lookup` keep
- *    `''` (not text-like); a non-blank value is untouched;
+ *    the `$empty` operator's ruled table reads it; a non-blank value is
+ *    untouched. (A unique `select` / `lookup` `''` is `null` too since #29277,
+ *    on every optional column, unique or not: `pick` / `ref` below.)
  *  - `required` is unchanged: a required unique field's `''` is refused
  *    `required` exactly as before — including when the field declares a
  *    `defaultValue`, which a blank rewritten to `null` would have taken;
@@ -135,10 +136,10 @@ const CRED = {
   },
 };
 
-/** The covered columns of {@link OBJ}: both unique surfaces, three scopes. */
-const COVERED_NAMES = ['sku', 'tax_id', 'email', 'code'];
-/** The columns that keep their `''`: no unique constraint, or not text-like. */
-const KEPT_NAMES = ['note', 'plain_idx', 'off', 'pick', 'ref'];
+/** The covered columns of {@link OBJ}: both unique surfaces, three scopes; and [#29277] the single-value select / lookup. */
+const COVERED_NAMES = ['sku', 'tax_id', 'email', 'code', 'pick', 'ref'];
+/** The text columns that keep their `''`: no unique constraint. */
+const KEPT_NAMES = ['note', 'plain_idx', 'off'];
 const blanksOf = (names: readonly string[]) => Object.fromEntries(names.map((n) => [n, '']));
 const COVERED = blanksOf(COVERED_NAMES);
 const KEPT = blanksOf(KEPT_NAMES);

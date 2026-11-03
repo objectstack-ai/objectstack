@@ -509,6 +509,7 @@
     "chartAggregateResultKeys": "src/ui/chart-aggregate.ts#chartAggregateResultKeys (function)",
     "chartAggregateValueKey": "src/ui/chart-aggregate.ts#chartAggregateValueKey (function)",
     "checkAppLandingItems": "src/ui/app.zod.ts#checkAppLandingItems (function)",
+    "checkDashboardReservedDateRangeGlobalFilters": "src/ui/dashboard.zod.ts#checkDashboardReservedDateRangeGlobalFilters (function)",
     "checkDashboardWidgetChartMeasureArity": "src/ui/dashboard.zod.ts#checkDashboardWidgetChartMeasureArity (function)",
     "checkDashboardWidgetMetricMeasureArity": "src/ui/dashboard.zod.ts#checkDashboardWidgetMetricMeasureArity (function)",
     "checkDashboardWidgetStageOrder": "src/ui/dashboard.zod.ts#checkDashboardWidgetStageOrder (function)",

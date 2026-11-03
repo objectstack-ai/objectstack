@@ -131,7 +131,6 @@ const pt = {
   actions: {
     decisionOutput: {
       help: 'Entregue ao fluxo como saída da decisão.',
-      helpMultiValue: 'Entregue ao fluxo como saída da decisão. Separe vários valores por vírgulas.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -263,6 +262,11 @@ const pt = {
       copy: 'Copiar valor',
       show: 'Mostrar código QR',
       hide: 'Ocultar código QR',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Escanear código',
+      failed: 'Falha ao escanear',
     },
     image: {
       upload: "Enviar imagem",
@@ -884,8 +888,6 @@ const pt = {
     pullToRefresh: "Puxar para atualizar",
     refreshing: "Atualizando…",
     share: "Compartilhar",
-    sharingPersonal: "Visualização pessoal",
-    sharingCollaborative: "Visualização compartilhada",
     sharingLockedBy: "Bloqueada por {{user}}",
     print: "Imprimir",
     hideFieldsTitle: "Ocultar campos",
@@ -1161,7 +1163,6 @@ const pt = {
     undo: "Desfazer",
     redo: "Refazer",
     canvasMinimap: "Minimapa da tela",
-    versionHistory: "Histórico de versões",
   },
   detail: {
     editInlineHint: "Clique duas vezes para editar",
@@ -4993,6 +4994,18 @@ const pt = {
     retry: "Tentar novamente",
     emptyTitle: "Nenhum conector precisa ser conectado",
     emptyBody: "Nenhum dos aplicativos instalados tem um conector em que um administrador entre com OAuth.",
+    clientKeptWithSecret: "Cliente OAuth {{clientId}}, segredo armazenado",
+    clientKept: "Cliente OAuth {{clientId}}, sem segredo",
+    clientTitle: "Cliente OAuth para {{name}}",
+    clientIntro: "Este conector entra com um cliente OAuth que sua organização registra no fornecedor para esta implantação. Informe o ID do cliente e, se o fornecedor emitiu um, o segredo do cliente; depois continue para o login do fornecedor. A documentação de conectores descreve o URI de redirecionamento a registrar no cliente.",
+    clientStored: "Cliente armazenado: {{clientId}}",
+    clientStoredSecret: "Um segredo do cliente está armazenado com ele. Ele nunca é exibido.",
+    clientStoredNoSecret: "Nenhum segredo do cliente está armazenado com ele.",
+    clientResend: "Reconectar envia o cliente novamente: mantenha o ID do cliente e informe o segredo outra vez se ele tiver um, ou informe outro cliente para substituí-lo.",
+    clientId: "ID do cliente",
+    clientSecret: "Segredo do cliente",
+    clientSecretHint: "Deixe vazio para um cliente público. O segredo é armazenado criptografado com a conexão e nunca mais é exibido.",
+    clientContinue: "Continuar para o login",
   },
   setupAssignments: {
     positionsTitle: "Titulares de cargos",

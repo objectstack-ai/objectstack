@@ -217,11 +217,11 @@ export function BuilderLanding(): React.ReactElement {
   // Duplicate (ADR-0070 D4) clones a writable BASE into a new writable package,
   // the "duplicate base" gesture, and drops the user straight into the copy's
   // builder. It is offered on writable bases only. A read-only code or
-  // installed package is not a duplicate source: ADR-0070 D2 customizes it by
-  // environment overlay, where the item's metadata type declares `allowEnvironmentOverlay`
-  // (ADR-0005), so its card points there instead (the read-only section
-  // below). Home's "Start with a template" is not this gesture either: it
-  // opens the marketplace.
+  // installed package is not a duplicate source: its items are customized in
+  // its paired `.custom` package through Customize or New similar (objectstack
+  // ADR-0146 D2, D3), never by a package-less overlay (D11), and the read-only
+  // section below says so. Home's "Start with a template" is not this gesture
+  // either: it opens the marketplace.
   const [dupFor, setDupFor] = React.useState<string | null>(null);
   const [dupName, setDupName] = React.useState('');
   const [dupId, setDupId] = React.useState('');
@@ -327,7 +327,7 @@ export function BuilderLanding(): React.ReactElement {
               {/* ADR-0070 D4 — Duplicate clones a writable base: the copy is a new
                 * writable package holding the base's sys_metadata rows. It is
                 * offered here, on writable bases only; a read-only package's card
-                * offers the routes that exist for it (environment overlay, the
+                * offers the routes that exist for it (its `.custom` pair, the
                 * marketplace). */}
               <button
                 type="button"

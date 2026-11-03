@@ -125,18 +125,17 @@ declare const sections: ReportDesignerSection[];
 ### Shared Hooks
 
 ```tsx
-import { useUndoRedo, useConfirmDialog } from '@object-ui/plugin-designer';
+import { useUndoRedo } from '@object-ui/plugin-designer';
 
 import type { DesignerComponent } from '@object-ui/types';
 
 const { undo, redo, canUndo, canRedo } = useUndoRedo<DesignerComponent[]>([]);
-const { confirm, isOpen } = useConfirmDialog();
 ```
 
 ### Shared Components
 
 ```tsx
-import { ConfirmDialog, Minimap, VersionHistory } from '@object-ui/plugin-designer';
+import { ConfirmDialog, Minimap } from '@object-ui/plugin-designer';
 ```
 
 ## Links

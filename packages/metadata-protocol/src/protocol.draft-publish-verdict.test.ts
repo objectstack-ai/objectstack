@@ -29,7 +29,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /** The LIVE object universe: a deal with a formula field, and its account. */
@@ -284,6 +284,24 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // [#29007] The card's reproduction: a `titleFormat` on an object that
+        // authors no `nameField`. The stamped pointer outranks the template,
+        // so the save was a silent no-op; the ruling of record (6574393684,
+        // letter B) refuses it at the save gate.
+        rule: 'title-format-retired',
+        type: 'object',
+        item: {
+            name: 'qar8_tf2',
+            label: 'Title Format',
+            sharingModel: 'public_read_write',
+            titleFormat: '{code} @ {city}',
+            fields: {
+                code: { type: 'text', label: 'Code' },
+                city: { type: 'text', label: 'City' },
+            },
+        },
+    },
+    {
         // Reproduction 5: a dashboard global filter on a field the bound
         // widget's object does not have.
         rule: 'dashboard-filter-field-unknown',
@@ -460,7 +478,56 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
             ],
         },
     },
+    {
+        // [#29233] A loop whose body closes on itself (body a → b → a, the
+        // card's reproduction). It saved, read valid:true and PUBLISHED, and
+        // the engine's region check then refused to register it.
+        rule: 'flow-region-shape-invalid',
+        type: 'flow',
+        item: regionFlow('region_loop', {
+            id: 'lp',
+            type: 'loop',
+            label: 'Loop',
+            config: {
+                collection: [1, 2],
+                iteratorVariable: 'row',
+                body: {
+                    nodes: [
+                        { id: 'step_a', type: 'assignment', label: 'A' },
+                        { id: 'step_b', type: 'assignment', label: 'B' },
+                    ],
+                    edges: [
+                        { id: 'b1', source: 'step_a', target: 'step_b' },
+                        { id: 'b2', source: 'step_b', target: 'step_a' },
+                    ],
+                },
+            },
+        }),
+    },
 ];
+
+/** [#29233] start → CONTAINER → end, the container's region carrying the case. */
+function regionFlow(name: string, container: Record<string, unknown>) {
+    return {
+        name,
+        label: name,
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            container,
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: container.id as string },
+            { id: 'e2', source: container.id as string, target: 'end' },
+        ],
+    };
+}
+
+/** [#29233] One straight body of a single step, the well-formed region shape. */
+function oneStep(id: string) {
+    return { nodes: [{ id, type: 'assignment', label: id }], edges: [] };
+}
 
 /** Stage one env-wide, package-bound draft (Studio's autosave shape). */
 async function stageDraft(protocol: ObjectStackProtocolImplementation, type: string, item: { name: string }) {
@@ -539,6 +606,58 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect(await draftDiagnostics(protocol, 'flow', flow.name)).toEqual({ valid: true });
         const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
         expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#29233] a well-formed loop, parallel and try_catch region each still read valid:true and publish', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const flows = [
+            regionFlow('ok_loop', {
+                id: 'lp', type: 'loop', label: 'Loop',
+                config: { collection: [1, 2], iteratorVariable: 'row', body: oneStep('loop_step') },
+            }),
+            regionFlow('ok_parallel', {
+                id: 'fan', type: 'parallel', label: 'Fan',
+                config: { branches: [oneStep('left_step'), oneStep('right_step')] },
+            }),
+            regionFlow('ok_try', {
+                id: 'guard', type: 'try_catch', label: 'Guard',
+                config: { try: oneStep('try_step'), catch: oneStep('catch_step') },
+            }),
+        ];
+        for (const flow of flows) await stageDraft(protocol, 'flow', flow);
+
+        for (const flow of flows) expect(await draftDiagnostics(protocol, 'flow', flow.name)).toEqual({ valid: true });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published).toMatchObject({ success: true, publishedCount: 3, failedCount: 0 });
+    });
+
+    it('[#29233] the region verdict on the draft read is the registry rule\'s: the engine\'s sentence, at the item root', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        // A one-branch parallel block nested in a try region. The registry rule
+        // judges the flow as one unit (as the engine does) and anchors the
+        // flow itself, so the item-relative path is the item root; the
+        // sentence names the region.
+        const flow = regionFlow('nested_region', {
+            id: 'guard', type: 'try_catch', label: 'Guard',
+            config: {
+                try: {
+                    nodes: [{ id: 'fan', type: 'parallel', label: 'Fan', config: { branches: [oneStep('only_step')] } }],
+                    edges: [],
+                },
+                catch: oneStep('catch_step'),
+            },
+        });
+        await stageDraft(protocol, 'flow', flow);
+
+        const diagnostics = await draftDiagnostics(protocol, 'flow', flow.name);
+        expect(diagnostics.valid).toBe(false);
+        expect((diagnostics.errors ?? []).filter((e) => e.code === 'flow-region-shape-invalid')).toEqual([{
+            path: '',
+            message: "Flow 'nested_region' would be refused at registration: parallel 'fan': a parallel block needs at least 2 branches",
+            code: 'flow-region-shape-invalid',
+        }]);
     });
 
     it('[#29025] the same loop with its closing edge typed back still reads valid:true and publishes', async () => {
@@ -811,5 +930,189 @@ describe('[#27445] a stored dashboard carrying an undeclared filterBindings key'
         const issue = err.issues.find((i: any) => i.rule === 'dashboard-filter-binding-unknown');
         expect(issue.message).toContain('`filterBindings.regoin`');
         expect(issue.message).toContain('(declared: region)');
+    });
+});
+
+describe('[#29007] a stored object carrying the retired titleFormat', () => {
+    const titled = CASES.find((c) => c.rule === 'title-format-retired')!.item;
+
+    it('still loads and reads the key — the schema parses it, no conversion drops it', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        // A row written before the refusal: the save path with the authoring
+        // gate switched off stores the body verbatim, as a pre-ruling write did.
+        process.env.OS_ALLOW_UNLINTED_METADATA_WRITES = '1';
+        try {
+            const saved: any = await (protocol as any).saveMetaItem({ type: 'object', name: titled.name, item: titled, packageId: PKG });
+            expect(saved.success).toBe(true);
+        } finally {
+            delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+        }
+        expect([...rows.values()].filter((r) => r.name === titled.name).map((r) => r.state)).toEqual(['active']);
+
+        const read: any = await protocol.getMetaItem({ type: 'object', name: titled.name, packageId: PKG } as any);
+        const tf = read.item.titleFormat;
+        expect(typeof tf === 'string' ? tf : tf?.source).toBe('{code} @ {city}');
+    });
+
+    it('is refused on its next save with the prescription, and the same body without it saves', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const err: any = await (protocol as any)
+            .saveMetaItem({ type: 'object', name: titled.name, item: titled, packageId: PKG })
+            .then(() => null, (e: unknown) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === 'title-format-retired');
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        expect(issue.message).toContain('migrate to nameField');
+
+        // The control: the author's fix — the pointer, no template — saves.
+        const { titleFormat: _dropped, ...fixed } = titled as Record<string, unknown>;
+        const saved: any = await (protocol as any).saveMetaItem({
+            type: 'object', name: titled.name, item: { ...fixed, nameField: 'code' }, packageId: PKG,
+        });
+        expect(saved.success).toBe(true);
+    });
+});
+
+/**
+ * [#29557] A flow draft stored in a legacy ADR-0087 D2 spelling the engine
+ * registers (`get_record` `config.filters`, `flow-node-crud-filter-alias`). The
+ * save door judges a flow on the canonicalizer's fallback in its D2-converted
+ * spelling and stores the raw body (#21982), so the draft saves; both publish
+ * doors and the draft read judge the stored draft through the same seam, so it
+ * publishes, and what goes live is the stored bytes.
+ *
+ * The draft is the realistic one: a stored active row carries the spelling (a
+ * row at rest), and the author's draft re-save of it carries the same hit, so
+ * the save replays the full chain (#23903 ruling B'). This harness reaches no
+ * automation service, so every save takes the fallback.
+ */
+describe('[#29557] a stored flow draft in a legacy D2 spelling the engine registers', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    /** start → get_record → end, the match map spelled under `filterKey`. */
+    const fetchFlow = (name: string, filterKey: 'filters' | 'filter') => ({
+        name,
+        label: name,
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'fetch', type: 'get_record', label: 'Fetch', config: { objectName: 'deal', [filterKey]: { name: 'Acme' }, outputVariable: 'deal' } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'fetch' },
+            { id: 'e2', source: 'fetch', target: 'end' },
+        ],
+    });
+
+    /** The stored active row a legacy draft is a re-save of. */
+    async function seedActive(engine: any, body: { name: string }) {
+        await engine.insert('sys_metadata', {
+            type: 'flow',
+            name: body.name,
+            organization_id: null,
+            package_id: PKG,
+            state: 'active',
+            metadata: JSON.stringify(body),
+            checksum: hashSpec(body, 'flow'),
+            version: 1,
+        });
+    }
+
+    const storedConfig = (rows: Map<string, Row>, name: string, state: 'active' | 'draft') => {
+        const row = [...rows.values()].find((r) => r.type === 'flow' && r.name === name && r.state === state);
+        return row ? JSON.parse(row.metadata).nodes[1].config : undefined;
+    };
+
+    async function stageLegacy(name: string, body = fetchFlow(name, 'filters')) {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await seedActive(engine, body);
+        const saved = await stageDraft(protocol, 'flow', body);
+        expect(saved).toMatchObject({ success: true, state: 'draft' });
+        // Stored as written: the conversion is the verdict's, never the row's.
+        expect(storedConfig(rows, name, 'draft')).toEqual({ objectName: 'deal', filters: { name: 'Acme' }, outputVariable: 'deal' });
+        return { engine, rows, protocol };
+    }
+
+    it('publishes through the per-item door, and the active row is the stored bytes', async () => {
+        const { rows, protocol } = await stageLegacy('legacy_fetch');
+
+        const published: any = await protocol.publishMetaItem({ type: 'flow', name: 'legacy_fetch', packageId: PKG } as any);
+
+        expect(published.success).toBe(true);
+        expect(storedConfig(rows, 'legacy_fetch', 'active')).toEqual({ objectName: 'deal', filters: { name: 'Acme' }, outputVariable: 'deal' });
+        expect(storedConfig(rows, 'legacy_fetch', 'draft')).toBeUndefined();
+    });
+
+    it('publishes through the package door, and the active row is the stored bytes', async () => {
+        const { rows, protocol } = await stageLegacy('legacy_fetch');
+
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(published).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
+        expect(storedConfig(rows, 'legacy_fetch', 'active')).toEqual({ objectName: 'deal', filters: { name: 'Acme' }, outputVariable: 'deal' });
+    });
+
+    it('its draft read reports no publish refusal for it', async () => {
+        const { rows, protocol } = await stageLegacy('legacy_fetch');
+        const stored = JSON.parse([...rows.values()].find((r) => r.name === 'legacy_fetch' && r.state === 'draft')!.metadata);
+
+        // The draft read's publish verdict, on the stored draft: nothing.
+        expect(await (protocol as any).draftPublishVerdict({ type: 'flow', name: 'legacy_fetch', body: stored, packageId: PKG }))
+            .toEqual([]);
+        // Served, it carries none of the rules the publish refused it on before.
+        // (The read's own schema half still judges the served body as stored;
+        // that seam is the read's, not the publish verdict's.)
+        const codes = ((await draftDiagnostics(protocol, 'flow', 'legacy_fetch')).errors ?? []).map((e) => e.code);
+        expect(codes).not.toContain('expression-invalid');
+        expect(codes).not.toContain('flow-region-shape-invalid');
+    });
+
+    /** The same flow with a conditional edge whose CEL does not parse. */
+    const brokenEdge = (name: string, filterKey: 'filters' | 'filter') => {
+        const flow = fetchFlow(name, filterKey);
+        flow.edges[1] = { ...flow.edges[1]!, type: 'conditional', condition: 'record.name ==' } as typeof flow.edges[number];
+        return flow;
+    };
+
+    /** The per-item door's 422 for a draft of `body`, staged as `stageLegacy` stages it. */
+    async function perItemRefusal(body: ReturnType<typeof fetchFlow>) {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await seedActive(engine, body);
+        await stageDraft(protocol, 'flow', body);
+        const err: any = await protocol.publishMetaItem({ type: 'flow', name: body.name, packageId: PKG } as any)
+            .then(() => null, (e: unknown) => e);
+        return { protocol, err };
+    }
+
+    const issueTriples = (issues: Array<{ rule?: string; path?: string; message: string }>) =>
+        issues.map((i) => [i.rule, i.path, i.message]).sort();
+
+    it('a draft still refused once converted is refused at both doors with the issues its canonical spelling gets', async () => {
+        const canonical = await perItemRefusal(brokenEdge('broken_fetch', 'filter'));
+        const legacy = await perItemRefusal(brokenEdge('broken_fetch', 'filters'));
+
+        expect({ code: canonical.err?.code, status: canonical.err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(canonical.err.issues.map((i: any) => i.rule)).toContain('expression-invalid');
+        expect({ code: legacy.err?.code, status: legacy.err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(issueTriples(legacy.err.issues)).toEqual(issueTriples(canonical.err.issues));
+
+        // The package door refuses the same draft, on the same issues, and
+        // publishes nothing.
+        const batch: any = await legacy.protocol.publishPackageDrafts({ packageId: PKG });
+        expect(batch).toMatchObject({ success: false, publishedCount: 0 });
+        expect(batch.failed.map((f: any) => f.name)).toEqual(['broken_fetch']);
+        expect(issueTriples(batch.failed[0].issues)).toEqual(issueTriples(canonical.err.issues));
     });
 });

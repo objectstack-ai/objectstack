@@ -37,6 +37,13 @@
  * missing-column backstop. All three now answer the engine's
  * `INVALID_FIELD` / 400 at `groupBy.N.dateGranularity`, field for field.
  *
+ * [#29364] …and a third face that hands no engine the keys: the delegated
+ * fallback service behind `FallbackDelegateStrategy`, which folds a bucket in
+ * memory and read no field type. It is judged with the keys the strategy's
+ * direct path would build and the strategy context's `declaredFieldType`, on
+ * both its query and its dry run (`analytics-service.ts`,
+ * `assertDelegatedDateBucketsTemporal`).
+ *
  * Why a copy of the sentence: `@objectstack/objectql` is a dev dependency of
  * this package, never a runtime one, and its root does not export the door.
  * The message, code, status and keys are the engine's, and

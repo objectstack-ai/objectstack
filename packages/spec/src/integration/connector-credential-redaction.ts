@@ -28,6 +28,18 @@
  *     {@link ConnectorInstanceAuthSchema} itself, so a kind added to the union
  *     later is covered with nothing to edit here. A `type` that names no kind
  *     leaves `type` alone declared.
+ *
+ *     **Withheld and NOT carried forward** (#28640 ②B, ruling 6566912252):
+ *     each such position is named in `notCarriedForwardKeys` as well as in
+ *     `redactedKeys`. Every instance-auth kind is a strict shape, so the save
+ *     door refuses an undeclared `auth` key whatever its value, and nothing at
+ *     runtime reads one: a stored value there is cleartext a row written
+ *     before the shapes went strict still holds, and keeping it through a save
+ *     keeps nothing but the exposure. So a save of the served form drops it,
+ *     and the save names each key it dropped. For the same reason a CLEARED
+ *     value (`null`, `''`, an empty map) is withheld here too, unlike the
+ *     credential positions below: serving it back would make a plain read then
+ *     save meet the strict shape's refusal.
  *  2. **`authentication.<key>` — every key but `type`.** The runtime shape
  *     carries its secret inline (`token`, `key`, `password`), and an authored
  *     entry may hold only `{ type: 'none' }` (the publish refusal registered as
@@ -113,7 +125,9 @@
  *
  * A position holding nothing — `null`, `''`, or an empty map — is served as
  * written and not reported, as the schema derivation serves its cleared forms:
- * a reader can tell "cleared" from "withheld". Every other key of the item is
+ * a reader can tell "cleared" from "withheld". The undeclared keys (items 1, 7
+ * and 8) are the exception, each for the reason its item gives: no door
+ * accepts them, so their cleared forms are withheld too. Every other key of the item is
  * left byte for byte, `_diagnostics` included, and the input is never mutated:
  * redaction is a SERVING act. The runtime reads connectors through the
  * protocol's execution read, which applies no serving decoration, so a
@@ -336,17 +350,24 @@ function undeclaredNestedKeysOf(item: Record<string, unknown>): string[][] {
   return paths;
 }
 
-/** Every credential position present in `item` that is withheld by removal, as item-relative paths. */
+/**
+ * Item 1: every key the item's instance-auth kind does not declare, as
+ * item-relative paths — withheld whatever its value, and not carried forward
+ * (see the module note). `[]` when `auth` is not an object (item 4 judges that).
+ */
+function undeclaredAuthKeysOf(item: Record<string, unknown>): string[][] {
+  const auth = item.auth;
+  if (!isPlainRecord(auth)) return [];
+  const declared = declaredConnectorAuthKeys(auth);
+  return Object.keys(auth).filter((key) => !declared.has(key)).map((key) => ['auth', key]);
+}
+
+/** Every other credential position present in `item` that is withheld by removal, as item-relative paths. */
 function credentialPathsOf(item: Record<string, unknown>): string[][] {
   const paths: string[][] = [];
-  const auth = item.auth;
-  if (isPlainRecord(auth)) {
-    const declared = declaredConnectorAuthKeys(auth);
-    for (const key of Object.keys(auth)) if (!declared.has(key)) paths.push(['auth', key]);
-  } else {
-    // Item 4: not an object, so withheld whole (a cleared form is skipped by the caller).
-    paths.push(['auth']);
-  }
+  // Item 4: `auth` that is not an object is withheld whole (a cleared form is
+  // skipped by the caller); an object `auth` is item 1's, judged key by key.
+  if (!isPlainRecord(item.auth)) paths.push(['auth']);
   const authentication = item.authentication;
   if (isPlainRecord(authentication)) {
     for (const key of Object.keys(authentication)) if (key !== 'type') paths.push(['authentication', key]);
@@ -398,12 +419,14 @@ function credentialUrlRewritesOf(
 
 /**
  * The built-in `connector` redactor: withholds the positions the module note
- * lists, names each in `redactedKeys` (dotted, sorted), and returns the input
- * by reference when there is nothing to withhold.
+ * lists, names each in `redactedKeys` (dotted, sorted) and item 1's in
+ * `notCarriedForwardKeys` too, and returns the input by reference when there
+ * is nothing to withhold.
  */
 export function redactConnectorItem(item: Record<string, unknown>): MetadataRedactionResult {
   let served = item;
   const redactedKeys: string[] = [];
+  const notCarriedForwardKeys: string[] = [];
   // Items 7 and 8, first: an undeclared key is withheld whatever its value —
   // a cleared one included — because nothing can judge it.
   for (const path of [...undeclaredRootKeysOf(item), ...undeclaredNestedKeysOf(item)]) {
@@ -411,6 +434,15 @@ export function redactConnectorItem(item: Record<string, unknown>): MetadataReda
     if (!present) continue;
     served = withoutKeyAt(served, path);
     redactedKeys.push(path.join('.'));
+  }
+  // Item 1: an undeclared `auth` key, whatever its value, withheld and not
+  // carried forward — a save of the served form drops it.
+  for (const path of undeclaredAuthKeysOf(item)) {
+    const { present } = readAt(served, path);
+    if (!present) continue;
+    served = withoutKeyAt(served, path);
+    redactedKeys.push(path.join('.'));
+    notCarriedForwardKeys.push(path.join('.'));
   }
   for (const path of credentialPathsOf(item)) {
     const { present, value } = readAt(served, path);
@@ -424,5 +456,10 @@ export function redactConnectorItem(item: Record<string, unknown>): MetadataReda
     redactedKeys.push(path.join('.'));
   }
   if (redactedKeys.length === 0) return { item, redactedKeys: [] };
-  return { item: served, redactedKeys: redactedKeys.sort() };
+  return {
+    item: served,
+    redactedKeys: redactedKeys.sort(),
+    // Set only when it names a position: absent means none (the contract's own reading).
+    ...(notCarriedForwardKeys.length > 0 ? { notCarriedForwardKeys: notCarriedForwardKeys.sort() } : {}),
+  };
 }

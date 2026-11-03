@@ -37,8 +37,11 @@ import type { ExprIssue } from './validate-expressions.js';
 import { validateSemanticRoles, SEMANTIC_ROLE_FIELD_UNPROVISIONED } from './validate-semantic-roles.js';
 
 describe('validateStackExpressions (ADR-0032 build-time)', () => {
+  // [#29026] `rating` is required: a record-triggered flow comparing an
+  // optional field with no `!= null` in front is refused by the null-guard
+  // gate, and this suite's flows compare `rating` to pin other verdicts.
   const objects = [
-    { name: 'crm_lead', fields: { rating: { type: 'number' }, status: { type: 'text' } } },
+    { name: 'crm_lead', fields: { rating: { type: 'number', required: true }, status: { type: 'text' } } },
   ];
 
   it('passes a clean stack', () => {
@@ -3207,28 +3210,30 @@ describe('null-guard gate (#4763)', () => {
       ).toHaveLength(0);
     });
 
-    // #4811 re-measured the reason this one is excluded. It is NOT the
-    // flattened scope (this gate never resolves a bare identifier — only
-    // `record.<f>`/`previous.<f>`, and a record-triggered run binds both
-    // roots — #22677). It is that `record-change-trigger.ts` seeds the flow's
-    // record as `{ ...(inputData ?? {}), ...after }` (spelled `inputDoc` until
-    // #5671 dropped that alias read) with no `materializeDeclaredFields`,
-    // so a declared column the write never mentioned is an ABSENT key — and on
-    // an absent key the `!= null` this gate prescribes faults exactly like the
-    // comparison it was meant to guard.
-    it('leaves flow conditions alone (trigger record is not total over declared fields)', () => {
+    // RE-JUDGED IN PLACE (#29026). This pinned `toHaveLength(0)` while the
+    // record-change trigger seeded the flow's record sparse; since #4953 it
+    // materializes every declared field, so a record-triggered flow's edge is
+    // covered and `validate-expressions.flow-null-guards.test.ts` pins the
+    // wiring. What stays out is pinned here: a non-start node's
+    // `config.condition` (inert — nothing evaluates it), and a flow with no
+    // record trigger, whose record nothing makes total.
+    it('judges a record-triggered flow edge, and leaves an inert node condition and an untriggered flow alone', () => {
+      const flow = (triggerType?: string) => ({
+        name: 'escalate',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'showcase_project', ...(triggerType ? { triggerType } : {}) } },
+          { id: 'd', type: 'decision', config: { condition: 'record.budget > 100000' } },
+        ],
+        edges: [{ id: 'e1', source: 'd', target: 'end', condition: 'record.spent > record.budget' }],
+      });
+      const triggered = validateStackExpressions({ objects: [project], flows: [flow('record-after-update')] });
+      expect(triggered.map((i) => i.where)).toEqual([expect.stringContaining("edge 'e1'")]);
+      expect(triggered[0]!.message).toContain('`record.budget`');
+      // (With no trigger the run binds no `record` at all, which the flow CEL
+      // root judge reports; that is its verdict, not this gate's.)
       expect(
-        validateStackExpressions({
-          objects: [project],
-          flows: [{
-            name: 'escalate',
-            nodes: [
-              { id: 'start', type: 'start', config: { objectName: 'showcase_project', triggerType: 'record-after-update' } },
-              { id: 'd', type: 'decision', config: { condition: 'record.budget > 100000' } },
-            ],
-            edges: [{ id: 'e1', source: 'd', target: 'end', condition: 'record.spent > record.budget' }],
-          }],
-        }),
+        validateStackExpressions({ objects: [project], flows: [flow()] })
+          .filter((i) => i.message.includes('declares as nullable')),
       ).toHaveLength(0);
     });
 
@@ -3435,9 +3440,19 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   {
     receiver: 'def',
     // `referenceTo` is absent — likewise.
-    expected: ['defaultValue', 'options', 'reference', 'required', 'type'],
+    // [#29026] `summaryOperations` joined: a `count` / `sum` roll-up is
+    // always valued for the null-guard gate, and its function is read below.
+    expected: ['defaultValue', 'options', 'reference', 'required', 'summaryOperations', 'type'],
     declaredBy: 'FieldSchema',
     keys: () => Object.keys(FieldSchema.shape),
+  },
+  {
+    // [#29026] The roll-up's aggregate function — the null-guard gate's
+    // nullability judgment reads it and nothing else here.
+    receiver: 'summaryOperations',
+    expected: ['function'],
+    declaredBy: 'FieldSchema.summaryOperations',
+    keys: () => shapeKeysOf(FieldSchema.shape.summaryOperations),
   },
   {
     // [#24798] One `bulkActionDefs[]` entry: its `confirmText` template slot,
@@ -3712,6 +3727,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // node walk's own sites. Its keys are `Map.prototype.set` / `get`, never
       // metadata keys; the config it describes is read off the tabled `cfg`.
       'nodeSlotKeys',
+      // [#29026] The flow null-guard wiring: the flow CEL root judge's own
+      // result (`provable`), the flow's declared-name set and the gate's
+      // bare-name set. Their keys are that module's result key and Set
+      // methods, never metadata keys.
+      'rootScope', 'declaredVariables', 'nullGuardBare',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -4618,8 +4638,10 @@ describe('assignment value envelope — located findings (#15137)', () => {
  * controls below are those two shapes staying green.
  */
 describe('structural condition shape (#15662)', () => {
+  // [#29026] `rating` is required so the record-triggered null-guard gate
+  // stays out of the shape verdicts this suite pins (its controls compare it).
   const objects = [
-    { name: 'crm_lead', fields: { rating: { type: 'number' }, status: { type: 'text' } } },
+    { name: 'crm_lead', fields: { rating: { type: 'number', required: true }, status: { type: 'text' } } },
   ];
 
   const flowWith = (opts: { startCondition?: unknown; decisionCondition?: unknown; edgeCondition?: unknown }) => ({
@@ -4785,8 +4807,10 @@ describe('structural condition shape (#15662)', () => {
  * one shared refusal to prevent.
  */
 describe('blank structural condition (#17495)', () => {
+  // [#29026] `rating` is required so the record-triggered null-guard gate
+  // stays out of the shape verdicts this suite pins (its controls compare it).
   const objects = [
-    { name: 'crm_lead', fields: { rating: { type: 'number' }, status: { type: 'text' } } },
+    { name: 'crm_lead', fields: { rating: { type: 'number', required: true }, status: { type: 'text' } } },
   ];
 
   const flowWith = (opts: { startCondition?: unknown; decisionCondition?: unknown; edgeCondition?: unknown }) => ({

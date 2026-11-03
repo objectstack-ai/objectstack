@@ -68,7 +68,11 @@ export const NotificationTemplate = ObjectSchema.create({
     // It names the two channels that read a row and says the inbox reads none
     // (TEMPLATE_CHANNELS above is the measurement behind both halves).
     description: 'The email and SMS text each notification topic sends, per language. The in-app inbox never uses these templates.',
-    titleFormat: '{topic} · {channel} · {locale}',
+    // [ADR-0079] The record title: the template's subject, the field the
+    // registry stamped when the retired `titleFormat` template stood here (an
+    // object definition that declares one is refused at save and by
+    // `os validate`).
+    nameField: 'subject',
     highlightFields: ['topic', 'channel', 'locale', 'is_active'],
 
     // The one list view this object ships, declared for its `emptyState`: with

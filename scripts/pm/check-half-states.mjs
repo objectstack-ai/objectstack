@@ -544,7 +544,7 @@
  *       (2026-08-22); a blocking posture for this surface is a later card on
  *       its own baseline.
  *
- * ## H24 + H25 — the queue/assignee contradiction, and the state that closes it
+ * ## H24 — the queue/assignee contradiction
  *
  *   H24 an OPEN card carrying `pm:queue` with a NON-EMPTY assignee — the queue
  *       view reads it as dispatchable, the claim rule reads it as taken, and
@@ -573,21 +573,6 @@
  *       true-ownership exemption in an explicit marker LATER, never the other
  *       way round. It names the login instead, and states the asymmetric
  *       remedy (an agent may clear agent residue; ⛔ never a human's).
- *   H25 `pm:awaiting-maintainer` coexisting with another pm STATE label — the
- *       exclusivity half of the new state ruled in on 2026-08-23 (「可以新标
- *       签,最好 pm: 开头」). The state exists because the board had no legal
- *       place for "everything mechanical is done, a human must now act":
- *       `needs-user-decision` is the ruling inbox (the ruling here is already
- *       given) and `pm:on-hold` requires a machine-fireable `Restart-when:`
- *       (H9), which this card can never have. Each forbidden pairing is a
- *       specific lie about which mechanism will release the card, and the row
- *       names the one it found. Written while the population is zero, which is
- *       the cheapest moment to pin a vocabulary. The label also joins H11's
- *       parked inventory, H13's state vocabulary and H22's residue set, so the
- *       new state is a first-class citizen of every reader rather than a hole
- *       four rows wide. ⛔ Deferred, declared rather than dropped: the SKILL.md
- *       state-model row (its protocol face) and applying the label to the
- *       specimen card, which is a seat's write.
  *
  * ## H26 — the block nothing is SCHEDULED or DECLARED to release
  *
@@ -1175,7 +1160,7 @@ export function canonicalLane(label) {
  *
  * ⛔ It is defined here, at the top of the predicates, and not beside the item
  * that introduced it: four separate readers key on it (H11's parked inventory,
- * H13's state vocabulary, H22's residue set, H25's exclusivity) and a module
+ * H13's state vocabulary, H22's residue set, H29's exclusivity) and a module
  * constant they all import cannot drift the way four string literals would —
  * which is the failure family this whole file belongs to.
  *
@@ -1212,9 +1197,9 @@ export function h1DispatchedNoAssignee(issue) {
  * 严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. So a dash-written or
  * fullwidth-written claim is a MALFORMED claim, not an unrecognised dialect,
  * and the repair direction is the WRITE side. ⛔ Do not widen this class to
- * accept another separator — that is the one change the ruling closes. What
- * the patrol gained instead is visibility: `h34ClaimShapedNonCanonicalSeparator`
- * reports the near miss on its own row without redefining what a claim IS.
+ * accept another separator — that is the one change the ruling closes. Such a
+ * card stays visible without redefining what a claim IS: assigned, it is H2's
+ * row (no claim the marker reads); unassigned, H1's.
  *
  * ⚠️ The class was `[::]` until #12090 — U+003A written TWICE, not "ASCII or
  * fullwidth" as three separate readers (this file's own H33 note, the filing
@@ -1222,7 +1207,7 @@ export function h1DispatchedNoAssignee(issue) {
  * never matched here, measured by codepoint and by a live probe over 172
  * dispatched cards (0 fullwidth claims). Collapsed to a single `:` so the code
  * stops implying an affordance it never honored; behaviour is byte-identical,
- * and the fullwidth spelling now surfaces on the H34 row like every other
+ * and the fullwidth spelling reads as no claim, like every other
  * non-canonical separator.
  */
 export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
@@ -1432,8 +1417,7 @@ export function signatureRefusalText(row, { tool, where = 'the body' } = {}) {
 // markdown bullet `* Claim: …` would become ` Claim: …` and read as a claim.
 // This file already rules on that shape from the other side — H20's case
 // 「a bulleted `Claim:` is still not a claim comment」 pins `- Claim:` as NOT a
-// claim, and `CLAIM_NEAR_MISS_MARKER`'s docblock names the bullet hazard by
-// name — so undecorating a `*` bullet would accept through decoration exactly
+// claim — so undecorating a `*` bullet would accept through decoration exactly
 // what the `-` bullet is refused for. A bullet is a LIST, not a decoration:
 // the marker for one is followed by whitespace, the decoration for the other
 // is not, and that is the whole discriminator.
@@ -1447,8 +1431,8 @@ export function signatureRefusalText(row, { tool, where = 'the body' } = {}) {
  * A markdown LIST ITEM's opening — a bullet or an ordered marker — and the one
  * prefix `markerMatches` refuses to undecorate through.
  *
- * `[ \t]`, ⛔ never `\s`, on both sides: `\s` matches a NEWLINE, which is the
- * defect `CLAIM_NEAR_MISS_MARKER`'s docblock measured the hard way — a hyphen
+ * `[ \t]`, ⛔ never `\s`, on both sides: `\s` matches a NEWLINE, which is a
+ * defect this file has measured the hard way — a hyphen
  * is the commonest line-opening character in this repo's comment bodies, so a
  * class that can span lines reads an ordinary list as a directive.
  *
@@ -1515,12 +1499,9 @@ export function markerMatches(marker, text) {
  * word, which is exactly where every measured miss lives.
  *
  * ⚠️ Deliberate overlaps, stated rather than hidden:
- *   · `separator` overlaps H34 on the CLAIM side (`nearMissClaimSeparators`).
- *     H34 is a ROW with a remedy, gated to cards H2 is already reporting; this
- *     is a census over every thread the sweep already holds. Two readers of one
- *     shape answering two different questions, ⛔ not a second vocabulary for
- *     the claim separator: H34 keeps naming the codepoint and prescribing the
- *     rewrite.
+ *   · `separator` on the CLAIM side is the shape H2 reports as claimless on an
+ *     assigned card; this is a census over every thread the sweep already
+ *     holds, ⛔ not a second vocabulary for the claim separator.
  *   · `list-item` is the shape `markerMatches` refuses to undecorate through,
  *     named here so that refusal is a reading rather than a silence.
  *
@@ -1791,9 +1772,8 @@ export function releaseAnnouncementHeading(formId, prefix, line) {
  *
  * A form whose remainder is empty is skipped: 「Release:」 alone carries no
  * record, and reporting it would fill the clause with headings. That is the
- * conservative half, `looksLikeClaimContent`'s judgement at H34 applied one
- * notch looser — this is a census, and a threshold as strict as H34's would
- * recreate the silence it exists to end.
+ * conservative half — this is a census, and a stricter content threshold
+ * would recreate the silence it exists to end.
  *
  * @param {{ id?: number, body?: string }[]} commentRows — REST rows, NOT bodies:
  *   the row names the COMMENT, and an id is what a seat opens.
@@ -6756,47 +6736,6 @@ export function h24QueuedWithAssignee(issue) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// H25 — `pm:awaiting-maintainer` coexisting with another pm STATE label
-// (#11196 fix 5, the exclusivity half of the new state).
-//
-// The state model makes the pm state labels ONE-OF: each is a claim about
-// where the card is, and two of them at once leaves every reader to pick. H3
-// is the same invariant for the one pair that was measured drifting, and this
-// row is the same invariant for the newest state — written now, while the
-// population is zero, because the cheapest moment to pin a vocabulary is
-// before anything can carry it.
-//
-// Each coexistence is a specific lie, not a generic tidiness complaint:
-//
-//   + `pm:queue`             dispatchable AND waiting on a human — H24's
-//                            two-views contradiction with a different second
-//                            half, and the shape this whole family is about.
-//   + `pm:dispatched`        a dev is on it AND nobody is: the label pair says
-//                            an agent is working a card whose next act is the
-//                            maintainer's.
-//   + `pm:blocked`           two different release mechanisms are declared at
-//                            once (an unlock scan over `Blocked-by:`, and a
-//                            human act), so neither reader can tell which one
-//                            will actually free it.
-//   + `pm:on-hold`           the hold requires a machine-fireable
-//                            `Restart-when:` (H9) and this state exists
-//                            precisely for the card that cannot have one.
-//                            Carrying both claims an exit that does not exist.
-//   + `needs-user-decision`  the decision inbox says a RULING is owed; this
-//                            state says a ruling was already given and an ACT
-//                            is owed. Both at once inflates the inbox with a
-//                            question nobody has to answer.
-//
-// ⛔ Deliberately NOT here: any requirement that the card NAME the awaited
-// action. When this row was written that was a grammar for a protocol face the
-// SKILL.md state-model row had not been written for, and inventing one in the
-// sweeper would have made the sweeper the author of the protocol it audits.
-// ⚖️ That face exists now — `references/state-machine.md` specifies the
-// `Maintainer-action:` entry line — and H55 reads it. H25 stays the EXCLUSIVITY half
-// and H55 is the ENTRY half; neither is widened into the other.
-// ---------------------------------------------------------------------------
-
 /** The states `pm:awaiting-maintainer` must never coexist with. */
 export const AWAITING_MAINTAINER_EXCLUSIVE_LABELS = [
   'pm:queue',
@@ -6806,47 +6745,13 @@ export const AWAITING_MAINTAINER_EXCLUSIVE_LABELS = [
   'needs-user-decision',
 ];
 
-/**
- * Why each coexistence is a contradiction — one clause per label, so the
- * finding names the specific lie rather than "these two labels disagree".
- */
-const AWAITING_MAINTAINER_CONFLICT_REASON = {
-  'pm:queue': 'dispatchable now AND waiting on a human act',
-  'pm:dispatched': 'an agent is working it AND the next act is the maintainer\'s',
-  'pm:blocked': 'two different release mechanisms declared at once (unlock scan vs. a human act)',
-  'pm:on-hold': 'a hold owes a machine-fireable `Restart-when:` (H9) and this state is for the card that cannot have one',
-  'needs-user-decision': 'the decision inbox says a ruling is owed; this state says one was already given',
-};
-
-/** H25 — null when clean, else the finding sentence. */
-export function h25AwaitingMaintainerExclusivity(issue) {
-  if (issue?.state === 'closed') return null;
-  const labels = labelNames(issue ?? {});
-  if (!labels.includes(AWAITING_MAINTAINER_LABEL)) return null;
-  const conflicts = AWAITING_MAINTAINER_EXCLUSIVE_LABELS.filter((l) => labels.includes(l));
-  if (conflicts.length === 0) return null;
-  const named = conflicts
-    .map((l) => `\`${l}\` (${AWAITING_MAINTAINER_CONFLICT_REASON[l]})`)
-    .join('; ');
-  return (
-    `\`${AWAITING_MAINTAINER_LABEL}\` coexists with ${named} — the pm state labels are ONE-OF, ` +
-    'and two state claims on one card leave every reader to pick which is true. The awaiting ' +
-    'state is the card whose remaining work is a MANUAL maintainer action, which is exactly why ' +
-    'it has no machine exit; pairing it with a state that declares a different exit tells the ' +
-    'unlock scan, the queue view and the decision inbox three different stories. Keep the ONE ' +
-    'state that is true and drop the other(s) in a single write.'
-  );
-}
-
 // ---------------------------------------------------------------------------
 // H29 — the pm state labels are ONE-OF, GENERALLY (#11179).
 //
-// H3 and H25 are both this invariant, each pinned to the carrier that was
-// measured drifting: H3 to the one pair (`pm:queue` + `pm:dispatched`), H25 to
-// the one label (`pm:awaiting-maintainer`, written while its population was
-// still zero). Between them the vocabulary has six members and fifteen pairs,
-// and eleven of those pairs had no reader at all — including the two this card
-// was filed on:
+// H3 is this invariant pinned to the one pair that was measured drifting
+// (`pm:queue` + `pm:dispatched`). The vocabulary has six members and fifteen
+// pairs, and every other pair is this row's — including the two this card was
+// filed on:
 //
 //   • `pm:queue` + `needs-user-decision` — the state model defines `pm:queue`
 //     as 「无可问之事」, so the pair is a card that is simultaneously ready to
@@ -6866,13 +6771,11 @@ export function h25AwaitingMaintainerExclusivity(issue) {
 // ## It reports the pairs no other row owns, and only those
 //
 // A breach must be reported ONCE. H3 owns `pm:queue` + `pm:dispatched` (with
-// its own measured specimen and its own sentence) and H25 owns every pair
-// containing `pm:awaiting-maintainer` (with a per-label clause naming the
-// specific lie). So this row skips exactly those and reports the remainder —
-// and on a card carrying THREE states it still reports the pairs the others do
-// not, rather than going silent because one of them fired. Both exclusions are
-// pinned in the self-test, in both directions: the excluded pair is silent
-// HERE and the owning row does fire on it.
+// its own measured specimen and its own sentence), so this row skips exactly
+// that pair and reports the remainder — and on a card carrying THREE states it
+// still reports the pairs H3 does not, rather than going silent because H3
+// fired. The exclusion is pinned in the self-test, in both directions: the pair
+// is silent HERE and H3 does fire on it.
 //
 // ## Free, and report-only
 //
@@ -6885,8 +6788,8 @@ export function h25AwaitingMaintainerExclusivity(issue) {
 
 /**
  * The ONE-OF vocabulary, in ONE place: the awaiting state plus the five it
- * excludes. Derived from H25's list rather than re-typed, so the two rows can
- * never disagree about what a "pm state" is — the same single-constant
+ * excludes. Derived from that list rather than re-typed, so no two readers can
+ * ever disagree about what a "pm state" is — the same single-constant
  * discipline `AWAITING_MAINTAINER_LABEL` itself was introduced with, and the
  * failure family this whole file belongs to.
  *
@@ -6903,7 +6806,7 @@ export function h25AwaitingMaintainerExclusivity(issue) {
  *                          so it carries `pm:blocking` (a derived priority
  *                          cache, not a state) and drops `needs-user-decision`
  *                          (a fine state to close in).
- *   `PM_EXCLUSIVE_STATE_LABELS` (H25/H29) "is this a position the card can be
+ *   `PM_EXCLUSIVE_STATE_LABELS` (H29) "is this a position the card can be
  *                          IN, such that two of them contradict?" — identity
  *                          stickers (`pm:seat`, `pm:epic`) legally coexist
  *                          with any state and are out; `pm:blocking` and
@@ -6921,11 +6824,6 @@ export const PM_EXCLUSIVE_STATE_LABELS = [
 /**
  * What each state claims ON ITS OWN — one clause, so a row names the two
  * contradicting claims rather than complaining that two labels are present.
- *
- * Deliberately NOT merged with H25's `AWAITING_MAINTAINER_CONFLICT_REASON`:
- * that map says what a pairing WITH THE AWAITING STATE specifically lies about
- * (it reads as the second half of one sentence), while this one says what the
- * label asserts by itself, which is what a general pair needs on both sides.
  * The self-test pins that every `PM_EXCLUSIVE_STATE_LABELS` member has an entry, so the
  * vocabulary cannot be half-extended the way four string literals would be.
  */
@@ -6942,10 +6840,8 @@ export const PM_STATE_CLAIM = {
 const pmStatePairKey = (a, b) => [a, b].sort().join('|');
 
 /**
- * The pairs another row already reports, by key. `pm:queue` + `pm:dispatched`
- * is H3's; every pair containing the awaiting label is H25's (handled by the
- * label test below rather than enumerated, so a future member added to
- * `AWAITING_MAINTAINER_EXCLUSIVE_LABELS` is covered without a second edit).
+ * The one pair another row already reports, by key: `pm:queue` + `pm:dispatched`
+ * is H3's.
  */
 const H3_PAIR_KEY = pmStatePairKey('pm:queue', 'pm:dispatched');
 
@@ -6960,7 +6856,6 @@ export function h29PmStateExclusivity(issue) {
     for (let j = i + 1; j < present.length; j++) {
       const a = present[i];
       const b = present[j];
-      if (a === AWAITING_MAINTAINER_LABEL || b === AWAITING_MAINTAINER_LABEL) continue; // H25's
       if (pmStatePairKey(a, b) === H3_PAIR_KEY) continue; // H3's
       pairs.push([a, b]);
     }
@@ -8255,9 +8150,8 @@ export function isTriageRulingComment(body) {
  * `CLAIM_COMMENT_MARKER` wants the colon directly after the word, and here the
  * word is followed by ` pointer`, so the marker has never matched it. Under the
  * same 2026-08-11 ruling that governs the dash spellings it is a MALFORMED
- * claim — and unlike those it is invisible to H34 as well, which reports only a
- * punctuation separator (that gap was measured and deliberately left open; see
- * H34's header). The paragraph's conclusion is unaffected: it rests on the
+ * claim, read as no claim at all like the dash spellings. The paragraph's
+ * conclusion is unaffected: it rests on the
  * first specimen, which is real, and on the live count above.
  *
  * ## ⚠️ The inherited blind spot, and what it is NOT (#12090)
@@ -8283,9 +8177,9 @@ export function isTriageRulingComment(body) {
  * takes on every unrecognised spelling (H17's extractor, H20's branch shape),
  * never a fabricated row.
  *
- * Where those claims DO surface is H34, which reports the near miss as its own
- * observation and points the seat at the canonical spelling — visibility
- * without redefining the vocabulary.
+ * Where those claims DO surface is H2 (an assigned card with no claim the
+ * marker reads) or H1 (an unassigned one) — visibility without redefining the
+ * vocabulary.
  *
  * @param {{ body?: string, created_at?: string }[]} commentRows
  * @returns {{ createdAt: string|null } | null}
@@ -8354,257 +8248,6 @@ export function h33ClaimPredatesRuling(issue, commentRows) {
     'so on the card so the dev is not left arbitrating between two orders. ⛔ This is not a new rule: the ' +
     're-read step exists, and the same session it failed on had already been saved by it twice that day. ' +
     'Report-only: ⛔ never a label written from this script.'
-  );
-}
-
-// ---------------------------------------------------------------------------
-// H34 — a claim-shaped comment with a NON-CANONICAL SEPARATOR (#12090).
-//
-// The card that filed this measured 24 of 54 open `pm:dispatched` cards
-// carrying 「Claim — <seat>, session …」 with an EM DASH, invisible to
-// `CLAIM_COMMENT_MARKER`, and proposed widening the class. That proposal is
-// CLOSED, and this row is what was taken instead.
-//
-// ## Why the predicate is not widened — the ruling, verbatim
-//
-// `.claude/skills/pm-dispatch/SKILL.md` (step 4 of the claim protocol) records
-// 「首行以字面 `Claim:` 开头是机器判据(维护者 2026-08-11 裁定;巡查谓词只认这
-// 一个拼写且保持严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. Under that
-// ruling a dash-written claim is a MALFORMED claim, H2's row on it is a CORRECT
-// report, and the repair is the write side converging on the documented
-// spelling. Widening the reader would make the enforced protocol drift away
-// from the written one permanently — the declared-≠-enforced shape this repo
-// treats as a defect everywhere else — and would do it by editing a maintainer
-// ruling's own text, which is not a patrol script's call.
-//
-// ## …and why the gap is nevertheless real, which is what this row closes
-//
-// The cost the card found is not only H2's loudness. `governingClaim` gates on
-// the same marker before reading `Branch:`, so a card claimed with a dash buys
-// no ref probe and can never produce an H20 「no remote ref」 or H27 「dead
-// claim」 row: it sits OUTSIDE dispatch-liveness entirely, silently, for as long
-// as it is in flight. H33 inherits the same blindness. So the malformed claim
-// costs one noisy row and three quiet ones, and the quiet ones are the
-// expensive direction.
-//
-// This row makes the malformed spelling VISIBLE without redefining what a claim
-// is. `Claim:` stays the single machine criterion — H2/H20/H27/H33 are
-// untouched, byte for byte — and the near miss is reported as its own,
-// separately-named observation whose remedy points at the canonical spelling.
-// The file therefore never disagrees with itself about its own vocabulary,
-// which is the objection that kept the gap open.
-//
-// ## Measured, fresh, at dispatch time (2026-08-25 ~15:00Z)
-//
-// Over the LIVE open `pm:dispatched` population (45 cards): 40 colon-form,
-// 1 dash-only, 0 hyphen, 0 fullwidth, 4 with no claim in any spelling. The
-// filing card's 24-of-54 has already decayed to 1-of-45 in a day — the
-// maintainer's prescribed convergence is working, which is precisely why the
-// widening was not worth a ruling. Over the 128 `pm:dispatched` cards closed
-// since 2026-08-24 the shape is recurring rather than historical: 13 dash-only
-// claims, clustered in identifiable seat batches. So this row's expected steady
-// state is quiet — H23's register, not H30's — and its value is that a seat
-// writing the wrong spelling learns about it while the card is still in flight,
-// which is how a fleet converges.
-//
-// ## Deliberately NOT the whole near-miss space
-//
-// Two suppressions, both under-reporting on purpose (H17's and H20's standing
-// direction — a fabricated row sends a reader to check something that was never
-// there):
-//
-//   • A thread that ALSO carries a canonical claim is silent here. That card is
-//     machine-visible, so the row would have no remedy to offer. The residual
-//     it accepts: a RE-claim written with a dash over an older colon claim
-//     leaves `governingClaim` reading the stale one. Narrower than the shape
-//     this row is for, and naming it would cost a row on every card that ever
-//     wrote a dash claim once.
-//   • A claim-shaped line whose remainder carries none of the protocol's own
-//     content (a session reference, the word "seat", or a protocol-shaped
-//     branch anywhere in the comment) is silent. 「Claim - see above」 in prose
-//     is not evidence that a claim was attempted.
-//
-// ## The WORD position — measured 2026-08-27, and NOT widened
-//
-// A filed finding asked whether the separator class should cover a WORD where
-// the punctuation goes, on the strength of 「Claim pointer: folded into the
-// 11678 family dispatch」 — a string `latestClaimComment`'s header cited as a
-// claim the marker reads, which it never was. Measured before answering,
-// because the header above says this row's strictness was paid for once and
-// a widening is exactly what it was paid to prevent.
-//
-// The census: 161 pm-tracked cards — 13 open `pm:dispatched`, 76 open
-// `pm:queue`, 72 `pm:dispatched` closed since 2026-08-26 — and all 343 comments
-// on them, classified by what follows a line-opening claim word. 19 canonical
-// `Claim:`; 2 with a declared punctuation separator (both EM DASH, both on
-// threads with no canonical claim — this row's live population, and it fires);
-// and ZERO with a distinct word in the separator position. The 「Claim pointer:」
-// specimen occurs nowhere on the board: its only live instance is the finding
-// card quoting this file quoting it.
-//
-// So the widening buys nothing measurable, and it would spend the conservative
-// half's whole margin to buy it. `Claim` followed by a word is ordinary English
-// — 「Claiming this card」, 「Claim comments are …」 — where `Claim` followed by
-// an em dash is not; `looksLikeClaimContent` would carry that load for a
-// population of zero. RECORDED, NOT WIDENED.
-//
-// The same census found three OTHER shapes invisible to both markers, recorded
-// so a later reader can reopen the question on numbers instead of re-measuring
-// — and each is already harmless for a DIFFERENT reason, which is the actual
-// finding:
-//
-//   • 2 「Claim (dev): …」 openings. Both threads ALSO carry a canonical claim,
-//     so the first suppression above already covers them: they are a SECOND
-//     claim comment on a machine-visible card, never a substitute for one.
-//   • 2 inflected openings (「Claiming this card. session …」) and 1 decorated
-//     with backticks (「`Claim:` devx@objectstack seat …」). All three sit on
-//     UNASSIGNED cards, which this row and H2 both decline to judge — the
-//     residual already declared above.
-//
-// Three different shapes, three different reasons, none of them this one. Each
-// is its own question with its own noise floor if it ever acquires a population.
-// ---------------------------------------------------------------------------
-
-/**
- * The separators a claim-shaped line is measured to carry INSTEAD of the
- * canonical colon, each with the name the row prints. Codepoints are spelled
- * out rather than pasted: these characters are visually near-identical to each
- * other and to the colon, and a row that says 「EM DASH (U+2014)」 tells a seat
- * what to search for in a way a rendered glyph cannot.
- *
- * U+FF1A is here, and it is the reason it can be: the claim marker's class
- * looked like it accepted it for the whole of this file's life and never did
- * (see `CLAIM_COMMENT_MARKER`). In a protocol whose own SKILL.md is written in
- * Chinese, 「Claim：」 is a plausible spelling; it was invisible to every reader
- * and is now merely non-canonical, which is a state a seat can act on.
- */
-export const NON_CANONICAL_CLAIM_SEPARATORS = [
-  ['—', 'EM DASH (U+2014)'],
-  ['–', 'EN DASH (U+2013)'],
-  ['-', 'HYPHEN-MINUS (U+002D)'],
-  ['：', 'FULLWIDTH COLON (U+FF1A)'],
-];
-
-/**
- * A claim-shaped opening whose separator is not the canonical colon.
- *
- * Mirrors `CLAIM_COMMENT_MARKER`'s strictness deliberately — same optional
- * blockquote, same must-BEGIN-with-the-word anchor, same absence of `g` — so
- * that the two markers partition claim-shaped openings rather than overlapping.
- * The prose control the strictness was paid for (#7488) is still excluded here
- * for the same reason it is there: 「the next seat should claim: only after the
- * ruling lands」 does not BEGIN with the word.
- *
- * ⚠️ `[ \t]*`, NOT `\s*`, on both sides of the word. `\s` matches a NEWLINE, so
- * `Claim\n- something` would put a markdown BULLET's hyphen in the separator
- * position and read an ordinary list as a malformed claim — and a hyphen is the
- * commonest line-opening character in this repo's comment bodies, where the
- * colon marker never had to care (a line starting with `:` is not a thing
- * anyone writes).
- *
- * Stated precisely, because it is easy to over-claim: `nearMissClaimSeparators`
- * already runs this regex per SPLIT LINE, so the reader below is safe either
- * way and the character class is not what saves it. What the class protects is
- * this constant AS AN EXPORT — it is `m`-flagged and reusable, and a future
- * caller doing `CLAIM_NEAR_MISS_MARKER.test(body)` over a whole comment gets
- * the right answer only because of it. Both properties are pinned separately in
- * the self-test, at the regex and at the reader, so neither can go green on the
- * other's behalf.
- *
- * Capture groups: 1 = the separator, 2 = the rest of the line.
- */
-export const CLAIM_NEAR_MISS_MARKER = new RegExp(
-  `^[ \\t]*>?[ \\t]*Claim(?:ed)?[ \\t]*([${NON_CANONICAL_CLAIM_SEPARATORS.map(([ch]) => `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`).join('')}])[ \\t]*(.*)$`,
-  'mi'
-);
-
-/**
- * Does this line's remainder carry the claim protocol's own content?
- *
- * The conservative half of the detection. The protocol's claim comment is
- * required to name a session ID and a branch, and the measured dash claims do:
- * 「Claim — skills seat `session_01RM…`. Folded dispatch …」 and 「Claim —
- * domain:cli lane execution seat, session 019siH5jDmk5hrayvfyojUqR, round
- * R36」. Requiring one of those tokens is what separates an attempted claim
- * from a line that merely opens with the word.
- *
- * A protocol-shaped branch is accepted from ANYWHERE in the comment rather than
- * from the opening line, because the template puts `Branch:` on its own line —
- * the same reason `claimedBranches` reads a directive line rather than the
- * first one.
- */
-export function looksLikeClaimContent(remainder, body) {
-  if (/\bsessions?\b|\bseat\b/iu.test(String(remainder ?? ''))) return true;
-  return claimedBranches(body).length > 0;
-}
-
-/**
- * Which non-canonical separators this comment body opens a claim-shaped line
- * with — de-duplicated, in the order declared, empty when none does.
- *
- * @param {string} body
- * @returns {string[]} the printable separator NAMES
- */
-export function nearMissClaimSeparators(body) {
-  const text = String(body ?? '');
-  const found = [];
-  for (const line of text.split('\n')) {
-    const hit = CLAIM_NEAR_MISS_MARKER.exec(line);
-    if (!hit) continue;
-    if (!looksLikeClaimContent(hit[2], text)) continue;
-    const name = NON_CANONICAL_CLAIM_SEPARATORS.find(([ch]) => ch === hit[1])?.[1];
-    if (name && !found.includes(name)) found.push(name);
-  }
-  return found;
-}
-
-/**
- * H34 — null when clean, else the finding sentence.
- *
- * Gated on the SAME population H2 judges (pm-tracked, assigned) and read off
- * the SAME comment bodies that branch already fetched, so the row costs no
- * request at all. It fires only where H2 fires — no canonical claim on the
- * thread — which makes every H34 row a companion that EXPLAINS its card's H2
- * row rather than a second accusation about the same fact.
- *
- * The residual that gate accepts, stated rather than dropped: an UNASSIGNED
- * `pm:dispatched` card buys no comment fetch here and so is never judged. That
- * card is H1's finding in its own right, and its dispatch is already the thing
- * being questioned.
- *
- * @param {object} issue — an OPEN issue.
- * @param {(string|null|undefined)[]} commentBodies
- */
-export function h34ClaimShapedNonCanonicalSeparator(issue, commentBodies) {
-  const labels = labelNames(issue ?? {});
-  const pmTracked = labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched');
-  if (!pmTracked || (issue?.assignees ?? []).length === 0) return null;
-  if (!Array.isArray(commentBodies)) return null;
-  // A card with a readable claim is machine-visible; the row has no remedy for it.
-  if (commentBodies.some((b) => markerMatches(CLAIM_COMMENT_MARKER, String(b ?? '')))) return null;
-
-  const separators = [];
-  let lines = 0;
-  for (const body of commentBodies) {
-    const names = nearMissClaimSeparators(body);
-    if (names.length === 0) continue;
-    lines += 1;
-    for (const name of names) if (!separators.includes(name)) separators.push(name);
-  }
-  if (separators.length === 0) return null;
-
-  return (
-    `a claim-shaped comment whose separator is NOT the canonical colon — ${lines} comment(s), ` +
-    `${separators.join(' + ')} where the protocol writes \`Claim:\` — and NO comment on this thread ` +
-    'matches the marker. So this card reads as CLAIMLESS to H2 (its row on this card is correct, not a ' +
-    'false positive) and sits outside dispatch-liveness entirely: `governingClaim` gates on the same ' +
-    'marker before reading `Branch:`, so H20 can never report a missing remote ref for it and H27 can ' +
-    'never report a dead claim — the two rows that exist to catch an abandoned dispatch. Remedy, and it ' +
-    'is the WRITE side: the claiming seat re-posts (or edits) the claim so its FIRST line begins with ' +
-    'the literal `Claim:`, per SKILL.md step 4 — 「首行以字面 `Claim:` 开头是机器判据(维护者 ' +
-    '2026-08-11 裁定;巡查谓词只认这一个拼写且保持严格,修法是全舰队向文档拼写收敛,⛔ 不放宽谓词)」. ' +
-    '⛔ The patrol predicate is NOT widened to accept the separator this card used; that is the one ' +
-    'repair the ruling closes. Report-only: ⛔ never a label written from this script.'
   );
 }
 
@@ -10439,8 +10082,8 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 // above — so an author test cannot separate a seat's reading from the
 // maintainer's prose. It is not merely unavailable, it is ill-posed.
 //
-// ⇒ So this row recognises the ARTEFACT, exactly as `CLAIM_COMMENT_MARKER`, H33,
-// H34 and H37 already do, and filters by nothing else. That is also what the
+// ⇒ So this row recognises the ARTEFACT, exactly as `CLAIM_COMMENT_MARKER`, H33
+// and H37 already do, and filters by nothing else. That is also what the
 // rule itself says: it is scoped to 「认领、派发令、复核、轮次报告、座位贴段落」
 // — five artefacts — and says nothing whatever about who typed them.
 //
@@ -11537,7 +11180,7 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
  *
  * ⚠️ On a PULL REQUEST this label means「awaiting the maintainer's review」and
  * it is NOT one of the six card states — ⛔ never add it to a card-state table
- * here (H24/H25/H29 own that vocabulary) and ⛔ never read a card's copy of it
+ * here (H24/H29 own that vocabulary) and ⛔ never read a card's copy of it
  * through this constant.
  */
 export const GOVERNED_PR_DECISION_LABEL = 'needs-user-decision';
@@ -12067,8 +11710,8 @@ export function h49PartialLandingUnreleased(issue, mergedPrs, openPrs, commentRo
 //             the claim, and exactly the population whose thread the
 //             dispatch-liveness loop already buys for H20/H27/H33.
 //   OUT       a closed card; a card with no `Claim:` this file's marker reads
-//             (H2's row where the card is assigned, H34's where the separator
-//             is the reason); a claim whose stamp does not parse — it cannot be
+//             (H2's row where the card is assigned, H1's where it is
+//             not); a claim whose stamp does not parse — it cannot be
 //             placed against the cutoff, so the row DECLINES rather than
 //             accuses; a predecessor whose id does not read — the "actual" half
 //             of the sentence would be invented.
@@ -13036,7 +12679,7 @@ export function h54DecisionTitledQueueCard(issue) {
 
 // ---------------------------------------------------------------------------
 // H55 — `pm:awaiting-maintainer` entered WITHOUT its `Maintainer-action:` line
-// (#17017): the ENTRY half of the awaiting state, beside H25's exclusivity half.
+// (#17017): the ENTRY half of the awaiting state, beside H29's exclusivity half.
 //
 // ## The defect this row reads
 //
@@ -13052,7 +12695,7 @@ export function h54DecisionTitledQueueCard(issue) {
 // 55 → 55 across ~14h while `pm:queue` moved −84 — because a wrong entry had
 // exactly one reviewer, the director seat, and no machine could notice it:
 // the state has no machine EXIT by construction (H11's note says so, and it
-// is right) and, until this row, no machine ENTRY either. H25, H29 and H30
+// is right) and, until this row, no machine ENTRY either. H29 and H30
 // read the label's SHAPE and the important-parked ager reads its TIME;
 // nothing read its MEANING.
 //
@@ -15157,6 +14800,156 @@ export function h62DecisionCardWithoutFacetBlock(issue) {
 }
 
 // ---------------------------------------------------------------------------
+// H73 (#29386) — a RULED decision card still sitting in the decision box.
+//
+// The runbook declares this as 「旗一」 (dispatch-runbook.md, 巡查常设项): 「open
+// 卡标题带决策标记或线程含裁决记录,却仍挂 `needs-user-decision`」, report-only,
+// owned by this patrol. This row wires its body-record half.
+//
+// The shape. The director records a ruling as a `Ruling:` comment plus a
+// `Ruled: <comment id> · letter <X> · <UTC>` line on the card body, and by
+// charter writes no label (lanes/director.md). The exit out of the box
+// (`needs-user-decision` → `pm:queue` / `pm:blocked` / close) is the card's
+// LANE seat's, and the lane learns of the ruling from the `Notify: ruling` bell
+// the recorder rings in the same act. When that bell is skipped nothing else
+// moves the card: measured 2026-11-02, twelve cards ruled 01:14Z–10:06Z drew
+// zero bells and all twelve still carried the label at 12:08Z, the oldest
+// 10 h 54 min after its ruling.
+//
+// The reading. BODY ONLY, and free: `needs-user-decision` is not a label the
+// label loop pages, so the carriers are first visible on the unscoped open
+// listing (H62's reason), whose rows already hold the body. Fenced blocks are
+// stripped before the line is read (`stripMarkdownCode`, inline spans kept so a
+// backticked line still reads) — a card quoting another card's `Ruled:` line in
+// a fence is citing it, not carrying it. The line must lead (the directive
+// reader's anchoring, decoration tolerated) and its value must OPEN with a
+// numeric comment id: a line-leading `Ruled:` followed by prose is a sentence,
+// not a ruling record. The ruling that governs is the NEWEST readable stamp; a
+// card whose rulings carry no readable stamp reports with its age unreadable,
+// never as fresh (#4690).
+//
+// The one lawful carrier. A card may re-enter the box with a NEW question after
+// an earlier ruling; the box duty then writes a `Prior rulings on this card:`
+// line naming each earlier ruling id (lanes/director.md, 入箱勤务). A card whose
+// governing ruling id is named there is that re-entry and is clean here.
+//
+// Threshold `RULED_IN_BOX_STALE_HOURS` = one standing patrol cycle: a lane seat
+// patrols far more often than that, so a ruled card still in the box after it
+// has outlived at least one exit pass it should not have.
+//
+// ⛔ Report-only: no label, comment or body is written, and the remedy names
+// the lane seat (the exit) and the recorder (a missing bell) — never the
+// director writing the label. ⛔ Out of scope: the reverse direction (a card
+// moved OUT of the box with no retrievable ruling id), which the runbook
+// assigns to the dispatch-time 决策复读; and the TITLE half of 旗一, which H54
+// reads from the queue side. Band `stall`: the card's forward motion is
+// stopped and nothing else will move it.
+// ---------------------------------------------------------------------------
+
+/** H73's threshold — one standing patrol cycle (`PATROL_CADENCE_HOURS`). */
+export const RULED_IN_BOX_STALE_HOURS = 6;
+
+/** The body directive the director writes when a ruling is recorded. */
+export const RULED_LINE_KEY = 'Ruled';
+
+/** The box duty's line naming earlier rulings on a card that re-entered. */
+export const PRIOR_RULINGS_ON_CARD_KEY = 'Prior rulings on this card';
+
+const RULED_RECORD_ID = /^(\d{6,})(?!\d)/u;
+const RULED_RECORD_STAMP = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z)/u;
+
+/**
+ * Every ruling record a body carries, fences stripped: `{ id, at }` per
+ * line-leading `Ruled:` whose value opens with a comment id, `at` being the
+ * epoch-ms of the line's own UTC stamp or null when it has none readable.
+ *
+ * @param {string} body
+ * @returns {{ id: string, at: number|null }[]}
+ */
+export function ruledRecords(body) {
+  const text = stripMarkdownCode(body, { inline: false });
+  const out = [];
+  for (const value of directiveValues(text, RULED_LINE_KEY)) {
+    const id = RULED_RECORD_ID.exec(value);
+    if (!id) continue;
+    const stamp = RULED_RECORD_STAMP.exec(value);
+    const at = stamp ? Date.parse(stamp[1]) : NaN;
+    out.push({ id: id[1], at: Number.isFinite(at) ? at : null });
+  }
+  return out;
+}
+
+/**
+ * Is this ruling id named on the body's `Prior rulings on this card:` line, or
+ * on the list lines directly under it? Fences stripped, like the record itself.
+ */
+export function priorRulingNamesId(body, id) {
+  const lines = stripMarkdownCode(body, { inline: false }).split('\n');
+  const head = new RegExp(`^${DIRECTIVE_PREFIX}${directiveKey(PRIOR_RULINGS_ON_CARD_KEY)}`);
+  const named = new RegExp(`(?<!\\d)${id}(?!\\d)`);
+  for (let i = 0; i < lines.length; i++) {
+    if (!head.test(lines[i])) continue;
+    for (let j = i; j < lines.length && (j === i || lines[j].trim() !== ''); j++) {
+      if (named.test(lines[j])) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Does H73 speak about this card at all? ISSUES only, never a PR (a ruled
+ * governed PR is H48/H52's subject); a CLOSED card is out (the label on it is
+ * residue, H22/H39's reading); an unreadable `labels` is out and never read as
+ * unlabelled (#4690).
+ */
+export function h73SpeaksAbout(issue) {
+  if (!issue || issue.pull_request) return false;
+  if (issue.state === 'closed') return false;
+  if (!Array.isArray(issue.labels)) return false;
+  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+}
+
+/**
+ * H73 — null when clean, else the finding sentence naming the ruling id, its
+ * age and the `domain:*` seat that owes the exit.
+ *
+ * ⛔ No angle-bracket fragment and no tracker number in the sentence: it is
+ * rendered into a GitHub issue body, and the card it is about is the row's own
+ * link.
+ */
+export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
+  if (!h73SpeaksAbout(issue)) return null;
+  const records = ruledRecords(issue.body);
+  if (records.length === 0) return null;
+  const stamped = records.filter((r) => r.at !== null);
+  const governing = stamped.length > 0 ? stamped.reduce((a, r) => (r.at > a.at ? r : a)) : records[0];
+  if (priorRulingNamesId(issue.body, governing.id)) return null;
+  const ageHours = governing.at === null ? null : (nowMs - governing.at) / 3_600_000;
+  if (ageHours !== null && ageHours <= RULED_IN_BOX_STALE_HOURS) return null;
+  const age =
+    ageHours === null
+      ? 'its `Ruled:` line carries no readable UTC stamp (an unreadable age must not read as fresh)'
+      : `recorded ~${Math.round(ageHours)}h ago (threshold ${RULED_IN_BOX_STALE_HOURS}h)`;
+  const domains = labelNames(issue).filter((l) => typeof l === 'string' && l.startsWith('domain:'));
+  const owes =
+    domains.length > 0
+      ? `owed by the ${domains.map((d) => `\`${d}\``).join(' / ')} lane seat`
+      : 'owed by NO lane yet — the card carries no `domain:*` label, so the TRIAGE seat routes it first';
+  return (
+    `\`${GOVERNED_PR_DECISION_LABEL}\` still on a card whose BODY carries a ruling record: ` +
+    `\`${RULED_LINE_KEY}:\` ruling comment ${governing.id}, ${age}. The ruling is recorded and the exit ` +
+    `out of the decision box is not: ${owes}, which moves the card in one write as the ruled letter ` +
+    'says (`pm:queue`, `pm:blocked` or close) — nothing else will, because the director writes no label. ' +
+    'The likely cause is a skipped bell: the ruling, the `Ruled:` line and the `Notify: ruling` knock to ' +
+    'the lane seat land in ONE act (lanes/director.md), so a ruling recorded without its knock is a half ' +
+    'state the RECORDER owes — ring it in the shape 〈信箱 PR〉 spells (`record-recognisers.mjs ' +
+    '--mailbox-keys` prints it). Report-only: ⛔ never a label written from this script. Boundaries: a ' +
+    'card that re-entered the box naming this ruling on its `Prior rulings on this card:` line is clean ' +
+    'here; a card moved OUT of the box with no ruling id is the dispatch-time 决策复读\'s, not this row\'s.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // The stale-`finding` screen — ONE rule, two readers (#16904)
 //
 // `finding` is defined by the state model as a TRANSIENT marker — 「观察类记录,
@@ -15210,7 +15003,7 @@ export function h62DecisionCardWithoutFacetBlock(issue) {
 //   `PM_RESIDUE_LABELS`         (H22) does this label CLAIM work is in flight?
 //                               — drops `finding`, a fine state to close in.
 //                               This row is OPEN-only, so the two never meet.
-//   `PM_EXCLUSIVE_STATE_LABELS` (H25/H29) is this a POSITION the card can be
+//   `PM_EXCLUSIVE_STATE_LABELS` (H29)     is this a POSITION the card can be
 //                               in, such that two of them contradict? — drops
 //                               `finding` because it is a card KIND rather than
 //                               a position. ⚠️ That pin is the one this row
@@ -15747,7 +15540,7 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
 // login (H43's header), and the seat-post sticker login does not match comment
 // authorship. ⚠️ The direction is what makes the two rows agree rather than
 // collide: H44 refused an author test for FINDING seat artefacts and that
-// refusal stands — this row finds them exactly the structural way H44, H33, H34
+// refusal stands — this row finds them exactly the structural way H44, H33
 // and H37 do, and since the re-keying it does not read the author as the defect
 // at all.
 //
@@ -16825,7 +16618,7 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
 //
 // The `pm:queue` label page the sweep's loop already consumes, minus every card
 // another row already contradicts: a second member of `PM_EXCLUSIVE_STATE_LABELS`
-// beside `pm:queue` is H3's, H25's or H29's pair and a card the board still reads
+// beside `pm:queue` is H3's or H29's pair and a card the board still reads
 // as somewhere else has not exited anything here (H47 leg (b)'s refusal, taken
 // for its reason and against the same vocabulary rather than a second list). An
 // ASSIGNED card is H24's row and is out.
@@ -17005,7 +16798,7 @@ export function h66ReleaseVerdict(body) {
  * one is residue the closed census already counts), ⛔ an unreadable `labels` out
  * rather than read as unlabelled (#4690 on the one field that decides
  * membership), ⛔ an ASSIGNED card out (that is H24's row), and ⛔ a card carrying
- * a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out — that pair is H3's, H25's
+ * a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out — that pair is H3's
  * or H29's contradiction, and a card the board still reads as somewhere else has
  * not exited anything here.
  */
@@ -17391,14 +17184,19 @@ export function h66ReleasedNonDispatchableRemainder(issue, commentRows) {
 // force is OLDEST FIRST. The cards a seat will reach for next are exactly the
 // cards this row must have read. So the plan sorts by the two legs of that
 // order this file can see for free off the label page — the priority rank, then
-// card AGE — and the cap eats the tail a seat reaches LAST.
+// the AUTHOR (a human-opened card before a fleet-opened one), then card AGE —
+// and the cap eats the tail a seat reaches LAST.
 //
 // ⛔ It models the full 取卡全序 only in part, and says so rather than implying
 // otherwise: `target:` board membership is a board read this file does not
-// make, and the same-priority 「先 `Bug`」 tiebreak is not taken. An unreadable
-// `created_at` sorts LAST rather than first (#4690's direction on every
-// timestamp here), with `number` as a total-order tiebreak so two runs over one
-// board agree.
+// make, and the same-priority 「先 `Bug`」 tiebreak is not taken. The author leg
+// IS taken: within one rank a non-fleet card sorts before a fleet card, and ⛔
+// it never lifts a card out of its rank. A card is the fleet's when an App
+// opened it (`user.type` `Bot`, every `[bot]` login) OR its body opens with a
+// seat signature (`readSignatureLine`), since seat-operated human accounts file
+// cards too. An unreadable author reads as the fleet's, ⛔ never promoted. An unreadable `created_at` sorts LAST rather than first (#4690's
+// direction on every timestamp here), with `number` as a total-order tiebreak
+// so two runs over one board agree.
 // ---------------------------------------------------------------------------
 
 /**
@@ -17492,7 +17290,7 @@ export const H67_CLOSING_CONDITION_ANCHOR_CAP = 5;
  * for H66's reasons: ⛔ ISSUES only, ⛔ closed cards out, ⛔ an unreadable
  * `labels` out rather than read as unlabelled (#4690 on the one field that
  * decides membership), ⛔ an ASSIGNED card out (H24's row), and ⛔ a card
- * carrying a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out (H3's, H25's or
+ * carrying a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out (H3's or
  * H29's contradiction — a card the board still reads as somewhere else has not
  * been offered to anybody).
  *
@@ -17506,7 +17304,8 @@ export function h67SpeaksAbout(issue) {
 
 /**
  * Which candidates this run buys a page for, and which it defers — OLDEST
- * FIRST, by the two legs of 取卡全序 this file can read for free.
+ * FIRST, by the legs of 取卡全序 this file can read for free: rank, then a
+ * non-fleet card before a fleet one (App author or seat-signed body), then age.
  *
  * ⛔ The opposite of `h66BuyOrder`, deliberately, and the header carries the
  * argument: H66 chases a fresh write, this one chases the card a dispatching
@@ -17518,7 +17317,7 @@ export function h67SpeaksAbout(issue) {
  * what gets READ AT ALL is where a silent hole would live, and a plan the
  * self-test can drive offline is the only kind that can be pinned.
  *
- * @param {{ number?: number, created_at?: string, labels?: object[] }[]} issues
+ * @param {{ number?: number, created_at?: string, labels?: object[], user?: object }[]} issues
  * @param {number} [cap]
  * @returns {{ read: object[], deferred: object[] }}
  */
@@ -17529,13 +17328,23 @@ export function h67ReadOrder(issues, cap = H67_TIMELINE_READ_CAP) {
     const at = H67_SELECTION_ORDER_LABELS.findIndex((l) => labels.includes(l));
     return at === -1 ? H67_SELECTION_ORDER_LABELS.length : at;
   };
+  // Non-fleet before fleet, inside one rank only; a seat-signed body or an
+  // unreadable author reads as the fleet's.
+  const fleet = (issue) => {
+    if (readSignatureLine(issue?.body) !== null) return 1;
+    const author = artefactAuthor(issue);
+    return author && !author.isApp ? 0 : 1;
+  };
   const age = (issue) => {
     const parsed = Date.parse(issue?.created_at ?? '');
     return Number.isFinite(parsed) ? parsed : Infinity;
   };
   const ordered = [...rows].sort(
     (a, b) =>
-      rank(a) - rank(b) || age(a) - age(b) || Number(a?.number ?? 0) - Number(b?.number ?? 0),
+      rank(a) - rank(b) ||
+      fleet(a) - fleet(b) ||
+      age(a) - age(b) ||
+      Number(a?.number ?? 0) - Number(b?.number ?? 0),
   );
   const limit = Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : 0;
   return { read: ordered.slice(0, limit), deferred: ordered.slice(limit) };
@@ -19506,10 +19315,8 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H21: 'state',
   H23: 'state',
   H24: 'state',
-  H25: 'state',
   H29: 'state',
   H30: 'state',
-  H34: 'state',
   H37: 'state',
   H44: 'state',
   H45: 'state',
@@ -19527,10 +19334,8 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H49: 'state',
   H50: 'state',
 
-  // H60 is a `state` for H34's reason, one field over. H34 reads a claim whose
-  // SEPARATOR the marker does not accept; this one reads a claim whose BRANCH
-  // line the directive reader does not accept. Both are a live card that
-  // contradicts itself — claimed to a human, unclaimed (or claimed elsewhere)
+  // H60 is a `state`: it reads a claim whose BRANCH line the directive reader
+  // does not accept. That is a live card that contradicts itself — claimed to a human, unclaimed (or claimed elsewhere)
   // to the machine — and both are repaired on the board by the claiming seat
   // re-writing one comment. ⛔ Not `stall`: this row does not claim the card is
   // stopped, and it fires on a card whose dev may be working perfectly well;
@@ -19601,6 +19406,15 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // half-written against a shape it owes, the whole repair one body edit on the
   // board, by the seat that filed it.
   H62: 'state',
+
+  // H73 is a `stall` (#29386): a ruled card whose exit out of the decision box
+  // was never made. ⛔ Not `state`: the label and the body do not contradict a
+  // DEFINITION — a ruled card may lawfully sit in the box for a while — what is
+  // wrong is that it has stopped there, past a patrol cycle, and the one seat
+  // that moves it was never told. ⛔ Not `gate`: nothing was stripped. ⛔ Not
+  // `inventory`: it alarms about one card. What is left is `stall`'s definition:
+  // forward motion stopped, and nothing else will move it.
+  H73: 'stall',
 
   // H63 is a `state`, and the other three bands are refused on their own
   // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
@@ -22744,7 +22558,7 @@ async function listAllOpenIssues(stats = {}) {
  * untimestamped-reading and dangling-reference rows read.
  *
  * `pm:awaiting-maintainer` is listed like every other state label (#11196
- * fix 5). H25's exclusivity carriers would be reachable through the label
+ * fix 5). H29's awaiting-pair carriers would be reachable through the label
  * they wrongly coexist with, but a card in the state ALONE would otherwise be
  * swept by nothing at all — no H2 claim check, no H11 parked inventory — and
  * "the patrol's input set is narrower than the states the board produces" is
@@ -23219,15 +23033,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // the sweep did not list.
     const decisionInQueue = h54DecisionTitledQueueCard(issue);
     if (decisionInQueue) findings.push([issue, 'H54', decisionInQueue]);
-    // H24 + H25 — two field/label intersections over cards this loop already
-    // holds, so neither costs a request. H24's population is the `pm:queue`
-    // listing; H25's carriers are all listed too, either by the awaiting label
-    // page below or by the very state label they wrongly coexist with.
+    // H24 — a field/label intersection over cards this loop already holds, so
+    // it costs no request. Its population is the `pm:queue` listing.
     const queuedAndTaken = h24QueuedWithAssignee(issue);
     if (queuedAndTaken) findings.push([issue, 'H24', queuedAndTaken]);
-    const doubleState = h25AwaitingMaintainerExclusivity(issue);
-    if (doubleState) findings.push([issue, 'H25', doubleState]);
-    // H55 (#17017) — the ENTRY half of the awaiting state, H25 above being the
+    // H55 (#17017) — the ENTRY half of the awaiting state, H29 below being the
     // exclusivity half. Membership is free (the awaiting label page is one this
     // loop consumes); the thread is bought only for a judged, body-clean card
     // (`needsMaintainerActionComments`); legacy entries are counted into the
@@ -23359,13 +23169,6 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (h2AssigneeNoClaimComment(issue, comments)) {
         findings.push([issue, 'H2', 'assignee set but no claim comment on the thread']);
       }
-      // H34 (#12090) — the same bodies, asked WHY H2 is firing. Free by
-      // construction: it reads the page already in hand, on exactly H2's
-      // population, and fires only on cards H2 is already reporting. Judged
-      // here rather than in the dispatched loop below so a `pm:queue` claim
-      // written with a dash is covered too, and so the two rows land together.
-      const nearMiss = h34ClaimShapedNonCanonicalSeparator(issue, comments);
-      if (nearMiss) findings.push([issue, 'H34', nearMiss]);
     }
 
     // H17 — the trigger-file index. Gathering only: the card's own body plus
@@ -23960,6 +23763,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // own rule (「落卡即带」), so it buys no thread.
     const facelessDecision = h62DecisionCardWithoutFacetBlock(issue);
     if (facelessDecision) findings.push([issue, 'H62', facelessDecision]);
+    // H73 (#29386) — the same decision card's EXIT, on this listing for H62's
+    // reason: `needs-user-decision` is not a label page, so a ruled card holding
+    // no `pm:*` state is first visible here. One label read and one body read on
+    // a row this listing already holds — no request, no thread.
+    const ruledInBox = h73RuledCardStillInBox(issue);
+    if (ruledInBox) findings.push([issue, 'H73', ruledInBox]);
     // H63 (#16904) — the same listing for the same reason: `finding` is not one
     // of the labels the label loop pages, so a carrier holding no `pm:*` state
     // is first visible HERE. One label read on a row this listing already
@@ -25069,8 +24878,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // `Part of` card must never read as a candidate for closing, and an OPEN PR
   // must stand the row down. A listing whose discriminators quietly stopped
   // being asserted would still print rows, and every one of them would read as
-  // 「close this」, which is the one thing the card forbids.
-  'H67 queued merged-delivery reading': 142,
+  // 「close this」, which is the one thing the card forbids. Pinned AT the count
+  // since the read order took the author leg, so the same-priority pair cannot go.
+  'H67 queued merged-delivery reading': 158,
   // Registered with the decorated ownership-marker reading (#18680); the pin
   // sits just under the count on its neighbours' grounds. What this battery
   // floors is a WIDENING of the two markers' READING, so the FIRING CONTROLS
@@ -25165,6 +24975,11 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // through this predicate — lives in record-recognisers.mjs's doorbell battery,
   // because this self-test cannot import that module (H62's banner).
   'H72 mailbox off-table bells': 20,
+  // Registered with the ruled-card-in-the-box row (#29386), pin just under the
+  // count: the firing case, the label / fence / anchoring / id controls each
+  // beside its positive twin, the threshold boundary, the governing stamp, the
+  // re-entry line, the owing seat, the live record shapes, the text, the band.
+  'H73 ruled card in the decision box': 25,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -25253,13 +25068,12 @@ async function selfTest() {
   // ⚖️ #14072: H22 returns LABELS, not a sentence, so its helper joins them.
   const h22labels = (...args) => (h22ClosedCardPmResidue(...args) ?? []).join(',');
   const h24row = (...args) => String(h24QueuedWithAssignee(...args) ?? '');
-  const h25row = (...args) => String(h25AwaitingMaintainerExclusivity(...args) ?? '');
   const h26row = (...args) => String(h26BlockOnIndefiniteTarget(...args) ?? '');
   const h32row = (...args) => String(h32SeatIdleOverQueue(...args) ?? '');
   const h38row = (...args) => String(h38SeatPostStale(...args) ?? '');
   const h33row = (...args) => String(h33ClaimPredatesRuling(...args) ?? '');
-  // H34's wrapper (the pattern this generalizes) stays beside its own block,
-  // as do H8's `halvesRow` and H27's `dead27Row` — all three wrap a helper
+  // H8's `halvesRow` and H27's `dead27Row` stay beside their own blocks —
+  // both wrap a helper
   // that is itself declared locally, next to the fixtures it closes over.
   // H29/H30 use a different reader, `says()`, declared at those blocks:
   // it returns a DESCRIBING string (`NO MESSAGE (null)`) rather than `''`, so
@@ -27783,7 +27597,7 @@ async function selfTest() {
   // The governing claim — the MOST RECENT one, H19's double-check ① reasoning.
   const gov = (rows) => governingClaim(rows);
   // ⚠️ `?? []` rather than a bare `.branches` on the three-valued return, for
-  // the reason H34's row wrapper carries: a case built to go NULL under a
+  // this reason: a case built to go NULL under a
   // mutation must report a NAMED failing case, not throw and abort the suite
   // before the remaining cases run — measured while ablating the #16170 anchor,
   // where the reverse run died on a TypeError naming neither row nor mutation.
@@ -28201,7 +28015,7 @@ async function selfTest() {
   t('⛔ H60: …and the claim marker still matches it, which is what makes this a STATE and not an absence', CLAIM_COMMENT_MARKER.test(INLINE_16322_NEW.body), true);
   t('⛔ H60: #16170\'s bulleted directive still parses, so its card stays clean', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n- Branch: `claude/issue-15511-zh-gap-helptext`')])), null);
   t('⛔ H60: …and the blockquoted template spelling too', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n> Branch: `claude/issue-6752-x`')])), null);
-  t('H60 band: the row is registered as a `state`, beside H34\'s claim-shape row', familyBand('H60'), familyBand('H34'));
+  t('H60 band: the row is registered as a `state`', familyBand('H60'), 'state');
 
   // -- H62 (#17009): a decision card whose FACE carries no four-facet block ---
   //
@@ -28514,6 +28328,51 @@ async function selfTest() {
   b(BATTERY28675, '⛔ H72 summary: a reader that did not load renders NOT MEASURED, never `0 of N`', (() => { const c = saidBy('h72Mailbox', summaryLine({ mailboxReaderReason: 'the doorbell reader did not load (x)', mailboxCandidates: 0 }, 0)); return c.includes('NOT MEASURED — the doorbell reader did not load (x)') && !c.includes('0 of 0'); })(), true);
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
+
+  // -- H73 (#29386): a RULED decision card still sitting in the decision box.
+  //    Positive controls beside every negative one: the label, the fence, the
+  //    anchoring, the id, the threshold, the governing stamp, the re-entry line.
+  const BATTERY29386 = 'H73 ruled card in the decision box';
+  const NOW73 = Date.parse('2026-11-02T12:08:00Z');
+  const RULED73 = 'Ruled: 6566731522 · letter A · 2026-11-02T01:15Z';
+  const card73 = (extra = {}) => ({
+    number: 28658,
+    state: 'open',
+    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    body: `director#1 · os-support-ai · session_x\n${RULED73}\n\n## 维护者速读\n\n- 问题:…`,
+    ...extra,
+  });
+  const h73 = (extra = {}, nowMs = NOW73) => h73RuledCardStillInBox(card73(extra), nowMs);
+  const row73 = (extra = {}, nowMs = NOW73) => String(h73(extra, nowMs) ?? '');
+  const at73 = (iso) => Date.parse(iso);
+  b(BATTERY29386, 'H73 fires: an open card carrying the decision label and a line-leading `Ruled:` record past the threshold', typeof h73(), 'string');
+  b(BATTERY29386, 'H73 row: names the ruling id, its age and the threshold', ['ruling comment 6566731522', 'recorded ~11h ago', `threshold ${RULED_IN_BOX_STALE_HOURS}h`].every((x) => row73().includes(x)), true);
+  b(BATTERY29386, 'H73 row: names the `domain:*` seat that owes the exit', row73().includes('owed by the `domain:server` lane seat'), true);
+  b(BATTERY29386, '⛔ H73: the SAME body without the decision label is clean', h73({ labels: [{ name: 'domain:server' }, { name: 'pm:queue' }] }), null);
+  b(BATTERY29386, '⛔ H73: a `Ruled:` line inside a backtick FENCE is a citation, not a record', h73({ body: `quoting the other card:\n\`\`\`\n${RULED73}\n\`\`\`\n` }), null);
+  b(BATTERY29386, 'H73 control: …and the identical line with the fence removed fires, so the silence is the fence\'s', typeof h73({ body: `quoting the other card:\n${RULED73}\n` }), 'string');
+  b(BATTERY29386, '⛔ H73: a tilde fence is a fence too', h73({ body: `~~~text\n${RULED73}\n~~~` }), null);
+  b(BATTERY29386, 'H73: a backticked line-leading record still reads (decoration tolerated, inline spans kept)', typeof h73({ body: `\`${RULED73}\`` }), 'string');
+  b(BATTERY29386, '⛔ H73: a mid-sentence mention is prose, not a record', h73({ body: `The director writes a ${RULED73} line on the body.\n| Cards ruled | \`Ruled:\` on the body | 12 |` }), null);
+  b(BATTERY29386, '⛔ H73: a line-leading `Ruled:` followed by prose carries no comment id and is not a record', h73({ body: 'Ruled: the repository variable is set by hand.' }), null);
+  b(BATTERY29386, '⭐ H73: the threshold boundary — 5h59m after the ruling is silent, 6h01m fires', [h73({}, at73('2026-11-02T07:14:00Z')), typeof h73({}, at73('2026-11-02T07:16:00Z'))].join(), ',string');
+  b(BATTERY29386, 'H73: a record with no readable UTC stamp reports, never reads as fresh', row73({ body: 'Ruled: 6566731522 · letter A' }).includes('no readable UTC stamp'), true);
+  b(BATTERY29386, 'H73: the NEWEST stamp governs — a fresh re-ruling silences an old one, and two old ones report the newer id', [h73({ body: `Ruled: 6400000001 · letter B · 2026-10-30T09:00Z\nRuled: 6566731522 · letter A · 2026-11-02T11:00Z` }), row73({ body: `Ruled: 6400000001 · letter B · 2026-10-30T09:00Z\n${RULED73}` }).includes('ruling comment 6566731522')].join(), ',true');
+  b(BATTERY29386, '⛔ H73: a card that re-entered the box naming this ruling on its `Prior rulings on this card:` line is clean', h73({ body: `${RULED73}\n\nPrior rulings on this card: 6566731522 — letter A ruled the old question; this is a new one.` }), null);
+  b(BATTERY29386, 'H73: …and the list form under that line is read too', h73({ body: `${RULED73}\n\n**Prior rulings on this card:**\n- 6566731522 — the old question\n` }), null);
+  b(BATTERY29386, 'H73 control: …while the same line naming a DIFFERENT ruling still fires', typeof h73({ body: `${RULED73}\n\nPrior rulings on this card: 6400000001 — another ruling.` }), 'string');
+  b(BATTERY29386, 'H73 control: …and an id after a blank line below it is not that line\'s', typeof h73({ body: `Prior rulings on this card: none\n\n${RULED73}` }), 'string');
+  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
+  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
+  b(BATTERY29386, '⛔ H73 population: a closed card, a PR row, an unreadable `labels`, a missing row and an empty body are all silent, none a crash', [h73({ state: 'closed' }), h73({ pull_request: {} }), h73({ labels: undefined }), h73RuledCardStillInBox(undefined, NOW73), h73({ body: null })].every((v) => v === null), true);
+  b(BATTERY29386, 'H73 reader: the live shapes read — a parenthesised re-ruling note and a seconds stamp', JSON.stringify([...ruledRecords('Ruled: 6439314592 · letter A (re-ruled from B, 6435350063) · 2026-10-27T10:22Z'), ...ruledRecords('- Ruled: 6398569691 · letter A · 2026-10-25T13:58:53Z')]), JSON.stringify([{ id: '6439314592', at: at73('2026-10-27T10:22Z') }, { id: '6398569691', at: at73('2026-10-25T13:58:53Z') }]));
+  b(BATTERY29386, 'H73 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row73()) || /#[0-9]/.test(row73()), false);
+  b(BATTERY29386, 'H73 text: names the one-act rule, the bell, the shape\'s printout and the report-only boundary', ['ONE act (lanes/director.md)', '`Notify: ruling`', '--mailbox-keys', 'never a label written from this script'].every((x) => row73().includes(x)), true);
+  b(BATTERY29386, 'H73 text: the label is the constant H48/H52/H62 own, ⛔ never a re-typed literal', row73().startsWith(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
+  b(BATTERY29386, 'H73 constants: a six-hour threshold, one standing patrol cycle', `${RULED_IN_BOX_STALE_HOURS}/${PATROL_CADENCE_HOURS}`, '6/6');
+  b(BATTERY29386, 'H73 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H73')}/${familyRegistryCoverage().emitted.includes('H73')}`, 'stall/true');
+  b(BATTERY29386, 'H73: not a loud finding — it never escalates a sweep', isLoudFinding(row73()), false);
+  b(BATTERY29386, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY29386) && SELF_TEST_BATTERIES[BATTERY29386] > 0, true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
@@ -30431,21 +30290,9 @@ async function selfTest() {
   t('H19: …with the rule line unbroken there too', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes(RELEASE_RULE_LINE), true);
   t('H19: …and the retired coinage gone from that branch as well', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes(RETIRED_ASSIGNEE_COINAGE), false);
 
-  // -- H25 + the `pm:awaiting-maintainer` vocabulary (#11196 fix 5) -----------
+  // -- the `pm:awaiting-maintainer` vocabulary (#11196 fix 5) ----------------
   t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
-  t('H25: awaiting + pm:queue -> finding', typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])), 'string');
-  t('H25: …and the row names the coexisting label', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])).includes('`pm:queue`'), true);
-  t('H25: …and the specific lie, not a tidiness complaint', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:on-hold'])).includes('Restart-when'), true);
-  t('H25: awaiting ALONE -> clean', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL])), null);
-  t('H25: awaiting + a non-state label -> clean', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'domain:skills', 'priority:p0', 'pm:blocking'])), null);
-  t('H25: no awaiting label -> out of scope however many states', h25AwaitingMaintainerExclusivity(queued(['pm:queue', 'pm:dispatched'])), null);
-  t('H25: a CLOSED card is H22 residue, not a live exclusivity breach', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'], [], { state: 'closed' })), null);
-  t('H25: a missing issue does not crash', h25AwaitingMaintainerExclusivity(undefined), null);
-  t('H25: several conflicts are ALL named', h25row(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue', 'needs-user-decision'])).includes('`needs-user-decision`'), true);
-  for (const conflicting of AWAITING_MAINTAINER_EXCLUSIVE_LABELS) {
-    t(`H25: awaiting + \`${conflicting}\` -> finding`, typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, conflicting])), 'string');
-  }
-  // The four readers the new state joins — each pinned in BOTH directions, so
+  // The readers the new state joins — each pinned in BOTH directions, so
   // the vocabulary cannot be half-added (the defect class this family is about).
   t('vocabulary: H13 treats awaiting as a real state -> clean', h13DomainWithoutPmState(domainCard(['domain:skills', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
   t('vocabulary: …while the same card without it is still H13', typeof h13DomainWithoutPmState(domainCard(['domain:skills'], hoursAgo(200)), NOW), 'string');
@@ -30512,10 +30359,9 @@ async function selfTest() {
   // owning row does fire on the same card. One breach, one row.
   t('H29: pm:queue + pm:dispatched is H3\'s pair, not this row', h29(['pm:queue', 'pm:dispatched']), null);
   t('H29: …and H3 does fire on it', h3QueueAndDispatched(queued(['pm:queue', 'pm:dispatched'])), true);
-  t('H29: any pair containing the awaiting state is H25\'s', h29([AWAITING_MAINTAINER_LABEL, 'pm:blocked']), null);
-  t('H29: …and H25 does fire on it', typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:blocked'])), 'string');
+  t('H29: a pair containing the awaiting state is this row\'s', typeof h29([AWAITING_MAINTAINER_LABEL, 'pm:blocked']), 'string');
   for (const other of AWAITING_MAINTAINER_EXCLUSIVE_LABELS) {
-    t(`H29: awaiting + \`${other}\` stays H25's row`, h29([AWAITING_MAINTAINER_LABEL, other]), null);
+    t(`H29: awaiting + \`${other}\` fires here`, typeof h29([AWAITING_MAINTAINER_LABEL, other]), 'string');
   }
   // …and an excluded pair does not silence the pairs no one else owns.
   const three29 = h29(['pm:queue', 'pm:dispatched', 'pm:blocked']);
@@ -30523,8 +30369,8 @@ async function selfTest() {
   t('H29: …naming queue + blocked', says(three29, '`pm:queue` (dispatchable NOW, with nothing left to ask) + `pm:blocked`'), true);
   t('H29: …and dispatched + blocked', says(three29, '`pm:dispatched` (an agent is working it under a live claim) + `pm:blocked`'), true);
   const awaitingPlusTwo = h29([AWAITING_MAINTAINER_LABEL, 'pm:queue', 'pm:blocked']);
-  t('H29: awaiting alongside two others still reports the pair H25 cannot', typeof awaitingPlusTwo, 'string');
-  t('H29: …and does not re-report the awaiting pairs', says(awaitingPlusTwo, AWAITING_MAINTAINER_LABEL), false);
+  t('H29: awaiting alongside two others is reported', typeof awaitingPlusTwo, 'string');
+  t('H29: …and names the awaiting pairs too', says(awaitingPlusTwo, AWAITING_MAINTAINER_LABEL), true);
 
   // -- H30: a `pm:queue` card rotting unclaimed --------------------------------
   const queueCard = (labels, updatedAt, extra = {}) => ({
@@ -31451,91 +31297,10 @@ async function selfTest() {
   // H2/H20/H27 use — a file that disagrees with itself about what a claim IS
   // would be the worse defect. The consequence is UNDER-reporting, this file's
   // standing direction for an unrecognised spelling (H17/H20), never a
-  // fabricated row. Where the malformed claim becomes VISIBLE is H34 (#12090),
-  // whose cases sit below.
+  // fabricated row. Where the malformed claim becomes VISIBLE is H2's row on
+  // an assigned card (and H1's on an unassigned one).
   t('H33 claim: an EM-DASH claim is invisible to the shared marker (malformed, by ruling)', latestClaimComment([row33(CLAIM_AT, 'Claim — skills seat `session_x`.')]), null);
   t('H33: …so a card claimed that way under-reports rather than fabricating', h33ClaimPredatesRuling(dispatched33(), [row33(CLAIM_AT, 'Claim — skills seat `session_x`.'), rulingRow33]), null);
-
-  // -- H34 — a claim-shaped comment with a non-canonical separator (#12090) ---
-  // The acceptance pair for this row is the FOUR-WAY split below: the marker's
-  // verdict and H34's verdict are asserted on the same specimen every time, so
-  // no case can go green by quietly redefining what a claim is.
-  const tracked34 = (labels = ['pm:dispatched']) => issue(labels, ['os-zhuang']);
-  // ⚠️ `?? ''` rather than a bare `.includes` on the predicate's return. A row
-  // that goes NULL under a mutation must report a NAMED failing case, not throw
-  // and abort the suite before the remaining 200 cases run — measured while
-  // reverse-verifying this row: widening the marker turned a red suite into a
-  // TypeError whose message named neither the row nor the mutation.
-  const h34row = (...args) => String(h34ClaimShapedNonCanonicalSeparator(...args) ?? '');
-  const DASH_CLAIM = 'Claim — skills seat `session_01RM`. Folded dispatch, patrol-predicates pack.';
-  const COLON_CLAIM = 'Claim: skills seat `session_01RM`.\nBranch: `claude/issue-12090-x`';
-  const PROSE_CONTROL = 'the next seat should claim: only after the ruling lands';
-  const FULLWIDTH_CLAIM = 'Claim：skills seat `session_01RM`, round R36.';
-
-  // 1. dash claim -> the near-miss row fires AND the marker stays false.
-  t('H34: an EM-DASH claim fires the near-miss row', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(), [DASH_CLAIM]), 'string');
-  t('H34: …and CLAIM_COMMENT_MARKER is still false on it (⛔ 不放宽谓词)', CLAIM_COMMENT_MARKER.test(DASH_CLAIM), false);
-  t('H34: …and the row NAMES the separator by codepoint', h34row(tracked34(), [DASH_CLAIM]).includes('EM DASH (U+2014)'), true);
-  t('H34: …and points the remedy at the canonical spelling', h34row(tracked34(), [DASH_CLAIM]).includes('begins with the literal `Claim:`'), true);
-  t('H34: …and says the predicate is NOT widened', h34row(tracked34(), [DASH_CLAIM]).includes('NOT widened'), true);
-  // …and H2 still reports the card, correctly, as claimless.
-  t('H34: H2 still fires on the same card, and that row is CORRECT', h2AssigneeNoClaimComment(tracked34(), [DASH_CLAIM]), true);
-
-  // 2. colon claim -> the marker is true and the near-miss row is silent.
-  t('H34: a COLON claim leaves the near-miss row silent', h34ClaimShapedNonCanonicalSeparator(tracked34(), [COLON_CLAIM]), null);
-  t('H34: …because the marker reads it', CLAIM_COMMENT_MARKER.test(COLON_CLAIM), true);
-  t('H34: …and H2 is clean', h2AssigneeNoClaimComment(tracked34(), [COLON_CLAIM]), false);
-
-  // 3. the #7488 prose control -> NEITHER reader sees a claim.
-  t('H34: the prose control fires neither reader (H34)', h34ClaimShapedNonCanonicalSeparator(tracked34(), [PROSE_CONTROL]), null);
-  t('H34: …nor the marker', CLAIM_COMMENT_MARKER.test(PROSE_CONTROL), false);
-
-  // 4. fullwidth colon -> a near miss, which is what the collapsed `[::]` class
-  // makes honest: U+FF1A never matched the marker and now says so out loud.
-  t('H34: a FULLWIDTH-COLON claim fires the near-miss row', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(), [FULLWIDTH_CLAIM]), 'string');
-  t('H34: …named as such', h34row(tracked34(), [FULLWIDTH_CLAIM]).includes('FULLWIDTH COLON (U+FF1A)'), true);
-  t('H34: …and the marker has never matched it (behaviour unchanged by #12090)', CLAIM_COMMENT_MARKER.test(FULLWIDTH_CLAIM), false);
-
-  // The remaining separators, each pinned by name.
-  t('H34: an EN DASH is a near miss', nearMissClaimSeparators('Claim – skills seat, session 019x').join(','), 'EN DASH (U+2013)');
-  t('H34: a HYPHEN-MINUS is a near miss', nearMissClaimSeparators('Claim - skills seat, session 019x').join(','), 'HYPHEN-MINUS (U+002D)');
-  t('H34: `Claimed —` is one too', nearMissClaimSeparators('Claimed — by the skills seat, session 019x').join(','), 'EM DASH (U+2014)');
-  t('H34: a BLOCKQUOTED near miss reads (the template is a blockquote)', nearMissClaimSeparators('> Claim — skills seat, session 019x').join(','), 'EM DASH (U+2014)');
-
-  // ⚠️ The `[ \t]*` decision, pinned TWICE and deliberately: once on the
-  // exported regex (where the character class is what answers) and once on the
-  // reader (where the per-line split answers). A single case would let the
-  // regex be relaxed to `\s*` with the suite still green — measured: the
-  // reader-level case alone survives that mutation untouched.
-  t('H34: the exported marker does not span lines (the class, not the split)', CLAIM_NEAR_MISS_MARKER.test('Claim\n- skills seat, session 019x'), false);
-  t('H34: a markdown bullet on the NEXT line is not a separator', nearMissClaimSeparators('Claim\n- skills seat, session 019x').length, 0);
-  t('H34: …the same shape with a colon claim is unaffected', CLAIM_COMMENT_MARKER.test('Claim\n- skills seat'), false);
-
-  // The conservative content half: a claim-shaped opening with none of the
-  // protocol's own content is NOT evidence that a claim was attempted.
-  t('H34: a contentless claim-shaped line is silent', nearMissClaimSeparators('Claim - see above').length, 0);
-  t('H34: …but a `Branch:` line elsewhere in the comment is content', nearMissClaimSeparators('Claim - see above\nBranch: `claude/issue-12090-x`').join(','), 'HYPHEN-MINUS (U+002D)');
-
-  // Suppression: a thread that ALSO carries a readable claim is machine-visible,
-  // so the row has no remedy to offer and stays quiet.
-  t('H34: a thread carrying BOTH spellings is silent', h34ClaimShapedNonCanonicalSeparator(tracked34(), [DASH_CLAIM, COLON_CLAIM]), null);
-  // Gates, mirroring H2's exactly — same population, same declines.
-  t('H34: `pm:queue` is in scope too', typeof h34ClaimShapedNonCanonicalSeparator(tracked34(['pm:queue']), [DASH_CLAIM]), 'string');
-  t('H34: an untracked card is out of scope', h34ClaimShapedNonCanonicalSeparator(issue(['domain:skills'], ['os-zhuang']), [DASH_CLAIM]), null);
-  t('H34: an UNASSIGNED card is out of scope (H1 owns that card)', h34ClaimShapedNonCanonicalSeparator(issue(['pm:dispatched']), [DASH_CLAIM]), null);
-  t('H34: an unconsulted thread declines', h34ClaimShapedNonCanonicalSeparator(tracked34(), undefined), null);
-  t('H34: an unreadable thread declines', h34ClaimShapedNonCanonicalSeparator(tracked34(), null), null);
-  t('H34: an empty thread is clean', h34ClaimShapedNonCanonicalSeparator(tracked34(), []), null);
-  t('H34: a null body among the comments does not throw', h34ClaimShapedNonCanonicalSeparator(tracked34(), [null, DASH_CLAIM]) !== null, true);
-  // Two malformed comments, two separators, counted and de-duplicated.
-  const twoNearMiss = h34row(tracked34(), [DASH_CLAIM, 'Claim – other seat, session 019y']);
-  t('H34: multiple malformed comments are counted', twoNearMiss.includes('2 comment(s)'), true);
-  t('H34: …and both separators named', twoNearMiss.includes('EM DASH (U+2014) + EN DASH (U+2013)'), true);
-  t('H34: a separator is named once, not per comment', h34row(tracked34(), [DASH_CLAIM, DASH_CLAIM]).includes('EM DASH (U+2014) + EM DASH'), false);
-  // No `g` flag on the shared marker — the state bug the colon marker's header
-  // names, asserted here because this regex is exported and reused per line.
-  t('H34: the near-miss marker carries no `g` flag', CLAIM_NEAR_MISS_MARKER.global, false);
-  t('H34: …so repeated reads of one line agree', nearMissClaimSeparators(DASH_CLAIM).join() === nearMissClaimSeparators(DASH_CLAIM).join(), true);
 
   // -- H36 — cross-lane same-file holds (report-only patrol input, #12286) ---
   const h36pr = (number, opts = {}) => ({
@@ -33770,7 +33535,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H50 order: the predecessor is the previous ROW, whatever its kind', h50([GRADING50, cm50(77, 'os-dev-report\n{}', '2026-09-07T11:30:00Z'), cm50(2, claim50('77'), T50_AFTER)]), null);
   t('H50 order: the documented blockquote claim spelling reads the same', h50([TRIAGE50, GRADING50, cm50(4, `> ${claim50('5569655227').split('\n').join('\n> ')}`, T50_AFTER)]), null);
   t('H50 order: a thread with no claim at all is silent (H2\'s row where assigned)', h50([TRIAGE50, GRADING50]), null);
-  t('H50 order: a dash-written claim is invisible here, as it is to H2 (H34 reports it)', h50([GRADING50, cm50(2, 'Claim — PM loop round 1\nThread-read: 1', T50_AFTER)]), null);
+  t('H50 order: a dash-written claim is invisible here, as it is to H2 (H2 reports the card claimless)', h50([GRADING50, cm50(2, 'Claim — PM loop round 1\nThread-read: 1', T50_AFTER)]), null);
 
   // Population — `pm:dispatched`, open.
   t('H50 population: an open `pm:dispatched` card is in', h50SpeaksAbout(DISPATCHED50), true);
@@ -34227,8 +33992,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H55 census: …and a missing list is too', h55LegacyCensus(undefined).oldest, null);
 
   // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
-  t('H55 adjacency: H25 is silent — one pm state label, not two', h25AwaitingMaintainerExclusivity(card55()), null);
-  t('H55 adjacency: H29 is silent for the same reason', h29PmStateExclusivity(card55()), null);
+  t('H55 adjacency: H29 is silent — one pm state label, not two', h29PmStateExclusivity(card55()), null);
   t('H55 adjacency: H11 is silent — no importance signal on the specimen', h11ImportantParked(card55({ created_at: '2026-08-01T00:00:00Z' })), null);
 
   // The row's own sentence — the halves the ruling requires.
@@ -34275,7 +34039,6 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const SELF55 = readFileSync(SELF_PATH, 'utf8');
   t('H55 reconciliation: the ager\'s note still says the state has no machine EXIT by construction', SELF55.includes(['has no machine exit', 'BY CONSTRUCTION'].join(' ')), true);
   t('H55 reconciliation: …and now says the state has an ENTRY predicate', SELF55.split(['now has an', 'ENTRY predicate'].join(' ')).length - 1, 1);
-  t('H55 reconciliation: H25\'s deferral points at this row instead of deferring', SELF55.split(['H25 stays the', 'EXCLUSIVITY half'].join(' ')).length - 1, 1);
   t('H55 reconciliation: …and the ager\'s remedy reads the line before re-asking', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Maintainer-action'), true);
   t('H55 reconciliation: …without prescribing the re-check this state cannot have', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Restart-when'), false);
 
@@ -35468,7 +35231,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY66, 'H66 population: a card with no `pm:queue` is out', h66SpeaksAbout(card66({ labels: [{ name: 'bug' }] })), false);
   b(BATTERY66, 'H66 population: `pm:queue` + `pm:dispatched` is out — H3\'s contradiction', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'pm:dispatched' }] })), false);
   b(BATTERY66, 'H66 population: `pm:queue` + `needs-user-decision` is out — H29\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'needs-user-decision' }] })), false);
-  b(BATTERY66, 'H66 population: `pm:queue` + `pm:awaiting-maintainer` is out — H25\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: AWAITING_MAINTAINER_LABEL }] })), false);
+  b(BATTERY66, 'H66 population: `pm:queue` + `pm:awaiting-maintainer` is out — H29\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: AWAITING_MAINTAINER_LABEL }] })), false);
   b(BATTERY66, 'H66 population: …and the exclusion reads ONE vocabulary, ⛔ not a second list', PM_EXCLUSIVE_STATE_LABELS.includes('pm:queue'), true);
   b(BATTERY66, 'H66 population: `pm:retriage` is an ANNOTATION and does NOT exclude', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'pm:retriage' }] })), true);
   b(BATTERY66, 'H66 population: a missing card is out, never a crash', h66SpeaksAbout(undefined), false);
@@ -35897,6 +35660,19 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY67, 'H67 order: `priority:p0` is reached FIRST, whatever its age', order67(CAND67, 4), '3,2,1,4');
   b(BATTERY67, 'H67 order: …then OLDEST-FIRST among equals, which is the order in force', order67(CAND67.filter((i) => i.number !== 3), 3), '2,1,4');
   b(BATTERY67, 'H67 order: ⛔ an unreadable `created_at` sorts LAST, ⛔ never promoted', order67([CAND67[3], CAND67[1]], 2), '2,4');
+  const human67 = { login: 'outside-user', type: 'User' };
+  const fleet67 = { login: 'objectstack-fleet[bot]', type: 'Bot' };
+  const PAIR67 = [
+    { number: 21, created_at: '2026-08-01T00:00:00Z', labels: [{ name: 'priority:p2' }], user: fleet67 },
+    { number: 22, created_at: '2026-09-20T00:00:00Z', labels: [{ name: 'priority:p2' }], user: human67 },
+  ];
+  b(BATTERY67, '⭐ H67 order: within ONE priority a human-opened card is reached before an OLDER fleet-opened one', order67(PAIR67, 2), '22,21');
+  b(BATTERY67, 'H67 order: …and the author leg is the ONLY reason — two fleet cards of that priority stay oldest-first', order67([PAIR67[0], { ...PAIR67[1], user: fleet67 }], 2), '21,22');
+  b(BATTERY67, '⛔ H67 order: the author leg never lifts a card OUT of its priority, and never past p0', order67([{ ...PAIR67[1], labels: [{ name: 'priority:p3' }] }, PAIR67[0], { ...PAIR67[0], number: 23, labels: [{ name: 'priority:p0' }] }], 3), '23,21,22');
+  const SIGNED67 = 'domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\nFiling gate ③ …';
+  b(BATTERY67, '⭐ H67 order: a HUMAN account whose body opens with a seat signature is the fleet\'s — it stays behind the older fleet card', order67([{ ...PAIR67[1], body: SIGNED67 }, PAIR67[0]], 2), '21,22');
+  b(BATTERY67, 'H67 order: …while the same human card with the signature off its first line is still reached first', order67([{ ...PAIR67[1], body: `A user report.\n\n${SIGNED67}` }, PAIR67[0]], 2), '22,21');
+  b(BATTERY67, 'H67 order: every App author is the fleet\'s (`github-actions[bot]` too), and an unreadable author ⛔ is never promoted', order67([{ ...PAIR67[1], user: { login: 'github-actions[bot]', type: 'Bot' } }, { ...PAIR67[1], number: 24, user: undefined }, PAIR67[0]], 3), '21,22,24');
   b(BATTERY67, 'H67 order: `pm:blocking` ranks above p1, as the selection order does', order67([{ number: 8, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'priority:p1' }] }, { number: 9, created_at: '2026-09-11T00:00:00Z', labels: [{ name: 'pm:blocking' }] }], 2), '9,8');
   b(BATTERY67, 'H67 order: ⭐ it is the OPPOSITE of H66\'s, and that is the point', order67(CAND67.filter((i) => i.number !== 3 && i.number !== 4), 2) === h66BuyOrder(CAND67.filter((i) => i.number !== 3 && i.number !== 4).map((i) => ({ ...i, updated_at: i.created_at })), 2).buy.map((i) => i.number).join(','), false);
   b(BATTERY67, 'H67 cap: the rest are DEFERRED, ⛔ not dropped silently', h67ReadOrder(CAND67, 2).deferred.map((i) => i.number).join(','), '1,4');
@@ -36063,7 +35839,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, 'control: …and the blockquoted prose control too', markerMatches(CLAIM_COMMENT_MARKER, '> the next seat should claim: only after the ruling lands'), false);
   b(BATTERY68, 'control: ⛔ `Released:` is still a MALFORMED release, ⛔ not a dialect', markerMatches(RELEASE_COMMENT_MARKER, 'Released: session `session_x`'), false);
   b(BATTERY68, 'control: ⛔ the FULLWIDTH colon still does not read — the 2026-08-11 ruling is untouched', markerMatches(RELEASE_COMMENT_MARKER, 'Release：session `session_x`'), false);
-  b(BATTERY68, 'control: ⛔ nor a dash-written claim, which is H34\'s row and ⛔ not a widening', markerMatches(CLAIM_COMMENT_MARKER, 'Claim — skills seat, session 019x'), false);
+  b(BATTERY68, 'control: ⛔ nor a dash-written claim, which is H2\'s claimless card and ⛔ not a widening', markerMatches(CLAIM_COMMENT_MARKER, 'Claim — skills seat, session 019x'), false);
 
   // THE LIST-ITEM GUARD — `undecorateProseLine` strips EVERY `*`, so a `*`
   // bullet would become a directive. H20 pins `- Claim:` as NOT a claim; a `*`
@@ -36129,7 +35905,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18831 ordering: the two additions are LAST on the roster, in that order', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(-2).map((f) => f.id).join(','), 'heading-bare,bare-word');
   b(BATTERY68, '#18831 ordering: a heading WITH the canonical colon is still `heading`, ⛔ not `heading-bare`', miss68('## Claim: seat, session `session_x`').form, 'heading');
   b(BATTERY68, '#18831 ordering: …an inflected word with a colon is still `inflected-word`', miss68('Claiming: seat, session `session_x`').form, 'inflected-word');
-  b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H34\'s row and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
+  b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H2\'s claimless card and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
   b(BATTERY68, '#18831 ordering: …a `-` bulleted claim with no colon is named by NEITHER addition — a list is not a heading and not a line start', ownershipMarkerNearMisses(rows68('- Claiming the producer half, seat `domain:spec`')).length, 0);
 
   // THE `leading-sigil` FORM (#18829 A) — the shape the sibling's retired

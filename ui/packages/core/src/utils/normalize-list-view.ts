@@ -160,18 +160,6 @@ function foldsInlineEditIntoEditInline(s: Record<string, unknown>): boolean {
   return !(isRecord(s.userActions) && typeof s.userActions.editInline === 'boolean');
 }
 
-/**
- * Legacy `sharing.visibility` → the spec's `ViewSharing.type`. The spec models
- * two ownership kinds; objectui's four-value audience enum collapses onto them:
- * only `private` is personal, everything wider is collaborative.
- */
-const VISIBILITY_TO_SHARING_TYPE: Record<string, 'personal' | 'collaborative'> = {
-  private: 'personal',
-  team: 'collaborative',
-  organization: 'collaborative',
-  public: 'collaborative',
-};
-
 /** Legacy ARIA spellings → the spec's `AriaProps` keys. */
 const ARIA_KEY_ALIASES: Record<string, string> = {
   label: 'ariaLabel',
@@ -407,9 +395,12 @@ function readListViewKind(value: unknown): string | undefined {
  *    absent here as well; `ListView` reads that as on, the spec's default
  *    (objectstack#22605).
  *  - `aria: { label, describedBy }` → the spec's `AriaProps`
- *    (`{ ariaLabel, ariaDescribedBy }`), and `sharing: { visibility, enabled }`
- *    → the spec's `ViewSharing` (`{ type }`) — #2890 scope A step 5. `aria.live`
- *    survives untouched: it has no spec counterpart.
+ *    (`{ ariaLabel, ariaDescribedBy }`) — #2890 scope A step 5. `aria.live`
+ *    survives untouched: it has no spec counterpart. The legacy
+ *    `sharing: { visibility, enabled }` pair is DROPPED: it folded onto the
+ *    spec's ownership `type`, which objectstack#29037 retired (nothing ever
+ *    restricted a view to one user), so it has no spec counterpart left.
+ *    `lockedBy` survives.
  *  - `filters` → `filter` (#2890 scope A step 4). A key rename only: BOTH keys
  *    carry an ObjectQL FilterNode array (`[['stage','=','won']]`) everywhere in
  *    objectui — every consumer passes the value straight to `$filter`. The spec
@@ -569,20 +560,10 @@ export function normalizeListViewSchema<T>(schema: T): T {
     next.aria = nextAria;
   }
   if (foldSharing && sharing) {
+    // objectstack#29037: the audience pair has no spec counterpart any more —
+    // the ownership `type` it folded onto is retired, and the toolbar draws
+    // only `lockedBy`. Drop it; never invent a retired key.
     const nextSharing: Record<string, unknown> = { ...sharing };
-    if (nextSharing.type === undefined) {
-      const visibility = typeof sharing.visibility === 'string' ? sharing.visibility : undefined;
-      // `enabled: true` with no audience is under-specified legacy input. It
-      // used to render the share badge titled "private", so it maps to
-      // `personal` — preserving what the user saw rather than adopting the
-      // spec's `collaborative` default and silently relabeling the badge.
-      const resolved = visibility
-        ? VISIBILITY_TO_SHARING_TYPE[visibility]
-        : sharing.enabled === true
-          ? 'personal'
-          : undefined;
-      if (resolved) nextSharing.type = resolved;
-    }
     delete nextSharing.visibility;
     delete nextSharing.enabled;
     next.sharing = nextSharing;

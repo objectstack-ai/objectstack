@@ -361,16 +361,20 @@ function applyCollectionItemOwnerStampGate(
  * The judged collections a `packages[]` stack's TOP LEVEL never files as
  * residual items: the boot's residual rule (`unclaimedTopLevel`,
  * `@objectstack/metadata`) walks the collections the metadata door registers
- * as items (its `ARTIFACT_FIELD_TO_TYPE`), and these three are not among them.
- * The boot reads them off the stack whole and judges no stamp on them: seed
- * `data` is applied by the seed loader, `jobs` are scheduled and `datasets`
- * consumed by `AppPlugin` straight off the bundle. A package BODY's items of
- * these collections are still judged, at both doors.
+ * as items (its `ARTIFACT_FIELD_TO_TYPE`), and these two are not among them,
+ * so the boot judges no stamp on a top-level item of either. Both are read off
+ * the stack whole, the top level merged with every body
+ * (`resolveArtifactCollections`, `@objectstack/runtime`): `AppPlugin` hands the
+ * seed `data` to the seed loader and schedules the `jobs`.
+ * `datasets` is not here: the residual rule walks it, so a top-level dataset
+ * that no body declares is registered under `manifest.id` and its stamp is
+ * judged at both doors, like every other residual item.
+ * A package BODY's items of these collections are still judged, at both doors.
  *
  * Mirrored, because `@objectstack/spec` cannot import the rule it mirrors; a
  * `@objectstack/metadata` test holds the two equal, collection by collection.
  */
-const TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL: ReadonlySet<string> = new Set(['data', 'datasets', 'jobs']);
+const TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL: ReadonlySet<string> = new Set(['data', 'jobs']);
 
 /**
  * The registry slot one item occupies, the way the boot's residual rule
@@ -3242,36 +3246,63 @@ function collectDuplicateEntryErrors(config: ObjectStackDefinition): string[] {
  * `origins` labels each page's position for the finding (`stack.pages[3]`);
  * {@link collectComposedDefaultRecordPageErrors} reuses the reading over the
  * pages a composition brings together, with its own labels.
+ *
+ * The same rule holds one level down, per app (ruling A on #28979): two record
+ * pages for one object that both name the same app in `apps` are two pages for
+ * that app's record view, refused here with the same counting and naming. The
+ * default and an app's page are different slots and never meet.
  */
 function duplicateDefaultRecordPageFindings(
   entries: Iterable<{ readonly page: unknown; readonly origin: string; readonly holder?: string }>,
   scope: string,
 ): string[] {
-  // object → page identity → { name, origins }. The identity is the page name,
-  // or `holder|name` where the caller says which package an entry lands in.
-  const byObject = new Map<string, Map<string, { name: string; origins: string[] }>>();
+  // slot → page identity → { name, origins }. A slot is an object's default
+  // (no app), or an object's record page inside one app (ruling A on #28979:
+  // `apps`, one page per object per app — the default's rule one level down,
+  // read by the same `defaultRecordPageObject` with the app passed). The
+  // identity is the page name, or `holder|name` where the caller says which
+  // package an entry lands in.
+  type Slot = { object: string; app?: string };
+  const slots = new Map<string, { slot: Slot; pages: Map<string, { name: string; origins: string[] }> }>();
   for (const { page, origin, holder } of entries) {
-    const object = defaultRecordPageObject(page);
-    if (object === undefined) continue;
     const name = readEntryName(page);
     if (name === undefined) continue;
-    const pages = byObject.get(object) ?? new Map<string, { name: string; origins: string[] }>();
-    const key = holder === undefined ? name : `${holder}|${name}`;
-    const found = pages.get(key) ?? { name, origins: [] };
-    found.origins.push(origin);
-    pages.set(key, found);
-    byObject.set(object, pages);
+    const held: Slot[] = [];
+    const object = defaultRecordPageObject(page);
+    if (object !== undefined) held.push({ object });
+    const apps: unknown = (page as { apps?: unknown } | null | undefined)?.apps;
+    if (Array.isArray(apps)) {
+      for (const app of new Set(apps.filter((a): a is string => typeof a === 'string'))) {
+        const scoped = defaultRecordPageObject(page, app);
+        if (scoped !== undefined) held.push({ object: scoped, app });
+      }
+    }
+    for (const slot of held) {
+      const slotKey = JSON.stringify([slot.object, slot.app ?? null]);
+      const entry = slots.get(slotKey) ?? { slot, pages: new Map<string, { name: string; origins: string[] }>() };
+      const key = holder === undefined ? name : `${holder}|${name}`;
+      const found = entry.pages.get(key) ?? { name, origins: [] };
+      found.origins.push(origin);
+      entry.pages.set(key, found);
+      slots.set(slotKey, entry);
+    }
   }
 
   const errors: string[] = [];
-  for (const [object, pages] of byObject) {
+  for (const { slot: { object, app }, pages } of slots.values()) {
     if (pages.size < 2) continue;
     const named = [...pages.values()].map(({ name, origins }) => `'${name}' (${joinDeclarationOrigins(origins)})`);
+    const count = pages.size === 2 ? 'two' : String(pages.size);
     errors.push(
-      `Object '${object}' has ${pages.size === 2 ? 'two' : pages.size} default record pages in ${scope}: ` +
-        `${joinDeclarationOrigins(named)}. Set \`isDefault: false\` on all but one of them. At most one ` +
-        `record page may be \`isDefault: true\` for an object in a deployment: the record view opens that ` +
-        `page with no tie-break, so with two the choice would fall to registration order.`,
+      app === undefined
+        ? `Object '${object}' has ${count} default record pages in ${scope}: ` +
+            `${joinDeclarationOrigins(named)}. Set \`isDefault: false\` on all but one of them. At most one ` +
+            `record page may be \`isDefault: true\` for an object in a deployment: the record view opens that ` +
+            `page with no tie-break, so with two the choice would fall to registration order.`
+        : `Object '${object}' has ${count} record pages for app '${app}' in ${scope}: ` +
+            `${joinDeclarationOrigins(named)}. Remove '${app}' from \`apps\` on all but one of them. At most one ` +
+            `record page may name an app in \`apps\` for an object: the app's record view opens that page with ` +
+            `no tie-break, so with two the choice would fall to registration order.`,
     );
   }
   return errors;

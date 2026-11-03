@@ -65,7 +65,11 @@ function reasonOf(row: CensusRow): string {
       return `'${row.base}' has no paired .custom package id, so there is nowhere to move it. Left as it is.`;
     case 'foreign_declaration':
       return `its body already carries an \`overrides\` key that does not name '${row.base}'. Left as it is: `
-        + 'remove the key with a save naming no package, then re-run: the move declares the right override.';
+        + (row.boundToBase
+          // [#29392] A save naming the base is closed, so the key cannot be removed in place.
+          ? `delete it with a delete naming '${row.base}', then save its body into '${row.pair}' declaring `
+            + `overrides: { package: '${row.base}', basedOn }.`
+          : 'remove the key with a save naming no package, then re-run: the move declares the right override.');
     case 'shadowed':
       return (row.shadowDeclares
         ? `'${row.pair}' already overrides this item (a customization made in Studio), and that row is the one `
@@ -94,6 +98,7 @@ function jsonRow(row: CensusRow, outcome?: Outcome): Record<string, unknown> {
     ...(row.pair !== undefined ? { pair: row.pair } : {}),
     ...(row.shadowDeclares !== undefined ? { shadowDeclares: row.shadowDeclares } : {}),
     ...(row.addedMember !== undefined ? { addedMember: row.addedMember } : {}),
+    ...(row.boundToBase ? { boundToBase: true } : {}),
     outcome: outcome?.outcome ?? (row.disposition === 'movable' ? 'listed' : 'left'),
     ...(outcome && outcome.outcome !== 'failed'
       ? { packageId: outcome.packageId, ...(outcome.basedOn !== undefined ? { basedOn: outcome.basedOn } : {}) }
@@ -106,7 +111,9 @@ function jsonRow(row: CensusRow, outcome?: Outcome): Record<string, unknown> {
  * `os migrate packageless-overlays` — list, and with `--apply` move, every
  * package-less overlay row of a name exactly one installed code package ships
  * into that package's paired `<base>.custom`, as a declared override
- * (ADR-0146 D11, the migration half of N-16).
+ * (ADR-0146 D11, the migration half of N-16) — and every overlay row bound to
+ * a read-only code package that ships its name, which a save naming that
+ * package stored before such a save was closed (listed `boundToBase`).
  *
  * ## Why a ceremony
  *
@@ -125,7 +132,7 @@ function jsonRow(row: CensusRow, outcome?: Outcome): Record<string, unknown> {
  * header holds the rules): the pair is ensured through its one creation door,
  * each body is saved into the pair through the save door with the declaration
  * (`basedOn` = the installed base's version now), read back as the served
- * override, and only then is the package-less row deleted. A name no package
+ * override, and only then is the moved row deleted. A name no package
  * ships is environment metadata and is not touched; a name several packages
  * ship, and a row the pair already overrides (a Studio customization made
  * first), are listed and left alone. A pair row declaring an override with no
@@ -158,8 +165,8 @@ function jsonRow(row: CensusRow, outcome?: Outcome): Record<string, unknown> {
 export default class MigratePackagelessOverlays extends Command {
   static override description =
     'List, and with --apply move, the package-less view, dashboard, report, translation and email-template rows '
-    + 'over a name one installed package ships into that package\'s paired .custom package, as declared overrides '
-    + '(ADR-0146 D11). Run once after upgrading.';
+    + 'over a name one installed package ships, and those bound to a read-only package that ships the name, into '
+    + 'that package\'s paired .custom package, as declared overrides (ADR-0146 D11). Run once after upgrading.';
 
   static override examples = [
     '$ os migrate packageless-overlays',
@@ -242,7 +249,7 @@ export default class MigratePackagelessOverlays extends Command {
         }
         printWarning(
           'Apply mode moves the listed sys_metadata rows into each base\'s paired .custom package (created when '
-          + 'absent) and deletes the package-less rows. Re-run with --yes to confirm, or run without --apply to preview.',
+          + 'absent) and deletes the rows moved. Re-run with --yes to confirm, or run without --apply to preview.',
         );
         this.exit(1);
         return;
@@ -381,7 +388,8 @@ export default class MigratePackagelessOverlays extends Command {
         console.log(chalk.bold(`${movable.length} row(s) to move:`));
         for (const row of movable) {
           // [#28904] A member the base does not ship moves in as the pair's own, declaring nothing.
-          console.log(`  • ${itemOf(row)} → ${row.pair} ${row.addedMember !== undefined
+          // [#29392] A row bound to the base (a save naming it, before that write was closed) moves the same way.
+          console.log(`  • ${itemOf(row)}${row.boundToBase ? ` bound to ${row.base}` : ''} → ${row.pair} ${row.addedMember !== undefined
             ? `(its own member; ${row.base} ships none at ${row.addedMember})`
             : `(overrides ${row.base})`}`);
         }
@@ -413,7 +421,7 @@ export default class MigratePackagelessOverlays extends Command {
         + `${line.declarationsCompleted} basedOn recorded, ${line.shadowed} shadowed, ${line.failed} failed`);
     }
     if (failed > 0) {
-      printError(`${failed} row(s) could not be moved; each package-less row that failed is kept as it was.`);
+      printError(`${failed} row(s) could not be moved; each row that failed is kept as it was.`);
     } else {
       printSuccess(`Done ${chalk.dim(`(${timer.display()})`)}. Restart the server so it serves the moved rows.`);
     }

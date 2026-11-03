@@ -143,7 +143,6 @@ const ar = {
   actions: {
     decisionOutput: {
       help: 'يُمرَّر إلى التدفق كمخرج للقرار.',
-      helpMultiValue: 'يُمرَّر إلى التدفق كمخرج للقرار. افصل بين القيم المتعددة بفواصل.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -275,6 +274,11 @@ const ar = {
       copy: 'نسخ القيمة',
       show: 'إظهار رمز QR',
       hide: 'إخفاء رمز QR',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'مسح الرمز',
+      failed: 'تعذّر المسح',
     },
     image: {
       upload: "رفع صورة",
@@ -968,8 +972,6 @@ const ar = {
     pullToRefresh: "اسحب للتحديث",
     refreshing: "جارٍ التحديث…",
     share: "مشاركة",
-    sharingPersonal: "عرض شخصي",
-    sharingCollaborative: "عرض مشترك",
     sharingLockedBy: "مقفل بواسطة {{user}}",
     print: "طباعة",
     hideFieldsTitle: "إخفاء الحقول",
@@ -1254,7 +1256,6 @@ const ar = {
     undo: "تراجع",
     redo: "إعادة",
     canvasMinimap: "الخريطة المصغرة للوحة",
-    versionHistory: "سجل الإصدارات",
   },
   detail: {
     editInlineHint: "انقر نقرًا مزدوجًا للتحرير",
@@ -5369,6 +5370,18 @@ const ar = {
     retry: "إعادة المحاولة",
     emptyTitle: "لا يوجد موصل يحتاج إلى اتصال",
     emptyBody: "لا يحتوي أي من التطبيقات المثبتة على موصل يسجّل المسؤول الدخول إليه عبر OAuth.",
+    clientKeptWithSecret: "عميل OAuth {{clientId}}، السر محفوظ",
+    clientKept: "عميل OAuth {{clientId}}، بلا سر",
+    clientTitle: "عميل OAuth لـ {{name}}",
+    clientIntro: "يسجّل هذا الموصل الدخول باستخدام عميل OAuth تسجّله مؤسستك لدى المورّد لهذا النشر. أدخل معرّف العميل، وسر العميل إن أصدره المورّد، ثم تابع إلى تسجيل الدخول لدى المورّد. تصف وثائق الموصلات عنوان URI لإعادة التوجيه الذي يجب تسجيله مع العميل.",
+    clientStored: "العميل المحفوظ: {{clientId}}",
+    clientStoredSecret: "سر العميل محفوظ معه، ولا يُعرض أبدًا.",
+    clientStoredNoSecret: "لا يوجد سر عميل محفوظ معه.",
+    clientResend: "تعيد إعادة الاتصال إرسال العميل: احتفظ بمعرّف العميل وأدخل سره مرة أخرى إن كان له سر، أو أدخل عميلًا آخر لاستبداله.",
+    clientId: "معرّف العميل",
+    clientSecret: "سر العميل",
+    clientSecretHint: "اتركه فارغًا للعميل العام. يُحفظ السر مشفّرًا مع الاتصال ولا يُعرض مرة أخرى.",
+    clientContinue: "متابعة إلى تسجيل الدخول",
   },
   setupAssignments: {
     positionsTitle: "شاغلو المناصب",

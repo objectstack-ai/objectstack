@@ -62,14 +62,22 @@
  *   declares resolves `_actions.<name>.outcomeMessages.<outcome>`; a bundle
  *   entry for an outcome the action does not declare is never read, so a
  *   bundle cannot add copy for an answer the author never wrote one for.
- * - **`label`, `confirmText`, `successMessage`, `errorMessage` and each
- *   `outcomeMessages` entry are reduced through `pickLocalized` first**,
- *   because each is an `I18nLabel` — a string or an inline per-locale map. The map is collapsed to the active language
+ * - **`label`, `confirmText`, `successMessage`, `errorMessage`, `description`
+ *   and each `outcomeMessages` entry are reduced through `pickLocalized`
+ *   first**, because each is an `I18nLabel` — a string or an inline per-locale map. The map is collapsed to the active language
  *   BEFORE it is offered to the bundle as the fallback, so a per-locale
  *   literal and a bundle entry cannot disagree about what "the authored text"
  *   is, and the action runner, which has no language, only ever receives a
  *   string. `errorMessage` has no bundle key (the spec's action translation
  *   declares none), so the collapse is all it gets (objectui#12757).
+ * - **`description` is collapse-only too** (objectstack#29249): the line the
+ *   param dialog draws under its title is an `I18nLabel` on an inline action
+ *   (`InlineActionSchema` picks it), so a locale map collapses to the active
+ *   language here, before the runner and the dialog, which have no language,
+ *   receive it. Its bundle entry (`_actions.<name>.description`) is NOT read
+ *   here: the param-collection host resolves it (`actionDescription` in
+ *   `useConsoleActionRuntime`), over the string this hook hands on. An action
+ *   that declares none gains no key, so the dialog keeps its generic line.
  * - **`disabledReason` follows the same declared-only rule**
  *   (objectstack#26619): the reason a greyed action gives resolves
  *   `_actions.<name>.disabledReason` only when the action declares one, after
@@ -90,7 +98,8 @@
  *   scope `onSuccess.navigate` reads — one interpolation, in one place.
  * - **The `template` envelope keeps its shape** (objectui#13367, the renderer
  *   half of objectstack#24814). `confirmText`, `successMessage`,
- *   `errorMessage` and each `outcomeMessages` entry (objectstack#27948) may
+ *   `errorMessage`, `description` and each `outcomeMessages` entry
+ *   (objectstack#27948) may
  *   arrive as `{ dialect: 'template', source }` instead of a string. The
  *   envelope is not an `I18nLabel` map — read as one it would
  *   collapse to its first string value, the word `template` — so its `source`
@@ -113,10 +122,11 @@ export interface ActionTextLocalizerOptions {
 
 /**
  * Returns a copy of `action` with `label` — plus `confirmText`,
- * `successMessage`, `errorMessage`, `outcomeMessages`, `disabledReason` and
- * `cancelText` when the action declares them —
+ * `successMessage`, `errorMessage`, `description`, `outcomeMessages`,
+ * `disabledReason` and `cancelText` when the action declares them —
  * resolved from the active locale's bundle, falling back to the authored
- * literals. `objectName` is the host object the action is drawn on; the
+ * literals (`errorMessage` and `description` are collapsed to the active
+ * language only; neither reads the bundle here). `objectName` is the host object the action is drawn on; the
  * action's own declared `objectName` wins over it when present.
  */
 export type ActionTextLocalizer = <T extends Record<string, any>>(
@@ -126,7 +136,7 @@ export type ActionTextLocalizer = <T extends Record<string, any>>(
 ) => T;
 
 /** The declared `I18nLabel` copy, besides `label`, that reaches the runner. */
-const DECLARED_COPY_KEYS = ['confirmText', 'successMessage', 'errorMessage'] as const;
+const DECLARED_COPY_KEYS = ['confirmText', 'successMessage', 'errorMessage', 'description'] as const;
 
 /**
  * Collapse one declared copy value to the active language: an `I18nLabel`

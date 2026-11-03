@@ -13,7 +13,11 @@
         "!**/node_modules/**",
         "plugin.js",
         "plugin.d.ts"
-      ]
+      ],
+      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/ui/packages/mobile/src/serviceWorkerSource.ts"]
+    },
+    "type-check": {
+      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/ui/packages/mobile/src/serviceWorkerSource.ts"]
     }
   }
 }

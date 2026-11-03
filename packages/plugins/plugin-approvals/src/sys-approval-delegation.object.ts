@@ -50,15 +50,15 @@ export const SysApprovalDelegation = ObjectSchema.create({
   // membership-level approvers are not (`ApprovalService.expandApprovers`).
   description: 'While someone is away, approvals assigned to them personally go to their delegate.',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` names. With no pointer declared, the
+  // same two columns `titleFormat` named. With no pointer declared, the
   // registry's designate-only pass stamped `nameField: 'id'` (the first
   // title-eligible field), so a renderer honouring ADR-0079's order (an
   // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
-  // page's H1. `titleFormat` stays for renderers that still read it first;
-  // `sys-approval-delegation-display-title.test.ts` holds the two to the same text.
+  // page's H1. The retired `titleFormat` template beside it is gone (refused at
+  // save and by `os validate`); `sys-approval-delegation-display-title.test.ts`
+  // holds the formula to the text that template drew.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{delegator_id} → {delegate_id}',
   highlightFields: ['delegator_id', 'delegate_id', 'valid_from', 'valid_until'],
 
   listViews: {

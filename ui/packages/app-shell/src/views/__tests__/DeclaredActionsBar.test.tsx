@@ -484,8 +484,9 @@ describe('DeclaredActionsBar chrome localization (objectui#2762)', () => {
     const byName = Object.fromEntries(params.map((p) => [p.name, p]));
     expect(byName['outputs.reviewer'].helpText).toBe('t:actions.decisionOutput.help');
     expect(byName['outputs.owning_team'].helpText).toBe('t:actions.decisionOutput.help');
-    // The free-text variant carries the extra comma-separation sentence.
-    expect(byName['outputs.notes'].helpText).toBe('t:actions.decisionOutput.helpMultiValue');
+    // The free-text variant says the same: its comma is literal, and a list
+    // output collects entries one by one instead (objectstack#28658).
+    expect(byName['outputs.notes'].helpText).toBe('t:actions.decisionOutput.help');
   });
 });
 

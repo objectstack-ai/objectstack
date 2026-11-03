@@ -365,12 +365,12 @@ export class OwnershipQueueService implements IOwnershipQueueService {
           if (spec.value === userId) return true;
           break;
         case 'team':
-          if (await teamHasMember(engine, spec.value, userId)) return true;
+          if (await this.holderCheck(spec, () => teamHasMember(engine, spec.value, userId))) return true;
           break;
         case 'position': {
           if (!(await this.positionActive(spec.value, pass))) break;
           const positions = new PositionGraphService({ engine, organizationId });
-          if (await positions.holdsPosition(userId, spec.value, organizationId ?? undefined)) return true;
+          if (await this.holderCheck(spec, () => positions.holdsPosition(userId, spec.value, organizationId ?? undefined))) return true;
           break;
         }
         default:
@@ -378,6 +378,28 @@ export class OwnershipQueueService implements IOwnershipQueueService {
       }
     }
     return false;
+  }
+
+  /**
+   * [#29503] A team or position holder check, answered in the posture this
+   * service declares for a failed member-table read (module header): that
+   * specification contributes nobody, logged once — the same answer
+   * {@link expandSpec} gives the expansion, so the two twins cannot disagree.
+   *
+   * The checks themselves (`teamHasMember`, `PositionGraphService.holdsPosition`)
+   * now refuse a failed read instead of answering `false`; this keeps the
+   * queue's consumers where they were. Whether a queue should refuse too is not
+   * decided by ADR-0142 and is left to a ruling rather than narrowed here.
+   */
+  private async holderCheck(spec: QueueMemberSpec, check: () => Promise<boolean>): Promise<boolean> {
+    try {
+      return await check();
+    } catch (err: any) {
+      this.warnOnce(`holds::${spec.type}::${spec.value}`, '[queue] a member specification could not be read for a holder check — it contributes nobody until it can', {
+        type: spec.type, value: spec.value, error: err?.message,
+      });
+      return false;
+    }
   }
 
   // ── Reads ──────────────────────────────────────────────────────────────────

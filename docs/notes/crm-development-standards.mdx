@@ -94,7 +94,7 @@ export const MyObject = ObjectSchema.create({
   description: '...',             // Help text
   
   // ✅ Display Configuration
-  titleFormat: '{field1} - {field2}',
+  nameField: 'field1',             // Record title field (ADR-0079); never titleFormat
   highlightFields: ['field1', 'field2', 'field3'],
   
   // ✅ Fields Definition

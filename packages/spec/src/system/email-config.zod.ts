@@ -196,33 +196,43 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
   /**
    * Render context merged into every `sendTemplate()` call, under the
    * per-call `data`. Free-form on purpose: the CLI passes this object
-   * through to `EmailServicePlugin` as written — `appName` excepted, see
-   * below — and the template engine resolves whatever names a template
-   * happens to reference, so there is no closed vocabulary here to declare —
-   * put the values your own templates interpolate (support address, brand
-   * URL, footer text …).
+   * through to `EmailServicePlugin` as written — `appName` and `baseUrl`
+   * excepted, see below — and the template engine resolves whatever names a
+   * template happens to reference, so there is no closed vocabulary here to
+   * declare — put the values your own templates interpolate (support address,
+   * brand URL, footer text …).
    *
-   * One key is not passed through as written: `appName`. It is always
-   * present in the delivered context, and its value comes from the chain on
-   * the `appName` key above — `OS_APP_NAME` → `appName` → this map's
-   * `appName` → the top-level config `appName` → `'ObjectStack'`. So writing
-   * it here still works (it is the third rung, and a config that spells only
-   * this form keeps its name), but the env var and the dedicated key both
-   * override it.
+   * Two keys are not passed through as written: `appName` and `baseUrl`.
+   * Both are always present in the delivered context, each resolved by its
+   * own chain, env first, with the value written here as one rung:
+   *  - `appName` comes from the chain on the `appName` key above —
+   *    `OS_APP_NAME` → `appName` → this map's `appName` → the top-level
+   *    config `appName` → `'ObjectStack'`. So writing it here still works
+   *    (it is the third rung, and a config that spells only this form keeps
+   *    its name), but the env var and the dedicated key both override it.
+   *  - `baseUrl` is the deployment's address, for absolute links in a
+   *    template — `OS_AUTH_URL` (legacy `BETTER_AUTH_URL`) → `OS_BASE_URL` →
+   *    this map's `baseUrl` → `http://localhost:` plus the serve port
+   *    (`OS_PORT`, legacy `PORT`, else `3000`), with any trailing slash
+   *    trimmed. Writing it here is the fallback for a deployment that sets
+   *    neither env var.
+   * A send's own `data` still wins over both, as it does over every key here.
    *
-   * It used to be the other way round: the resolver computed the value and
-   * then spread this whole map OVER it, which made `OS_APP_NAME` inert and
-   * broke the header's "env overrides per setting" on exactly one key.
-   * #5448 settled that the env must win (implemented in PR #5498), and the
-   * exception is gone. Every OTHER key here has no env or dedicated-config
-   * carrier, so it remains the only source for itself and reaches templates
-   * verbatim.
+   * It used to be the other way round for `appName`: the resolver computed
+   * the value and then spread this whole map OVER it, which made
+   * `OS_APP_NAME` inert and broke the header's "env overrides per setting"
+   * on exactly one key. #5448 settled that the env must win (implemented in
+   * PR #5498), and `baseUrl` follows the same order (#29095). Every OTHER key
+   * here has no env or dedicated-config carrier, so it remains the only
+   * source for itself and reaches templates verbatim.
    */
   defaultTemplateContext: z.record(z.string(), z.unknown()).optional()
     .describe(
       'Free-form render context merged into every sendTemplate() call, under the per-call data. '
-      + 'Passed through unchanged except appName, which is resolved by its own chain — '
-      + 'OS_APP_NAME and the appName key both override the value written here',
+      + 'Passed through unchanged except appName and baseUrl, each resolved by its own chain — '
+      + 'OS_APP_NAME and the appName key both override appName written here; baseUrl takes '
+      + 'OS_AUTH_URL, then OS_BASE_URL, then the value written here, then the local '
+      + 'http://localhost default, with no trailing slash',
     ),
 }));
 export type EmailServiceConfig = z.input<typeof EmailServiceConfigSchema>;

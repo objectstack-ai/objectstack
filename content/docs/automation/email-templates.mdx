@@ -244,23 +244,41 @@ export const passwordResetZh = defineEmailTemplateDefinition({
 });
 ```
 
-`sendTemplate({ template, locale })` walks a fixed ladder — exact, then default,
-then deterministic:
+The template name is matched exactly; only the locale member is resolved, by
+the ladder below. Every rung of it loads one row at one tag exactly, so `en` and
+`en-US` stay two distinct rows of the bundle: folding chooses which row is read,
+it never merges two. Resolution is deterministic, never "whichever row the store
+yields first". The ladder of record is `SendTemplateInput.locale` in
+`packages/spec/src/contracts/email-service.ts`; this section copies it.
 
-1. **`locale`, matched exactly.** There is **no language-prefix matching**:
-   `zh` does not resolve `zh-CN`, and `en` does not resolve `en-US`. Author the
-   tags your callers actually pass.
-2. **`en-US`** — which is also where a call that omits `locale` *starts*, so
-   "no locale" means the default rather than an arbitrary row.
-3. Only for a call that named **no** locale, and only when the bundle has no
-   `en-US` row at all: the bundle's lowest locale tag. A single-locale tenant
-   keeps rendering, and renders identically on every boot.
+A call that **names** a locale, over the built-in registry template loader (the
+one `EmailServicePlugin` wires), walks:
 
-A call that names a locale with no exact row and no `en-US` row fails with
-`TEMPLATE_NOT_FOUND` — it does not silently fall through to another language.
-That rung ordering exists because one seam once answered "whichever row the
-store yields first" and a no-locale send rendered `zh-CN` out of an
-`en-US` + `zh-CN` bundle.
+1. **this locale, folded** against the locale tags the template's bundle carries
+   by `resolveBundleLocale` (`@objectstack/spec/system`, the BCP-47 fold
+   plugin-email imports rather than copying): exact, then case-insensitive
+   (`zh-cn` → `zh-CN`), then base language (`en-GB` → `en`), then variant
+   expansion (`zh` and `zh-TW` → `zh-CN`), the first match in ascending tag
+   order;
+2. **the stack's declared fallback locale**, as
+   `II18nService.getFallbackLocale()` answers it (`i18n.fallbackLocale`, else
+   `defaultLocale`), folded the same way. A host whose i18n service declares
+   none, or that has no i18n service, skips this rung;
+3. **`en-US`**, exactly;
+4. none of them lands on a row: `TEMPLATE_NOT_FOUND`, which is permanent.
+
+A rung that resolves to a tag already tried is skipped. A replacement
+`TemplateLoader` keeps the exact ladder: this locale matched exactly, then
+`en-US`, then `TEMPLATE_NOT_FOUND`, with no fold and no declared fallback.
+
+A call that **omits** `locale` keeps its own ladder. The service's part of it
+holds over any loader: no fold, no declared fallback, and `en-US` first,
+exactly, so "no locale" means the default rather than an arbitrary member. When
+that misses, the service asks the loader for its own no-locale answer. The
+built-in registry loader answers the bundle's `en-US` member, else its lowest
+locale tag, so a single-locale bundle keeps rendering and does so identically on
+every boot; a replacement `TemplateLoader` gives its own deterministic best
+answer for the name.
 
 ## Reaching a template
 

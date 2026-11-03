@@ -287,6 +287,7 @@ import {
   type ControlledByParentWriteDenialLeg,
   type ControlledByParentWriteOutcome,
   type PositionGrantSummary,
+  type ExplainAccessRequest,
 } from '@objectstack/spec/contracts';
 import {
   type MatchesFilterOptions,
@@ -2372,9 +2373,13 @@ export class SecurityPlugin implements Plugin {
    * explaining ANOTHER user whose read of the record is refused (a declared
    * 4xx) is answered so too; a caller explaining itself keeps the write path's
    * notion (no row), so its explanation shows what its own doors do.
+   *
+   * The request is the contract's `ExplainAccessRequest` itself, so the
+   * method's declared type carries every member the body honours, the batch
+   * form `recordIds` included, and cannot drift from the published selector.
    */
   explainAccessForCaller(
-    request: { object: string; operation: string; userId?: string; recordId?: string },
+    request: ExplainAccessRequest,
     callerContext?: any,
   ): Promise<ExplainDecision> {
     // [#25223 cut 10] The body moved to `security-plugin-explain-access.ts` (see `ExplainAccessHost`).

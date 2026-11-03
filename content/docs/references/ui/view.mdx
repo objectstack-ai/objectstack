@@ -800,7 +800,7 @@ Map view configuration
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
-| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **sharing** | `{ lockedBy?: string }` | optional | View sharing configuration: who locked the view configuration |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066] Capabilities a user must ALL hold for this list view or dashboard to be served to them — names that permission sets grant through `systemPermissions`, the same list as `requiredPermissions` on an app, a navigation item or an action. Absent or empty: no audience gate. There is no any-of form: to serve one item to several audiences (legal OR admin), declare one capability and grant it to each of their permission sets. The server enforces it: a user who does not hold them all is not listed the item and is refused it by name; a view container's list views are pruned the same way, and so are an object's own list views for a user who may not edit the object. |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
@@ -875,7 +875,7 @@ View filter rule
 
 ### Nested Shape: `ListView.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1026,7 +1026,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'personal' \| 'collaborative'>` | optional (default: `"collaborative"`) | View ownership type |
+| **type** | `never` | optional | [REMOVED] `view.list.sharing.type` was removed in @objectstack/spec 18.3.0 (ADR-0049 enforce-or-remove) — nothing enforced it: a `personal` view was listed for every user who can read the object, and `collaborative` described every view, so the key only ever drew a badge. Delete the key; `sharing.lockedBy` is unchanged. A view is visible to everyone who can read its object; personal named views are a user-owned record, not view metadata (ADR-0017). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **lockedBy** | `string` | optional | User who locked the view configuration |
 
 ### Nested Shape: `ListView.grouping`
@@ -1188,7 +1188,7 @@ View filter rule
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
-| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **sharing** | `{ lockedBy?: string }` | optional | View sharing configuration: who locked the view configuration |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066] Capabilities a user must ALL hold for this list view or dashboard to be served to them — names that permission sets grant through `systemPermissions`, the same list as `requiredPermissions` on an app, a navigation item or an action. Absent or empty: no audience gate. There is no any-of form: to serve one item to several audiences (legal OR admin), declare one capability and grant it to each of their permission sets. The server enforces it: a user who does not hold them all is not listed the item and is refused it by name; a view container's list views are pruned the same way, and so are an object's own list views for a user who may not edit the object. |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
@@ -1264,7 +1264,7 @@ View filter rule
 
 ### Nested Shape: `ObjectListView.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1405,7 +1405,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'personal' \| 'collaborative'>` | optional (default: `"collaborative"`) | View ownership type |
+| **type** | `never` | optional | [REMOVED] `view.list.sharing.type` was removed in @objectstack/spec 18.3.0 (ADR-0049 enforce-or-remove) — nothing enforced it: a `personal` view was listed for every user who can read the object, and `collaborative` described every view, so the key only ever drew a badge. Delete the key; `sharing.lockedBy` is unchanged. A view is visible to everyone who can read its object; personal named views are a user-owned record, not view metadata (ADR-0017). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **lockedBy** | `string` | optional | User who locked the view configuration |
 
 ### Nested Shape: `ObjectListView.grouping`
@@ -1770,7 +1770,7 @@ Tab configuration for multi-tab view interface
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
-| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **sharing** | `{ lockedBy?: string }` | optional | View sharing configuration: who locked the view configuration |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066] Capabilities a user must ALL hold for this list view or dashboard to be served to them — names that permission sets grant through `systemPermissions`, the same list as `requiredPermissions` on an app, a navigation item or an action. Absent or empty: no audience gate. There is no any-of form: to serve one item to several audiences (legal OR admin), declare one capability and grant it to each of their permission sets. The server enforces it: a user who does not hold them all is not listed the item and is refused it by name; a view container's list views are pruned the same way, and so are an object's own list views for a user who may not edit the object. |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
@@ -1849,7 +1849,7 @@ Tab configuration for multi-tab view interface
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
-| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **sharing** | `{ lockedBy?: string }` | optional | View sharing configuration: who locked the view configuration |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066] Capabilities a user must ALL hold for this list view or dashboard to be served to them — names that permission sets grant through `systemPermissions`, the same list as `requiredPermissions` on an app, a navigation item or an action. Absent or empty: no audience gate. There is no any-of form: to serve one item to several audiences (legal OR admin), declare one capability and grant it to each of their permission sets. The server enforces it: a user who does not hold them all is not listed the item and is refused it by name; a view container's list views are pruned the same way, and so are an object's own list views for a user who may not edit the object. |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
@@ -2001,7 +2001,7 @@ View filter rule
 
 #### Option 2
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 ### Properties
 
@@ -2026,7 +2026,7 @@ View filter rule
 
 ## ViewFilterOrGroup
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 ### Properties
 
@@ -2104,8 +2104,8 @@ This schema accepts one of the following structures:
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
 | **isDefault** | `boolean` | optional | Whether this is the object's default view in the switcher. |
 | **order** | `integer` | optional | Sort order within the object's view switcher / left rail. |
-| **scope** | `Enum<'package' \| 'shared' \| 'personal'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
-| **owner** | `never` | optional | [REMOVED] `view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the user a `personal` view item belonged to, and nothing ever read it: the view switcher (`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a view marked as one user's was listed for every user who can read the object. Delete the key. Nothing restricts a view item to one user today — per-user view scoping is a parked direction (ADR-0017), not a shipped mechanism — so a view item is visible to everyone who can read its object. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **scope** | `Enum<'package' \| 'shared'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
+| **owner** | `never` | optional | [REMOVED] `view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the user a `personal` view item belonged to, and nothing ever read it: the view switcher (`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a view marked as one user's was listed for every user who can read the object. Delete the key. Nothing restricts a view item to one user — personal named views are a user-owned record, not a view item (ADR-0017) — so a view item is visible to everyone who can read its object. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **hidden** | `never` | optional | [REMOVED] `view.hidden` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it promised to hide a view item from the switcher, and nothing ever read it: `GET /meta/view?object=` and the console's view switcher list every item bound to the object, `hidden: true` included. Delete the key; to take a view out of the switcher, delete the view item itself (or stop shipping it from source). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -2146,7 +2146,7 @@ This schema accepts one of the following structures:
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
-| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **sharing** | `{ lockedBy?: string }` | optional | View sharing configuration: who locked the view configuration |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066] Capabilities a user must ALL hold for this list view or dashboard to be served to them — names that permission sets grant through `systemPermissions`, the same list as `requiredPermissions` on an app, a navigation item or an action. Absent or empty: no audience gate. There is no any-of form: to serve one item to several audiences (legal OR admin), declare one capability and grant it to each of their permission sets. The server enforces it: a user who does not hold them all is not listed the item and is refused it by name; a view container's list views are pruned the same way, and so are an object's own list views for a user who may not edit the object. |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
@@ -2198,8 +2198,8 @@ This schema accepts one of the following structures:
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
 | **isDefault** | `boolean` | optional | Whether this is the object's default view in the switcher. |
 | **order** | `integer` | optional | Sort order within the object's view switcher / left rail. |
-| **scope** | `Enum<'package' \| 'shared' \| 'personal'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
-| **owner** | `never` | optional | [REMOVED] `view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the user a `personal` view item belonged to, and nothing ever read it: the view switcher (`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a view marked as one user's was listed for every user who can read the object. Delete the key. Nothing restricts a view item to one user today — per-user view scoping is a parked direction (ADR-0017), not a shipped mechanism — so a view item is visible to everyone who can read its object. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **scope** | `Enum<'package' \| 'shared'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
+| **owner** | `never` | optional | [REMOVED] `view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the user a `personal` view item belonged to, and nothing ever read it: the view switcher (`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a view marked as one user's was listed for every user who can read the object. Delete the key. Nothing restricts a view item to one user — personal named views are a user-owned record, not a view item (ADR-0017) — so a view item is visible to everyone who can read its object. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **hidden** | `never` | optional | [REMOVED] `view.hidden` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it promised to hide a view item from the switcher, and nothing ever read it: `GET /meta/view?object=` and the console's view switcher list every item bound to the object, `hidden: true` included. Delete the key; to take a view out of the switcher, delete the view item itself (or stop shipping it from source). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -2287,8 +2287,8 @@ This schema accepts one of the following structures:
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
 | **isDefault** | `boolean` | optional | Whether this is the object's default view in the switcher. |
 | **order** | `integer` | optional | Sort order within the object's view switcher / left rail. |
-| **scope** | `Enum<'package' \| 'shared' \| 'personal'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
-| **owner** | `never` | optional | [REMOVED] `view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the user a `personal` view item belonged to, and nothing ever read it: the view switcher (`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a view marked as one user's was listed for every user who can read the object. Delete the key. Nothing restricts a view item to one user today — per-user view scoping is a parked direction (ADR-0017), not a shipped mechanism — so a view item is visible to everyone who can read its object. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **scope** | `Enum<'package' \| 'shared'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
+| **owner** | `never` | optional | [REMOVED] `view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the user a `personal` view item belonged to, and nothing ever read it: the view switcher (`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a view marked as one user's was listed for every user who can read the object. Delete the key. Nothing restricts a view item to one user — personal named views are a user-owned record, not a view item (ADR-0017) — so a view item is visible to everyone who can read its object. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **hidden** | `never` | optional | [REMOVED] `view.hidden` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it promised to hide a view item from the switcher, and nothing ever read it: `GET /meta/view?object=` and the console's view switcher list every item bound to the object, `hidden: true` included. Delete the key; to take a view out of the switcher, delete the view item itself (or stop shipping it from source). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -2334,7 +2334,7 @@ This schema accepts one of the following structures:
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
-| **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
+| **sharing** | `{ lockedBy?: string }` | optional | View sharing configuration: who locked the view configuration |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066] Capabilities a user must ALL hold for this list view or dashboard to be served to them — names that permission sets grant through `systemPermissions`, the same list as `requiredPermissions` on an app, a navigation item or an action. Absent or empty: no audience gate. There is no any-of form: to serve one item to several audiences (legal OR admin), declare one capability and grant it to each of their permission sets. The server enforces it: a user who does not hold them all is not listed the item and is refused it by name; a view container's list views are pruned the same way, and so are an object's own list views for a user who may not edit the object. |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
@@ -2393,8 +2393,8 @@ This schema accepts one of the following structures:
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
 | **isDefault** | `boolean` | optional | Whether this is the object's default view in the switcher. |
 | **order** | `integer` | optional | Sort order within the object's view switcher / left rail. |
-| **scope** | `Enum<'package' \| 'shared' \| 'personal'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
-| **owner** | `never` | optional | [REMOVED] `view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the user a `personal` view item belonged to, and nothing ever read it: the view switcher (`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a view marked as one user's was listed for every user who can read the object. Delete the key. Nothing restricts a view item to one user today — per-user view scoping is a parked direction (ADR-0017), not a shipped mechanism — so a view item is visible to everyone who can read its object. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **scope** | `Enum<'package' \| 'shared'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
+| **owner** | `never` | optional | [REMOVED] `view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the user a `personal` view item belonged to, and nothing ever read it: the view switcher (`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a view marked as one user's was listed for every user who can read the object. Delete the key. Nothing restricts a view item to one user — personal named views are a user-owned record, not a view item (ADR-0017) — so a view item is visible to everyone who can read its object. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **hidden** | `never` | optional | [REMOVED] `view.hidden` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it promised to hide a view item from the switcher, and nothing ever read it: `GET /meta/view?object=` and the console's view switcher list every item bound to the object, `hidden: true` included. Delete the key; to take a view out of the switcher, delete the view item itself (or stop shipping it from source). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -2480,26 +2480,25 @@ Whether `config` is a ListView (list family) or a FormView.
 
 ## ViewScope
 
-View identity layer: package | shared | personal.
+View identity layer: package | shared.
 
 ### Allowed Values
 
 * `package`
 * `shared`
-* `personal`
 
 
 ---
 
 ## ViewSharing
 
-View sharing and access configuration
+View sharing configuration — who locked the view configuration
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'personal' \| 'collaborative'>` | optional (default: `"collaborative"`) | View ownership type |
+| **type** | `never` | optional | [REMOVED] `view.list.sharing.type` was removed in @objectstack/spec 18.3.0 (ADR-0049 enforce-or-remove) — nothing enforced it: a `personal` view was listed for every user who can read the object, and `collaborative` described every view, so the key only ever drew a badge. Delete the key; `sharing.lockedBy` is unchanged. A view is visible to everyone who can read its object; personal named views are a user-owned record, not view metadata (ADR-0017). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **lockedBy** | `string` | optional | User who locked the view configuration |
 
 
@@ -2535,7 +2534,7 @@ View filter rule
 
 ### Nested Shape: `ViewTab.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its sibling elements, and its filter builder edits a filter that is exactly one group.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

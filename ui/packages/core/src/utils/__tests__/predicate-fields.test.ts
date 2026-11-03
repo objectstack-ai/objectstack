@@ -52,6 +52,41 @@ describe('collectPredicateFieldRefs', () => {
   it('is not confused by a field name embedded in a longer path', () => {
     expect(collectPredicateFieldRefs(['record.owner.id == os.user.id'])).toEqual(['owner']);
   });
+
+  // The CEL optional-field selector reads the same key as `record.x`, and it is
+  // the spelling written for a sparse row — so its operand is owed to `$select`
+  // exactly as the plain spelling's is.
+  it('harvests the CEL optional `record.?x` spelling', () => {
+    expect(collectPredicateFieldRefs(['record.?status.orValue("") == "open"'])).toEqual(['status']);
+  });
+
+  it('harvests the CEL optional `data.?x` spelling too', () => {
+    expect(collectPredicateFieldRefs(['data.?owner_id == os.user.id'])).toEqual(['owner_id']);
+  });
+
+  it('dedupes the optional and plain spellings of one field, in first-seen order', () => {
+    expect(
+      collectPredicateFieldRefs(['has(record.stage) && record.?locked.orValue(false) && record.?stage == "won"']),
+    ).toEqual(['stage', 'locked']);
+  });
+
+  it('harvests an optional selector inside the { dialect, source } envelope', () => {
+    expect(
+      collectPredicateFieldRefs([{ dialect: 'cel', source: 'record.?approved_by != null' }]),
+    ).toEqual(['approved_by']);
+  });
+
+  it('yields nothing for an optional selector that names no field', () => {
+    expect(
+      collectPredicateFieldRefs([
+        'record.? == null', // no name after the selector
+        'record.?.status', // selector, then a path dot: not a field name
+        'data.?1st == 2', // not an identifier
+        'myrecord.?status', // `record` must be the whole identifier
+        'record?.status', // JavaScript optional chaining, not CEL
+      ]),
+    ).toEqual([]);
+  });
 });
 
 describe('listViewPredicates', () => {
@@ -77,6 +112,18 @@ describe('listViewPredicates', () => {
       'stage',
       'editable', 'system',
     ]);
+  });
+
+  it('reaches an optional `record.?x` operand on the action and CRUD-override surfaces', () => {
+    expect(
+      collectPredicateFieldRefs(
+        listViewPredicates({
+          rowActionDefs: [{ name: 'a', visible: 'record.?owner_id.orValue("") == os.user.id' }],
+          objectActions: [{ name: 'c', disabled: 'record.?locked.orValue(false)' }],
+          userActions: { edit: { visibleWhen: 'data.?editable == true' } },
+        }),
+      ),
+    ).toEqual(['owner_id', 'locked', 'editable']);
   });
 
   it('returns nothing for a view that declares no predicates', () => {

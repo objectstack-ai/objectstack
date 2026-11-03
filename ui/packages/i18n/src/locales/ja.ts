@@ -129,7 +129,6 @@ const ja = {
   actions: {
     decisionOutput: {
       help: '決定の出力としてフローに渡されます。',
-      helpMultiValue: '決定の出力としてフローに渡されます。複数の値はカンマで区切ってください。',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -261,6 +260,11 @@ const ja = {
       copy: '値をコピー',
       show: 'QR コードを表示',
       hide: 'QR コードを非表示',
+    },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'コードをスキャン',
+      failed: 'スキャンできませんでした',
     },
     image: {
       upload: "画像をアップロード",
@@ -859,8 +863,6 @@ const ja = {
     pullToRefresh: "引っ張って更新",
     refreshing: "更新中…",
     share: "共有",
-    sharingPersonal: "個人ビュー",
-    sharingCollaborative: "共有ビュー",
     sharingLockedBy: "{{user}} がロック中",
     print: "印刷",
     hideFieldsTitle: "フィールドを非表示",
@@ -1133,7 +1135,6 @@ const ja = {
     undo: "元に戻す",
     redo: "やり直す",
     canvasMinimap: "キャンバスのミニマップ",
-    versionHistory: "バージョン履歴",
   },
   detail: {
     editInlineHint: "ダブルクリックで編集",
@@ -4876,6 +4877,18 @@ const ja = {
     retry: "再試行",
     emptyTitle: "接続が必要なコネクタはありません",
     emptyBody: "インストール済みのアプリに、管理者が OAuth でサインインするコネクタはありません。",
+    clientKeptWithSecret: "OAuth クライアント {{clientId}}（シークレット保存済み）",
+    clientKept: "OAuth クライアント {{clientId}}（シークレットなし）",
+    clientTitle: "{{name}} の OAuth クライアント",
+    clientIntro: "このコネクタは、組織がこのデプロイ用にベンダーへ登録した OAuth クライアントでサインインします。クライアント ID と、ベンダーが発行した場合はクライアントシークレットを入力し、ベンダーのサインインへ進んでください。クライアントに登録するリダイレクト URI はコネクタのドキュメントに記載されています。",
+    clientStored: "保存済みのクライアント: {{clientId}}",
+    clientStoredSecret: "クライアントシークレットが一緒に保存されています。表示されることはありません。",
+    clientStoredNoSecret: "クライアントシークレットは保存されていません。",
+    clientResend: "再接続ではクライアントを再送信します。クライアント ID はそのままで、シークレットがある場合は再入力してください。別のクライアントを入力すると置き換えられます。",
+    clientId: "クライアント ID",
+    clientSecret: "クライアントシークレット",
+    clientSecretHint: "パブリッククライアントの場合は空のままにします。シークレットは接続とともに暗号化して保存され、再表示されません。",
+    clientContinue: "サインインへ進む",
   },
   setupAssignments: {
     positionsTitle: "役職の保持者",

@@ -138,6 +138,7 @@ export {
   validateFlowTriggerReadiness,
   validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
+  FLOW_INPUT_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
@@ -235,6 +236,7 @@ export type { SourceStyleFinding, SourceStyleSeverity } from './validate-page-so
 
 export {
   validateRecordTitle,
+  validateTitleFormatRetired,
   TITLE_FORMAT_RETIRED,
   TITLE_UNRESOLVABLE,
 } from './validate-record-title.js';
@@ -724,6 +726,14 @@ export {
   NAMESPACE_NO_CUSTOMIZATION_PAIR,
 } from './validate-customization-namespace.js';
 export type { CustomizationNamespaceFinding } from './validate-customization-namespace.js';
+
+// [#29049] ADR-0031 region shape: a flow the automation engine refuses to
+// register, judged with the spec's `validateControlFlow` itself.
+export {
+  validateFlowRegionShape,
+  FLOW_REGION_SHAPE_INVALID,
+} from './validate-flow-region-shape.js';
+export type { FlowRegionShapeFinding } from './validate-flow-region-shape.js';
 
 // [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
 // own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,

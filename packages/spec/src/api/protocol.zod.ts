@@ -28,7 +28,9 @@ import {
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
-import { ServedTranslationDataSchema } from '../system/translation.zod';
+import { ServedTranslationDataSchema, LocaleSchema } from '../system/translation.zod';
+import { PushVendorSchema } from '../system/push-config.zod';
+import { PUSH_DEVICE_PLATFORMS } from '../system/push-device-platform';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -752,7 +754,7 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ),
   disabledActions: z.array(z.string()).optional().describe(
     'The names in `item.actions` that this deployment\'s activation ledger switches off (an administrator '
-    + 'turned them off under Setup › Packaged automation): a call to any of them is refused 409 '
+    + 'turned them off under Setup › Packaged Actions): a call to any of them is refused 409 '
     + '`ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an '
     + 'activation ledger attached, and then `[]` when none of this object\'s actions is switched off. '
     + 'Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike '
@@ -1227,7 +1229,14 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + 'CLI at all, which is the gap this key exists to close. The gate runs on '
     + 'both write doors (D1), and both report: '
     + '`POST /meta/:type/:name/publish` carries the same key on '
-    + '`PublishMetaItemResponseSchema`.',
+    + '`PublishMetaItemResponseSchema`. '
+    + 'The save also reports here what it did to the row at rest that the '
+    + 'author did not write, on a draft save too: one `warning` with rule '
+    + '`withheld-key-dropped` for each stored position it dropped because the '
+    + 'type\'s read redactor withholds it and marks it not carried forward '
+    + '(a connector\'s undeclared `auth` keys, which no door accepts and nothing '
+    + 'reads). Its `path` names where the value sat at rest, in the same '
+    + 'spelling (`connectors[0].auth.token`).',
   ),
   message: z.string().optional(),
 }));
@@ -3507,25 +3516,61 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
 // Notification Operations
 // ==========================================
 
+/**
+ * Register or refresh a push device for the signed-in user (ADR-0012 §6).
+ *
+ * **Declared ahead of its producer.** No route serves this body yet: the
+ * device routes land together with their handlers, and until then each of
+ * the four device schemas below carries a `[PLANNED — not yet served]` marker
+ * in its `.describe()`. What follows is the contract that route owes, not a
+ * description of something running.
+ *
+ * One request does both: registering a `deviceId` the user already has
+ * refreshes that device (its token, vendor, app and locale) instead of adding
+ * a second one. A request without `deviceId` gets one minted by the server
+ * and answered in {@link RegisterDeviceResponseSchema}; the client keeps it
+ * and sends it on every later registration and on unregister.
+ *
+ * The members after `name` (`vendor`, `appId`, `locale`) were added for the
+ * push channel, all optional, so the body a client sent before still parses
+ * unchanged. The device's owner is the session's user, never a body member.
+ * The stored device a registration produces is `UserDeviceSchema`
+ * (`system/push-device.zod.ts`).
+ */
+// The marker comes off when the server device-registry slice (#29068) mounts
+// POST /api/v1/notifications/devices and the unregister route, adds their rows
+// to DEFAULT_NOTIFICATION_ROUTES and flips that table's catalog pin.
 export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   token: z.string().describe('Device push notification token'),
-  platform: z.enum(['ios', 'android', 'web']).describe('Device platform'),
-  deviceId: z.string().optional().describe('Unique device identifier'),
+  platform: z.enum(PUSH_DEVICE_PLATFORMS).describe('Device platform'),
+  deviceId: z.string().optional().describe(
+    'Client-held device id, stable per app install. Re-registering the same deviceId refreshes that device; '
+    + 'absent, the server mints one and answers it, and the client keeps it for later registrations and unregister',
+  ),
   name: z.string().optional().describe('Device friendly name'),
-}));
+  vendor: PushVendorSchema.optional().describe(
+    'Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, '
+    + 'android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused',
+  ),
+  appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
+  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+}).describe(
+  '[PLANNED — not yet served] Register or refresh a push device for the signed-in user. No route serves it yet; '
+  + 'the device routes land together with their handlers',
+));
 
 export const RegisterDeviceResponseSchema = lazySchema(() => z.object({
   deviceId: z.string().describe('Registered device ID'),
   success: z.boolean().describe('Whether registration succeeded'),
-}));
+}).describe('[PLANNED — not yet served] Answer to a device registration: the device id the client keeps'));
 
 export const UnregisterDeviceRequestSchema = lazySchema(() => z.object({
   deviceId: z.string().describe('Device ID to unregister'),
-}));
+}).describe('[PLANNED — not yet served] Unregister one of the signed-in user\'s push devices'));
 
 export const UnregisterDeviceResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe('Whether unregistration succeeded'),
-}));
+}).describe('[PLANNED — not yet served] Answer to a device unregistration'));
 
 export const NotificationPreferencesSchema = lazySchema(() => z.object({
   email: z.boolean().default(true).describe('Receive email notifications'),
