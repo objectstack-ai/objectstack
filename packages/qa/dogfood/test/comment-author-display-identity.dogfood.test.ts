@@ -67,15 +67,17 @@ describe('sys_comment display identity over the REST data door — stamped from 
       extraPlugins: [new AuditPlugin()],
       orgContext: true,
     });
-    adminTok = await stack.signIn();
-    memberTok = await stack.signUp(MEMBER_EMAIL, undefined, MEMBER_NAME);
     ql = await stack.kernel.getServiceAsync('objectql');
-
+    // Each avatar is set before its user's first write: the platform reads a
+    // user's display identity once per snapshot window (the record history's
+    // actor snapshot), so a later change shows on later writes only.
     const admin = await userRow('admin@objectos.ai');
     adminId = String(admin.id);
     adminName = String(admin.name);
-    memberId = String((await userRow(MEMBER_EMAIL)).id);
     await ql.update('sys_user', { image: ADMIN_IMAGE }, { where: { id: adminId }, context: SYS });
+    adminTok = await stack.signIn();
+    memberTok = await stack.signUp(MEMBER_EMAIL, undefined, MEMBER_NAME);
+    memberId = String((await userRow(MEMBER_EMAIL)).id);
     await ql.update('sys_user', { image: MEMBER_IMAGE }, { where: { id: memberId }, context: SYS });
     // Two distinct, non-empty names, or the pins below could not tell them apart.
     expect(adminName).toBeTruthy();
