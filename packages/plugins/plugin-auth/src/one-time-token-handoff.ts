@@ -51,6 +51,24 @@
  * consumes nothing: the real holder still redeems afterwards. The verifier
  * never leaves the device (only its hash travels, in step 2).
  *
+ * ## Who can open it (maintainer ruling A, card comment 6597001931)
+ *
+ * The binding stops a callback being redeemed by an app that intercepts it.
+ * It does not stop an app or a web page from OPENING the hand-off itself,
+ * with its own challenge, in a browser that already holds the user's session.
+ * Two refusals close that:
+ *
+ *  - **Freshness.** The session must have been created within
+ *    {@link ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS}; an older one
+ *    answers `401 UNAUTHENTICATED` (the remedy is a sign-in, the same remedy
+ *    as no session). So the shell completes a full sign-in in the system auth
+ *    session before every hand-off (an ephemeral session is fine); an existing
+ *    Safari or Custom Tabs session is not enough.
+ *  - **Cross-site navigation.** A request carrying `Sec-Fetch-Site:
+ *    cross-site` answers `400 VALIDATION_ERROR` before anything else is read:
+ *    a malformed request context, not a missing sign-in. The header is judged
+ *    only when present.
+ *
  * Generation happens only inside this route ({@link withHandoffChallenge}):
  * the plugin's generate endpoint refuses every HTTP request
  * (`disableClientRequest`), and a server-side call made outside this route's
@@ -93,6 +111,17 @@ export const ONE_TIME_TOKEN_GENERATE_PATH = '/one-time-token/generate';
  * that is only time for a stolen token to be tried. The vendor default is 3.
  */
 export const ONE_TIME_TOKEN_EXPIRES_IN_MINUTES = 1;
+
+/**
+ * How old the caller's session may be, in SECONDS, for the hand-off to carry
+ * it (maintainer ruling A on the residual risk this PR raised, card comment
+ * 6597001931). The hand-off hands over a session the shell has just watched
+ * the user create in the system auth session; a session older than this was
+ * made for something else, and a page or app that opens the hand-off against
+ * it would carry it off silently. Five minutes covers a sign-in with a slow
+ * second factor.
+ */
+export const ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS = 5 * 60;
 
 /** The route's CLOSED query-parameter set. */
 export const ONE_TIME_TOKEN_HANDOFF_QUERY_PARAMS: readonly string[] = [
@@ -228,8 +257,14 @@ export interface HandoffAnswer {
 export interface HandoffDeps {
   /** The registered app schemes ({@link registeredAppSchemesOf}). */
   registeredSchemes: readonly string[];
-  /** Whether `headers` carry a live session. */
-  hasSession(headers: Headers): Promise<boolean>;
+  /**
+   * When the live session `headers` carry was created, or `null` when they
+   * carry none: the vendor session's `session.createdAt` (`sys_session.created_at`),
+   * which a refresh or a bearer replay never moves (those move `updatedAt`).
+   */
+  sessionCreatedAt(headers: Headers): Promise<Date | null>;
+  /** The clock, for the freshness window; `Date.now` by default. */
+  now?: () => number;
   /** The vendor plugin's generate endpoint, called server-side with the caller's headers. */
   generate(headers: Headers): Promise<{ token: string }>;
 }
@@ -256,6 +291,19 @@ function single(queries: Record<string, readonly string[]>, name: string): { val
 
 /** `GET /api/v1/auth/one-time-token/handoff` — see the module docblock. */
 export async function runOneTimeTokenHandoff(deps: HandoffDeps, request: HandoffRequest): Promise<HandoffAnswer> {
+  // A navigation another site started (a link, a form, a script) arrives with
+  // `Sec-Fetch-Site: cross-site` and the session cookie, since `SameSite=Lax`
+  // sends it on a top-level GET. The shell opens the hand-off itself, which a
+  // browser reports as `none`. Judged only when the header is present: a
+  // browser that sends none is not refused for its absence (ruling A).
+  if (request.headers.get('sec-fetch-site')?.trim().toLowerCase() === 'cross-site') {
+    return refusal(
+      400,
+      'VALIDATION_ERROR',
+      'The sign-in hand-off cannot be opened from another site: the app opens it in its own system auth session.',
+    );
+  }
+
   const unknown = unknownQueryParamRefusalMessage(request.queries, ONE_TIME_TOKEN_HANDOFF_QUERY_PARAMS);
   if (unknown !== undefined) return refusal(400, 'VALIDATION_ERROR', unknown);
 
@@ -296,8 +344,18 @@ export async function runOneTimeTokenHandoff(deps: HandoffDeps, request: Handoff
     return refusal(400, 'VALIDATION_ERROR', 'The "code_challenge_method" query parameter accepts only "S256".');
   }
 
-  if (!(await deps.hasSession(request.headers))) {
+  const createdAt = await deps.sessionCreatedAt(request.headers);
+  if (!createdAt) {
     return refusal(401, 'UNAUTHENTICATED', 'Sign in first: the hand-off carries the signed-in session of this browser to the app.');
+  }
+  const ageMs = (deps.now ?? Date.now)() - createdAt.getTime();
+  if (!(ageMs <= ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS * 1000)) {
+    return refusal(
+      401,
+      'UNAUTHENTICATED',
+      `Sign in again: the hand-off carries only a session signed in within the last ${ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS / 60} minutes, ` +
+        'so the app completes a sign-in in its system auth session before every hand-off.',
+    );
   }
 
   const { token } = await withHandoffChallenge(challenge.value, () => deps.generate(request.headers));

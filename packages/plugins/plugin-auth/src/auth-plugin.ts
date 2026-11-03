@@ -4020,8 +4020,9 @@ export class AuthPlugin implements Plugin {
     // the app redeems at better-auth's own `/one-time-token/verify`, bound to
     // the shell's PKCE challenge so an intercepted callback cannot be
     // redeemed. Mounted unconditionally: with no registered scheme every
-    // target is refused with a 400 that says how to register one. Session
-    // required; the reasons for every refusal live in
+    // target is refused with a 400 that says how to register one. A session
+    // signed in within the last five minutes is required, and a cross-site
+    // navigation is refused (ruling A); the reasons for every refusal live in
     // `one-time-token-handoff.ts`. Ledgered in auth-route-ledger.ts.
     rawApp.get(`${basePath}/one-time-token/handoff`, async (c: any) => {
       try {
@@ -4029,9 +4030,11 @@ export class AuthPlugin implements Plugin {
         const answer = await runOneTimeTokenHandoff(
           {
             registeredSchemes: manager.getRegisteredAppSchemes(),
-            hasSession: async (headers) => {
+            sessionCreatedAt: async (headers) => {
               const api: any = await manager.getApi();
-              return Boolean(await api.getSession({ headers }));
+              const live = await api.getSession({ headers });
+              const createdAt = live?.session?.createdAt;
+              return createdAt ? new Date(createdAt) : null;
             },
             generate: async (headers) => {
               const api: any = await manager.getApi();

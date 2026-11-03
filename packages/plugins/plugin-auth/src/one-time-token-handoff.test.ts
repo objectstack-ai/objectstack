@@ -27,6 +27,7 @@ import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import {
   NEVER_APP_SCHEMES,
   ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
+  ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS,
   ONE_TIME_TOKEN_GENERATE_PATH,
   ONE_TIME_TOKEN_HANDOFF_PATH,
   ONE_TIME_TOKEN_VERIFY_PATH,
@@ -108,9 +109,9 @@ const arrange = async (trustedAppSchemes?: string[]) => {
   };
 
   /** GET the hand-off through the Hono app, as the system browser does. */
-  const handoff = (cookie: string | undefined, query: Record<string, string>) =>
+  const handoff = (cookie: string | undefined, query: Record<string, string>, extra: Record<string, string> = {}) =>
     app.request(`${ORIGIN}${BASE}${ONE_TIME_TOKEN_HANDOFF_PATH}?${new URLSearchParams(query)}`, {
-      headers: cookie ? { cookie } : {},
+      headers: { ...(cookie ? { cookie } : {}), ...extra },
     });
 
   /** Hand off and return the token the app callback received. */
@@ -259,9 +260,53 @@ describe('one-time-token hand-off — the redirect goes to a registered app sche
   });
 });
 
+describe('one-time-token hand-off — only a fresh sign-in, opened by the app itself (ruling A)', () => {
+  const query = { redirect_uri: CALLBACK, code_challenge: s256Challenge(VERIFIER) };
+
+  it(`refuses a session older than ${ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS} seconds with 401 and mints nothing`, async () => {
+    const { engine, signIn, handoff } = await arrange();
+    const cookie = await signIn();
+    const before = verificationRows(engine).length;
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS * 1000 + 1_000 });
+    const res = await handoff(cookie, query);
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).error.code).toBe('UNAUTHENTICATED');
+    expect(res.headers.get('location')).toBeNull();
+    expect(verificationRows(engine).length).toBe(before);
+  });
+
+  it('still hands off a session inside the window', async () => {
+    const { signIn, handoff } = await arrange();
+    const cookie = await signIn();
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + ONE_TIME_TOKEN_HANDOFF_SESSION_MAX_AGE_SECONDS * 1000 - 5_000 });
+    expect((await handoff(cookie, query)).status).toBe(302);
+  });
+
+  it('refuses a cross-site navigation with 400 and mints nothing', async () => {
+    const { engine, signIn, handoff } = await arrange();
+    const cookie = await signIn();
+    const before = verificationRows(engine).length;
+    const res = await handoff(cookie, query, { 'sec-fetch-site': 'cross-site' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error.code).toBe('VALIDATION_ERROR');
+    expect(res.headers.get('location')).toBeNull();
+    expect(verificationRows(engine).length).toBe(before);
+  });
+
+  it.each([['none'], ['same-origin'], ['same-site']])('hands off when Sec-Fetch-Site is %s', async (site) => {
+    const { signIn, handoff } = await arrange();
+    expect((await handoff(await signIn(), query, { 'sec-fetch-site': site })).status).toBe(302);
+  });
+
+  it('does not refuse a request that carries no Sec-Fetch-Site at all', async () => {
+    const { signIn, handoff } = await arrange();
+    expect((await handoff(await signIn(), query)).status).toBe(302);
+  });
+});
+
 describe('one-time-token hand-off — the request is validated before anything is minted', () => {
   const generate = vi.fn(async () => ({ token: 'never' }));
-  const deps = { registeredSchemes: [APP_SCHEME], hasSession: async () => true, generate };
+  const deps = { registeredSchemes: [APP_SCHEME], sessionCreatedAt: async () => new Date(), generate };
   const ask = (queries: Record<string, string[]>) => runOneTimeTokenHandoff(deps, { queries, headers: new Headers() });
   const challenge = s256Challenge(VERIFIER);
 
