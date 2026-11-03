@@ -1957,7 +1957,9 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
   {
     code: 'NOT_FOUND',
     shadows: 'RESOURCE_NOT_FOUND',
-    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing. ' +
+    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing; ' +
+      'service-messaging lists the same pre-existing wire value under its own provenance row ' +
+      '(its device-registry unregister 404). ' +
       'Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {

@@ -16,9 +16,12 @@ import { PUSH_DEVICE_PLATFORMS } from './push-device-platform';
  * answers (`INotificationService.listDevices`).
  *
  * Stored in `sys_user_device`, the device registry's table (ADR-0012 §11),
- * which `@objectstack/service-messaging` owns while no push channel plugin
- * exists: its `INotificationService` device members write it, and the device
- * routes under `/api/v1/notifications/devices` are the only door to it.
+ * which `@objectstack/service-messaging` owns: its `INotificationService`
+ * device members write it, the device routes under
+ * `/api/v1/notifications/devices` are the only door to it from outside, and
+ * its `push` channel reads it to address a phone and retires dead tokens in
+ * it. `@objectstack/service-push` holds only the vendor transports and never
+ * touches the table.
  *
  * Three rules the registry owes, stated here because they decide the shape:
  *

@@ -7,14 +7,16 @@ import { strictObject } from '../shared/strict-object';
 /**
  * Push Service Configuration Protocol — the push channel's transports.
  *
- * **Declared ahead of its reader.** Every schema here carries a
- * `[PLANNED — not yet read]` marker in its `.describe()`: nothing reads this
- * shape until the push channel plugin lands, so a value written to it today
- * changes nothing. The marker comes off with the change that wires the reader.
+ * **Read by `@objectstack/service-push`.** `PushServicePlugin` parses its
+ * `config` option with {@link PushServiceConfigSchema} when it initialises and
+ * builds one transport per block; the `push` channel in
+ * `@objectstack/service-messaging` delivers through the push service it
+ * registers.
  *
  * Operator-facing configuration for the `push` channel ADR-0012 §4 ships in
  * core: Apple Push Notification service with token-based auth, and Firebase
- * Cloud Messaging over its HTTP v1 API. It sits beside
+ * Cloud Messaging over its HTTP v1 API (ADR-0012, amended 2026-11-03: the
+ * transports ship as `@objectstack/service-push`). It sits beside
  * `EmailServiceConfigSchema` (`email-config.zod.ts`), the declaration of
  * the email channel's transport selection.
  *
@@ -22,21 +24,21 @@ import { strictObject } from '../shared/strict-object';
  * transport has one secret — the APNs `.p8` signing key and the FCM
  * service-account JSON — and each is named by a `credentialRef`, the same key
  * every other secret an author names is written under (ADR-0143 D3), which
- * the push channel resolves through the secrets layer when it sends (in the
- * open tier, the name of an environment variable). An inline secret is
+ * the push transport resolves through the secrets layer when it first signs
+ * (in the open tier, the name of an environment variable). An inline secret is
  * refused two ways: written under a key an operator would reach for (`key`,
  * `privateKey`, `serviceAccount`, …), it is refused by name with
  * `credentialRef` as the prescription; written into the reference itself, it
  * is refused because a reference is one token — a PEM block carries
  * whitespace and a JSON document carries braces, and a name carries neither.
  *
- * **What reads it, and why it is not a stack key yet.** The push channel
- * plugin (`plugin-notification-push`, ADR-0012 §11) is its one reader, and it
- * is a later change than this declaration. The email transport selection it
- * sits beside is read from `config.email` of the stack definition
- * (`StackEmailConfigSchema`) and `OS_EMAIL_*`; this shape gets its own
- * configuration door in the change that ships the reader, not here, so a key
- * is never authorable before something honours it.
+ * **What reads it, and why it is not a stack key.** `PushServicePlugin`
+ * (`@objectstack/service-push`) is its one reader, through the plugin's
+ * constructor: the host that composes the plugin hands it the value. The email
+ * transport selection it sits beside is read from `config.email` of the stack
+ * definition (`StackEmailConfigSchema`) and `OS_EMAIL_*`; this shape has no
+ * stack-definition key and no `os serve` capability yet, so it is authorable
+ * only where a host composes the plugin.
  *
  * Out of scope here: a hosted (cloud-side) configuration surface, and the
  * other vendors ADR-0012 §6 routes to alternate channel plugins (HMS,
@@ -110,7 +112,7 @@ export const ApnsTransportConfigSchema = lazySchema(() => strictObject(
     credentialRef: secretReference('APNs .p8 signing key')
       .describe('Secrets-layer reference to the .p8 signing key (an environment-variable name in the open tier). Never the key itself'),
   },
-).describe('[PLANNED — not yet read] APNs transport with token-based auth (.p8 signing key by reference)'));
+).describe('APNs transport with token-based auth (.p8 signing key by reference)'));
 export type ApnsTransportConfig = z.input<typeof ApnsTransportConfigSchema>;
 
 /** FCM over the HTTP v1 API, authenticated by a service account. */
@@ -135,7 +137,7 @@ export const FcmTransportConfigSchema = lazySchema(() => strictObject(
     credentialRef: secretReference('FCM service-account JSON')
       .describe('Secrets-layer reference to the service-account JSON (an environment-variable name in the open tier). Never the JSON itself'),
   },
-).describe('[PLANNED — not yet read] FCM HTTP v1 transport (service-account JSON by reference)'));
+).describe('FCM HTTP v1 transport (service-account JSON by reference)'));
 export type FcmTransportConfig = z.input<typeof FcmTransportConfigSchema>;
 
 /**
@@ -152,5 +154,5 @@ export const PushServiceConfigSchema = lazySchema(() => strictObject(
     apns: ApnsTransportConfigSchema.optional().describe('APNs transport (token-based auth). Absent: no delivery to apns devices'),
     fcm: FcmTransportConfigSchema.optional().describe('FCM HTTP v1 transport. Absent: no delivery to fcm devices'),
   },
-).describe('[PLANNED — not yet read] Push channel transport configuration: one optional block per vendor (apns, fcm). Nothing reads it until the push channel plugin ships'));
+).describe('Push channel transport configuration: one optional block per vendor (apns, fcm), read by the push service'));
 export type PushServiceConfig = z.input<typeof PushServiceConfigSchema>;

@@ -108,14 +108,14 @@ describe('PushServiceConfigSchema', () => {
   });
 });
 
-// Declared ahead of its reader (ADR-0049): nothing reads this shape until the
-// push channel plugin ships, and each block says so in its description.
-describe('push transport configuration is declared, not yet read', () => {
+// Read by `PushServicePlugin` (`@objectstack/service-push`, #29041), so no
+// block claims it is unread any more (ADR-0049: a marker states a fact).
+describe('push transport configuration is read', () => {
   it.each([
     ['PushServiceConfigSchema', PushServiceConfigSchema],
     ['ApnsTransportConfigSchema', ApnsTransportConfigSchema],
     ['FcmTransportConfigSchema', FcmTransportConfigSchema],
-  ] as const)('%s carries the PLANNED marker', (_name, schema) => {
-    expect(schema.description).toMatch(/^\[PLANNED — /);
+  ] as const)('%s carries no PLANNED marker', (_name, schema) => {
+    expect(schema.description).not.toMatch(/PLANNED/);
   });
 });

@@ -16,10 +16,10 @@ import { lazySchema } from '../shared/lazy-schema';
  * of string values. On APNs they sit at the top level of the payload, beside
  * `aps`, and never under a `data` key.
  *
- * **Declared ahead of its producer.** No push channel delivers yet, so
- * nothing produces this data today; {@link PushDeliveryDataSchema} carries a
- * `[PLANNED — not yet served]` marker in its `.describe()` until the push
- * channel ships. The route rule below is the contract that channel owes.
+ * **Produced by the `push` channel** (`push-channel.ts` in
+ * `@objectstack/service-messaging`), which builds it per delivery and hands it
+ * to the push service's transports (`@objectstack/service-push`). The route
+ * rule below is the contract that channel keeps.
  *
  * **What `route` is — the inbox's `actionUrl`, derived, never authored.**
  * There is no `notify` key for it. It is the value the inbox already serves:
@@ -86,7 +86,6 @@ export const PushRouteSchema = z.string()
 export type PushRoute = z.input<typeof PushRouteSchema>;
 
 /** The data a push delivery carries to the shell. */
-// The marker comes off when the push channel (#29041) produces this data.
 export const PushDeliveryDataSchema = lazySchema(() => z.object({
   notificationId: z.string().min(1).describe('Notification id — the one the inbox lists and markRead takes'),
   route: PushRouteSchema.optional().describe(
@@ -94,7 +93,6 @@ export const PushDeliveryDataSchema = lazySchema(() => z.object({
     + 'The shell resolves it on tap as the inbox bell and Home do, never verbatim',
   ),
 }).describe(
-  '[PLANNED — not yet served] The data a push delivery carries to the shell: the notification id and its actionUrl as a '
-  + 'same-server route. No push channel delivers yet',
+  'The data a push delivery carries to the shell: the notification id and its actionUrl as a same-server route',
 ));
 export type PushDeliveryData = z.input<typeof PushDeliveryDataSchema>;
