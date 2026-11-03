@@ -42,7 +42,7 @@
  *              to: `review#N` or `domain:<lane>#N`), `stale`, `absent`, `unreadable`
  *              (a line still naming `triage` is unreadable: it hands to nobody).
  *   claim      the `Contract-review-claim:` lines: `live` (who holds the head,
- *              the lane winning a tie), `lapsed`, `none`.
+ *              the earliest live claim), `lapsed`, `none`.
  *   hold       the `Contract-review-hold:` lines, as `contractReviewHold` reads
  *              them, per head: `live` (a readable hold names the current head:
  *              trigger (b) does not fire, and its age is printed), `stale` (the
@@ -332,7 +332,7 @@ export function renderRow(row) {
   const holder = row.claim.holder;
   const claim = holder === null
     ? row.claim.state
-    : `live ${holder.session} (${holder.side}${row.claim.tie ? ', lane wins the tie' : ''}, ${holder.id}, ${holder.time})`;
+    : `live ${holder.session} (${holder.side}${row.claim.tie ? ', a triage claim yields' : ''}, ${holder.id}, ${holder.time})`;
   const parts = [
     `${row.status}  #${row.pr} ${row.draft ? 'draft' : 'ready'}`,
     `face ${row.face.join('+')}`,
@@ -493,7 +493,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the owed face: paths, the Clause-② line, the label — drafts included, nothing else owes': 9,
   'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 8,
   'the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat': 10,
-  'a live claim holds the head and a record settles it; a lapsed claim holds nothing': 5,
+  'a live claim holds the head and a record settles it; a lapsed claim holds nothing': 6,
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
   'the live read: every read through one reader; a failed read is INCOMPLETE, never clean': 6,
   'the report: one line per owing PR, TAKE first, exit 0': 5,
@@ -593,7 +593,8 @@ export function selfTest() {
 
   battery('a live claim holds the head and a record settles it; a lapsed claim holds nothing');
   t('⭐ a live claim on the current head ⇒ HELD, naming the holder — whatever trigger holds', (() => { const r = row({ labels: [{ name: WAITING_LABEL }], comments: [claimRow(TRIAGE, HEAD, '2026-10-28T12:18:56Z', `triage#1 · os-zhuang · ${TRIAGE}`)] }); return r.status === 'HELD' && r.claim.holder.session === TRIAGE && r.trigger === null; })());
-  t('⭐ the lane wins a tie: a `triage#N`-signed claim first (posted before triage stopped reviewing), lane later ⇒ the lane holds', (() => { const r = row({ comments: [claimRow(TRIAGE, HEAD, '2026-10-28T12:18:56Z', `triage#1 · os-zhuang · ${TRIAGE}`), { ...claimRow(LANE, HEAD, '2026-10-28T12:20:00Z', `domain:ui#1 · os-bill · ${LANE}`), id: 2 }] }); return r.status === 'HELD' && r.claim.holder.session === LANE && r.claim.tie === true; })());
+  t('⭐ a legacy `triage#N`-signed claim yields: triage first (posted before triage stopped reviewing), lane later ⇒ the lane holds', (() => { const r = row({ comments: [claimRow(TRIAGE, HEAD, '2026-10-28T12:18:56Z', `triage#1 · os-zhuang · ${TRIAGE}`), { ...claimRow(LANE, HEAD, '2026-10-28T12:20:00Z', `domain:ui#1 · os-bill · ${LANE}`), id: 2 }] }); return r.status === 'HELD' && r.claim.holder.session === LANE && r.claim.tie === true; })());
+  t('⭐ two live claims ⇒ the EARLIEST holds, no tie: a review seat first, the lane later ⇒ the review seat holds, and the row prints no tie', (() => { const r = row({ comments: [claimRow(REVIEWER, HEAD, '2026-10-28T12:18:56Z', `review#1 · os-zhuang · ${REVIEWER}`), { ...claimRow(LANE, HEAD, '2026-10-28T12:20:00Z', `domain:ui#1 · os-bill · ${LANE}`), id: 2 }] }); return r.status === 'HELD' && r.claim.holder.session === REVIEWER && r.claim.tie === false && !renderRow(r).includes('yields'); })());
   t('a record on the head settles it even beside a live claim ⇒ DONE', row({ comments: [claimRow(TRIAGE, HEAD, '2026-10-28T12:18:56Z', `triage#1 · os-zhuang · ${TRIAGE}`), recordRow(HEAD)] }).status === 'DONE');
   t('⛔ a claim two hours old with no record holds nothing ⇒ the trigger reads again', (() => { const r = row({ comments: [claimRow(TRIAGE, HEAD, '2026-10-28T10:30:00Z', `triage#1 · os-zhuang · ${TRIAGE}`)] }); return r.claim.state === 'lapsed' && r.status === 'TAKE'; })());
   t('⛔ a claim on an earlier head holds nothing — the head moved', row({ comments: [claimRow(TRIAGE, HEAD2, '2026-10-28T12:50:00Z', `triage#1 · os-zhuang · ${TRIAGE}`)] }).claim.state === 'none');
@@ -699,7 +700,7 @@ export function selfTest() {
   console.log(
     `✓ check-owed-reviews self-test: ${cases.length} cases pass in ${declared.length} batteries (the owed face from paths, `
       + 'the Clause-② line and the label, drafts included; the record on this head, an earlier head, none, unjudged; '
-      + 'the (a) / (b) / (c) triggers and the taker — the named seat, the lane seat or a review seat, never triage; claims holding and lapsing, the lane winning a tie; the two live drafts as TAKE; '
+      + 'the (a) / (b) / (c) triggers and the taker — the named seat, the lane seat or a review seat, never triage; claims holding and lapsing, the earliest live claim holding; the two live drafts as TAKE; '
       + 'every read through one reader with failures as gaps; the report, exit 0; a lane\'s live hold holding (b) alone, '
       + 'cleared by a new head, an unreadable hold line voiding nothing and printed, listed at 24 hours and still WAIT).',
   );

@@ -25,7 +25,7 @@
 - (c) 车道收班或离总表:欠审入交班简报待下席或复审席;清单 `scripts/pm/check-owed-reviews.mjs`。
 - 车道或复审席起审前读 PR:现 head 有记录或活认领 ⇒ ⛔ 不起;否则先落认领行,一 head 一行:
 - `Contract-review-claim: <session> · head <full sha> · <UTC>`
-- 认领随 head 移动或贴后 2 小时无记录失效;同 head 双认 ⇒ 车道胜,他方回帖撤回、弃产出。
+- 认领随 head 移动或贴后 2 小时无记录失效;双认 ⇒ 先贴者持有,后者回帖撤回、弃产出。
 - 车道暂缓本 head 送审落 `Contract-review-hold: <session> · head <sha> · <reason> · until <condition>`
 - 新 head 即清;点名现 head 时 (b) 不起;条件满足由持有车道挂等复核标记或落交接行。
 - 逾 24 小时条件未满的 hold 列入分诊轮次记录(`check-owed-reviews.mjs` 标出)。
