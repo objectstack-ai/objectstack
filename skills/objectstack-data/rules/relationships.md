@@ -177,7 +177,8 @@ cleared; a `multiple` field loses only that member — or an authored `cascade` 
 `restrict`), and a `user` field only when it declares a value: deleting the user
 then cascades, clears or refuses exactly as a `lookup` does; undeclared, the
 field keeps the deleted user's id. `restrict`, and `set_null` on a `required`
-field, refuse the delete with `409 DELETE_RESTRICTED`.
+field (a `multiple` one only when the removal would empty it), refuse the delete
+with `409 DELETE_RESTRICTED`.
 
 ## Roll-up Summaries
 
