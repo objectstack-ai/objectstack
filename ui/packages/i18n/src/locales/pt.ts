@@ -4581,6 +4581,7 @@ const pt = {
     changes: {
       title: 'Alterações pendentes',
       description: 'O que a publicação vai mudar. Itens novos são adicionados; atualizações sobrescrevem a versão publicada.',
+      savedToCustomization: 'Salvo nas personalizações de {{package}}',
       loading: 'Carregando alterações pendentes…',
       loadFailed: 'Não foi possível carregar as alterações pendentes:',
       empty: 'Nada pendente — todos os rascunhos foram publicados.',
