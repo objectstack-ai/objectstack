@@ -408,6 +408,8 @@ describe('CONTROLS: every step the fix takes, failing, leaves the write naming t
     });
 
     it('a read-only base that records no version, its pair installed, keeps the write naming it: there is no `basedOn` to declare', async () => {
+        // The ensure door answers an installed pair without reading the base's
+        // version, so this is the version step's own case.
         const { protocol, rows } = makeProtocol();
 
         const saved = await protocol.saveMetaItem({
