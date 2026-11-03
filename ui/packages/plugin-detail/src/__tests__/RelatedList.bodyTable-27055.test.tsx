@@ -97,6 +97,9 @@ describe('RelatedList — the body-table face (objectstack#27055)', () => {
     expect(document.querySelector('[data-body-table-totals]')).toBeNull();
     expect(document.querySelector('[data-related-card-enlarge]')).toBeNull();
     expect(screen.getByText(/View all/i)).toBeInTheDocument();
+    // objectstack#29945 — every data-table header, not only a body table's,
+    // carries its whole label for a hover the ellipsis would cut.
+    expect(document.querySelector('thead th span[title="Quantity"]')?.textContent).toBe('Quantity');
   });
 });
 
