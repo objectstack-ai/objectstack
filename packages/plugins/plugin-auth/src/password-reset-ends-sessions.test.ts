@@ -21,13 +21,19 @@
  *    sessions on every reset door;
  *  - an explicit `revokeSessionsOnPasswordReset: false` is refused at
  *    construction and on a configuration patch, where the standing
- *    configuration keeps ruling; `true` is accepted.
+ *    configuration keeps ruling; `true` is accepted;
+ *  - a session a password reset ends leaves a revocation trail: on each reset
+ *    door every session the account held is still a `sys_session` row
+ *    afterwards, stamped `revoked_at` and `revoke_reason: password_reset`, and
+ *    it still answers 401; the control, an administrator's forced reset over
+ *    the same engine, stamps `admin_password_reset` instead.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
+import { runAdminSetUserPassword, type AdminUserEndpointDeps } from './admin-user-endpoints.js';
 import { authIdentityObjects } from './manifest.js';
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
@@ -206,6 +212,116 @@ describe("a completed phone OTP reset ends the account's other sessions", () => 
     const fresh = await post(a.manager, '/sign-in/email', { email: EMAIL, password: SECOND });
     expect(fresh.status, await fresh.clone().text()).toBe(200);
     expect(await answer(await getSession(a.manager, cookieFrom(fresh)))).toEqual({ status: 200, email: EMAIL });
+  }, 60_000);
+});
+
+describe('a session a password reset ends leaves a revocation trail', () => {
+  type SessionRow = { id: string; expires_at?: unknown; revoked_at?: unknown; revoke_reason?: unknown };
+
+  /** The account's `sys_session` rows, read off the table the way an auditor reads them. */
+  async function sessionRowsOf(engine: ObjectQL): Promise<SessionRow[]> {
+    const [user] = (await engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    return (await engine.find('sys_session', { where: { user_id: user.id } }, SYS)) as SessionRow[];
+  }
+
+  /** The sessions the account holds before the reset: at least one, none of them ended. */
+  async function liveSessionsBefore(a: Account): Promise<SessionRow[]> {
+    const before = await sessionRowsOf(a.engine);
+    expect(before.length).toBeGreaterThan(0);
+    expect(before.map((row) => row.revoked_at ?? null)).toEqual(before.map(() => null));
+    return before;
+  }
+
+  /**
+   * Every session in `before` is still a row, stamped with when and why it
+   * ended, and the session signed in before the reset is refused.
+   */
+  async function expectTrail(a: Account, before: SessionRow[], reason: string, startedAt: number): Promise<void> {
+    const after = new Map((await sessionRowsOf(a.engine)).map((row) => [row.id, row]));
+    for (const { id } of before) {
+      const row = after.get(id);
+      expect({ id, kept: row !== undefined }).toEqual({ id, kept: true });
+      expect(row!.revoke_reason).toBe(reason);
+      const revokedAt = new Date(row!.revoked_at as string).getTime();
+      expect(Number.isFinite(revokedAt)).toBe(true);
+      // Whole-second storage may round the stamp down, never ahead of now.
+      expect(revokedAt).toBeGreaterThanOrEqual(startedAt - 1000);
+      expect(revokedAt).toBeLessThanOrEqual(Date.now());
+      expect(new Date(row!.expires_at as string).getTime()).toBeLessThan(Date.now());
+    }
+    expect(await answer(await getSession(a.manager, a.earlier))).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
+  }
+
+  it('the emailed-link reset (/reset-password) stamps every earlier session password_reset, and the session still answers 401', async () => {
+    const a = await signedInAccount();
+    const token = await requestResetToken(a);
+    const before = await liveSessionsBefore(a);
+    const startedAt = Date.now();
+
+    const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+    expect(reset.status, await reset.clone().text()).toBe(200);
+
+    await expectTrail(a, before, 'password_reset', startedAt);
+  }, 60_000);
+
+  it('the phone OTP reset (/phone-number/reset-password) stamps every earlier session password_reset, and the session still answers 401', async () => {
+    const PHONE = '+15550143';
+    const a = await signedInAccount({ plugins: { phoneNumber: true } });
+    const texts: Array<{ to: string; templateParams?: { code?: string } }> = [];
+    a.manager.setSmsService({
+      async send(input: { to: string; templateParams?: { code?: string } }) {
+        texts.push(input);
+        return { id: `sms${texts.length}`, status: 'sent' };
+      },
+      isConfigured: () => true,
+    } as never);
+    const [user] = (await a.engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    await a.engine.update('sys_user', { id: user.id, phone_number: PHONE, phone_number_verified: true }, SYS);
+    const requested = await post(a.manager, '/phone-number/request-password-reset', { phoneNumber: PHONE });
+    expect(requested.status, await requested.clone().text()).toBe(200);
+    await vi.waitFor(() => expect(texts.map((t) => t.to)).toEqual([PHONE]));
+    const otp = String(texts[0].templateParams?.code ?? '');
+    expect(otp, 'the reset text carries its code').not.toBe('');
+    const before = await liveSessionsBefore(a);
+    const startedAt = Date.now();
+
+    const reset = await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND });
+    expect(reset.status, await reset.clone().text()).toBe(200);
+
+    await expectTrail(a, before, 'password_reset', startedAt);
+  }, 60_000);
+
+  it("the control: an administrator's forced reset still stamps admin_password_reset, so the value says who ended the session", async () => {
+    const a = await signedInAccount();
+    const before = await liveSessionsBefore(a);
+    const [user] = (await a.engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    const m = a.manager;
+    const quiet = { warn() {}, info() {}, error() {}, debug() {} };
+    // The deps `auth-plugin.ts` hands the forced-reset door, built from the same manager.
+    const deps = {
+      getAuthApi: () => m.getApi(),
+      getAuthContext: () => m.getAuthContext(),
+      getDataEngine: () => m.getDataEngine(),
+      assertPasswordComplexity: (pw: string) => m.checkPasswordComplexity(pw),
+      noteMustChangePasswordIssued: () => m.noteMustChangePasswordIssued(),
+      phoneNumberEnabled: () => m.isPhoneNumberEnabled(),
+      getMembershipPolicy: () => m.getMembershipPolicy(),
+      logger: quiet,
+    } as unknown as AdminUserEndpointDeps;
+    const startedAt = Date.now();
+
+    const forced = await runAdminSetUserPassword(
+      deps,
+      new Request(`${AUTH}/admin/set-user-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', origin: BASE },
+        body: JSON.stringify({ userId: user.id, newPassword: SECOND }),
+      }),
+      { id: 'admin-control', email: 'admin-control@example.com' },
+    );
+    expect(forced.status, JSON.stringify(forced.body)).toBe(200);
+
+    await expectTrail(a, before, 'admin_password_reset', startedAt);
   }, 60_000);
 });
 
