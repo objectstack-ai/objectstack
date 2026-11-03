@@ -23,4 +23,9 @@ export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_http_delivery.fields.status.help": "e437ecf81dfb4715",
   "objects.sys_notification_delivery.fields.display_title.label": "70f7aadecce647a5",
   "objects.sys_notification_preference.fields.display_title.label": "70f7aadecce647a5",
+  "objects.sys_user_device.fields.platform.options.android": "44fa27bdaae7f812",
+  "objects.sys_user_device.fields.platform.options.ios": "461f32943613be91",
+  "objects.sys_user_device.fields.platform.options.web": "2a7ead3da8c035c5",
+  "objects.sys_user_device.fields.vendor.options.apns": "b6edcf327f308698",
+  "objects.sys_user_device.fields.vendor.options.fcm": "fc3b030ffd243df4",
 };

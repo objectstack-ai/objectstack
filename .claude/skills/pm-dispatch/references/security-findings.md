@@ -52,5 +52,11 @@
 
 ## 8. 一处成文
 
-- 立卡门、server 车道、信箱、`checklist-test` 与 `os-dev` 只指向本文,⛔ 不留第二份。
+- 立卡门、server 与 security 车道、信箱、`checklist-test` 与 `os-dev` 只指向本文,⛔ 不留第二份。
 - ⛔ 本规则不新增门禁、不新增标签。
+
+## 9. 归属:`security#1` 席
+
+- 每份安全发现从接收到发布归 `security#1` 席(章程 `lanes/security.md`),⛔ 不归发现者。
+- 发现者只做两件:经中继 `advisory_create` 建草稿;向该席敲 `Notify: security · GHSA-ID`,只带编号。
+- 中继拒(第 3 节)⇒ 机制在会话里交 `security#1` 席;席空缺 ⇒ 交维护者;发布恒归维护者。

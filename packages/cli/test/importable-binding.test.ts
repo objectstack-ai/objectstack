@@ -52,7 +52,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ts } from 'ts-morph';
+import ts from 'typescript';
 import { namedImportDiagnostics, findBarrelAliasRefusal } from '../src/utils/importable-binding.js';
 
 /** Reserved in every context — illegal as an import binding, always. */

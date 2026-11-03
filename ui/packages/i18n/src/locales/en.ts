@@ -1393,6 +1393,10 @@ const en = {
       pin: 'Pin: open this view by default',
       unpin: 'Unpin: the list opens its default view again',
       inMenu: 'Already in the menu',
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: 'My views',
+      saveAsMyView: 'Save as my view',
+      myViewName: 'View name',
     },
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
