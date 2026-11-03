@@ -4252,16 +4252,22 @@ export class SchemaRegistry {
    * first and refuse the publish with the registry's own envelope — the same
    * shape as the ADR-0029 D9.9 representability refusal they already ask.
    *
-   * Covers the doors that judge the body itself. The single-owner rule is
-   * the protocol's own question (`classifyObjectContribution`), and a code
-   * package's action parse never judges a tenant-authored body.
+   * Covers the doors that judge the body ALONE. The record-currency
+   * `summary` door is left out: it judges the body against the registry as it
+   * stands (the pair is judged at whichever registration completes it), so
+   * asked of a draft before its batch registers it answers both ways wrong —
+   * it refuses a draft whose sibling in the same batch takes the child amount
+   * out of record-currency mode, and it passes one whose sibling completes the
+   * pair. It stays the registration's own question. The single-owner rule is
+   * the protocol's (`classifyObjectContribution`), and a code package's action
+   * parse never judges a tenant-authored body.
    */
   objectRegistrationRefusal(
     schema: ServiceObject,
     packageId?: string,
     ownership: ObjectOwnership = 'own',
   ): Error | null {
-    const door = this.judgeRegistrationDoors(schema, packageId, ownership);
+    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: true });
     return 'refusal' in door ? door.refusal : null;
   }
 
@@ -4269,12 +4275,15 @@ export class SchemaRegistry {
    * [#29673] The registration doors of {@link registerObject}, moved here
    * whole so {@link objectRegistrationRefusal} asks exactly what the
    * registration throws: the refusal, or the body to register (an `extend`
-   * body re-keyed to the object it extends).
+   * body re-keyed to the object it extends). `bodyOnly` skips the one door
+   * that reads the registry's other objects (see
+   * {@link objectRegistrationRefusal}).
    */
   private judgeRegistrationDoors(
     schema: ServiceObject,
     packageId: string | undefined,
     ownership: ObjectOwnership,
+    opts: { bodyOnly?: boolean } = {},
   ): { refusal: Error } | { schema: ServiceObject } {
     // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
     // its position is the whole point.
@@ -4328,6 +4337,9 @@ export class SchemaRegistry {
       const target = this.extensionTargetKey(String(schema.name ?? ''), packageId);
       if (target !== schema.name) schema = { ...schema, name: target };
     }
+    // [#29673] The pre-flight question stops here: the door below reads the
+    // registry's other objects, not the body alone.
+    if (opts.bodyOnly) return { schema };
     // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
     // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
     // their own currency — is refused here, the door every metadata path
