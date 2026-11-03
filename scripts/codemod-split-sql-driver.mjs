@@ -96,15 +96,20 @@
  * emitted in source order or sorted, and the output is a pure function of the
  * input: two runs on one input write byte-identical trees.
  *
- * ts-morph is resolved through `@objectstack/cli`'s dependency closure
- * (`packages/cli/package.json` declares `ts-morph`), the way other root
- * scripts resolve a tool through the package that declares it; the root adds
- * no dependency for it.
+ * ts-morph is a root devDependency (`package.json` declares `ts-morph`
+ * `^28.0.0`), the way the other root scripts take `typescript`, `yaml` or
+ * `semver`: it is resolved from the root manifest, so a fresh
+ * `pnpm install --frozen-lockfile` is all this script needs. It used to borrow
+ * `@objectstack/cli`'s closure; #29711 dropped `ts-morph` from the CLI, and no
+ * workspace package declares it.
  *
  * Exit codes: 0 done · 1 a proof failed (stop: the generated split is never
  * hand-edited to pass) · 2 the script could not run (unknown banner, missing
  * prerequisite, bad arguments) · 3 an input does not parse (`ts-parse.mjs`'s
- * refusal, which names the parse errors).
+ * refusal, which names the parse errors). A tree with no install at all stops
+ * before this script's own ts-morph check: `ts-parse.mjs` loads `typescript`
+ * through `import-prerequisite.mjs`, whose refusal is also exit 3 and names
+ * `pnpm install`.
  */
 
 import { createHash } from 'node:crypto';
@@ -303,10 +308,10 @@ const TOP_STAY_REASONS = Object.freeze({
 
 let tsMorph = null;
 
-/** ts-morph through `@objectstack/cli`'s closure; a missing install is exit 2, never a stack trace. */
+/** ts-morph from the root manifest's devDependencies; a missing install is exit 2, never a stack trace. */
 async function loadTsMorph() {
   if (tsMorph) return tsMorph;
-  const manifest = join(ROOT, 'packages', 'cli', 'package.json');
+  const manifest = join(ROOT, 'package.json');
   try {
     const resolved = createRequire(manifest).resolve('ts-morph');
     const mod = await import(pathToFileURL(resolved).href);
