@@ -340,10 +340,15 @@ shell; the bridge contract is owned by the mobile app (`docs/HYBRID-SHELL.md`,
   loading cover on it, so the cover hands over to that spinner instead of staying up
   through the session round-trip.
 - `nativeGetPushToken`, `nativeHaptic`, `nativeOpenExternal`, `nativeNavigate`,
-  `nativeResetServer` and `nativeShowConnectionSwitcher` check `has(capability)` and
+  `nativeResetServer`, `nativeShowConnectionSwitcher`, `nativePickImage`,
+  `nativeOpenFile` and `nativeShare` check `has(capability)` and
   that the method exists before calling. They never throw: each resolves
   `{ status: 'unavailable' }` without the capability, `{ status: 'ok', value }` on
   success, or `{ status: 'failed', code, message }` when the shell refuses the call.
+- Files cross the bridge as base64 bytes, never as a URL, up to
+  `NATIVE_FILE_MAX_BYTES` (8 MiB): `fileFromNativeFile` turns what `nativePickImage`
+  resolves into an uploadable `File`, and `nativeFileFromBlob` turns bytes the page
+  fetched with its own session into what `nativeOpenFile` takes.
 - `nativeHostCan(host, method)` is that same check, for a control that picks its
   native or web path before it renders (the header's organization button opens the
   shell's switcher this way).
