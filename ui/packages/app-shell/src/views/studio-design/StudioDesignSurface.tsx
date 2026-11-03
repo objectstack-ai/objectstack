@@ -5280,7 +5280,17 @@ export function InterfacesPillar({
         // buffer is installed over it, so nothing is shown to edit and the
         // autosave has nothing to send: a buffer seeded from the published
         // layer would be saved over the draft, dropping its keys and its gate.
+        // objectstack#29884 — and a buffer already stamped as this leaf's is
+        // taken back: the `{}` the no-designer arm above installs while the
+        // built-in designers are still loading, or the body an earlier read of
+        // this leaf installed before a reload. A stamped buffer is a loaded one
+        // to the autosave, the canvas, the inspector and the item tools.
         if ('refused' in draftRead) {
+          setDraft({});
+          setDraftFor('');
+          forgetLeafVersion();
+          leafReadAtRef.current = null;
+          setIfDirty(false);
           setError({
             message: t('engine.studio.refusal.draftUnreadable', locale),
             detail: formatMetadataError(draftRead.refused),
