@@ -2269,6 +2269,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.bannerTitle':
     '此矩阵仅列出本包声明的对象,「Save」只合并本包切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效(与数据、界面一致)。',
   'engine.studio.access.banner': '仅本包对象 · 保存为草稿',
+  // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
+  'engine.studio.access.bannerPair': '本包及 {package} 的对象 · 保存为草稿',
+  'engine.studio.access.bannerTitlePair':
+    '此权限集位于 {package} 的定制包中，因此矩阵除本包声明的对象外，也列出 {package} 的对象；「Save」只合并这一切片 —— 其他包贡献的授权原样保留。编辑保存为软件包草稿,点击顶栏「发布」后随整个包一起生效。',
   'engine.studio.access.bannerTitleReadOnly':
     '此矩阵仅列出本包声明的对象。本软件包为只读:其权限集可在此查看,但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)

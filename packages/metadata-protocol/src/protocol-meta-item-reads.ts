@@ -117,9 +117,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [#26707] A served DRAFT is decorated as above and then told what its
     // publish would refuse: the runtime gate's verdict on the stored draft
     // body ({@link draftPublishVerdict}), folded into `_diagnostics`
-    // ({@link withPublishVerdict}). Judged on the row as stored — the body
-    // the promotion judges — never on the governed, converted or redacted
-    // copy this read serves. The execution face serves no `_diagnostics`.
+    // ({@link withPublishVerdict}). Handed the row as stored — the body the
+    // promotion reads, and [#29557] converts for its verdict exactly as the
+    // promotion does — never the governed, converted or redacted copy this
+    // read serves. The execution face serves no `_diagnostics`.
     const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
         const served = await serveFormLayout(serveItem(resolved));
         if (execution || !served || typeof served !== 'object') return served;

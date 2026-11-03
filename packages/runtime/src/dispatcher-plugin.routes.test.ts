@@ -138,17 +138,22 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
   // domain's floor can only answer a verb that is mounted. No sub-path beyond
   // the three faces is mounted. The wire answer is pinned in
   // `notifications-every-verb.hono.integration.test.ts`.
-  it('mounts every verb on each of the three /notifications faces, and no sub-path beyond them', async () => {
+  it('mounts every verb on each of the five /notifications faces, and no sub-path beyond them', async () => {
     const { server, routes } = makeFakeServer();
     const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
     await plugin.start?.(makeCtx(server));
 
-    for (const face of ['/notifications', '/notifications/read', '/notifications/read/all']) {
+    // The three inbox faces, and the device registry's two (ADR-0012 §6).
+    const faces = [
+      '/notifications', '/notifications/read', '/notifications/read/all',
+      '/notifications/devices', '/notifications/devices/:deviceId',
+    ];
+    for (const face of faces) {
       for (const verb of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
         expect(routes.filter((r) => r === `${verb} /api/v1${face}`), `${verb} ${face}`).toHaveLength(1);
       }
     }
-    expect(routes.filter((r) => r.includes('/notifications'))).toHaveLength(15);
+    expect(routes.filter((r) => r.includes('/notifications'))).toHaveLength(25);
   });
 
   it('also mounts a known existing route (sanity that start() ran)', async () => {

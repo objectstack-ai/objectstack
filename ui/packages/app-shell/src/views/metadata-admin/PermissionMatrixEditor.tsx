@@ -149,6 +149,7 @@ import {
   type ObjectPermFlag,
   type FieldPerm,
   type PermissionSetDraft,
+  permissionObjectScopePackages,
 } from './permission-slice.js';
 import type { ObjectAccessScope } from '@objectstack/spec/security';
 
@@ -978,8 +979,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           // first publish: each pending draft is served with a `_draft` mark
           // (the object picker's read, `useObjectCatalog`). The environment
           // door keeps the published list: only the package door authors drafts.
+          // objectstack#29674 — a pair's set is scoped to its base's objects
+          // too (`permissionObjectScopePackages`), each list read the same way.
           (packageId
-            ? client.withPreviewDrafts(true).list<any>('object', { packageId })
+            ? Promise.all(
+                permissionObjectScopePackages(packageId).map((scopeId) =>
+                  client.withPreviewDrafts(true).list<any>('object', { packageId: scopeId }),
+                ),
+              ).then((lists) => lists.flat())
             : client.list<any>('object', {})
           ).catch(() => []),
           draftReadForSave,
@@ -1038,7 +1045,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               ...(item?._draft === true ? { draft: true } : {}),
             };
           })
-          .filter((o) => !!o.name)
+          // One row per object: a name two scope packages both answer keeps
+          // the first one's row (the set's own package lists first).
+          .filter((o, i, rows) => !!o.name && rows.findIndex((r) => r.name === o.name) === i)
           .sort((a, b) => a.name.localeCompare(b.name));
         setObjects(list);
         const full: PermissionSetDraft = {

@@ -25,7 +25,9 @@
  *  - a walled admin (a group posture, not the platform operator) sees
  *    Customize disabled, and the platform operator does not;
  *  - CONTROL: a base with no pair keeps the read-only Publish and reviews
- *    the base, as before.
+ *    the base, as before;
+ *  - objectstack#29691: reviewing the pair, the panel is handed the base's
+ *    label for its "saved to" sentence, and nothing without a pair.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -78,8 +80,16 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({
-  DraftChangesPanel: ({ packageId, onPublish }: { packageId: string | null; onPublish?: () => void | Promise<void> }) => (
-    <div data-testid="changes-panel" data-package={packageId ?? ''}>
+  DraftChangesPanel: ({
+    packageId,
+    onPublish,
+    customizationOf,
+  }: {
+    packageId: string | null;
+    onPublish?: () => void | Promise<void>;
+    customizationOf?: string;
+  }) => (
+    <div data-testid="changes-panel" data-package={packageId ?? ''} data-customization-of={customizationOf ?? ''}>
       {onPublish && (
         <button type="button" data-testid="publish-all-drafts" onClick={() => void onPublish()}>
           publish
@@ -233,6 +243,8 @@ function renderWorkbench() {
 
 const publishButton = () => screen.getByRole('button', { name: /^Publish/ });
 const panelPackage = () => screen.getByTestId('changes-panel').getAttribute('data-package');
+/** The base label the host hands the sheet's "saved to" sentence (objectstack#29691); '' when none. */
+const panelCustomizationOf = () => screen.getByTestId('changes-panel').getAttribute('data-customization-of');
 const header = () => screen.getByTestId('if-item-header');
 
 async function openPipeline(): Promise<void> {
@@ -246,6 +258,8 @@ describe('a read-only base with its pair listed: Pending, the panel and Publish 
     renderWorkbench();
 
     await waitFor(() => expect(panelPackage()).toBe(PAIR), { timeout: 8000 });
+    // objectstack#29691 — the sheet names the base the pair's drafts are saved for.
+    expect(panelCustomizationOf()).toBe('HotCRM');
     await waitFor(() => expect(srv.reads).toContain(`/api/v1/meta/_drafts?packageId=${encodeURIComponent(PAIR)}`));
     await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
     expect(publishButton().parentElement).not.toHaveAttribute('data-disabled-reason');
@@ -259,6 +273,7 @@ describe('a read-only base with its pair listed: Pending, the panel and Publish 
     await waitFor(() => expect(publishButton().parentElement).toHaveAttribute('data-disabled-reason'), { timeout: 8000 });
     expect(publishButton()).toBeDisabled();
     expect(panelPackage()).toBe(BASE);
+    expect(panelCustomizationOf()).toBe('');
     expect(screen.queryByTestId('publish-all-drafts')).toBeNull();
   });
 });
@@ -278,6 +293,7 @@ describe('end to end: the first edit makes the pair, and Pending and Publish fol
     expect(saved!.body).toStrictEqual({ ...PIPELINE, label: 'Pipeline (ours)', overrides: { package: BASE, basedOn: '4.0.0' } });
 
     await waitFor(() => expect(panelPackage()).toBe(PAIR), { timeout: 8000 });
+    expect(panelCustomizationOf()).toBe('HotCRM');
     await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
     fireEvent.click(screen.getByTestId('publish-all-drafts'));
     await waitFor(() => expect(srv.publishes).toEqual([PAIR]));

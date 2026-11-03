@@ -45,7 +45,8 @@
  *   ({@link externalBindingDatasourceRefusal}), and the one-name-per-action
  *   judge of the object refinement ({@link duplicateActionNames}), and the
  *   one-key-per-global-filter judge of the dashboard refinement
- *   ({@link duplicateGlobalFilterNames}), and the `fieldPatches` key
+ *   ({@link duplicateGlobalFilterNames}), and its reserved-`dateRange` judge
+ *   ({@link reservedDateRangeGlobalFilters}), and the `fieldPatches` key
  *   grammar of `ObjectExtensionSchema`'s own parse
  *   ({@link refusedFieldPatchKeys}). A site is listed here exactly
  *   when that door refuses it. One door lives outside this package: the
@@ -73,7 +74,11 @@ import { duplicateActionNames } from '../data/duplicate-action-names.js';
 import { externalBindingDatasourceRefusal } from '../data/external-binding-datasource.js';
 import { ObjectExtensionSchema } from '../data/object.zod.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
-import { duplicateGlobalFilterNames } from '../ui/duplicate-global-filter-names.js';
+import {
+  duplicateGlobalFilterNames,
+  RESERVED_DATE_RANGE_FILTER_NAME,
+  reservedDateRangeGlobalFilters,
+} from '../ui/duplicate-global-filter-names.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
 import { refusedHasArguments } from './cel-has-argument.js';
 import type { ConversionTodoDetail } from './types.js';
@@ -587,6 +592,32 @@ const dashboardDuplicateGlobalFilterName: RefusedStoredShape = {
   },
 };
 
+// ── #29541: a dashboard whose globalFilters entry reuses the reserved key `dateRange` (the #29213 refusal) ──
+
+const dashboardReservedDateRangeGlobalFilter: RefusedStoredShape = {
+  id: 'ui-dashboard-global-filter-reserved-date-range-refused',
+  toMajor: 18,
+  surface: 'dashboard.globalFilters — an entry keyed `dateRange` (its `name`, or its `field` when it has no '
+    + '`name`) on a dashboard that also declares the built-in `dateRange`',
+  detect(stack, report) {
+    mapCollection(stack, 'dashboards', (dashboard, path) => {
+      for (const entry of reservedDateRangeGlobalFilters(dashboard.dateRange, dashboard.globalFilters)) {
+        report({
+          // The site the dashboard parse refuses: the entry's `name`, or its `field`.
+          path: `${path}.globalFilters[${entry.index}].${entry.key}`,
+          from: JSON.stringify({ name: RESERVED_DATE_RANGE_FILTER_NAME, index: entry.index }),
+          reason: 'No lossless rewrite: whether the entry was meant to be the date range or a filter of its own, '
+            + 'and which widget `filterBindings.dateRange` keys mean it, only the author knows. Left as stored, '
+            + 'the dashboard still loads with `_diagnostics` reading `valid: false`, and its next save, draft or '
+            + 'publish, is refused with 422 INVALID_METADATA. '
+            + entry.message,
+        });
+      }
+      return dashboard;
+    });
+  },
+};
+
 // ── #29554: an object extension whose `fieldPatches` key cannot be a field name (the #29366 refusal) ──
 
 /**
@@ -647,6 +678,7 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
   visibilityHasArgument,
   objectDuplicateActionName,
   dashboardDuplicateGlobalFilterName,
+  dashboardReservedDateRangeGlobalFilter,
   objectExtensionFieldPatchKeyGrammar,
 ];
 
