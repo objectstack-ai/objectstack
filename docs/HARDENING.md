@@ -260,7 +260,7 @@ ObjectStack uses [better-auth](https://www.better-auth.com/) via
 | Session TTL       | 7 days                                    | `session.expiresIn` (seconds)             |
 | Access token TTL  | inherited from session                    | configure in better-auth                  |
 | Refresh           | better-auth `/auth/get-session` rolls TTL | `session.updateAge` (seconds)             |
-| Revocation        | DELETE on `session` row; a completed password reset ends every session of the account | — always on (`revokeSessionsOnPasswordReset: false` is refused at boot) |
+| Revocation        | Sign-out deletes the `session` row. A revoke, and a completed password reset (which ends every session of the account), keep the row stamped `revoked_at` / `revoke_reason` (`password_reset` for the reset) and refuse it | — always on (`revokeSessionsOnPasswordReset: false` is refused at boot) |
 | Idle / absolute / concurrent caps | Off (opt-in)              | `session_idle_timeout_minutes` / `session_absolute_max_hours` / `max_concurrent_sessions_per_user` (Setup → Authentication) |
 | Email verify TTL  | 1 hour                                    | `emailVerification.expiresIn`             |
 

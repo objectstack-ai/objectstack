@@ -369,7 +369,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "失効理由",
-        help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended、admin_password_reset など）。"
+        help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset など）。"
       },
       active_organization_id: {
         label: "アクティブ組織"

@@ -150,6 +150,28 @@
  * are visible again and are physically deleted. Keeping an audit row about a
  * user the deployment has erased is the wrong trade.
  *
+ * ## The password-reset doors
+ *
+ * A completed self-service password reset ends every session the account
+ * holds (`password-reset-ends-sessions.ts`), and a session it ends leaves the
+ * same kind of trail an interactive revoke leaves, so the reset doors are in
+ * {@link INTERACTIVE_REVOKE_REASON} with their own value, `password_reset`.
+ * The seam is the same one: measured against the installed better-auth
+ * `1.7.12`, every reset door runs `resetCredentialPassword`
+ * (`dist/utils/password.mjs`), which ends the sessions with
+ * `internalAdapter.deleteUserSessions`; with no `secondaryStorage` that is
+ * `deleteManyWithHooks` (`dist/db/with-hooks.mjs`), which calls this
+ * adapter's `deleteMany` inside the endpoint's own context — and `deleteMany`
+ * reconciles every row it matched. The transaction the reset runs in does not
+ * change that: outside a SCIM request the adapter's `transaction` hands the
+ * callback this same adapter.
+ *
+ * They are revocations, not erasures: the account outlives the reset — its
+ * owner signs in again with the new password — so its tombstones stay hidden
+ * like any other and are never in {@link SESSION_ERASURE_PATHS}. The reset
+ * revokes no API key and writes no `logout` audit row; both stay out of this
+ * ledger's reach.
+ *
  * ## Deliberately NOT in the revoke ledger
  *
  * `POST /admin/ban-user` and `POST /admin/update-user` (with `banned: true`)
@@ -172,13 +194,13 @@ import { SystemObjectName } from '@objectstack/spec/system';
  * Paths are better-auth's own (`endpoint.path`), i.e. without the
  * `/api/v1/auth` base — that is what `getCurrentAuthContext().path` carries.
  *
- * ## The two values, and why not one
+ * ## The values, and why not one
  *
  * `revoked_at`'s declared description names the interactive cause `admin`;
  * `revoke_reason` is free text (`Field.text({ maxLength: 64 })`) whose
- * description gives an open-ended list — `idle_timeout, absolute_max,
- * concurrent_cap, …`. There is no closed enum to violate, and
- * `sys-session.object.ts` is untouched by this change.
+ * description is the published vocabulary, an open-ended list —
+ * `idle_timeout, absolute_max, concurrent_cap, …` — that names every value
+ * this ledger writes. There is no closed enum to violate.
  *
  * Within that, admin-initiated and self-initiated revokes get **distinct**
  * values, because the field is the only thing in the row that says who ended
@@ -189,6 +211,16 @@ import { SystemObjectName } from '@objectstack/spec/system';
  * — plus the administrator lane of `sys-session-revoke.ts`, which writes this
  * ledger's `admin` value itself — and `user_revoked` means the session's own
  * owner did it.
+ *
+ * `password_reset` means a completed self-service password reset ended the
+ * session: the reset door ends every session the account holds, whichever
+ * device it was on, because the password changed — nobody chose that session.
+ * It is therefore neither `user_revoked` nor the value an administrator's
+ * forced reset writes, `admin_password_reset` — which that reset stamps
+ * itself (`forced-reset-revocation.ts`), never through this ledger. So the
+ * row still says who ended the session: the owner choosing to
+ * (`user_revoked`), an administrator (`admin`, `admin_password_reset`), or a
+ * completed self-service reset (`password_reset`).
  */
 export const INTERACTIVE_REVOKE_REASON: Readonly<Record<string, string>> = {
   // Self-service — the session owner acting on their own sessions.
@@ -198,6 +230,15 @@ export const INTERACTIVE_REVOKE_REASON: Readonly<Record<string, string>> = {
   // Admin acting on someone else's sessions (better-auth `admin` plugin).
   '/admin/revoke-user-session': 'admin',
   '/admin/revoke-user-sessions': 'admin',
+  // A completed self-service password reset — every door that sets a password
+  // from a reset token or code ends the account's sessions
+  // (`password-reset-ends-sessions.ts`). See "The password-reset doors" above.
+  '/reset-password': 'password_reset',
+  '/phone-number/reset-password': 'password_reset',
+  // The vendor email-OTP plugin's own reset door. The platform does not mount
+  // that plugin today; the entry is keyed on the plugin's declared path, so
+  // the door records the same trail the day the platform mounts it.
+  '/email-otp/reset-password': 'password_reset',
 };
 
 /**
