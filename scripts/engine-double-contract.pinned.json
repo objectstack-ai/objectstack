@@ -5232,6 +5232,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-job/src/db-job-adapter.degraded-outcome.test.ts",
       "verb": "update",
       "pinned": 1
