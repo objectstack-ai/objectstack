@@ -166,7 +166,7 @@ const SESSION_SHAPE = /^(?:session|cse)_[A-Za-z0-9]+$/;
 // A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, `security`, `review`, the six a seat post's title
 // names, or the epic lane `epic:#<parent>` — then `#N`; absent = seat 1. Read lower-cased. The bare lanes are a closed
 // set of four, so a login is never read as a seat. The lists below are the ONE spelling of those lane words: the shape is
-// built from them, and so is the reserved set a `domain:` lane may not be named after (`seatKey`). The same three
+// built from them, and so is the reserved set a `domain:` lane may not be named after (`seatKey`). The same
 // four words close the seat signature's lane alternation (`SIGNATURE_LANE_SOURCE`, check-half-states.mjs), which this
 // list cannot import (the patrol loads this file lazily, so that edge would be a cycle); fleet-roster's self-test,
 // which imports both, holds the two equal, `coordinator` (it signs and has no mailbox) aside.
