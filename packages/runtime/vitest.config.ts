@@ -98,6 +98,13 @@ runProjectCliOverridePreflight({
   parse: parseCLI,
 });
 
+// [#29627] The lint package root's first load is paid in this setup file,
+// before a test file is collected, never inside the case that makes the
+// file's first served view read or object publish. Named in EACH project
+// below, like the per-project settings beside it. The module's header carries
+// the measurement and the price.
+const LINT_ROOT_PRELOAD = './test/lint-root-preload.setup.ts';
+
 export default defineConfig({
   resolve: {
     // ARRAY form, not the object form: only the array form accepts a RegExp
@@ -154,7 +161,8 @@ export default defineConfig({
       { find: /^@objectstack\/lint\/runtime$/, replacement: path.resolve(__dirname, '../lint/src/runtime.ts') },
       // [#29603] The package root: a served view read imports it lazily for the
       // form-layout warnings (metadata-protocol's `loadFormLayoutLint`), and
-      // `meta-write-org-scope.test.ts` pays that load at module top. Both
+      // `meta-write-org-scope.test.ts` pays that load at module top, as every
+      // test file does through `LINT_ROOT_PRELOAD` (#29627). All of them
       // resolve here, so the read judges the lint rule in the checkout, never `dist/`.
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
       // The MCP bridge (`domains/mcp.ts`) reads "this field declares options"
@@ -272,6 +280,7 @@ export default defineConfig({
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
           disableConsoleIntercept: true,
+          setupFiles: [LINT_ROOT_PRELOAD],
         },
       },
       {
@@ -290,6 +299,7 @@ export default defineConfig({
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
           disableConsoleIntercept: true,
+          setupFiles: [LINT_ROOT_PRELOAD],
         },
       },
     ],

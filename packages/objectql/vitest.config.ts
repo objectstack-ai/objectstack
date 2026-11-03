@@ -104,7 +104,25 @@ runProjectCliOverridePreflight({
   parse: parseCLI,
 });
 
+// [#29627] The lint package root's first load is paid in this setup file,
+// before a test file is collected, never inside the case that makes the
+// file's first served view read or object publish. Named in EACH project
+// below, like the per-project settings beside it. The module's header carries
+// the measurement and the price.
+const LINT_ROOT_PRELOAD = './test/lint-root-preload.setup.ts';
+
 export default defineConfig({
+  resolve: {
+    alias: [
+      // [#29627] The package root the preload above imports. This package does
+      // not depend on `@objectstack/lint`; metadata-protocol does, and loads
+      // the root lazily from its `dist/`. Anchored, so lint's published
+      // subpaths are not swallowed by the file replacement, and pointed at
+      // source, so the preload and the protocol's own `import()` resolve to
+      // the same module, the lint rule in the checkout, never `dist/`.
+      { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
+    ],
+  },
   test: {
     // Each project re-declares the root block's test options: a ROOT-level
     // value is inert for a project run (measured on vitest 4.1.10, see
@@ -124,6 +142,7 @@ export default defineConfig({
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
           disableConsoleIntercept: true,
+          setupFiles: [LINT_ROOT_PRELOAD],
         },
       },
       {
@@ -139,6 +158,7 @@ export default defineConfig({
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
           disableConsoleIntercept: true,
+          setupFiles: [LINT_ROOT_PRELOAD],
         },
       },
     ],
