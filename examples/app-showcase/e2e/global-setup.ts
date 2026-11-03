@@ -42,7 +42,11 @@ export default async function globalSetup(config: FullConfig) {
   // The specs' own launch options (playwright.config.ts carries
   // `OS_TEST_CHROMIUM_EXECUTABLE_PATH` there), so the prompt is answered in the
   // browser the specs run in.
-  await declineWorkspacePrompt(token, config.projects[0]?.use?.launchOptions);
+  const promptRecord = await declineWorkspacePrompt(token, config.projects[0]?.use?.launchOptions);
+  if (promptRecord.length > 0) {
+    state.origins[0].localStorage.push(...promptRecord);
+    writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+  }
 }
 
 /**
@@ -55,25 +59,34 @@ export default async function globalSetup(config: FullConfig) {
  * value. The showcase's dev seed derives the currency from the host's POSIX
  * locale and leaves it unset on a host that sets none or names no country, and
  * the seeded admin may write settings, so every spec would meet that dialog in
- * front of the page it reads: the modal makes
- * the page behind it `aria-hidden`, so role queries (`getByRole('checkbox')`,
- * `getByRole('table')`, a section's disclosure button) find nothing and a click
- * never lands.
+ * front of the page it reads: the modal makes the page behind it
+ * `aria-hidden`, so role queries (`getByRole('checkbox')`, `getByRole('table')`,
+ * a section's disclosure button) find nothing and a click never lands.
  *
  * The run answers it ONCE, in a real browser, through the prompt's own decline
  * button ("Not now" / "Keep the default"), the same way the console's own live
  * suite does (ui/e2e/live/global-setup.ts). Declining writes nothing to the
  * workspace — the showcase stays exactly as seeded, so no spec's reading of an
  * amount moves — and the prompt keeps its per-device record of having asked in
- * this origin's localStorage, which the storageState every spec reuses now
- * carries.
+ * this origin's localStorage (`PROMPT_RECORD_PREFIX`:ORG:USER). That record,
+ * and nothing else the console stored while it was open, is what this returns
+ * for the storageState every spec reuses: the rest (the sidebar's wide-open
+ * flag, recent items, the active organization) would change the fresh-context
+ * layout the specs measure from — detail-shapes derives its 780 px window from
+ * a context with no stored sidebar state.
  *
  * Skipped when the backend says the prompt would not ask (the console's own
  * condition per key, `workspaceTimezonePromptLogic.ts`). A prompt that was
  * expected but never shown is reported, not failed: the specs then show whether
- * anything stands in their way.
+ * anything stands in their way. A prompt that was declined but left no record
+ * throws: every spec would meet it again, and that is the run's one cause.
  */
-async function declineWorkspacePrompt(token: string, launchOptions: LaunchOptions | undefined) {
+const PROMPT_RECORD_PREFIX = 'os:workspace-timezone-prompt:';
+
+async function declineWorkspacePrompt(
+  token: string,
+  launchOptions: LaunchOptions | undefined,
+): Promise<{ name: string; value: string }[]> {
   const api = await request.newContext({ extraHTTPHeaders: { Authorization: `Bearer ${token}` } });
   let wouldAsk = false;
   try {
@@ -93,7 +106,7 @@ async function declineWorkspacePrompt(token: string, launchOptions: LaunchOption
   } finally {
     await api.dispose();
   }
-  if (!wouldAsk) return;
+  if (!wouldAsk) return [];
 
   const browser = await chromium.launch(launchOptions);
   try {
@@ -105,11 +118,21 @@ async function declineWorkspacePrompt(token: string, launchOptions: LaunchOption
       await prompt.waitFor({ state: 'visible', timeout: 60_000 });
     } catch {
       console.warn('[showcase-smoke] the workspace timezone or currency is unset, but the console showed no prompt');
-      return;
+      return [];
     }
     await page.getByTestId('workspace-timezone-prompt-decline').click();
     await prompt.waitFor({ state: 'hidden' });
-    await context.storageState({ path: STATE_PATH });
+    const stored = await context.storageState();
+    const record = (stored.origins.find((o) => o.origin === new URL(API).origin)?.localStorage ?? []).filter((e) =>
+      e.name.startsWith(PROMPT_RECORD_PREFIX),
+    );
+    if (record.length === 0) {
+      throw new Error(
+        `the workspace prompt was declined but left no ${PROMPT_RECORD_PREFIX}* record in localStorage, ` +
+          'so every spec would meet it again',
+      );
+    }
+    return record;
   } finally {
     await browser.close();
   }
