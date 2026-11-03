@@ -76,6 +76,12 @@ export {
   nativeResetServer,
   nativeScan,
   nativeShowConnectionSwitcher,
+  nativePickImage,
+  nativeOpenFile,
+  nativeShare,
+  fileFromNativeFile,
+  nativeFileFromBlob,
+  NATIVE_FILE_MAX_BYTES,
   nativeHostCan,
   postNativeReady,
   postNativeRouteChanged,
@@ -87,6 +93,9 @@ export {
   type NativePushToken,
   type NativeSafeArea,
   type NativeScanOptions,
+  type NativePickImageOptions,
+  type NativeFile,
+  type NativeShareContent,
 } from './nativeHost.js';
 
 // Re-export types for convenience
