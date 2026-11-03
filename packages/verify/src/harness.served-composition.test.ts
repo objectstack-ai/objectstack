@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: five in-process bootStack boots, no two the same configuration (the plain package, read by the slate, cube-control and mail-control cases; a declared cube; a package body's cube; email.persist false; the smtp boot that is refused), the first paying the file's first-boot cost; slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up; read before the three plain boots became one
+// test-budget: 20 — spawns the real producer once per single-cause fixture: in-process bootStack boots, no two the same configuration (the plain package, read by the slate, cube-control, mail-control and push-control cases; a declared cube; a package body's cube; email.persist false; the smtp boot that is refused; a direct push block; the relay push boot that is refused), the first paying the file's first-boot cost; slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up; read before the three plain boots became one
 
 /**
  * #22301 item 1, the composition gap the stage-2 contract review recorded:
@@ -176,5 +176,33 @@ describe('the email service is built from the app\'s mail configuration', () => 
     } finally {
       if (saved !== undefined) process.env.OS_EMAIL_SMTP_HOST = saved;
     }
+  }, BOOT_TIMEOUT);
+});
+
+/**
+ * The `push` capability: requested, never on the slate. A stack that declares
+ * `requires: ['push']` gets `PushServicePlugin`, built from its `push` key by
+ * the reader `serve` reads (`resolvePushCapabilityArg`, off the provider
+ * module); the relay that an absent key reads as is refused before the kernel
+ * boots, because nothing sends it yet.
+ */
+describe('the push service is built from the app\'s push configuration', () => {
+  const direct = { transport: 'direct', fcm: { projectId: 'example-app', credentialRef: 'SVC_FCM_SERVICE_ACCOUNT' } };
+
+  it('requires push with a direct block mounts PushServicePlugin, and the push service holds the configured vendor', async () => {
+    stack = await bootStack(onePackage({ requires: ['push'], push: direct }));
+    expect(stack.kernel.hasPlugin(CAPABILITY_PROVIDERS.push!.identities[0]!)).toBe(true);
+    const push = await stack.kernel.getServiceAsync<{ vendors(): string[] }>('push');
+    expect(push.vendors()).toEqual(['fcm']);
+  }, BOOT_TIMEOUT);
+
+  it('control — an app that does not require push mounts no push provider', async () => {
+    expect(plain!.kernel.hasPlugin(CAPABILITY_PROVIDERS.push!.identities[0]!)).toBe(false);
+  }, BOOT_TIMEOUT);
+
+  it('requires push with no push key fails the boot: the relay it reads as has no sender', async () => {
+    await expect(bootStack(onePackage({ requires: ['push'] }))).rejects.toThrow(
+      /PushServicePlugin[\s\S]*hosted push relay[\s\S]*its sender has not shipped[\s\S]*transport: 'direct'/,
+    );
   }, BOOT_TIMEOUT);
 });

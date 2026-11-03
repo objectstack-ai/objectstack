@@ -661,6 +661,9 @@ importers:
       '@objectstack/service-package':
         specifier: workspace:*
         version: link:../services/service-package
+      '@objectstack/service-push':
+        specifier: workspace:*
+        version: link:../services/service-push
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../services/service-queue
@@ -3488,6 +3491,9 @@ importers:
       '@objectstack/service-package':
         specifier: workspace:*
         version: link:../services/service-package
+      '@objectstack/service-push':
+        specifier: workspace:*
+        version: link:../services/service-push
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../services/service-queue
