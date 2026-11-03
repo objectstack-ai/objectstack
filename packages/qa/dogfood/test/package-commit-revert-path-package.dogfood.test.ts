@@ -51,6 +51,13 @@
 // restoring it would write the row bound to the read-only base again. The
 // last case pins both on such a commit, recorded with the close shadowed on
 // the booted instance only (what a build before the close did).
+//
+// [#29414] A commit names its own package's rows. The pair's first publish
+// beside such a base-bound row is recorded as a create (its plan used to read
+// the base row's version), so its revert removes the pair's row and the base
+// row is served again; a revert whose row was deleted since asks the
+// package-less close, as the per-item rollback does. Control: a writable
+// package's edit commit restores its own row in place.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
