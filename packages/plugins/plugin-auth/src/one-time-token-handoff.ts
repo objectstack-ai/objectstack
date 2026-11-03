@@ -93,12 +93,14 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
 import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
+import { AuthEndpointPaths } from '@objectstack/spec/api';
+import { TrustedAppSchemeSchema } from '@objectstack/spec/system';
 
-/** The hand-off route under the auth base path (an ObjectStack mount). */
-export const ONE_TIME_TOKEN_HANDOFF_PATH = '/one-time-token/handoff';
+/** The hand-off route under the auth base path (an ObjectStack mount), as the spec names it. */
+export const ONE_TIME_TOKEN_HANDOFF_PATH = AuthEndpointPaths.oneTimeTokenHandoff;
 
-/** The vendor plugin's redemption route under the auth base path. */
-export const ONE_TIME_TOKEN_VERIFY_PATH = '/one-time-token/verify';
+/** The vendor plugin's redemption route under the auth base path, as the spec names it. */
+export const ONE_TIME_TOKEN_VERIFY_PATH = AuthEndpointPaths.oneTimeTokenVerify;
 
 /** The vendor plugin's generate route; refused over HTTP (`disableClientRequest`). */
 export const ONE_TIME_TOKEN_GENERATE_PATH = '/one-time-token/generate';
@@ -189,25 +191,23 @@ export async function oneTimeTokenStoreHasher(input: string): Promise<string> {
 }
 
 /**
- * A registered app scheme, as RFC 8252 §7.1 requires of a private-use scheme:
- * lowercase RFC 3986 scheme syntax containing a dot (reverse-domain, e.g.
- * `com.example.app`), with no `:` suffix. The reverse-domain rule is also the
- * first interception defence: a scheme named for a domain the app's
- * publisher controls is one another app has no business claiming.
- */
-const APP_SCHEME_SYNTAX = /^[a-z][a-z0-9+.-]*$/;
-
-/**
  * Why `entry` cannot be a registered app scheme, or `undefined` when it can.
- * The same rules the spec's `AuthConfig.trustedAppSchemes` refuses at parse;
- * repeated here because the auth manager also receives plain objects.
+ * The rule is the spec's own {@link TrustedAppSchemeSchema} (RFC 8252 §7.1:
+ * a lowercase reverse-domain private-use scheme such as `com.example.app`,
+ * with no `:` suffix), imported, never copied: the auth manager also
+ * receives plain objects that never passed through `AuthConfigSchema`, so
+ * it runs the same schema again. The reverse-domain rule is also the first
+ * interception defence: a scheme named for a domain the app's publisher
+ * controls is one another app has no business claiming.
+ * {@link NEVER_APP_SCHEMES} is checked first only for the clearer message —
+ * none of them contains a dot, so the schema refuses each one anyway.
  */
 export function appSchemeRefusal(entry: unknown): string | undefined {
   if (typeof entry !== 'string') return 'is not a string';
   if (NEVER_APP_SCHEMES.includes(entry.toLowerCase().replace(/:.*$/, ''))) {
     return 'is a web or script scheme the browser itself handles, never an app scheme';
   }
-  if (!APP_SCHEME_SYNTAX.test(entry) || !entry.includes('.')) {
+  if (!TrustedAppSchemeSchema.safeParse(entry).success) {
     return 'is not a lowercase reverse-domain scheme with no ":" suffix (RFC 8252 §7.1), e.g. "com.example.app"';
   }
   return undefined;

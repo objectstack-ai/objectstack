@@ -331,7 +331,7 @@ describe('one-time-token hand-off — the request is validated before anything i
 describe('trustedAppSchemes — refused at construction, never dropped', () => {
   it.each([
     ['https'], ['HTTPS'], ['javascript'], ['data'],
-    ['Com.Example.App'], ['com.example.app://'], ['com.example.app:'], ['myapp'], [''], [42],
+    ['Com.Example.App'], ['com.example.app://'], ['com.example.app:'], ['myapp'], ['com..app'], ['com.example.'], [''], [42],
   ])('refuses %j', (entry) => {
     expect(appSchemeRefusal(entry)).toBeDefined();
     expect(() => assertTrustedAppSchemes(['com.example.ok', entry])).toThrow(/invalid trustedAppSchemes/);

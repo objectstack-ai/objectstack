@@ -667,13 +667,6 @@ export function readInvitationPlacementIntent(
 
 export interface AuthManagerOptions extends Partial<AuthConfig> {
   /**
-   * The app schemes the mobile sign-in hand-off may redirect a one-time token
-   * to (`one-time-token-handoff.ts`). Declared here only until the spec's
-   * `AuthConfig` carries the key; then this line goes and the spec's wins.
-   */
-  trustedAppSchemes?: string[];
-
-  /**
    * Better-Auth instance (for advanced use cases)
    * If not provided, one will be created from config
    */
