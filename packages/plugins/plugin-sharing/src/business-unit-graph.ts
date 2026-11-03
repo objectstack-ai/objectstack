@@ -2,7 +2,7 @@
 
 import type { IBusinessUnitGraphService } from '@objectstack/spec/contracts';
 import type { SharingEngine } from './sharing-service.js';
-import { TeamGraphService, managerIsProvablyOutsideOrg } from './team-graph.js';
+import { TeamGraphService, managerIsProvablyOutsideOrg, readMembershipToCompletion } from './team-graph.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -176,21 +176,14 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
       return [];
     }
 
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_business_unit_member', {
-        // [#14547] Tenant-screened — see {@link memberScope}, which is STRICT
-        // on purpose and is not {@link orgScope}.
-        where: this.memberScope({ business_unit_id: businessUnitId }),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      });
-    } catch {
-      rows = [];
-    }
-    const users = Array.from(
-      new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)),
+    // [#29606] Read to completion, and a failed or incomplete read throws — so
+    // nothing is cached for it, and the next caller reads again. A stack with
+    // no `sys_business_unit_member` has no unit members.
+    const users = await this.readMembers(
+      // [#14547] Tenant-screened — see {@link memberScope}, which is STRICT
+      // on purpose and is not {@link orgScope}.
+      this.memberScope({ business_unit_id: businessUnitId }),
+      `the members of business unit '${businessUnitId}'`,
     );
     this.cache.unitMembers!.set(businessUnitId, users);
     return users;
@@ -204,27 +197,44 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     const units = await this.descendants(businessUnitId);
     if (units.length === 0) return [];
 
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_business_unit_member', {
-        // [#14547] Tenant-screened — see {@link memberScope}. The WIDE width
-        // needs the screen exactly as much as the narrow one: the reported
-        // reproduction used `unit_and_subordinates`, and a subtree walk that
-        // now admits org-less (seeded) units reaches MORE unscreened member
-        // rows than the single-unit read, not fewer.
-        where: this.memberScope({ business_unit_id: { $in: units } }),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      });
-    } catch {
-      rows = [];
-    }
-    const users = Array.from(
-      new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)),
+    // [#29606] Read to completion, and a failed or incomplete read throws —
+    // nothing is cached for it. A stack with no `sys_business_unit_member` has
+    // no members in the subtree.
+    const users = await this.readMembers(
+      // [#14547] Tenant-screened — see {@link memberScope}. The WIDE width
+      // needs the screen exactly as much as the narrow one: the reported
+      // reproduction used `unit_and_subordinates`, and a subtree walk that
+      // now admits org-less (seeded) units reaches MORE unscreened member
+      // rows than the single-unit read, not fewer.
+      this.memberScope({ business_unit_id: { $in: units } }),
+      `the members of business unit '${businessUnitId}' and its descendant units`,
     );
     this.cache.expandUsers!.set(businessUnitId, users);
     return users;
+  }
+
+  /**
+   * [#29606] The `user_id`s of every `sys_business_unit_member` row matching
+   * `where`, read to completion through the one walk the team, role and
+   * position reads share ({@link readMembershipToCompletion}) — or a refusal,
+   * never a shortened or an invented empty set.
+   *
+   * Both widths read here. They read once at a 10,000-row bound and answered
+   * `[]` on any failure, and the set feeds sharing GRANTS that the reconcilers
+   * diff against it: a member past the bound lost the grant, and a failed read
+   * revoked every member's. A failed read, or a walk that cannot vouch for
+   * completion, now throws; a stack that never materialises the object has no
+   * members through it and answers `[]`.
+   */
+  private async readMembers(where: Record<string, unknown>, subject: string): Promise<string[]> {
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_business_unit_member',
+      where,
+      fields: ['user_id'],
+      subject,
+    });
+    if (!rows) return [];
+    return Array.from(new Set(rows.map((r) => String(r?.user_id ?? '')).filter(Boolean)));
   }
 
   async headOf(businessUnitId: string): Promise<string | null> {

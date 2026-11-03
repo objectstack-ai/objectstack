@@ -1121,7 +1121,7 @@ const MEMBER_SCREEN_READ_LIMIT = 50000;
 /**
  * [#29362, #29503] Rows per page of the directory holder reads
  * ({@link ApprovalService.readHoldersToCompletion}: the membership tier, the
- * position assignments, the team members) — the bound each read always
+ * position assignments, the team members, the business-unit members) — the bound each read always
  * carried, so a group held by fewer people issues the one read it always did,
  * and one held by more is read in further pages rather than cut.
  */
@@ -2695,12 +2695,7 @@ export class ApprovalService implements IApprovalService {
         // this is, and carry the error, so an operator does not go staffing a
         // position whose holders simply could not be read. The try above also
         // wraps the cross-org read filter (`bounded`), so the line names both.
-        this.logger?.warn?.(
-          `[approvals] approver '${type}:${a.value}' could not be expanded — a directory or read-filter lookup failed, so the `
-          + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
-          + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
-          { type, value: a.value, organizationId: organizationId ?? null, error: directoryFailure },
-        );
+        this.warnExpansionFailed(type, a.value, organizationId, directoryFailure);
       } else {
         this.logger?.warn?.(
           `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot names no one, so no one is `
@@ -2715,6 +2710,32 @@ export class ApprovalService implements IApprovalService {
     // phantom slot the existence check above exists to keep off the slate.
     if (type === 'user') return [];
     return [`${type}:${a.value}`];
+  }
+
+  /**
+   * [#29362, #29606] The one warning an approver slot logs when its expansion
+   * FAILED — a directory or read-filter lookup threw — rather than came back
+   * empty: the slot falls back to its literal, and the line carries the error.
+   * Shared by the static graph types ({@link resolveApproverSpec}) and an
+   * `expression` approver's `resolveAs` values ({@link resolveExpressionApprovers},
+   * which passes its source as `expression`), so the two cannot drift.
+   */
+  private warnExpansionFailed(
+    type: string,
+    value: unknown,
+    organizationId: string | null | undefined,
+    error: string,
+    expression?: string,
+  ): void {
+    this.logger?.warn?.(
+      `[approvals] approver '${type}:${value}' could not be expanded — a directory or read-filter lookup failed, so the `
+      + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
+      + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
+      {
+        type, value, organizationId: organizationId ?? null, error,
+        ...(expression === undefined ? {} : { expression }),
+      },
+    );
   }
 
   /**
@@ -2859,6 +2880,11 @@ export class ApprovalService implements IApprovalService {
         }
       } catch (err: any) {
         if (String(err?.message ?? '').startsWith('VALIDATION_FAILED')) throw err;
+        // [#29606] The literal slot below is the same fallback the static graph
+        // types take, and it says why exactly as they do: a failed read is not
+        // an unstaffed value, so an operator is pointed at the read rather than
+        // at staffing it.
+        this.warnExpansionFailed(resolveAs, key, organizationId, err instanceof Error ? err.message : String(err), source);
         users = [];
       }
       if (crossOrg && users.length) {
@@ -3210,20 +3236,22 @@ export class ApprovalService implements IApprovalService {
         if (kid && !seen.has(kid)) { seen.add(kid); queue.push(kid); }
       }
     }
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_business_unit_member', {
-        // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
-        // on purpose and is not {@link businessUnitOrgScope}. The units above
-        // proved their tenancy; these rows have not, and the
-        // shared seeded unit id is exactly where other tenants' rows sit.
-        where: this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      } as any);
-    } catch { rows = []; }
-    return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // [#29606] Every member of the subtree, read to completion — or a refusal
+    // that {@link resolveApproverSpec}'s directory catch reports as a failed
+    // read, never "expanded to nobody". It read once at a 10,000-row bound and
+    // answered `[]` on any failure: past the bound the slate silently lost the
+    // rest, and a failed read logged as an unstaffed unit. A stack with no
+    // `sys_business_unit_member` has no members.
+    return this.readHoldersToCompletion(
+      'sys_business_unit_member',
+      // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
+      // on purpose and is not {@link businessUnitOrgScope}. The units above
+      // proved their tenancy; these rows have not, and the
+      // shared seeded unit id is exactly where other tenants' rows sit.
+      this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
+      `the members of business unit '${businessUnitId}' and its descendant units`
+        + `${organizationId ? ` in organization '${organizationId}'` : ''}`,
+    );
   }
 
   /**
@@ -3445,8 +3473,8 @@ export class ApprovalService implements IApprovalService {
   /**
    * [#29362, #29503] The `user_id`s of every `object` row matching `where`,
    * read to COMPLETION — or a refusal, never a shortened or an invented empty
-   * slate. The one read behind the membership tier, the position assignments
-   * and the team members.
+   * slate. The one read behind the membership tier, the position assignments,
+   * the team members and the business-unit members (#29606).
    *
    * Pages of {@link HOLDER_PAGE_ROWS} through the platform's one keyset walk
    * (`keysetWalk`, `@objectstack/types`), ordered by `id`, so a group held past
