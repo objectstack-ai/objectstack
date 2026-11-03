@@ -1,7 +1,7 @@
 ---
 title: Field Value schema — Data Protocol reference
 navTitle: Field Value
-description: "Field runtime VALUE-shape contract. Reference for Address, AddressValue, CalendarDateValue, ClockTimeValue and 7 more: every property with its type and default."
+description: "Field runtime VALUE-shape contract. Reference for Address, AddressValue, CalendarDateValue, ClockTimeValue and 8 more: every property with its type and default."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -41,8 +41,8 @@ this contract has (ADR-0104 performance budget).
 ## TypeScript Usage
 
 ```typescript
-import { AddressSchema, AddressValueSchema, CalendarDateValueSchema, ClockTimeValueSchema, FileLikeValueSchema, FileReferenceIdValueSchema, FileRefusedValueSchema, FileValueSchema, InstantValueSchema, LocationValueSchema, ReferenceIdValueSchema } from '@objectstack/spec/data';
-import type { Address, AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileReferenceIdValue, FileRefusedValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
+import { AddressSchema, AddressValueSchema, CalendarDateValueSchema, ClockTimeValueSchema, FileLikeValueSchema, FileReferenceIdValueSchema, FileRefusedValueSchema, FileValueSchema, InstantValueSchema, LocationValueSchema, ReferenceIdValueSchema, ReferenceNameOnlyValueSchema } from '@objectstack/spec/data';
+import type { Address, AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileReferenceIdValue, FileRefusedValue, FileValue, InstantValue, LocationValue, ReferenceIdValue, ReferenceNameOnlyValue } from '@objectstack/spec/data';
 
 // Validate data
 const result = AddressSchema.parse(data);
@@ -189,6 +189,19 @@ Type: `string`
 ## ReferenceIdValue
 
 **Type:** `string`
+
+
+---
+
+## ReferenceNameOnlyValue
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | The id of the referenced record, as the referencing record holds it |
+| **name** | `string` | ✅ | The referenced record's display name (its object's `nameField`, else `displayNameField`, else the derived title field), or the `Record #` floor with the id where a field-level rule on that field holds |
+| **readRefused** | `true` | ✅ | The reader was refused the referenced record (the object's read gate or its row scope): only its id and display name are served, and the name links nothing. Distinct from an expanded record and from a bare id. |
 
 
 ---
