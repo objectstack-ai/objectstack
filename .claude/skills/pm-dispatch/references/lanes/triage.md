@@ -13,8 +13,8 @@
   先敲其席(无信箱按名)过下轮无答且回收需其一句;待裁或被具名 `Blocked-by:`、`status:parked`
   卡、所骑栈阻者与信箱、Version PR 不算。⑦席位或子代理被拒、需人做的动作,⛔ 不代做。
 - 不推:定级、治半状态、解锁、契约复核(PASS/FAIL 归车道)、门铃答复、健康绿读数。
+- sweep 加推导 `pm:queue`/`pm:blocked` 无审计评论卡(豁免照 H74 行),照未定级首触补审计并报数。
 - 每轮扫 `pm:dispatched` 卡与非信箱 open PR,进展=head 提交/非分诊评论/其席改标,非 `updated_at`。
 - 进展逾 3h 即敲认领席 `Request: progress`,下轮读答复,无答列轮次记录;两轮无答视为掉线。
 - 掉线或下班席的项归在线兄弟席(`seat-lifecycle.md`),下轮敲兄弟席一次;⛔ 分诊永不释放。
 - 安全发现:即推 ① 后转交 `security#1` 席即止(`security.md`);有公开卡只定 `security`+p1,余不判。
-- `security#1` 空缺时沿用 `security-findings.md` 第 7 节处置,⛔ 不代席、不追加细节。
