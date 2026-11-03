@@ -441,6 +441,7 @@ import {
   type DraftChangesPosture,
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
+import { SavedToCustomizationNote } from '../../preview/savedToCustomization.js';
 import { toast } from 'sonner';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
@@ -6300,12 +6301,18 @@ export function InterfacesPillar({
       )}
     </div>
   ) : null;
+  // objectstack#29691 (ADR-0146 D3) — an item the pair adds, overrides or is
+  // unlocked to customize saves to the base's pair: the header says where,
+  // in the pending-changes sheet's own words.
+  const ifSavedTo =
+    customization !== null && (currentAddedIn !== null || headerCustomize?.inPair === true || headerUnlocked);
   const ifHeaderEl = (
     <StudioItemHeader
       testId="if-item-header"
       // objectstack#29693 — on a narrow row the chips and the item tools fold
       // into the ⋯ menu before the title drops below its readable width.
       foldMenu={itemMoreEl ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'if-item-header-more' }}
+      note={ifSavedTo ? <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="if-item-saved-to" /> : undefined}
       leading={
         <button
           type="button"
@@ -8953,6 +8960,19 @@ export function DataPillar({
             // objectstack#29693 — the header has no ⋯ of its own (objectui#12511),
             // so on a narrow row it draws one for the chips and the item tools.
             foldMenu={{ label: t('engine.studio.if.more', locale), testId: 'data-object-header-more' }}
+            // objectstack#29691 (ADR-0146 D3) — an object the pair adds, or a
+            // base object the pair extends, saves to the base's pair. Named
+            // by the base's label: `packageId` names the pair for a pair's object.
+            note={
+              customization !== null &&
+              (!!current?.addedIn ||
+                (extOpen !== null && (extOpen.published.size > 0 || extHasDraft || extDirty))) ? (
+                <SavedToCustomizationNote
+                  baseLabel={customization.baseLabel}
+                  testId="data-object-saved-to"
+                />
+              ) : undefined
+            }
             leading={
               <button
                 type="button"
@@ -11259,6 +11279,13 @@ export function AutomationsPillar({
             // flow's ⋯ menu (or the header's own, where the flow has none).
             foldMenu={
               flowMoreShown ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'auto-flow-header-more' }
+            }
+            // objectstack#29691 (ADR-0146 D3) — a flow the pair adds, overrides
+            // or is unlocked to customize saves to the base's pair.
+            note={
+              customization !== null && (!!current?.addedIn || flowInPair || flowUnlocked) ? (
+                <SavedToCustomizationNote baseLabel={customizeBaseLabel} testId="auto-flow-saved-to" />
+              ) : undefined
             }
             leading={
               <button
