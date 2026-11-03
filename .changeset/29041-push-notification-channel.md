@@ -1,6 +1,6 @@
 ---
-'@objectstack/service-push': minor
-'@objectstack/service-messaging': minor
+'@objectstack/service-push': patch
+'@objectstack/service-messaging': patch
 '@objectstack/spec': patch
 ---
 
