@@ -3452,6 +3452,29 @@ function ownDocumentsOf(items: any[], type: string, packageId: string, registry:
 }
 
 /**
+ * [#29872, ADR-0146 D8 item 3 / D10] The `objectExtensions` entries of
+ * `packageId` that its `object_extension` `items` do not already carry: each
+ * `'extend'` contribution the registry holds for the package
+ * (`SchemaRegistry.getObjectExtensionsOf`), whose target no item names. Those
+ * are the extensions a manifest's `objectExtensions` registered
+ * (`ObjectQL.registerApp`, which files no item): a package installed through
+ * install-local, or a code package. Without them the package's export carried
+ * none of its extensions, so a deployment restored from an export lost the
+ * fields on its next export.
+ *
+ * A registry that cannot answer (a double predating the method) adds none,
+ * as before. ⛔ Never the owner's: an extension is exported once, by the
+ * package that contributes it; the owner's export carries its object without
+ * it (the per-package layer's `onlyExtensionsOf`).
+ */
+function registeredExtensionsOf(items: readonly any[], packageId: string, registry: any): any[] {
+    if (typeof registry?.getObjectExtensionsOf !== 'function') return [];
+    const named = new Set(items.map((it) => (it as { extend?: unknown } | null)?.extend));
+    const registered = registry.getObjectExtensionsOf(packageId);
+    return (Array.isArray(registered) ? registered : []).filter((ext: { extend?: unknown }) => !named.has(ext?.extend));
+}
+
+/**
  * [#29760] Whether this runtime serves metadata type `type` (the canonical
  * singular): whether its live type vocabulary lists it under either spelling
  * (`getMetaTypes`, the one accessor that answers "which types exist here" for
@@ -3613,6 +3636,16 @@ context: HttpProtocolContext,
         // `registerApp` filled, which the bare-slot copy never reaches), the
         // same body the layer serves for the name while no override is live.
         if (perPackageLayer) items = ownDocumentsOf(items, singular, packageId, registry);
+        // [#29872, ADR-0146 D8 item 3] …and a package's `objectExtensions` are
+        // every extension it contributes, however it was installed. The layer
+        // lists only the `object_extension` items (the stored rows the `/meta`
+        // doors write); a manifest's `objectExtensions` (a package installed
+        // through install-local, or a code package) are registered as the
+        // package's `'extend'` contributors with no item, so they are read back
+        // from the registry ({@link registeredExtensionsOf}). An item of the
+        // same target is the one exported: it is the stored body the registry's
+        // contribution was registered from.
+        if (plural === EXTENSIONS_KEY) items = [...items, ...registeredExtensionsOf(items, packageId, registry)];
         if (items.length === 0) continue;
         // [#5320] `views` is partitioned rather than dumped: the registry's
         // ADR-0017 dual-read returns the container AND its expanded per-view

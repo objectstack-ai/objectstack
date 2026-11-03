@@ -134,6 +134,13 @@ every flag is in
 Each release below is a self-contained page: what it changed, what breaks, and
 its own upgrade checklist.
 
+- **[18.3.0](/docs/releases/v18/18-3)** — customization pairs for installed
+  packages (ADR-0146), ownership queues, per-organization connector
+  credentials and a whole-deployment export. 305 of its 1,379 entries are
+  declared breaking: 264 need you to act and 41 are converted by
+  `os migrate meta`. Its
+  [upgrade checklist](/docs/releases/v18/18-3#upgrade-checklist) moves an
+  18.2.0 app to 18.3.0, and is compiled from the changesets, not walked.
 - **[18.2.0](/docs/releases/v18/18-2)** — the first release that ships the
   Console and the `@object-ui/*` packages from this repository, at one version
   with `@objectstack/*`. 59 of its 231 changesets are declared breaking: 52

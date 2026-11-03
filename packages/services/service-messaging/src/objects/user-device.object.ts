@@ -7,10 +7,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * (user, app install), the stored form of spec's `UserDeviceSchema`
  * (`system/push-device.zod.ts`).
  *
- * Belongs to `service-messaging` because no push channel plugin exists yet and
- * this service owns the `notification` slot whose `INotificationService`
- * device members write it (`../device-registry.ts`). When the push channel
- * lands it reads this table; it does not own it.
+ * Owned by `service-messaging`: this service fills the `notification` slot
+ * whose `INotificationService` device members write it
+ * (`../device-registry.ts`), and the `push` channel (`../push-channel.ts`,
+ * also this package) reads it through `listDevices` and retires dead tokens
+ * through `invalidateDeviceToken`. `@objectstack/service-push` holds only the
+ * APNs and FCM transports; it never reads or writes this table.
  *
  * The three rules spec states for the shape, and where each is kept:
  *

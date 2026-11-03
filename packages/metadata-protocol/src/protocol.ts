@@ -3526,13 +3526,13 @@ export class ObjectStackProtocolImplementation implements
      * (see {@link SchemaRegistry.foldObjectExtendersOnto}), so applying it twice
      * would duplicate both.
      */
-    private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown, withoutExtensionsOf?: string): unknown {
+    private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown, onlyExtensionsOf?: string): unknown {
         // [#25467 cut 30] The body moved to `protocol-object-extender-fold.ts` (see `ObjectExtenderFoldHost`).
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof foldObjectExtendersFromRegistry> = {
             get engine() { return readEngine(); },
         };
-        return foldObjectExtendersFromRegistry.call(host, type, name, body, withoutExtensionsOf);
+        return foldObjectExtendersFromRegistry.call(host, type, name, body, onlyExtensionsOf);
     }
 
     /**

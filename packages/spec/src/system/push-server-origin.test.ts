@@ -106,7 +106,7 @@ describe('the three origin members are one contract', () => {
   it('marks the device-side members PLANNED until the server stores the origin', () => {
     expect(RegisterDeviceRequestSchema.shape.origin.description).toMatch(/^\[PLANNED — not yet stored\] /);
     expect(UserDeviceSchema.shape.origin.description).toMatch(/^\[PLANNED — not yet stored\] /);
-    // The push data carries its marker on the whole schema until a push channel produces it.
-    expect(PushDeliveryDataSchema.description).toMatch(/^\[PLANNED — not yet served\] /);
+    // The push data is served: the push channel produces it and copies a stored origin (#29041).
+    expect(PushDeliveryDataSchema.description).not.toMatch(/PLANNED/);
   });
 });

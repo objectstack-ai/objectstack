@@ -149,7 +149,9 @@ describe('Error Classes', () => {
 
       expect(error.message).toBe('Connection error: Network timeout');
       expect(error.code).toBe('CONNECTION_ERROR');
-      expect(error.statusCode).toBe(503);
+      // Built without a status, nothing answered: no invented 503
+      // (objectstack#29916).
+      expect(error.statusCode).toBeUndefined();
       expect(error.name).toBe('ConnectionError');
       expect(error.url).toBe('https://api.example.com');
       expect(error).toBeInstanceOf(ObjectStackError);
@@ -161,6 +163,11 @@ describe('Error Classes', () => {
 
       expect(error.url).toBeUndefined();
       expect(error.message).toBe('Connection error: Network timeout');
+    });
+
+    it('CONTROL: a status the caller passes is kept', () => {
+      expect(new ConnectionError('down', undefined, undefined, 503).statusCode).toBe(503);
+      expect(new ConnectionError('timeout', undefined, undefined, 504).statusCode).toBe(504);
     });
   });
 

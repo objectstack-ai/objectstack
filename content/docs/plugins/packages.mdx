@@ -15,7 +15,7 @@ ObjectStack is organized into package manifests across multiple categories. This
 | **Framework adapters** | 1 | `hono` (other frameworks: build a thin adapter on `HttpDispatcher` — see below) |
 | **Drivers** | 5 | `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-mongodb`, `driver-turso` |
 | **Plugins** | 17 | `plugin-auth`, `plugin-security`, `plugin-audit`, `plugin-approvals`, `plugin-sharing`, `plugin-email`, `plugin-webhooks`, `plugin-hono-server`, `plugin-dev`, `plugin-pinyin-search`, `mcp`, trigger plugins (`trigger-api`, `trigger-record-change`, `trigger-schedule`), and knowledge/embedder plugins (`knowledge-memory`, `knowledge-ragflow`, `embedder-openai`) |
-| **Platform services** | 17 | `service-analytics`, `service-automation`, `service-cache`, `service-cluster`, `service-cluster-redis`, `service-datasource`, `service-i18n`, `service-job`, `service-knowledge`, `service-messaging`, `service-package`, `service-print`, `service-queue`, `service-realtime`, `service-settings`, `service-sms`, `service-storage` |
+| **Platform services** | 18 | `service-analytics`, `service-automation`, `service-cache`, `service-cluster`, `service-cluster-redis`, `service-datasource`, `service-i18n`, `service-job`, `service-knowledge`, `service-messaging`, `service-package`, `service-print`, `service-push`, `service-queue`, `service-realtime`, `service-settings`, `service-sms`, `service-storage` |
 
 
 ## Core Packages
@@ -240,7 +240,7 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 **Messaging Service** — Outbound notification dispatch (ADR-0012).
 
-- **Features**: `MessagingChannel` registry, `emit()` fan-out, always-on inbox channel; email/webhook/push/IM channels plug in
+- **Features**: `MessagingChannel` registry, `emit()` fan-out, always-on inbox channel; the email, sms and push channels mount while their transport service is registered; the push device registry (`sys_user_device`, `/api/v1/notifications/devices`); webhook/IM channels plug in
 - **When to use**: Notifying users across channels from flows, hooks, and plugins
 
 ### @objectstack/service-sms
@@ -249,6 +249,13 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 - **Features**: Provider adapters (Aliyun SMS, Twilio), `sms` settings namespace with live rebind, backs phone-number OTP sign-in/reset and the messaging `sms` channel
 - **When to use**: Phone OTP first-login / self-service reset, SMS notifications
+
+### @objectstack/service-push
+
+**Push Service** — Outbound mobile push through APNs and FCM (`push` service).
+
+- **Features**: APNs over HTTP/2 with token-based auth (`.p8` signing key) and FCM over the HTTP v1 API (service account), configured by `PushServiceConfigSchema` with each secret named by `credentialRef`, never inline; backs the messaging `push` channel, which delivers to the recipient's registered devices, carries the notification's `route`, and retires a token the vendor reports dead
+- **When to use**: Phone notifications from `notify` flow nodes and `emit()` — compose `new PushServicePlugin({ config })` beside `MessagingServicePlugin`
 
 ### @objectstack/service-print
 
