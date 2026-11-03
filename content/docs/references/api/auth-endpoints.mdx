@@ -221,7 +221,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **redirect_uri** | `string` | ✅ | Where to send the token: a URI whose scheme is registered in AuthConfig.trustedAppSchemes (e.g. com.example.app://auth/callback); any other scheme is refused with 400 and no redirect |
+| **redirect_uri** | `string` | ✅ | Where to send the token: an absolute URI whose scheme is registered in AuthConfig.trustedAppSchemes (e.g. com.example.app://auth/callback); any other scheme is refused with 400 and no redirect |
 | **code_challenge** | `string` | ✅ | RFC 7636 S256 code challenge: the unpadded base64url SHA-256 of the verifier the app keeps (43 characters) |
 | **code_challenge_method** | `'S256'` | optional | RFC 7636 challenge method; only S256 is accepted (plain is refused), and absent means S256 |
 

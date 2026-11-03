@@ -1406,6 +1406,7 @@
     "system/UserDevice:lastSeenAt",
     "system/UserDevice:locale",
     "system/UserDevice:name",
+    "system/UserDevice:origin",
     "system/UserDevice:platform",
     "system/UserDevice:token",
     "system/UserDevice:userId",
