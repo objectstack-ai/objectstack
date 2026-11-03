@@ -59,10 +59,13 @@ export const authIdentityObjects: any[] = [
   SysTeamMember,
   SysApiKey,
   SysTwoFactor,
+  // A user's own per-user key-value state. Its owner is fixed when it is saved
+  // (`user-preference-hooks.ts`, on the shared `owner-fixed-rule.ts`).
   SysUserPreference,
   // A reader's own named list views: user data on the preference template
-  // (ruling 6570568131 on #28971). Its save validation and default flag live
-  // in `personal-view-hooks.ts`.
+  // (ruling 6570568131 on #28971). Its save validation and the same owner rule
+  // live in `personal-view-hooks.ts`; which view opens by default is the
+  // reader's per-object pin, not this object's.
   SysPersonalView,
   SysOauthApplication,
   SysOauthAccessToken,

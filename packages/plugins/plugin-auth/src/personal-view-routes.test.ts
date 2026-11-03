@@ -169,3 +169,61 @@ describe('the personal-view delete door — answers given before the engine is a
     });
   });
 });
+
+describe('the personal-view delete door — its verdict on the row, read as the caller', () => {
+  /** An engine whose read answers `row` and whose delete answers `removed`. */
+  const scripted = (row: unknown, removed: unknown = true) => ({
+    findOne: vi.fn().mockResolvedValue(row),
+    delete: vi.fn().mockResolvedValue(removed),
+  });
+
+  it('a row the caller cannot read (the read answers nothing): 404 RECORD_NOT_FOUND, and nothing is removed', async () => {
+    const engine = scripted(undefined);
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'v1' },
+    });
+    expect(answer.status).toBe(404);
+    expect(answer.body?.error?.code).toBe('RECORD_NOT_FOUND');
+    expect(engine.findOne.mock.calls[0][0]).toBe('sys_personal_view');
+    expect(engine.findOne.mock.calls[0][1]).toEqual({ where: { id: 'v1' }, context: MEMBER });
+    expect(engine.delete).not.toHaveBeenCalled();
+  });
+
+  it('a row whose owner is someone else: 403 PERMISSION_DENIED, and nothing is removed', async () => {
+    const engine = scripted({ id: 'v1', user_id: 'u_other' });
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'v1' },
+    });
+    expect(answer.status).toBe(403);
+    expect(answer.body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(engine.delete).not.toHaveBeenCalled();
+  });
+
+  it('the owner\'s row is judged on user_id, not on who created it', async () => {
+    const engine = scripted({ id: 'v1', user_id: 'u_other', created_by: 'u_member' });
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'v1' },
+    });
+    expect(answer.status).toBe(403);
+    expect(engine.delete).not.toHaveBeenCalled();
+  });
+
+  it('a caller with no organization: the removal carries none', async () => {
+    const engine = scripted({ id: 'v1', user_id: 'u_member' });
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'v1' },
+    });
+    expect(answer.status).toBe(200);
+    expect(engine.delete.mock.calls[0][0]).toBe('sys_personal_view');
+    expect(engine.delete.mock.calls[0][1].context).toEqual({ isSystem: true, attributedUserId: 'u_member' });
+  });
+
+  it('a row that went between the read and the removal: 404 RECORD_NOT_FOUND', async () => {
+    const engine = scripted({ id: 'v1', user_id: 'u_member' }, false);
+    const answer = await call(door({ getEngine: () => engine, resolveCaller: async () => MEMBER }), {
+      params: { id: 'v1' },
+    });
+    expect(answer.status).toBe(404);
+    expect(answer.body?.error?.code).toBe('RECORD_NOT_FOUND');
+  });
+});
