@@ -1075,21 +1075,23 @@ function moduleText(moduleFile, title, movers, scope, leafNames) {
  * export and something outside the leaf now imports.
  */
 function leafText(scope, top, leafExports) {
+  // The header is `//` lines, not a `/** */` docblock: the bundled `.d.ts`
+  // keeps a JSDoc block that leads a module's first statement, and this module
+  // is bundled FIRST, so a docblock here would be published text the base did
+  // not carry (measured: 14 added lines in dist/index.d.ts).
   const out = [];
   out.push('// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.');
   out.push('');
-  out.push('/**');
   out.push(...wrapComment([MARK, 'The', 'top-level', 'declarations', 'ahead', 'of', '`SqlDriver`', 'in', '`sql-driver.ts`',
     'that', 'moved', 'out', 'whole', 'by', '`scripts/codemod-split-sql-driver.mjs`', '(lever', '(b)', 'of', 'ruling',
-    '6591753301).']));
-  out.push(' *');
-  out.push(' * A MOVE, not a redesign: each declaration below is its `sql-driver.ts` text');
-  out.push(' * exactly, with the comments above it, in the order it stood there. A LEAF:');
-  out.push(' * it imports neither `sql-driver.ts` nor any `sql-driver-*` module, so it is');
-  out.push(' * evaluated before the class and forms no cycle with it. `sql-driver.ts`');
-  out.push(' * re-exports, by name, every declaration here it exported before, so every');
-  out.push(' * importer of `./sql-driver.js` reads what it read.');
-  out.push(' */');
+    '6591753301).']).map((l) => l.replace(/^ \*/, '//')));
+  out.push('//');
+  out.push('// A MOVE, not a redesign: each declaration below is its `sql-driver.ts` text');
+  out.push('// exactly, with the comments above it, in the order it stood there. A LEAF:');
+  out.push('// it imports neither `sql-driver.ts` nor any `sql-driver-*` module, so it is');
+  out.push('// evaluated before the class and forms no cycle with it. `sql-driver.ts`');
+  out.push('// re-exports, by name, every declaration here it exported before, so every');
+  out.push('// importer of `./sql-driver.js` reads what it read.');
   out.push('');
   out.push(...importLines(scope, top.movers));
   let text = out.join('\n');
@@ -1236,7 +1238,7 @@ function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}
       const stmts = sf.getStatements();
       // The generated header is leading trivia of the first statement when no
       // import precedes it; a moved statement's text starts after it.
-      const headerEnd = text.indexOf(' */\n', text.indexOf(MARK)) + ' */\n'.length;
+      const headerEnd = text.indexOf('\n\n', text.indexOf(MARK)) + 1;
       stmts.forEach((st, i) => {
         if (Node.isImportDeclaration(st)) {
           if (/^\.\/sql-driver/.test(st.getModuleSpecifierValue())) {
@@ -1627,7 +1629,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'declaration bar': 6,
   'stay rules': 11,
-  'top-level moves': 9,
+  'top-level moves': 10,
   'byte-identity proof': 10,
   'refusals': 3,
 });
@@ -1823,6 +1825,8 @@ async function selfTest() {
     check('a declaration after the class is not in the region', !top('needleInMethod'));
     const out = generate(tm, input, planned);
     const leaf = out.modules.get(LEAF_MODULE) ?? '';
+    check('the leaf header is line comments, never a docblock the bundled .d.ts would publish',
+      leaf.includes(MARK) && !leaf.slice(0, leaf.indexOf('\n\n', leaf.indexOf(MARK))).includes('/*'));
     check('the leaf imports neither sql-driver.ts nor a seam module', leaf.length > 0 && !/from '\.\/sql-driver/.test(leaf), leaf.slice(0, 200));
     check('sql-driver.ts re-exports the exported movers by name, the interface as a type',
       /export \{ DERIVED, type ExportedShape \} from '\.\/sql-driver-top-level\.js';/.test(out.host));
