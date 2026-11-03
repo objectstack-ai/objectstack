@@ -29,10 +29,31 @@
  *    `sql-driver-<section>.ts`, whose `this` is one named host: the `SqlDriver`
  *    members the body reads, typed AS the class members (`SqlDriver['x']`).
  *  - The stub hands the body that host: a method as a closure that calls it on
- *    the driver at call time, a field or accessor as a GETTER that reads it
- *    when the body reads it.
- *  - The module imports `sql-driver.ts` for types only, so the two form no
- *    evaluation cycle.
+ *    the driver at call time (the builder factory as a bound reference, see
+ *    `BOUND_HOST_METHODS`), a field or accessor as a GETTER that reads it when
+ *    the body reads it.
+ *
+ * Ruling `6591753301` (option A) widened the pattern two ways, and this script
+ * applies both:
+ *
+ *  - (a) A section module may import VALUES from `sql-driver.ts`. A staying
+ *    top-level name a moved body reads is exported for it by one generated
+ *    `export { … }` list (the declaration's own text is not touched), and
+ *    `index.ts` re-exports by name, so none reaches the package. Every such
+ *    use is inside a function body, so the cycle is never read at evaluation.
+ *  - (b) The top-level declarations ahead of the class (`const` / `function` /
+ *    `interface` / `type`) move WHOLE, with the comments above them, into one
+ *    leaf module, `LEAF_MODULE`, in base order. The leaf never imports
+ *    `sql-driver.ts` or a `sql-driver-*` module: a declaration that names the
+ *    class, a seam import or a declaration that stays, stays itself.
+ *    `sql-driver.ts` imports back what it still reads and re-exports, by name,
+ *    every moved declaration it exported, so every importer of
+ *    `./sql-driver.js` (`index.ts`, the hand-series seams, the tests) reads
+ *    what it read.
+ *
+ * `check-tenant-chokepoint` reads every `sql-driver-*.ts` module since the
+ * same ruling, so a body carrying the builder factory or the tenant scope
+ * moves like any other; its readings must be equal before and after.
  *
  * ⛔ The moved text is not re-indented and not formatted: the body is the
  * method's `{ … }` exactly as it stood, so byte-identity is equality of text,
@@ -42,18 +63,23 @@
  *
  * A method stays whole on the class when moving it would change what it does,
  * what the published `.d.ts` says, or what a gate or test that reads
- * `sql-driver.ts` BY PATH sees. `STAY_REASONS` lists every reason; the plan
- * prints, per section, every method that stayed and why. The two reasons that
- * are tables rather than rules are `PATH_READER_PINS` (a member whose body a
- * reader extracts from `sql-driver.ts` by path) and the tenant-chokepoint
- * spellings (`check-tenant-chokepoint` scans `sql-driver.ts` alone).
+ * `sql-driver.ts` BY PATH sees. `STAY_REASONS` lists every reason for a method
+ * and `TOP_STAY_REASONS` every reason for a top-level declaration; the plan
+ * prints every one that stayed and why. The reasons that are tables rather
+ * than rules are `PATH_READER_PINS` (a name whose text a reader extracts from
+ * `sql-driver.ts` by path) and `PATH_READER_NEEDLES` (literal text a reader
+ * requires to find there).
  *
  * ## The proof (`--write` runs it on its own output; `--verify` re-runs it)
  *
  *  1. Byte-identity: every generated function's body, parameters and return
- *     type are the base method's text, exactly; and putting every body back
- *     (and `async` back on its stub, and the generated imports out) rebuilds
- *     the base `sql-driver.ts` byte-for-byte, so nothing else in it moved.
+ *     type are the base method's text, exactly; every leaf declaration is its
+ *     base statement's text with the comments above it, exactly; and putting
+ *     every body back (and `async` back on its stub), taking the generated
+ *     imports and exports out, and splicing the leaf back between the
+ *     statements that stayed rebuilds the base `sql-driver.ts` byte-for-byte,
+ *     so nothing else in it moved. The leaf's relative imports are followed on
+ *     disk: none may reach `sql-driver.ts`.
  *  2. The declaration-file bar of ruling `6348891160` item 1, on the built
  *     `dist/index.d.ts` and `dist/index.d.mts` (`--dts`): the same declaration
  *     set; byte-identical after sorting the members of each string-literal
@@ -139,30 +165,64 @@ const SECTION_MODULES = Object.freeze({
 });
 
 /**
- * Members whose body a reader takes out of `sql-driver.ts` BY PATH — moving the
- * body would leave that reader reading a stub. Each row names the reader. A row
- * naming a method the class no longer has stops the script (exit 2), so the
- * table cannot rot into names nobody reads.
+ * The leaf module the top-level declarations ahead of the class move to, whole
+ * (lever (b) of ruling `6591753301`). A leaf: it never imports `sql-driver.ts`
+ * or any `sql-driver-*` module, so it is evaluated before the class and forms
+ * no cycle with it.
+ */
+const LEAF_MODULE = 'sql-driver-top-level.ts';
+
+/**
+ * Names whose text a reader takes out of `sql-driver.ts` BY PATH. Moving it
+ * would leave that reader reading a stub, or nothing. A class method or a
+ * top-level declaration of the name stays. Each row names the reader. A row
+ * naming nothing the file declares stops the script (exit 2), so the table
+ * cannot rot into names nobody reads.
  */
 const PATH_READER_PINS = Object.freeze({
+  createColumn: 'packages/cli generate-{field-type-vocabulary,string-family-width,multiple-json-column} pins and '
+    + 'scripts/check-keyed-text-bounds.mjs slice `protected createColumn(` to its type switch',
+  createAuditTimestampColumn: 'packages/cli generate-builtin-id-column pin reads 600 characters after its signature',
 });
 
 /**
- * The spellings `scripts/check-tenant-chokepoint.mjs` keys on. It scans
- * `sql-driver.ts` (and the two subclasses) and no seam module, so a body that
- * carries one stays where the gate reads it: its counts (read doors, tenant
- * predicates, D8 arms) must not move.
+ * Literal text a reader requires to find in `sql-driver.ts` BY PATH. A class
+ * method or a top-level declaration whose text carries one stays, so the
+ * reader still finds it where it looks. Each row names the reader.
+ *
+ * The first three are `sql-driver-compile-refusal-seam.test.ts`'s enumeration:
+ * it parses `sql-driver.ts` and three named seam modules and asserts the EXACT
+ * set of functions that call `unsupportedFilterError` / `withheldFilterError`
+ * or write the `INVALID_FILTER` code, by enclosing name. A builder moved to a
+ * module it does not read drops out of that set.
  */
-const CHOKEPOINT_SPELLINGS = Object.freeze([
-  'getBuilder',
-  'applyTenantScope',
-  'resolveTenantField',
-  'computeTenantField',
-  'computeAndRecordTenantField',
-  'tenantField',
-  "'organization_id'",
-  '"organization_id"',
-]);
+const PATH_READER_NEEDLES = Object.freeze({
+  'unsupportedFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers',
+  'withheldFilterError(': 'sql-driver-compile-refusal-seam.test.ts enumerates its callers',
+  '.INVALID_FILTER': 'sql-driver-compile-refusal-seam.test.ts enumerates the INVALID_FILTER code writers',
+  "table.string('id').primary();": 'packages/cli generate-builtin-id-column and generate-field-type-vocabulary pins',
+  'table.timestamp(name).defaultTo(this.knex.fn.now());': 'packages/cli generate-builtin-id-column pin',
+  '...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
+  'const MEDIA_ID_VARCHAR_CHARS = ': 'packages/cli generate-file-reference-width and generate-field-type-vocabulary pins',
+  'table.string(name, MEDIA_ID_VARCHAR_CHARS)': 'packages/cli generate-file-reference-width and generate-field-type-vocabulary pins',
+  'this.createColumn(table, name, field, keyedColumns.get(name));': 'packages/cli generate-string-family-width pin',
+  'const keyedColumns = indexedKeyColumns({': 'packages/cli generate-string-family-width pin',
+  'keyed ? this.keyableTextLength(field) : null': 'scripts/check-keyed-text-bounds.mjs EMITTER_ANCHOR and the generate-string-family-width pin',
+  'JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name)': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
+  'if (FILE_REFERENCE_TYPES.has(type)) {': 'packages/cli generate-string-family-width pin',
+});
+
+/**
+ * The `SqlDriver` methods a host hands its body as a BOUND reference
+ * (`this.m.bind(this)`) rather than as a closure that calls it. Only the
+ * builder factory: `check-tenant-chokepoint` refuses a `this.getBuilder(...)`
+ * call whose result is never bound to a name, and a forwarding closure in a
+ * stub is exactly that shape. The bound reference calls the same method on
+ * the same driver (a subclass override included); the real call, and the
+ * binding the gate counts, stay in the moved body, where the widened gate
+ * reads them.
+ */
+const BOUND_HOST_METHODS = new Set(['getBuilder']);
 
 /** Reserved words a function declaration may not be named. */
 const RESERVED = new Set(('break case catch class const continue debugger default delete do else enum export extends ' +
@@ -184,8 +244,7 @@ const STAY_REASONS = Object.freeze({
   'type-parameters': 'a generic method (Function#call does not carry its type parameters)',
   'parameter-shape': 'a destructured, defaulted or `this` parameter (the stub cannot forward it unchanged)',
   'comment-in-parameters': 'a comment inside its parameter list (one-line parameters would drop it)',
-  'tenant-chokepoint': 'its body carries a spelling check-tenant-chokepoint reads in sql-driver.ts only',
-  'path-reader': 'a reader extracts its body from sql-driver.ts by path (PATH_READER_PINS)',
+  'path-reader': 'a reader takes its text out of sql-driver.ts by path (PATH_READER_PINS / PATH_READER_NEEDLES)',
   'arguments': 'its body reads `arguments`',
   'super': 'its body reads `super`',
   'new-target': 'its body reads `new.target`',
@@ -196,13 +255,23 @@ const STAY_REASONS = Object.freeze({
   'method-as-value': 'it reads a method as a value instead of calling it',
   'field-call': 'it calls a field or accessor as a function (the host would change its receiver)',
   'overloaded-host-method': 'it calls an overloaded method (the host closure cannot be typed)',
-  'module-value': 'it reads a value declared in sql-driver.ts itself (a value import would make an evaluation cycle)',
-  'module-local-type': 'it names a type sql-driver.ts declares without exporting it',
+  'non-public-static': 'it reads a private or protected static of SqlDriver (unreachable from a module function)',
+  'module-write': 'it assigns a module-scope binding of sql-driver.ts (an import is read-only)',
   'already-moved': 'its body is already a hand-series seam stub',
   'name-taken': 'its name is already a module-scope binding in sql-driver.ts',
   'name-collision': 'its name collides with an import its module needs',
   'parameter-shadows': 'a parameter shadows the moved function or a stub local',
   'no-yield': 'its stub would be no shorter than its body (moving it would grow sql-driver.ts)',
+});
+
+/** Every reason a top-level declaration ahead of the class stays in sql-driver.ts. */
+const TOP_STAY_REASONS = Object.freeze({
+  'top-kind': 'not a const / function / interface / type declaration of plain names',
+  'merged-declaration': 'its name is declared by more than one statement (an overload set or a merged declaration)',
+  'path-reader': 'a reader takes its text out of sql-driver.ts by path (PATH_READER_PINS / PATH_READER_NEEDLES)',
+  'class-reference': 'it names the class (the leaf would import sql-driver.ts back)',
+  'seam-import': 'it uses an import from a sql-driver-* module (the leaf would reach sql-driver.ts back through it)',
+  'needs-stayer': 'it names a declaration that stays (the leaf would import sql-driver.ts back)',
 });
 
 // ── Loading ts-morph ─────────────────────────────────────────────────────────
@@ -408,8 +477,8 @@ function readMethod(tm, ctx, m) {
     if (!reasons.includes(tag)) reasons.push(tag);
   };
   const host = new Map(); // member -> 'method' | 'getter'
-  const imports = new Map(); // local -> { specifier, importDecl, value }
-  const localTypes = new Set(); // exported sql-driver.ts types it names
+  const imports = new Map(); // local -> { value }
+  const moduleRefs = new Map(); // sql-driver.ts top-level name -> { value }
 
   if (m.isStatic()) add('static');
   if (!m.getBody()) add('no-body');
@@ -418,7 +487,7 @@ function readMethod(tm, ctx, m) {
   if (m.getOverloads().length > 0) add('overloaded');
   if (m.getDecorators().length > 0) add('decorated');
   const nameNode = m.getNameNode();
-  if (!Node.isIdentifier(nameNode)) { add('not-identifier-name'); return { reasons, host, imports, localTypes }; }
+  if (!Node.isIdentifier(nameNode)) { add('not-identifier-name'); return { reasons, host, imports, moduleRefs }; }
   const name = nameNode.getText();
   if (RESERVED.has(name)) add('reserved-name');
   if (!m.getReturnTypeNode() && m.getScope() !== 'private') add('inferred-return-type');
@@ -427,7 +496,7 @@ function readMethod(tm, ctx, m) {
     if (!Node.isIdentifier(p.getNameNode()) || p.hasInitializer() || p.getName() === 'this') add('parameter-shape', p.getName());
   }
   const body = m.getBody();
-  if (!body) return { reasons, host, imports, localTypes };
+  if (!body) return { reasons, host, imports, moduleRefs };
 
   // A comment between the parentheses that no parameter's own text carries.
   const params = m.getParameters();
@@ -439,9 +508,9 @@ function readMethod(tm, ctx, m) {
   }
   if (/\/\/|\/\*/.test(between)) add('comment-in-parameters');
 
-  const bodyText = body.getText();
-  for (const spelling of CHOKEPOINT_SPELLINGS) if (bodyText.includes(spelling)) add('tenant-chokepoint', spelling);
-  if (Object.prototype.hasOwnProperty.call(ctx.pins, name)) add('path-reader', ctx.pins[name]);
+  const methodText = m.getText();
+  for (const needle of Object.keys(ctx.needles)) if (methodText.includes(needle)) add('path-reader', JSON.stringify(needle));
+  if (Object.prototype.hasOwnProperty.call(ctx.pins, name)) add('path-reader', name);
 
   const regions = [...m.getTypeParameters(), ...params, m.getReturnTypeNode(), body].filter(Boolean);
   const checker = ctx.sf.getProject().getTypeChecker().compilerObject;
@@ -501,15 +570,22 @@ function readMethod(tm, ctx, m) {
           continue;
         }
         if (!isModuleScopeDecl(ts, decl)) continue;
+        // Lever (a) of ruling 6591753301: a module-scope name is imported —
+        // from the leaf when it moved there, from `sql-driver.ts` (exported
+        // for it) when it stayed. Two things a module function cannot do:
+        // reach a non-public static of the class, and assign an import.
         const declName = decl.name && ts.isIdentifier(decl.name) ? decl.name.text : node.getText();
-        const isTypeDecl = ts.isInterfaceDeclaration(decl) || ts.isTypeAliasDeclaration(decl);
-        if (!typePos || !(isTypeDecl || ts.isClassDeclaration(decl) || ts.isEnumDeclaration(decl))) {
-          add('module-value', declName);
-        } else if (!ctx.scope.exported.has(declName)) {
-          add('module-local-type', declName);
-        } else {
-          localTypes.add(declName);
+        if (ts.isClassDeclaration(decl) && declName === CLASS_NAME && !typePos) {
+          const access = node.getParent();
+          if (Node.isPropertyAccessExpression(access) && access.getExpression() === node) {
+            const member = access.getName();
+            const scope = ctx.statics.get(member);
+            if (scope && scope !== 'public') add('non-public-static', member);
+          }
         }
+        if (!typePos && isWritten(tm, node)) add('module-write', declName);
+        const prev = moduleRefs.get(declName);
+        moduleRefs.set(declName, { value: Boolean(prev && prev.value) || !typePos });
       }
     }
   }
@@ -523,7 +599,7 @@ function readMethod(tm, ctx, m) {
     const pn = p.getName();
     if (pn === name || pn === 'host' || /^read[A-Z]/.test(pn)) add('parameter-shadows', pn);
   }
-  return { reasons, host, imports, localTypes };
+  return { reasons, host, imports, moduleRefs };
 }
 
 function isModuleScopeDecl(ts, decl) {
@@ -549,11 +625,165 @@ function hostNameOf(moduleFile) {
   return `${slug.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join('')}Host`;
 }
 
+/** Is `node` inside a JSDoc comment? A `{@link X}` there is prose, not a use. */
+function inJsDoc(tm, node) {
+  for (let n = node.compilerNode; n; n = n.parent) {
+    if (n.kind >= tm.SyntaxKind.FirstJSDocNode && n.kind <= tm.SyntaxKind.LastJSDocNode) return true;
+  }
+  return false;
+}
+
+/** The statement of `sf` (a direct child of the source file) a declaration belongs to. */
+function topStatementOf(ts, decl) {
+  let n = decl;
+  while (n.parent && !ts.isSourceFile(n.parent)) n = n.parent;
+  return n.parent ? n : null;
+}
+
+/** The names a top-level statement declares, or null when one is not a plain identifier. */
+function declaredNames(tm, st) {
+  const { Node } = tm;
+  if (Node.isVariableStatement(st)) {
+    const names = [];
+    for (const d of st.getDeclarations()) {
+      if (!Node.isIdentifier(d.getNameNode())) return null;
+      names.push(d.getName());
+    }
+    return names;
+  }
+  if (Node.isFunctionDeclaration(st) || Node.isInterfaceDeclaration(st) || Node.isTypeAliasDeclaration(st)) {
+    return st.getName() ? [st.getName()] : null;
+  }
+  return null;
+}
+
 /**
- * Read `text` (a `sql-driver.ts`) and decide, per method, where its body goes.
- * Pure: the same text gives the same plan.
+ * Lever (b): read every top-level statement between the last import and the
+ * class, and decide which move whole into the leaf. A mover never names the
+ * class, a `sql-driver-*` module's import, or a statement that stays — so the
+ * leaf it lands in never imports `sql-driver.ts` back. Pure.
  */
-function plan(tm, text, { sections = SECTION_MODULES, pins = PATH_READER_PINS } = {}) {
+function planTopLevel(tm, ctx) {
+  const { Node, SyntaxKind } = tm;
+  const ts = tm.ts;
+  const stmts = ctx.sf.getStatements();
+  const clsIndex = stmts.indexOf(ctx.cls);
+  let lastImport = -1;
+  stmts.forEach((st, i) => { if (Node.isImportDeclaration(st)) lastImport = i; });
+  const checker = ctx.sf.getProject().getTypeChecker().compilerObject;
+  const nameCount = new Map();
+  for (const st of stmts) {
+    for (const n of declaredNames(tm, st) ?? []) nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
+  }
+  const records = [];
+  const byStatement = new Map();
+  for (let i = lastImport + 1; i < clsIndex; i += 1) {
+    const st = stmts[i];
+    const names = declaredNames(tm, st);
+    const record = {
+      node: st, names: names ?? [], label: names ? names.join(', ') : `(${st.getKindName()})`,
+      exported: Node.isExportable(st) && st.isExported(), reasons: [],
+      deps: new Set(), imports: new Map(),
+      startLine: st.getStartLineNumber(true), lines: st.getEndLineNumber() - st.getStartLineNumber(true) + 1,
+      typeOnly: Node.isInterfaceDeclaration(st) || Node.isTypeAliasDeclaration(st),
+    };
+    const add = (code, detail) => {
+      const tag = detail ? `${code}: ${detail}` : code;
+      if (!record.reasons.includes(tag)) record.reasons.push(tag);
+    };
+    if (!names || (Node.isVariableStatement(st) && st.hasDeclareKeyword()) ||
+      (Node.isFunctionDeclaration(st) && (!st.getBody() || st.hasDeclareKeyword()))) add('top-kind');
+    for (const n of record.names) if ((nameCount.get(n) ?? 0) > 1) add('merged-declaration', n);
+    for (const n of record.names) if (Object.prototype.hasOwnProperty.call(ctx.pins, n)) add('path-reader', n);
+    const fullText = st.getFullText();
+    for (const needle of Object.keys(ctx.needles)) if (fullText.includes(needle)) add('path-reader', JSON.stringify(needle));
+    for (const node of st.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      if (inJsDoc(tm, node)) continue;
+      const parent = node.getParent();
+      const symbol = Node.isShorthandPropertyAssignment(parent) && parent.getNameNode() === node
+        ? checker.getShorthandAssignmentValueSymbol(parent.compilerNode)
+        : checker.getSymbolAtLocation(node.compilerNode);
+      if (!symbol || !symbol.declarations) continue;
+      for (const decl of symbol.declarations) {
+        if (decl.getSourceFile() !== ctx.sf.compilerNode) continue;
+        const typePos = inTypePosition(tm, node, st);
+        if (ts.isImportSpecifier(decl) || ts.isImportClause(decl) || ts.isNamespaceImport(decl)) {
+          const local = node.getText();
+          const binding = ctx.scope.bindings.get(local);
+          if (binding && /^\.\/sql-driver/.test(binding.specifier)) add('seam-import', local);
+          const prev = record.imports.get(local);
+          record.imports.set(local, { value: Boolean(prev && prev.value) || !typePos });
+          continue;
+        }
+        if (!isModuleScopeDecl(ts, decl)) continue;
+        const owner = topStatementOf(ts, decl);
+        if (!owner || owner === st.compilerNode) continue;
+        if (owner === ctx.cls.compilerNode) { add('class-reference'); continue; }
+        record.deps.add(owner);
+      }
+    }
+    records.push(record);
+    byStatement.set(st.compilerNode, record);
+  }
+  // A mover may not name a statement that stays: close over the stayers until stable.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const r of records) {
+      if (r.reasons.length > 0) continue;
+      for (const owner of r.deps) {
+        const dep = byStatement.get(owner);
+        if (!dep || dep.reasons.length > 0) {
+          const depName = dep ? dep.label : (declaredNames(tm, ctx.sf.getStatements().find((s) => s.compilerNode === owner)) ?? ['?']).join(', ');
+          r.reasons.push(`needs-stayer: ${depName}`);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  const movers = records.filter((r) => r.reasons.length === 0);
+  const moverNames = new Map();
+  for (const r of movers) for (const n of r.names) moverNames.set(n, r);
+  return { records, movers, moverNames };
+}
+
+/**
+ * Which moved top-level names the text that STAYS in `sql-driver.ts` still
+ * reads, value or type: everything outside the moved statements and the moved
+ * method bodies, JSDoc excepted. Those are what `sql-driver.ts` imports back
+ * from the leaf.
+ */
+function hostUsesOfMovers(tm, ctx, top, methodRecords) {
+  const { SyntaxKind } = tm;
+  const ts = tm.ts;
+  const checker = ctx.sf.getProject().getTypeChecker().compilerObject;
+  const skip = [];
+  for (const r of top.movers) skip.push([r.node.getFullStart(), r.node.getEnd()]);
+  for (const r of methodRecords) if (r.reasons.length === 0) skip.push([r.node.getBody().getStart(), r.node.getBody().getEnd()]);
+  const uses = new Map();
+  for (const node of ctx.sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    const at = node.getStart();
+    if (skip.some(([a, b]) => at >= a && at < b)) continue;
+    if (inJsDoc(tm, node)) continue;
+    const name = node.getText();
+    if (!top.moverNames.has(name)) continue;
+    const symbol = checker.getSymbolAtLocation(node.compilerNode);
+    if (!symbol || !symbol.declarations) continue;
+    const mover = top.moverNames.get(name);
+    if (!symbol.declarations.some((d) => topStatementOf(ts, d) === mover.node.compilerNode)) continue;
+    const typePos = inTypePosition(tm, node, ctx.sf);
+    const prev = uses.get(name);
+    uses.set(name, { value: Boolean(prev && prev.value) || !typePos });
+  }
+  return uses;
+}
+
+/**
+ * Read `text` (a `sql-driver.ts`) and decide, per method, where its body goes,
+ * and per top-level declaration ahead of the class, whether it moves to the
+ * leaf. Pure: the same text gives the same plan.
+ */
+function plan(tm, text, { sections = SECTION_MODULES, pins = PATH_READER_PINS, needles = PATH_READER_NEEDLES } = {}) {
   const sf = parse(tm, HOST_PATH, text);
   const cls = sf.getClass(CLASS_NAME);
   if (!cls) refuse(`no class ${CLASS_NAME} in ${HOST_BASENAME}`);
@@ -564,10 +794,20 @@ function plan(tm, text, { sections = SECTION_MODULES, pins = PATH_READER_PINS } 
     refuse(`banner(s) the section table does not name: ${unknown.map((b) => `"${b.title}" (line ${b.line})`).join(', ')}. ` +
       'Add each to SECTION_MODULES (a module name, or null to keep the section on the class).');
   }
-  const ctx = { text, sf, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf) };
+  const statics = new Map();
+  for (const m of cls.getMembers()) {
+    if (typeof m.isStatic === 'function' && m.isStatic() && typeof m.getName === 'function') {
+      statics.set(m.getName(), typeof m.getScope === 'function' ? m.getScope() : 'public');
+    }
+  }
+  const ctx = { text, sf, cls, members: instanceMembers(tm, cls), scope: moduleScope(tm, sf), statics, pins, needles };
   const methodNames = new Set(cls.getMethods().map((m) => m.getName()));
-  const stalePins = Object.keys(pins).filter((n) => !methodNames.has(n));
-  if (stalePins.length > 0) refuse(`PATH_READER_PINS names method(s) the class no longer has: ${stalePins.join(', ')}`);
+  const stalePins = Object.keys(pins).filter((n) => !methodNames.has(n) && !ctx.scope.bindings.has(n));
+  if (stalePins.length > 0) refuse(`PATH_READER_PINS names what ${HOST_BASENAME} no longer declares: ${stalePins.join(', ')}`);
+  const staleNeedles = Object.keys(needles).filter((n) => !text.includes(n));
+  if (staleNeedles.length > 0) refuse(`PATH_READER_NEEDLES names text ${HOST_BASENAME} no longer carries: ${staleNeedles.map((n) => JSON.stringify(n)).join(', ')}`);
+
+  const top = planTopLevel(tm, ctx);
 
   const records = [];
   const seen = new Set();
@@ -575,7 +815,7 @@ function plan(tm, text, { sections = SECTION_MODULES, pins = PATH_READER_PINS } 
     const startLine = m.getStartLineNumber(true);
     let banner = null;
     for (const b of banners) if (b.line < startLine) banner = b;
-    const read = readMethod(tm, { ...ctx, pins }, m);
+    const read = readMethod(tm, ctx, m);
     const name = m.getName();
     const firstOfName = !seen.has(name);
     seen.add(name);
@@ -600,17 +840,40 @@ function plan(tm, text, { sections = SECTION_MODULES, pins = PATH_READER_PINS } 
     changed = false;
     const byModule = groupMovers(records);
     for (const [moduleFile, movers] of byModule) {
-      const taken = new Set(['SqlDriver', hostNameOf(moduleFile), 'ThisParameterType', 'Pick']);
+      const taken = new Set([CLASS_NAME, hostNameOf(moduleFile), 'ThisParameterType', 'Pick']);
       for (const r of movers) {
         for (const local of r.imports.keys()) taken.add(local);
-        for (const t of r.localTypes) taken.add(t);
+        for (const local of r.moduleRefs.keys()) taken.add(local);
       }
       for (const r of movers) {
         if (taken.has(r.name)) { r.reasons.push('name-collision'); changed = true; }
       }
     }
   }
-  return { sf, cls, ctx, banners, records, modules: groupMovers(records) };
+  const modules = groupMovers(records);
+  const hostUses = hostUsesOfMovers(tm, ctx, top, records);
+
+  // What each side imports across the cut: the section modules read moved
+  // names from the leaf and staying names from sql-driver.ts (lever (a));
+  // sql-driver.ts reads moved names from the leaf.
+  const sectionLeafNames = new Set();
+  const hostExportsForSections = new Map(); // staying name -> { value }
+  for (const movers of modules.values()) {
+    for (const r of movers) {
+      for (const [n, use] of r.moduleRefs) {
+        if (top.moverNames.has(n)) { sectionLeafNames.add(n); continue; }
+        if (n === CLASS_NAME || ctx.scope.exported.has(n)) continue;
+        const prev = hostExportsForSections.get(n);
+        hostExportsForSections.set(n, { value: Boolean(prev && prev.value) || use.value });
+      }
+    }
+  }
+  const leafExports = [];
+  for (const r of top.movers) {
+    if (r.exported) continue;
+    for (const n of r.names) if (hostUses.has(n) || sectionLeafNames.has(n)) leafExports.push(n);
+  }
+  return { sf, cls, ctx, banners, records, modules, top, hostUses, leafExports, hostExportsForSections };
 }
 
 /** Movers grouped by module, modules in the order their first banner appears. */
@@ -628,10 +891,46 @@ function groupMovers(records) {
 
 const readerName = (member) => `read${member[0].toUpperCase()}${member.slice(1)}`;
 
-/** The import lines a module needs, in sql-driver.ts's own import order. */
-function importLines(scope, movers, needsHost) {
+const byName = ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0);
+const leafSpecifier = () => `./${LEAF_MODULE.replace(/\.ts$/, '.js')}`;
+
+/**
+ * One `import` / `export` statement over `names`: on one line when it fits in
+ * 120 columns, else one name per wrapped run, two-space indented.
+ */
+function namedStatement(head, names, tail) {
+  const one = `${head} { ${names.join(', ')} }${tail}`;
+  if (one.length <= 120) return one;
+  const out = [`${head} {`];
+  let line = ' ';
+  for (const n of names) {
+    if (line.length + n.length + 2 > 118 && line !== ' ') { out.push(line); line = ' '; }
+    line += ` ${n},`;
+  }
+  out.push(line);
+  out.push(`}${tail}`);
+  return out.join('\n');
+}
+
+/** `import { … }` and `import type { … }` from one specifier, values first. */
+function importPair(specifier, uses) {
+  const out = [];
+  const entries = [...uses.entries()].sort(byName);
+  const values = entries.filter(([, u]) => u.value).map(([n]) => n);
+  const types = entries.filter(([, u]) => !u.value).map(([n]) => n);
+  if (values.length > 0) out.push(namedStatement('import', values, ` from '${specifier}';`));
+  if (types.length > 0) out.push(namedStatement('import type', types, ` from '${specifier}';`));
+  return out;
+}
+
+/**
+ * The import lines a module needs: sql-driver.ts's own imports it uses, in
+ * sql-driver.ts's import order; then the moved top-level names, from the leaf;
+ * then what stayed in sql-driver.ts (lever (a)), including the class.
+ */
+function importLines(scope, users, { needsHost = false, moduleRefs = new Map(), leafNames = new Map() } = {}) {
   const bySpecifier = new Map();
-  for (const r of movers) {
+  for (const r of users) {
     for (const [local, use] of r.imports) {
       const b = scope.bindings.get(local);
       if (!b || b.kind !== 'import') refuse(`import binding ${local} not found`);
@@ -644,7 +943,7 @@ function importLines(scope, movers, needsHost) {
   const out = [];
   const specifiers = [...bySpecifier.keys()].sort((a, b) => scope.importOrder.get(a) - scope.importOrder.get(b));
   for (const specifier of specifiers) {
-    const entries = [...bySpecifier.get(specifier).entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const entries = [...bySpecifier.get(specifier).entries()].sort(byName);
     const named = (value) => entries
       .filter(([, e]) => e.form === 'named' && e.value === value)
       .map(([local, e]) => (e.imported === local ? local : `${e.imported} as ${local}`));
@@ -661,9 +960,12 @@ function importLines(scope, movers, needsHost) {
     const typeNamed = named(false);
     if (typeNamed.length > 0) out.push(`import type { ${typeNamed.join(', ')} } from '${specifier}';`);
   }
-  const localTypes = [...new Set(movers.flatMap((r) => [...r.localTypes]))].sort();
-  const fromHost = [...(needsHost ? ['SqlDriver'] : []), ...localTypes.filter((t) => t !== 'SqlDriver')];
-  if (fromHost.length > 0) out.push(`import type { ${fromHost.join(', ')} } from './sql-driver.js';`);
+  const fromLeaf = new Map();
+  const fromHost = new Map();
+  for (const [n, use] of moduleRefs) (leafNames.has(n) ? fromLeaf : fromHost).set(n, use);
+  if (needsHost && !fromHost.has(CLASS_NAME)) fromHost.set(CLASS_NAME, { value: false });
+  out.push(...importPair(leafSpecifier(), fromLeaf));
+  out.push(...importPair('./sql-driver.js', fromHost));
   return out;
 }
 
@@ -687,11 +989,19 @@ function forwardList(m) {
   return m.getParameters().map((p) => (p.isRestParameter() ? `...${p.getName()}` : p.getName()));
 }
 
-function moduleText(moduleFile, title, movers, scope) {
+function moduleText(moduleFile, title, movers, scope, leafNames) {
   const hostName = hostNameOf(moduleFile);
   const hostMembers = new Map();
   for (const r of movers) for (const [member, kind] of r.host) hostMembers.set(member, kind);
   const needsHost = hostMembers.size > 0;
+  const moduleRefs = new Map();
+  for (const r of movers) {
+    for (const [n, use] of r.moduleRefs) {
+      const prev = moduleRefs.get(n);
+      moduleRefs.set(n, { value: Boolean(prev && prev.value) || use.value });
+    }
+  }
+  const readsHostValues = [...moduleRefs].some(([n, use]) => use.value && !leafNames.has(n));
   const names = movers.map((r) => `\`${r.name}\`${r === movers[movers.length - 1] ? '' : ','}`);
   const out = [];
   out.push('// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.');
@@ -710,19 +1020,27 @@ function moduleText(moduleFile, title, movers, scope) {
     out.push(` * The bodies reach the class through {@link ${hostName}}: exactly the`);
     out.push(' * `SqlDriver` members they read. Each method hands its body one literal of the');
     out.push(' * members that body reads, plus a `.call`: methods go as closures that call');
-    out.push(' * them on the driver at call time, so a subclass override or an instance spy');
-    out.push(' * is still the one reached; fields and accessors go as GETTERS, read when the');
-    out.push(' * body reads them, as they were on the class.');
-    out.push(' *');
-    out.push(' * The module imports `sql-driver.ts` for types only, so the two modules form');
-    out.push(' * no evaluation cycle. `index.ts` re-exports nothing from this module.');
+    out.push(' * them on the driver at call time (the builder factory as a bound reference),');
+    out.push(' * so a subclass override or an instance spy is still the one reached; fields');
+    out.push(' * and accessors go as GETTERS, read when the body reads them, as they were on');
+    out.push(' * the class.');
   } else {
     out.push(' * No body reads a `SqlDriver` member, so each method calls its function');
-    out.push(' * directly. `index.ts` re-exports nothing from this module.');
+    out.push(' * directly.');
+  }
+  out.push(' *');
+  if (readsHostValues) {
+    out.push(' * Values that stayed in `sql-driver.ts` are imported from it (lever (a) of');
+    out.push(' * ruling 6591753301); every use is inside a function body, so the import');
+    out.push(' * cycle is never read at evaluation time. `index.ts` re-exports nothing from');
+    out.push(' * this module.');
+  } else {
+    out.push(' * The module imports `sql-driver.ts` for types only, so the two modules form');
+    out.push(' * no evaluation cycle. `index.ts` re-exports nothing from this module.');
   }
   out.push(' */');
   out.push('');
-  out.push(...importLines(scope, movers, needsHost));
+  out.push(...importLines(scope, movers, { needsHost, moduleRefs, leafNames }));
   if (needsHost) {
     out.push('');
     out.push('/**');
@@ -750,6 +1068,39 @@ function moduleText(moduleFile, title, movers, scope) {
   return out.join('\n');
 }
 
+/**
+ * The leaf: the moved top-level statements, each its base text exactly (its
+ * leading comments and blank lines included), in base order, after the
+ * imports they use; then one `export { … }` of the moved names base did not
+ * export and something outside the leaf now imports.
+ */
+function leafText(scope, top, leafExports) {
+  const out = [];
+  out.push('// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.');
+  out.push('');
+  out.push('/**');
+  out.push(...wrapComment([MARK, 'The', 'top-level', 'declarations', 'ahead', 'of', '`SqlDriver`', 'in', '`sql-driver.ts`',
+    'that', 'moved', 'out', 'whole', 'by', '`scripts/codemod-split-sql-driver.mjs`', '(lever', '(b)', 'of', 'ruling',
+    '6591753301).']));
+  out.push(' *');
+  out.push(' * A MOVE, not a redesign: each declaration below is its `sql-driver.ts` text');
+  out.push(' * exactly, with the comments above it, in the order it stood there. A LEAF:');
+  out.push(' * it imports neither `sql-driver.ts` nor any `sql-driver-*` module, so it is');
+  out.push(' * evaluated before the class and forms no cycle with it. `sql-driver.ts`');
+  out.push(' * re-exports, by name, every declaration here it exported before, so every');
+  out.push(' * importer of `./sql-driver.js` reads what it read.');
+  out.push(' */');
+  out.push('');
+  out.push(...importLines(scope, top.movers));
+  let text = out.join('\n');
+  for (const r of top.movers) text += r.node.getFullText();
+  if (leafExports.length > 0) {
+    text += `\n\n// ${MARK} Declared above without \`export\`, and read by \`sql-driver.ts\` or a section module.\n`;
+    text += `${namedStatement('export', [...leafExports].sort(), ';')}`;
+  }
+  return `${text}\n`;
+}
+
 function stubBody(r, moduleFile, closeIndent) {
   const ind = `${closeIndent}  `;
   const hostName = hostNameOf(moduleFile);
@@ -766,9 +1117,9 @@ function stubBody(r, moduleFile, closeIndent) {
     }
     out.push(`${ind}const host: ThisParameterType<typeof ${r.name}> = {`);
     for (const member of members) {
-      out.push(r.host.get(member) === 'getter'
-        ? `${ind}  get ${member}() { return ${readerName(member)}(); },`
-        : `${ind}  ${member}: (...a) => this.${member}(...a),`);
+      if (r.host.get(member) === 'getter') out.push(`${ind}  get ${member}() { return ${readerName(member)}(); },`);
+      else if (BOUND_HOST_METHODS.has(member)) out.push(`${ind}  ${member}: this.${member}.bind(this),`);
+      else out.push(`${ind}  ${member}: (...a) => this.${member}(...a),`);
     }
     out.push(`${ind}};`);
     out.push(`${ind}return ${r.name}.call(host${args ? `, ${args}` : ''});`);
@@ -779,12 +1130,28 @@ function stubBody(r, moduleFile, closeIndent) {
 
 /**
  * Apply a plan to `text`. Returns `{ host, modules }`: the new `sql-driver.ts`
- * and a Map of module basename -> text. Pure.
+ * and a Map of module basename -> text (the leaf among them). Pure.
  */
 function generate(tm, text, planned) {
-  const { sf, ctx, modules } = planned;
+  const { sf, ctx, modules, top, hostUses, leafExports, hostExportsForSections } = planned;
   const edits = [];
   const importBlock = [];
+  if (top.movers.length > 0) {
+    const leafUses = new Map([...hostUses].filter(([n]) => top.moverNames.has(n)));
+    const lines = importPair(leafSpecifier(), leafUses);
+    if (lines.length > 0) {
+      importBlock.push(`\n// ${MARK} The top-level declarations that moved whole to \`${LEAF_MODULE}\`, as this file still reads them.`);
+      for (const l of lines) importBlock.push(`\n${l}`);
+    }
+    const reexports = top.movers.filter((r) => r.exported)
+      .flatMap((r) => r.names.map((n) => [n, r.typeOnly ? `type ${n}` : n]))
+      .sort(byName).map(([, spelled]) => spelled);
+    if (reexports.length > 0) {
+      importBlock.push(`\n// ${MARK} Re-exported by name, so every importer of \`./sql-driver.js\` reads what it read.`);
+      importBlock.push(`\n${namedStatement('export', reexports, ` from '${leafSpecifier()}';`)}`);
+    }
+    for (const r of top.movers) edits.push({ start: r.node.getFullStart(), end: r.node.getEnd(), text: '' });
+  }
   for (const [moduleFile, movers] of modules) {
     const title = movers[0].section;
     const hostName = hostNameOf(moduleFile);
@@ -802,6 +1169,14 @@ function generate(tm, text, planned) {
       if (asyncKw) edits.push({ start: asyncKw.getStart(), end: r.node.getNameNode().getStart(), text: '' });
     }
   }
+  if (hostExportsForSections.size > 0) {
+    const spelled = [...hostExportsForSections.keys()].sort().map((n) => {
+      const st = ctx.sf.getStatements().find((s) => (declaredNames(tm, s) ?? []).includes(n));
+      return st && (tm.Node.isInterfaceDeclaration(st) || tm.Node.isTypeAliasDeclaration(st)) ? `type ${n}` : n;
+    });
+    importBlock.push(`\n// ${MARK} Exported for the section modules above, which import them (lever (a)); \`index.ts\` re-exports by name, so none reaches the package.`);
+    importBlock.push(`\n${namedStatement('export', spelled, ';')}`);
+  }
   const lastImport = sf.getImportDeclarations().at(-1);
   if (!lastImport) refuse('sql-driver.ts has no import declaration to place the generated imports after');
   if (importBlock.length > 0) edits.push({ start: lastImport.getEnd(), end: lastImport.getEnd(), text: importBlock.join('') });
@@ -814,8 +1189,10 @@ function generate(tm, text, planned) {
     floor = e.start;
   }
   const moduleTexts = new Map();
+  const leafNames = top.moverNames;
+  if (top.movers.length > 0) moduleTexts.set(LEAF_MODULE, leafText(ctx.scope, top, leafExports));
   for (const [moduleFile, movers] of modules) {
-    moduleTexts.set(moduleFile, moduleText(moduleFile, movers[0].section, movers, ctx.scope));
+    moduleTexts.set(moduleFile, moduleText(moduleFile, movers[0].section, movers, ctx.scope, leafNames));
   }
   return { host: out, modules: moduleTexts };
 }
@@ -826,25 +1203,69 @@ const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 
 /**
  * Prove a split against its base, from the texts alone (it shares no state with
- * `generate`): every generated function is its base method's text, and undoing
- * the split rebuilds the base `sql-driver.ts` byte-for-byte.
+ * `generate`): every generated function is its base method's text, every leaf
+ * declaration is its base statement's text, and undoing the split rebuilds the
+ * base `sql-driver.ts` byte-for-byte.
  *
- * Returns `{ failures, moved, linesBefore, linesAfter }`; no failure = proved.
+ * Undoing is: put each body back on its stub (and `async` back), drop the
+ * generated import / export statements, then splice the leaf's statements back
+ * between the statements that stayed — the interleaving read off the base by
+ * NAME only, so every byte of the result comes from the head or the leaf.
+ *
+ * Returns `{ failures, moved, movedTop, linesBefore, linesAfter }`; no failure = proved.
  */
-function verify(tm, baseText, headText, moduleTexts) {
-  const { Node, SyntaxKind } = tm;
+function verify(tm, baseText, headText, moduleTexts, { readSibling = null } = {}) {
+  const { Node } = tm;
   const failures = [];
   const moved = [];
+  const movedTop = [];
   const baseSf = parse(tm, HOST_PATH, baseText);
   const baseCls = baseSf.getClass(CLASS_NAME);
   const headSf = parse(tm, HOST_PATH, headText);
   const headCls = headSf.getClass(CLASS_NAME);
-  if (!baseCls || !headCls) return { failures: [`no class ${CLASS_NAME} at base or head`], moved, linesBefore: 0, linesAfter: 0 };
+  const none = { failures: [`no class ${CLASS_NAME} at base or head`], moved, movedTop, linesBefore: 0, linesAfter: 0 };
+  if (!baseCls || !headCls) return none;
 
   const modules = new Map();
+  let leaf = null;
   for (const [file, text] of moduleTexts) {
     if (!text.includes(MARK)) continue;
     const sf = parse(tm, join(SRC_DIR, file), text);
+    if (file === LEAF_MODULE) {
+      const statements = [];
+      const stmts = sf.getStatements();
+      // The generated header is leading trivia of the first statement when no
+      // import precedes it; a moved statement's text starts after it.
+      const headerEnd = text.indexOf(' */\n', text.indexOf(MARK)) + ' */\n'.length;
+      stmts.forEach((st, i) => {
+        if (Node.isImportDeclaration(st)) {
+          if (/^\.\/sql-driver/.test(st.getModuleSpecifierValue())) {
+            failures.push(`${file}: imports ${st.getModuleSpecifierValue()} — a leaf never imports sql-driver.ts or a sql-driver-* module`);
+          }
+          return;
+        }
+        if (i === stmts.length - 1 && Node.isExportDeclaration(st) && !st.getModuleSpecifier() && st.getFullText().includes(MARK)) return;
+        const names = declaredNames(tm, st);
+        if (!names) { failures.push(`${file}: a statement that is not a moved declaration: ${st.getText().slice(0, 60)}`); return; }
+        statements.push({ names, text: text.slice(Math.max(st.getFullStart(), headerEnd), st.getEnd()), node: st });
+      });
+      leaf = { file, sf, statements };
+      if (readSibling) {
+        // The leaf's relative imports, followed on disk: none may reach sql-driver.ts.
+        const seen = new Set();
+        const queue = sf.getImportDeclarations().map((d) => d.getModuleSpecifierValue()).filter((s) => s.startsWith('./'));
+        while (queue.length > 0) {
+          const spec = queue.shift();
+          if (seen.has(spec)) continue;
+          seen.add(spec);
+          if (/^\.\/sql-driver(\.js|-)/.test(spec)) { failures.push(`${file}: reaches ${spec} through its imports — not a leaf`); continue; }
+          const sibling = readSibling(spec.replace(/^\.\//, '').replace(/\.js$/, '.ts'));
+          if (sibling === null) continue;
+          for (const m of sibling.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+'(\.\/[^']+)'/gm)) queue.push(m[1]);
+        }
+      }
+      continue;
+    }
     const fns = new Map();
     for (const st of sf.getStatements()) {
       if (Node.isFunctionDeclaration(st)) fns.set(st.getName(), st);
@@ -889,13 +1310,52 @@ function verify(tm, baseText, headText, moduleTexts) {
   for (const [file, mod] of modules) {
     for (const name of mod.fns.keys()) if (!mod.claimed.has(name)) failures.push(`${file}: function ${name} has no stub on the class`);
   }
-  for (const imp of headSf.getImportDeclarations()) {
-    const hit = /^\.\/(sql-driver-[a-z0-9-]+)\.js$/.exec(imp.getModuleSpecifierValue());
-    if (hit && modules.has(`${hit[1]}.ts`)) edits.push({ start: imp.getFullStart(), end: imp.getEnd(), text: '' });
+  const generatedSpecifier = (spec) => {
+    const hit = /^\.\/(sql-driver-[a-z0-9-]+)\.js$/.exec(spec ?? '');
+    return Boolean(hit && (modules.has(`${hit[1]}.ts`) || (leaf && `${hit[1]}.ts` === leaf.file)));
+  };
+  for (const st of headSf.getStatements()) {
+    const drop = (Node.isImportDeclaration(st) && generatedSpecifier(st.getModuleSpecifierValue())) ||
+      (Node.isExportDeclaration(st) && (st.getModuleSpecifier()
+        ? generatedSpecifier(st.getModuleSpecifierValue())
+        : st.getFullText().includes(MARK)));
+    if (drop) edits.push({ start: st.getFullStart(), end: st.getEnd(), text: '' });
   }
   edits.sort((a, b) => b.start - a.start || b.end - a.end);
   let rebuilt = headText;
   for (const e of edits) rebuilt = rebuilt.slice(0, e.start) + e.text + rebuilt.slice(e.end);
+
+  if (leaf) {
+    // Splice the leaf back, in the order the base interleaves it by NAME.
+    const restSf = parse(tm, HOST_PATH, rebuilt);
+    const rest = restSf.getStatements();
+    const queue = [...leaf.statements];
+    const baseStmts = baseSf.getStatements();
+    let j = 0;
+    let assembled = rest.length > 0 ? rebuilt.slice(0, rest[0].getFullStart()) : '';
+    for (const b of baseStmts) {
+      const names = declaredNames(tm, b);
+      const key = names ? names.join(',') : null;
+      if (queue.length > 0 && key !== null && queue[0].names.join(',') === key) {
+        const l = queue.shift();
+        assembled += l.text;
+        const same = l.text === b.getFullText();
+        if (!same) failures.push(`${leaf.file}: ${key} is not its base text (leading comments included)`);
+        movedTop.push({
+          name: key, lines: b.getEndLineNumber() - b.getStartLineNumber(true) + 1,
+          sha: sha256(l.text), baseSha: sha256(b.getFullText()), same, exported: Node.isExportable(b) && b.isExported(),
+        });
+        continue;
+      }
+      if (j >= rest.length) { failures.push(`undoing the split runs out of head statements at base ${key ?? b.getKindName()}`); break; }
+      assembled += rest[j].getFullText();
+      j += 1;
+    }
+    if (queue.length > 0) failures.push(`${leaf.file}: ${queue.map((q) => q.names.join(',')).join('; ')} not placed — out of base order or not in the base`);
+    if (rest.length > 0) assembled += rebuilt.slice(rest[rest.length - 1].getEnd());
+    rebuilt = assembled;
+  }
+
   if (rebuilt !== baseText) {
     const a = rebuilt.split('\n');
     const b = baseText.split('\n');
@@ -904,8 +1364,13 @@ function verify(tm, baseText, headText, moduleTexts) {
     failures.push(`undoing the split does not rebuild the base sql-driver.ts: first difference at line ${i + 1}` +
       `\n    rebuilt: ${JSON.stringify(a[i] ?? '<end>')}\n    base:    ${JSON.stringify(b[i] ?? '<end>')}`);
   }
-  if (moved.length === 0) failures.push('no moved method found: a proof over nothing is not a proof');
-  return { failures, moved, linesBefore: baseText.split('\n').length, linesAfter: headText.split('\n').length };
+  if (moved.length === 0 && movedTop.length === 0) failures.push('no moved method or declaration found: a proof over nothing is not a proof');
+  return { failures, moved, movedTop, linesBefore: lineCount(baseText), linesAfter: lineCount(headText) };
+}
+
+/** Lines as `wc -l` counts them: newline characters. */
+function lineCount(text) {
+  return text.split('\n').length - 1;
 }
 
 // ── Proof 2: the declaration-file bar (ruling 6348891160 item 1) ─────────────
@@ -1031,6 +1496,24 @@ function planReport(planned) {
   out.push(`total: ${movedMethods}/${planned.records.length} methods move into ${planned.modules.size} module(s): ` +
     `${movedLines} body lines out, ${movedLines - movedSaved} stub lines in, plus ${2 * planned.modules.size} import lines`);
   out.push(`stay reasons (a method may carry several): ${[...reasonCounts].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(', ')}`);
+  const top = planned.top;
+  out.push('');
+  out.push(`§ top-level declarations ahead of the class -> ${LEAF_MODULE}: ${top.movers.length}/${top.records.length} move`);
+  const topReasons = new Map();
+  for (const r of top.records) {
+    if (r.reasons.length === 0) out.push(`    move  ${r.label} (${r.lines})${r.exported ? ' [exported, re-exported]' : ''}`);
+    else out.push(`    stay  ${r.label} (${r.lines}) — ${r.reasons.join('; ')}`);
+    for (const reason of r.reasons) {
+      const code = reason.split(':')[0];
+      topReasons.set(code, (topReasons.get(code) ?? 0) + 1);
+    }
+  }
+  const topLines = top.movers.reduce((n, r) => n + r.lines, 0);
+  out.push(`top-level total: ${top.movers.length}/${top.records.length} declarations move (${topLines} lines with their docblocks); ` +
+    `stay reasons: ${[...topReasons].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(', ') || 'none'}`);
+  out.push(`lever (a): ${planned.hostExportsForSections.size} staying name(s) exported for the section modules` +
+    `${planned.hostExportsForSections.size ? ` (${[...planned.hostExportsForSections.keys()].sort().join(', ')})` : ''}; ` +
+    `${planned.leafExports.length} leaf name(s) exported beside the base exports`);
   return out.join('\n');
 }
 
@@ -1043,7 +1526,9 @@ function treeHash(files) {
 function printVerify(v) {
   for (const f of v.failures) console.error(`  ✗ ${f}`);
   const identical = v.moved.filter((m) => m.body && m.params && m.returnType && m.async).length;
+  const identicalTop = v.movedTop.filter((m) => m.same).length;
   console.log(`byte-identity: ${identical}/${v.moved.length} moved bodies identical to base (body, parameters, return type, async); ` +
+    `${identicalTop}/${v.movedTop.length} moved top-level declarations identical to base (leading comments included); ` +
     `sql-driver.ts ${v.linesBefore} -> ${v.linesAfter} lines; undoing the split ${v.failures.some((f) => f.startsWith('undoing')) ? 'does NOT' : 'does'} rebuild the base byte-for-byte`);
 }
 
@@ -1051,9 +1536,15 @@ function gitShow(ref, path) {
   return execFileSync('git', ['show', `${ref}:${path}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28 });
 }
 
+/** A sibling of `sql-driver.ts` by basename, or null when there is none. */
+function readSibling(basename) {
+  const p = join(SRC_DIR, basename);
+  return existsSync(p) ? readFileSync(p, 'utf8') : null;
+}
+
 function generatedModulesOnDisk() {
   const out = new Map();
-  for (const file of Object.values(SECTION_MODULES)) {
+  for (const file of [LEAF_MODULE, ...Object.values(SECTION_MODULES)]) {
     if (!file) continue;
     const p = join(SRC_DIR, file);
     if (existsSync(p)) out.set(file, readFileSync(p, 'utf8'));
@@ -1091,7 +1582,7 @@ async function main(argv) {
     const i = argv.indexOf('--base');
     const ref = i >= 0 ? argv[i + 1] : null;
     if (!ref) refuse('--verify needs --base <ref>');
-    const v = verify(tm, gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`), readFileSync(HOST_PATH, 'utf8'), generatedModulesOnDisk());
+    const v = verify(tm, gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`), readFileSync(HOST_PATH, 'utf8'), generatedModulesOnDisk(), { readSibling });
     printVerify(v);
     return v.failures.length === 0 ? 0 : 1;
   }
@@ -1102,7 +1593,7 @@ async function main(argv) {
   const out = generate(tm, input, planned);
   const files = new Map([[HOST_BASENAME, out.host], ...out.modules]);
   console.log(`output tree sha256: ${treeHash(files)} (input sha256 ${sha256(input)})`);
-  const v = verify(tm, input, out.host, out.modules);
+  const v = verify(tm, input, out.host, out.modules, { readSibling });
   printVerify(v);
   if (v.failures.length > 0) {
     console.error('✗ the generated split fails byte-identity: nothing written. Report the fork; never hand-edit the split.');
@@ -1135,28 +1626,46 @@ let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'declaration bar': 6,
-  'stay rules': 9,
-  'byte-identity proof': 6,
-  'refusals': 2,
+  'stay rules': 11,
+  'top-level moves': 9,
+  'byte-identity proof': 10,
+  'refusals': 3,
 });
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 const FIXTURE_SECTIONS = Object.freeze({ 'Lifecycle': 'sql-driver-lifecycle.ts', 'Kept': null });
+const FIXTURE_NEEDLES = Object.freeze({ 'PINNED_TEXT': 'a fixture reader', 'needleInMethod(': 'a fixture reader' });
+const FIXTURE_PINS = Object.freeze({ pinnedMethod: 'a fixture reader' });
+const fixturePlan = (tm, text) => plan(tm, text, { sections: FIXTURE_SECTIONS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES });
 
 function fixtureSource(extraMethods = '') {
   const pad = Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n');
   return `import type { Knex } from 'knex';
 import { helperImported } from './other.js';
+import { seamHelper } from './sql-driver-seam.js';
 
+/** A value the leaf takes, read by a moved body. */
 const LOCAL_VALUE = 1;
 type LocalType = { n: number };
 export interface ExportedShape { a: number }
+
+// A reader takes this one out of the file by path.
+const PINNED = 'PINNED_TEXT';
+function dependsOnPinned(): string {
+  return PINNED;
+}
+function namesClass(d: SqlDriver): SqlDriver {
+  return d;
+}
+const VIA_SEAM = seamHelper();
+export const DERIVED = LOCAL_VALUE + 1;
 
 export class SqlDriver {
   private knex: any = null;
   protected logger: { warn(m: string): void } = console;
   private count = 0;
   private readonly fn = (x: string): string => x;
+  private static readonly SECRET = 1;
 
   // ===================================
   // Lifecycle
@@ -1186,7 +1695,7 @@ ${pad}
 
   protected readsLocal(): number {
 ${pad}
-    return LOCAL_VALUE;
+    return LOCAL_VALUE + dependsOnPinned().length;
   }
 
   protected namesLocalType(): LocalType | null {
@@ -1217,6 +1726,21 @@ ${pad}
 ${pad}
     return this.fn('a');
   }
+
+  protected readsStatic(): number {
+${pad}
+    return SqlDriver.SECRET;
+  }
+
+  protected pinnedMethod(): number {
+${pad}
+    return 3;
+  }
+
+  protected carriesNeedle(): number {
+${pad}
+    return needleInMethod(1);
+  }
 ${extraMethods}
   // ===================================
   // Kept
@@ -1224,8 +1748,12 @@ ${extraMethods}
 
   protected keptSection(): number {
 ${pad}
-    return 2;
+    return 2 + VIA_SEAM + namesClass(this).count;
   }
+}
+
+function needleInMethod(n: number): number {
+  return n;
 }
 `;
 }
@@ -1261,46 +1789,86 @@ async function selfTest() {
 
   open('stay rules');
   {
-    const planned = plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: {} });
+    const planned = fixturePlan(tm, fixtureSource());
     const why = (name) => (planned.records.find((r) => r.name === name)?.reasons ?? ['<absent>']).join('; ');
     const stays = (name, code) => check(`${name} stays (${code})`, why(name).split('; ').some((r) => r.startsWith(code)), why(name));
-    check('movable moves', why('movable') === '', why('movable'));
+    const moves = (name, because) => check(`${name} moves (${because})`, why(name) === '', why(name));
+    moves('movable', 'the canonical body');
+    moves('readsLocal', 'lever (a)/(b): it imports the leaf value and the staying function');
+    moves('namesLocalType', 'a non-exported type it names moves to the leaf');
+    moves('scoped', 'the widened chokepoint gate reads the module');
     stays('other', 'no-yield');
     stays('writes', 'this-write');
     stays('asValue', 'method-as-value');
-    stays('readsLocal', 'module-value');
-    stays('namesLocalType', 'module-local-type');
     stays('inferred', 'inferred-return-type');
-    stays('scoped', 'tenant-chokepoint');
     stays('defaulted', 'parameter-shape');
+    stays('readsStatic', 'non-public-static');
+    check('a pinned method and a method carrying a needle stay (path-reader)',
+      why('pinnedMethod').startsWith('path-reader') && why('carriesNeedle').startsWith('path-reader'),
+      `${why('pinnedMethod')} | ${why('carriesNeedle')}`);
+  }
+
+  open('top-level moves');
+  {
+    const input = fixtureSource();
+    const planned = fixturePlan(tm, input);
+    const top = (label) => planned.top.records.find((r) => r.label === label);
+    const why = (label) => (top(label)?.reasons ?? ['<absent>']).join('; ');
+    check('a value, a local type and an exported interface move', ['LOCAL_VALUE', 'LocalType', 'ExportedShape', 'DERIVED']
+      .every((n) => why(n) === ''), ['LOCAL_VALUE', 'LocalType', 'ExportedShape', 'DERIVED'].map(why).join(' | '));
+    check('a declaration carrying a reader\'s needle stays (path-reader)', why('PINNED').startsWith('path-reader'), why('PINNED'));
+    check('a declaration naming a stayer stays (needs-stayer)', why('dependsOnPinned').startsWith('needs-stayer'), why('dependsOnPinned'));
+    check('a declaration naming the class stays (class-reference)', why('namesClass').startsWith('class-reference'), why('namesClass'));
+    check('a declaration using a sql-driver-* import stays (seam-import)', why('VIA_SEAM').startsWith('seam-import'), why('VIA_SEAM'));
+    check('a declaration after the class is not in the region', !top('needleInMethod'));
+    const out = generate(tm, input, planned);
+    const leaf = out.modules.get(LEAF_MODULE) ?? '';
+    check('the leaf imports neither sql-driver.ts nor a seam module', leaf.length > 0 && !/from '\.\/sql-driver/.test(leaf), leaf.slice(0, 200));
+    check('sql-driver.ts re-exports the exported movers by name, the interface as a type',
+      /export \{ DERIVED, type ExportedShape \} from '\.\/sql-driver-top-level\.js';/.test(out.host));
+    check('lever (a): the staying function a moved body reads is exported for its module, and the module imports it',
+      /export \{ dependsOnPinned \};/.test(out.host) &&
+      /import \{ dependsOnPinned \} from '\.\/sql-driver\.js';/.test(out.modules.get('sql-driver-lifecycle.ts') ?? ''));
   }
 
   open('byte-identity proof');
   {
     const input = fixtureSource();
-    const planned = plan(tm, input, { sections: FIXTURE_SECTIONS, pins: {} });
+    const planned = fixturePlan(tm, input);
     const out = generate(tm, input, planned);
-    const again = generate(tm, input, plan(tm, input, { sections: FIXTURE_SECTIONS, pins: {} }));
+    const again = generate(tm, input, fixturePlan(tm, input));
     const v = verify(tm, input, out.host, out.modules);
-    check('the generated split proves against its base', v.failures.length === 0 && v.moved.map((m) => m.name).join() === 'movable',
-      [...v.failures, `moved: ${v.moved.map((m) => m.name).join()}`].join(' | '));
+    check('the generated split proves against its base', v.failures.length === 0 && v.moved.length === 4 && v.movedTop.length === 4,
+      [...v.failures, `moved: ${v.moved.map((m) => m.name).join()}`, `top: ${v.movedTop.map((m) => m.name).join()}`].join(' | '));
     check('two runs on one input write byte-identical trees',
       treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
     const mod = out.modules.get('sql-driver-lifecycle.ts');
-    const edited = new Map([['sql-driver-lifecycle.ts', mod.replace('const p3 = 3;', 'const p3 = 4;')]]);
+    const edited = new Map([...out.modules, ['sql-driver-lifecycle.ts', mod.replace('const p3 = 3;', 'const p3 = 4;')]]);
     check('one edited character in a moved body fails', verify(tm, input, out.host, edited).failures.length > 0);
     check('an edited stub signature fails',
       verify(tm, input, out.host.replace('trx?: Knex.Transaction): Promise<string>', 'trx?: Knex.Transaction): Promise<String>'), out.modules).failures.length > 0);
     check('an extra top-level statement in a module fails',
-      verify(tm, input, out.host, new Map([['sql-driver-lifecycle.ts', `${mod}\nexport const extra = 1;\n`]])).failures.length > 0);
+      verify(tm, input, out.host, new Map([...out.modules, ['sql-driver-lifecycle.ts', `${mod}\nexport const extra = 1;\n`]])).failures.length > 0);
     check('a proof over no moved method fails', verify(tm, input, input, new Map()).failures.length > 0);
+    const leaf = out.modules.get(LEAF_MODULE);
+    const leafWith = (text) => new Map([...out.modules, [LEAF_MODULE, text]]);
+    check('one edited character in a moved declaration fails',
+      verify(tm, input, out.host, leafWith(leaf.replace('const LOCAL_VALUE = 1;', 'const LOCAL_VALUE = 2;'))).failures.length > 0);
+    check('an edited comment above a moved declaration fails',
+      verify(tm, input, out.host, leafWith(leaf.replace('/** A value the leaf takes', '/** A value the leaf holds'))).failures.length > 0);
+    check('a leaf that imports sql-driver.ts back fails',
+      verify(tm, input, out.host, leafWith(leaf.replace('\nconst LOCAL_VALUE', "\nimport { SqlDriver } from './sql-driver.js';\nconst LOCAL_VALUE"))).failures.length > 0);
+    const swapped = leaf.replace('type LocalType = { n: number };\nexport interface ExportedShape { a: number }',
+      'export interface ExportedShape { a: number }\ntype LocalType = { n: number };');
+    check('two moved declarations out of base order fail', swapped !== leaf && verify(tm, input, out.host, leafWith(swapped)).failures.length > 0);
   }
 
   open('refusals');
   {
     const unknownBanner = fixtureSource('\n  // ── Unnamed section ──────────\n\n  protected z(): number {\n    return 1;\n  }\n');
-    check('a banner the section table does not name refuses', refused(() => plan(tm, unknownBanner, { sections: FIXTURE_SECTIONS, pins: {} })));
-    check('a pin naming a method the class lacks refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: { gone: 'x' } })));
+    check('a banner the section table does not name refuses', refused(() => fixturePlan(tm, unknownBanner)));
+    check('a pin naming what the file lacks refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: { gone: 'x' }, needles: {} })));
+    check('a needle the file no longer carries refuses', refused(() => plan(tm, fixtureSource(), { sections: FIXTURE_SECTIONS, pins: {}, needles: { 'gone text': 'x' } })));
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
