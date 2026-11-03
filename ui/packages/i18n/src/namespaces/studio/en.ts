@@ -31,11 +31,24 @@ const STUDIO_EN: Record<string, string> = {
   'perm.action.modifyAll': 'Modify All Records (bypass sharing)',
   'perm.col.object': 'Object',
   'perm.col.bulk': 'Bulk',
+  // objectstack#29729 — the object columns' headers. en abbreviates (the words
+  // do not fit the column) and the legend line spells them out; a locale whose
+  // words fit spells the action word here and the legend line is not drawn.
+  'perm.col.create': 'C',
+  'perm.col.read': 'R',
+  'perm.col.edit': 'U',
+  'perm.col.delete': 'D',
+  'perm.col.export': 'E',
+  'perm.col.transfer': 'Tr',
+  'perm.col.viewAll': 'VA',
+  'perm.col.modifyAll': 'MA',
   'perm.posture.private': 'Private',
   'perm.posture.private.tip': 'Secure-by-default object (access.default = private): a permission set’s “*” wildcard grant does NOT cover it. Access needs an explicit grant on this object (or View/Modify All Records). Grants you edit here apply normally.',
   'perm.owd.tip': 'Org-wide default (sharingModel): the record-level visibility baseline for internal users, applied before positions and sharing rules. Object CRUD here gates the operation; the OWD decides which records it reaches (own vs org-wide).',
   'perm.owd.defaultPrivate': 'Private (default)',
   'perm.owd.editLink': 'Edit in the package’s Record Sharing Baseline (OWD) overview',
+  // objectstack#29729 — the Setup matrix's per-object chip.
+  'perm.owd.chip': 'OWD {value}',
   'perm.owd.private': 'Private',
   'perm.owd.public_read': 'Public read',
   'perm.owd.public_read_write': 'Public read/write',
@@ -66,7 +79,7 @@ const STUDIO_EN: Record<string, string> = {
   'perm.cap.none': 'No system capabilities',
   'perm.cap.add': 'Add capability',
   'perm.badge.package': 'Package',
-  'perm.badge.custom': 'Custom',
+  'perm.badge.custom': 'Added',
   'perm.badge.default': 'Default for new users',
   'perm.field.loading': 'Loading fields…',
   'perm.field.empty': 'No fields registered for this object.',
@@ -268,6 +281,15 @@ const STUDIO_EN: Record<string, string> = {
     'The clone was created, but the server\'s answer did not name it. Open it from the permission-set list.',
   // Embedded hosts have no route to navigate to, so the clone is announced.
   'perm.clone.done': 'Cloned as {name}. Open it from the permission-set list to edit.',
+  // objectstack#29727 — the clone door's notice, by the code it names it with
+  // (`noticeCode`, one per landing); `{package}` is the answer's `package`. A
+  // code this console does not know shows the door's `notice` as sent.
+  'perm.clone.notice.environmentWide':
+    'The copy was saved environment-wide, in no package, as the set it was copied from is. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  'perm.clone.notice.inPackage':
+    'The copy was saved in package \'{package}\', beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  'perm.clone.notice.inCreatedPackage':
+    'The copy was saved in package \'{package}\', created for it to hold your changes to the package the set came from, beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
   // A save that still reached the server and was refused as a packaged set:
   // the same guidance as the lock, keyed on the refusal's code (never its
   // prose), instead of the transport's generic message.
@@ -418,6 +440,11 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.lookup.allowCreate': 'Allow quick-create',
   'designer.field.lookup.referenceNameVisible': 'Show Name When Unreadable',
   'designer.field.lookup.referenceNameVisible.help': "Lets a reader of this record see the referenced record's name, as plain text with no link, even when they may not open that record. Nothing else of it is shown, and a field-level rule on the name still holds (the name then reads Record # and the id). Unset: such a reference shows as a restricted record.",
+  'designer.field.deleteBehavior': 'Delete Behavior',
+  'designer.field.deleteBehavior.help': 'What happens when the referenced record is deleted',
+  'designer.field.deleteBehavior.set_null': 'Set Null (clear the reference)',
+  'designer.field.deleteBehavior.cascade': 'Cascade (delete children)',
+  'designer.field.deleteBehavior.restrict': 'Restrict (block the delete)',
   'designer.field.relatedList.heading': 'Related list on the parent record',
   'designer.field.relatedList.shown': 'Show',
   'designer.field.relatedList.hidden': 'Don\'t show',
@@ -2466,15 +2493,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.newSimilar.submit': 'Create copy',
   'engine.studio.auto.newSimilar.failedHttp': 'Could not create the copy (HTTP {status}).',
   'engine.studio.auto.newSimilar.failed': 'Could not create the copy.',
+  // objectstack#29727 — the clone door's notice for the code
+  // `FLOW_CLONE_DISABLED_COPY`; any other code shows the door's `notice` as sent.
+  'engine.studio.auto.newSimilar.notice':
+    'The copy is switched off and does not run until you switch it on, and it still uses the same subflows, actions and objects as the original.',
   'engine.studio.auto.newSimilar.done': 'Saved the copy {name} in package {package}.',
   'engine.studio.auto.newSimilar.noPackage':
     'The server saved the copy {name}, but its answer does not name the package it landed in, so nothing was opened.',
   'engine.studio.auto.newSimilar.dismiss': 'Dismiss',
   // ADR-0146 D4 — a read-only package's flow: the activation-ledger switch
   // (this deployment only, never the definition), offered on the item.
-  'engine.studio.auto.ledger.on': 'On for this deployment',
-  'engine.studio.auto.ledger.off': 'Off for this deployment',
-  'engine.studio.auto.ledger.notRunning': 'On for this deployment, not running here',
+  'engine.studio.auto.ledger.on': 'Switched on for this deployment',
+  'engine.studio.auto.ledger.off': 'Switched off for this deployment',
+  'engine.studio.auto.ledger.notRunning': 'Switched on for this deployment, not running here',
   'engine.studio.auto.ledger.hint':
     'This flow ships in a read-only package. The switch turns it on or off for this deployment only; the package is not changed.',
   'engine.studio.auto.ledger.walled': 'On this deployment, only the platform operator can switch a packaged flow on or off.',
@@ -2482,9 +2513,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.ledger.switchedOff': '"{label}" is switched off for this deployment.',
   'engine.studio.auto.ledger.toggleFailedHttp': 'Could not change activation (HTTP {status}).',
   'engine.studio.auto.ledger.toggleFailed': 'Could not change activation.',
-  'engine.studio.auto.on': 'On',
-  'engine.studio.auto.off': 'Off',
-  'engine.studio.auto.offTitle': 'Disabled — will not run',
+  'engine.studio.auto.on': 'Switched on',
+  'engine.studio.auto.off': 'Switched off',
+  'engine.studio.auto.offTitle': 'Switched off — will not run',
   'engine.studio.auto.onBound': 'Enabled · bound to its trigger',
   'engine.studio.auto.onUnbound': 'Enabled · no trigger (run manually)',
   // objectui#11779 — an enabled flow whose declared trigger is not armed on this
@@ -2498,12 +2529,12 @@ const STUDIO_EN: Record<string, string> = {
   // reads "Not running here", titled by the row below.
   'engine.studio.auto.refused': 'Refused by the engine',
   'engine.studio.auto.unregisteredTitle': 'The automation engine on this deployment holds no registration for this flow',
-  'engine.studio.auto.enabled': 'Enabled',
-  'engine.studio.auto.disabled': 'Disabled',
+  'engine.studio.auto.enabled': 'Switched on',
+  'engine.studio.auto.disabled': 'Switched off',
   'engine.studio.auto.enableTitle': 'Enable this automation (publish to apply)',
   'engine.studio.auto.disableTitle': 'Disable this automation (publish to apply)',
-  'engine.studio.auto.enabledToast': 'Enabled — publish to apply',
-  'engine.studio.auto.disabledToast': 'Disabled — publish to apply',
+  'engine.studio.auto.enabledToast': 'Switched on — publish to apply',
+  'engine.studio.auto.disabledToast': 'Switched off — publish to apply',
   'engine.studio.auto.newTitle': 'New automation',
   'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
   'engine.studio.auto.emptyMain': 'No automations in this package yet.',
@@ -3236,6 +3267,12 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#28572 — one surface for a read-only base and its customization package.
   'engine.studio.customize.addedIn': 'In {pair}',
   'engine.studio.customize.addedInTitle': 'This item is added by {pair}, this deployment’s customization package, and is saved there.',
+  // objectstack#29786 — items another package contributes to a read-only base.
+  'engine.studio.contributed.from': 'from {package}',
+  'engine.studio.contributed.navTitle': 'Navigation item {name}, added to this app by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.fieldTitle': 'Field {name}, added to this object by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.flowTitle': 'Flow {name}, triggered on this object and shipped by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.undeclaredGroup': 'It names the group “{group}”, which this app does not declare, so it shows at the top level.',
   // objectstack#29705 — what a person can do with a type's items, in the words
   // the pillars use for an item's state: an overlay type of a read-only package
   // takes a customization; a create-only type of a writable package takes new

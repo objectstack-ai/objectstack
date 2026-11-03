@@ -264,6 +264,26 @@ export const SchemaModeSchema = z
 export type SchemaMode = z.input<typeof SchemaModeSchema>;
 
 /**
+ * [#29762] How many rows the engine reads from a plugin driver for one request
+ * when the datasource sets no `external.rowCap`: the engine's correctness floor
+ * (`external-driver-floor.ts` in `@objectstack/objectql`) re-applies the whole
+ * query over the rows the driver returns, so a read matching more than this is
+ * refused (`EXTERNAL_ROW_CAP_EXCEEDED`, 422), never answered from a part.
+ */
+export const EXTERNAL_ROW_CAP_DEFAULT = 1000;
+
+/**
+ * [#29762] The platform maximum on `external.rowCap` (maintainer ruling on
+ * #29762: a per-datasource cap bounded by a platform maximum of 10,000).
+ * Refused above it at parse, as `LoopConfigSchema.maxIterations` is refused
+ * above `LOOP_MAX_ITERATIONS_CEILING`. Measured before it was set: the engine's
+ * own decode and re-application of 10,000 twelve-column rows is about 35 ms and
+ * 2 MiB per read; the remote's cost (every match, twice per list page: the rows
+ * and the total) is the operator's to judge below it.
+ */
+export const EXTERNAL_ROW_CAP_CEILING = 10_000;
+
+/**
  * External Datasource Settings (ADR-0015)
  *
  * The federation policy for a mature external database: write gating, schema
@@ -301,6 +321,9 @@ export const ExternalDatasourceSettingsSchema = strictObject(
       connectorinstance: 'connector',
       timeoutms: 'queryTimeoutMs',
       querytimeout: 'queryTimeoutMs',
+      maxrows: 'rowCap',
+      rowlimit: 'rowCap',
+      maxrowcount: 'rowCap',
     },
     guidance: {
       label: RETIRED_DATASOURCE_BLOCKS.externalLabel,
@@ -373,6 +396,12 @@ export const ExternalDatasourceSettingsSchema = strictObject(
       + '`credentialsRef`; refused on a built-in database driver and on a managed datasource.'),
   queryTimeoutMs: z.number().default(30_000)
     .describe('Hard cap on per-query execution time.'),
+  rowCap: z.number().int().min(1).max(EXTERNAL_ROW_CAP_CEILING).optional()
+    .describe(`Plugin-driver datasources only (a non-managed datasource whose \`driver\` is not a built-in id): `
+      + `the most rows the engine reads from the driver for one request, and so the most rows one read may `
+      + `match before it is refused with EXTERNAL_ROW_CAP_EXCEEDED (422). Absent: ${EXTERNAL_ROW_CAP_DEFAULT}. `
+      + `At most ${EXTERNAL_ROW_CAP_CEILING}. Each list page reads every match up to this cap from the remote, `
+      + 'twice (the rows and the total), so raise it only as far as the widest read needs.'),
 })
   .describe('External datasource settings: federation policy (schemaMode != "managed") '
     + 'plus the secrets-store credentials reference (valid in every schemaMode) or the connector '
@@ -564,6 +593,19 @@ const CONNECTOR_ON_MANAGED_REFUSED =
   + "system and is never ObjectStack's to manage: set `schemaMode: 'external'` (or "
   + "`'validate-only'` to warn on drift instead of failing) on this datasource. A managed "
   + "datasource's `external` block may carry only `credentialsRef`.";
+
+/**
+ * [#29762] `external.rowCap` on a built-in driver. The cap is read only by the
+ * engine's floor over a plugin driver; a built-in driver executes the whole
+ * query itself and is never floored, so the key would parse and do nothing.
+ * A managed datasource needs no refusal of its own: a non-default `rowCap` is
+ * a federation key, which the managed-block refusal already names.
+ */
+function rowCapOnBuiltinDriverRefusal(driverId: string): string {
+  return `\`external.rowCap\` caps the rows the engine reads from a plugin driver, which it holds behind `
+    + `its correctness floor; the '${driverId}' driver is built in, runs the whole query itself and is `
+    + 'never capped, so the key would do nothing here. Remove `rowCap`.';
+}
 
 /**
  * Replay a driver-config parse onto the datasource's own issue list (#4410).
@@ -932,6 +974,18 @@ export const DatasourceSchema = lazySchema(() => strictObject(
         code: 'custom',
         path: ['external', 'connector'],
         message: CONNECTOR_ON_MANAGED_REFUSED,
+      });
+    }
+  }
+
+  // [#29762] `external.rowCap` is read only by the plugin-driver floor.
+  if (ds.external?.rowCap !== undefined) {
+    const builtinDriver = resolveDriverId(ds.driver);
+    if (builtinDriver !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['external', 'rowCap'],
+        message: rowCapOnBuiltinDriverRefusal(builtinDriver),
       });
     }
   }

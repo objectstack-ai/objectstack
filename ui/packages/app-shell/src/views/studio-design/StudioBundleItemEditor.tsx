@@ -58,7 +58,6 @@ import {
   StudioCustomizeButton,
   StudioOverrideChip,
   StudioRestoreOriginalDialog,
-  StudioRestoreOriginalItem,
   overrideDraftBody,
   useServedOverride,
   type CustomizeBlock,
@@ -375,7 +374,14 @@ export function StudioBundleItemEditor({
           </span>
         )}
         {customizing && served.declaration && (
-          <StudioOverrideChip baseLabel={baseLabel} basedOn={served.declaration.basedOn} locale={locale} />
+          <StudioOverrideChip
+            baseLabel={baseLabel}
+            basedOn={served.declaration.basedOn}
+            locale={locale}
+            // objectstack#29692 — Restore lives on the mark that names the customization.
+            onRestore={inPair ? () => setRestoreOpen(true) : undefined}
+            restoreDisabled={restoring || saving || (customization?.pairId == null && pairRef.current === null)}
+          />
         )}
         {status && (
           <span data-testid="studio-bundle-editor-status" className="shrink-0 text-xs text-muted-foreground">
@@ -418,13 +424,6 @@ export function StudioBundleItemEditor({
               <History className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
               {t('engine.edit.history', locale)}
             </DropdownMenuItem>
-            {customizing && inPair && (
-              <StudioRestoreOriginalItem
-                disabled={restoring || saving || (customization?.pairId == null && pairRef.current === null)}
-                locale={locale}
-                onSelect={() => setRestoreOpen(true)}
-              />
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

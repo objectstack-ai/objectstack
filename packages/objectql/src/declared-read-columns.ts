@@ -159,7 +159,13 @@ export function rowsWithDeclaredColumnsOnly<T>(rows: T[], declared: ReadonlySet<
  *   engine's own widening (formula inputs, a file field's owner key, each cut
  *   back off the answer before the verb returns) are what count;
  * - no projection (a whole-record GET, a list read) selects every declared
- *   column.
+ *   column;
+ * - [#29538] a write's answer (the insert result, single or batch, and the
+ *   by-id update readback) names no projection either, so it is answered on
+ *   the whole stored record: the write answer equals the next read of the row.
+ *   Less the columns the write itself carried a value for
+ *   ({@link storedColumnsLeftUnwritten}): those are stored, so a driver that
+ *   did not echo one leaves it absent rather than answered `null`.
  *
  * ## What stays absent, and why
  *
@@ -231,6 +237,38 @@ export function withSelectedColumnsAnswered<T>(row: T, selected: ReadonlySet<str
     shaped[name] = null;
   }
   return (shaped ?? row) as unknown as T;
+}
+
+/**
+ * [#29538] The {@link selectedStoredColumns} a write's answer may fill with
+ * `null`: those minus every column the write's images say holds a value. A
+ * write image is what the engine knows the row stores without the driver's
+ * echo, newest first — the payload it handed the driver and, on an update, the
+ * stored row it read before the write. The first image that names a column
+ * decides it: a non-null value IS stored, so a driver that stored it and did
+ * not echo it leaves it absent from the answer (unknown), never answered
+ * `null` (a value the row does not hold) — a reader that layers the payload
+ * under the answer (`{ ...input, ...result }`) would otherwise lose the value
+ * it wrote. A `null` there (a PATCH clearing a value the prior row held, too)
+ * is a stored `null` and stays answerable; an `undefined` names nothing. Same
+ * set reference when nothing is removed.
+ */
+export function storedColumnsLeftUnwritten(
+  selected: ReadonlySet<string> | undefined,
+  ...writeImages: unknown[]
+): ReadonlySet<string> | undefined {
+  if (!selected || selected.size === 0) return selected;
+  const images = writeImages.filter(
+    (image): image is Record<string, unknown> => !!image && typeof image === 'object' && !Array.isArray(image),
+  );
+  let left: Set<string> | undefined;
+  for (const name of selected) {
+    const decider = images.find((image) => image[name] !== undefined);
+    if (decider === undefined || decider[name] === null) continue;
+    left ??= new Set(selected);
+    left.delete(name);
+  }
+  return left ?? selected;
 }
 
 /** {@link withSelectedColumnsAnswered} over a driver's result page. */

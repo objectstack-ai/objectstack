@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schemas.objectstack.dev/template-manifest.json",
+  "manifestId": "app.objectstack.connector-docusign",
+  "name": "connector-docusign",
+  "specVersion": "^18.0.0",
+  "displayName": "DocuSign eSignature",
+  "description": "Send documents for signature, read envelopes and follow their signature status from flows, over DocuSign's eSignature OpenAPI document. Developer sandbox; your administrator registers their own DocuSign integration key.",
+  "category": "productivity",
+  "tags": ["docusign", "esignature", "openapi", "connector", "oauth"],
+  "license": "Apache-2.0",
+  "iconUrl": "https://raw.githubusercontent.com/objectstack-ai/objectstack/main/packages/apps/connector-docusign/assets/icon.svg",
+  "homepageUrl": "https://github.com/objectstack-ai/objectstack/tree/main/packages/apps/connector-docusign",
+  "readmePath": "README.md"
+}

@@ -212,6 +212,32 @@ raw rows** with nothing to say the aggregation never happened.
 }
 ```
 
+#### Read limits a deployment may set
+
+A deployment can bound how many rows one read returns and walks. Three host
+environment variables, each a positive integer; with none of them set, no read
+is limited:
+
+| Variable | Meaning |
+|:--|:--|
+| `OS_DATA_DEFAULT_PAGE_SIZE` | the page a read gets when it names no `top` / `limit` (unset with a maximum set: the maximum) |
+| `OS_DATA_MAX_PAGE_SIZE` | the largest `top` / `limit` a read may name |
+| `OS_DATA_QUERY_ROW_BUDGET` | the most rows one query may walk: its `skip` / `offset` plus the rows it returns |
+
+Over a limit is **refused, never clamped**, so a client paging by its own page
+size never skips rows. A page size over the maximum answers
+`400 MAX_RECORDS_EXCEEDED`; `offset` plus page size over the budget answers
+`400 QUERY_ROW_BUDGET_EXCEEDED`. Both messages name the configured number, and
+both are refused before the read runs. A list read that names no page size gets
+the default page, and `hasMore` / `total` say whether more rows exist. With a
+budget and no page size, a read that names no page size runs one row past what
+the budget leaves and is refused with `QUERY_ROW_BUDGET_EXCEEDED` if its answer
+holds more; that read does run first. The same limits apply to
+`POST /analytics/query` and the dataset query that reports and dashboards read
+through. An analytics answer carries no `hasMore`, so one that names no `limit`
+and would answer more rows than the default page runs one row past the default
+and is refused with `MAX_RECORDS_EXCEEDED` rather than cut.
+
 ### `GET /data/:object/:id`
 
 Get a single record by ID. Only `select` and `expand` query parameters are allowed; any other parameter is refused `400 VALIDATION_ERROR`, and the message names it and lists the two accepted ones.

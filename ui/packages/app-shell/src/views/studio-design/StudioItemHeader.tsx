@@ -410,6 +410,23 @@ export function useStudioItemHeaderFold(): Pick<StudioItemHeaderFoldValue, 'fold
   return React.useContext(StudioItemHeaderFoldContext);
 }
 
+/** objectstack#29692 — what a control inside the folded chips entry may ask of the ⋯ menu around it. */
+interface StudioFoldedEntryValue {
+  /** Closes the ⋯ menu, as choosing an ordinary entry does. */
+  closeMenu: () => void;
+}
+const StudioFoldedEntryContext = React.createContext<StudioFoldedEntryValue | null>(null);
+
+/**
+ * objectstack#29692 — for a chip's own control (the override mark's Restore):
+ * closes the ⋯ menu the chip is folded into, before the control opens
+ * something of its own (a confirmation). `null` while the chip sits in the
+ * row, where there is no menu to close.
+ */
+export function useStudioFoldedMenuClose(): (() => void) | null {
+  return React.useContext(StudioFoldedEntryContext)?.closeMenu ?? null;
+}
+
 /**
  * objectstack#29693 — what the title row folded away, at the top of a ⋯
  * menu: the identity chips as they read in the row (one entry), then the item
@@ -419,6 +436,15 @@ export function useStudioItemHeaderFold(): Pick<StudioItemHeaderFoldValue, 'fold
  */
 export function StudioItemHeaderFoldedItems({ separator = true }: { separator?: boolean }): React.ReactElement | null {
   const fold = React.useContext(StudioItemHeaderFoldContext);
+  const entryRef = React.useRef<HTMLDivElement | null>(null);
+  /** The next choice of the entry closes the menu: a control inside it asked to. */
+  const closingRef = React.useRef(false);
+  const [entryValue] = React.useState<StudioFoldedEntryValue>(() => ({
+    closeMenu: () => {
+      closingRef.current = true;
+      entryRef.current?.click();
+    },
+  }));
   if (!fold?.folded) return null;
   const hasChips = !!fold.apiName || !!fold.chips;
   if (!hasChips && fold.tools.length === 0) return null;
@@ -426,15 +452,29 @@ export function StudioItemHeaderFoldedItems({ separator = true }: { separator?: 
     <>
       {/* One menu entry, reachable by the keys like the others; choosing it
           keeps the menu open, so a chip with its own control (the override
-          chip) is used from here as from the row. */}
+          chip) is used from here as from the row. objectstack#29692 — a menu
+          holds the focus on its items, so choosing the entry by the keys
+          presses the chip's control (`data-studio-chip-control`); the control
+          keeps its own click from reaching the entry, so a pointer press
+          toggles it once. */}
       {hasChips && (
         <DropdownMenuItem
+          ref={entryRef}
           data-testid="studio-item-header-folded-chips"
-          onSelect={(event) => event.preventDefault()}
+          onSelect={(event) => {
+            if (closingRef.current) {
+              // A control inside asked: this choice closes the menu.
+              closingRef.current = false;
+              return;
+            }
+            event.preventDefault();
+            const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+            target?.querySelector<HTMLElement>('[data-studio-chip-control]')?.click();
+          }}
           className="flex flex-wrap items-center gap-1.5"
         >
           {fold.apiName && <StudioApiChip apiName={fold.apiName} />}
-          {fold.chips}
+          <StudioFoldedEntryContext.Provider value={entryValue}>{fold.chips}</StudioFoldedEntryContext.Provider>
         </DropdownMenuItem>
       )}
       {fold.tools.map(({ id, label, icon: Icon, count, onSelect }) => (
@@ -571,6 +611,12 @@ export interface StudioItemHeaderProps {
    * id. Omitted: nothing folds.
    */
   foldMenu?: 'pillar' | { label: string; testId?: string };
+  /**
+   * objectstack#29691 (ADR-0146 D3) — one line under the title row, above the
+   * tabs: where this item's edits are saved. Outside the title row, so the
+   * fold never measures it.
+   */
+  note?: React.ReactNode;
   testId?: string;
   className?: string;
 }
@@ -587,6 +633,7 @@ export function StudioItemHeader({
   tabs,
   leading,
   foldMenu,
+  note,
   testId,
   className,
 }: StudioItemHeaderProps): React.ReactElement {
@@ -664,6 +711,11 @@ export function StudioItemHeader({
           </div>
         )}
       </div>
+      {note && (
+        <p data-slot="item-note" className="-mt-1 truncate pb-1 text-[11px] leading-4 text-muted-foreground">
+          {note}
+        </p>
+      )}
       {tabs && (
         <nav ref={tabRowRef} data-fade={fade} className={STUDIO_TAB_ROW}>
           <StudioFoldRowContext.Provider value={tabFold}>{tabs}</StudioFoldRowContext.Provider>
