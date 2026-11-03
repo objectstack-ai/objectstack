@@ -37,7 +37,7 @@ import {
 } from '@object-ui/components';
 import { useUpload } from '@object-ui/providers';
 import { ConsolePageHeader } from '@object-ui/app-shell';
-import { useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 import { useAdapter, extractFieldErrors, extractWriteErrorMessage } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { resolveFieldAffordance } from '@object-ui/core';
@@ -334,16 +334,17 @@ export function ProfilePage() {
 /**
  * The timeout as a localized duration ("5 minutes", "1 hour"), in the largest
  * whole unit. `Intl` names the unit and its plural, so no locale pack carries
- * a count family for it. A tag `Intl` refuses falls back to the runtime's own.
+ * a count family for it. The unit is named in the sentence's own language (the
+ * UI language); a tag `Intl` refuses falls back to the display locale.
  */
-function formatLockTimeout(seconds: number, locale: string | undefined): string {
+function formatLockTimeout(seconds: number, sentenceLocale: string, displayLocale: string): string {
   const [value, unit] =
     seconds % 3600 === 0 ? [seconds / 3600, 'hour'] : seconds % 60 === 0 ? [seconds / 60, 'minute'] : [seconds, 'second'];
   const options: Intl.NumberFormatOptions = { style: 'unit', unit, unitDisplay: 'long' };
   try {
-    return new Intl.NumberFormat(locale, options).format(value);
+    return new Intl.NumberFormat(sentenceLocale, options).format(value);
   } catch {
-    return new Intl.NumberFormat(undefined, options).format(value);
+    return new Intl.NumberFormat(displayLocale, options).format(value);
   }
 }
 
@@ -363,6 +364,7 @@ function formatLockTimeout(seconds: number, locale: string | undefined): string 
  */
 function AppLockCard() {
   const { t, language } = useObjectTranslation();
+  const displayLocale = useDisplayLocale();
   const available = nativeHostCan(useNativeHost(), 'openAppLockSettings');
   const [lock, setLock] = useState<NativeAppLock | null>(null);
 
@@ -402,7 +404,7 @@ function AppLockCard() {
           ? t('profile.appLock.onImmediately', { defaultValue: 'On, locks as soon as you leave the app' })
           : t('profile.appLock.onAfter', {
               defaultValue: 'On, locks {{duration}} after you leave the app',
-              duration: formatLockTimeout(lock.timeoutSeconds, language),
+              duration: formatLockTimeout(lock.timeoutSeconds, language || displayLocale, displayLocale),
             });
 
   return (
