@@ -82,7 +82,7 @@
 
 import { useEffect } from 'react';
 import { matchRoutes, useLocation } from 'react-router-dom';
-import { isRecordPageOf, useAdapter, useMetadata, type MetadataContextValue } from '@object-ui/react';
+import { isRecordPageOf, useAdapter, useMetadata, type AnsweredLoadFailure, type MetadataContextValue } from '@object-ui/react';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
@@ -100,15 +100,31 @@ export type AppObjectScope = ReturnType<ReadObjectScope>;
  * (reported once nothing else is in flight; `settled` stays false for them),
  * and `refused`, each refused name in `missing` with its ADR-0112 code. A
  * provider that does not carry them (a test double, a host's own) reads as
- * none, which is the behaviour before this card.
+ * none, which is the behaviour before this card. objectstack#29728 —
+ * `answers`, each failed name a server DID answer, with its code and sentence.
  */
 interface ScopeReadOutcomes {
   failed?: readonly string[];
   refused?: Readonly<Record<string, string>>;
+  answers?: Readonly<Record<string, AnsweredLoadFailure>>;
 }
 
 function failedNamesOf(scope: AppObjectScope): readonly string[] {
   return (scope as AppObjectScope & ScopeReadOutcomes).failed ?? [];
+}
+
+/**
+ * objectstack#29728 — what the server said for the route's failed reads: the
+ * answer of the first failed name a server answered, or `null` when none was
+ * (the route keeps its network sentence).
+ */
+function failedAnswerOf(scope: AppObjectScope): AnsweredLoadFailure | null {
+  const answers = (scope as AppObjectScope & ScopeReadOutcomes).answers;
+  if (!answers) return null;
+  for (const name of failedNamesOf(scope)) {
+    if (answers[name]) return answers[name];
+  }
+  return null;
 }
 
 function refusalOf(scope: AppObjectScope, name: string | undefined): AppObjectScopeRead['routeObjectRefusal'] {
@@ -263,7 +279,7 @@ export function readPageObjectScope(
   app: Record<string, any> | undefined,
   page: unknown,
   extraNames: readonly string[] = [],
-): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[] } {
+): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[]; failedAnswer: AnsweredLoadFailure | null } {
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
   const read = (names: readonly string[]): AppObjectScope =>
     packageId ? readObjectScope({ packageId, names }) : names.length > 0 ? readObjectScope({ names }) : NO_OBJECT_SCOPE;
@@ -277,6 +293,7 @@ export function readPageObjectScope(
     scope: lookups.length > 0 ? read([...new Set([...names, ...lookups])]) : first,
     ready,
     failedNames: failedNamesOf(boundRead),
+    failedAnswer: failedAnswerOf(boundRead),
   };
 }
 
@@ -333,7 +350,7 @@ export function readDashboardObjectScope(
   app: Record<string, any> | undefined,
   dashboard: unknown,
   extraNames: readonly string[] = [],
-): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[] } {
+): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[]; failedAnswer: AnsweredLoadFailure | null } {
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
   const widgetRead = readDashboardWidgetObjects(readObjectScope, app, dashboard);
   const names = [...new Set([...dashboardObjectNames(dashboard), ...extraNames])];
@@ -342,7 +359,12 @@ export function readDashboardObjectScope(
     : names.length > 0
       ? readObjectScope({ names })
       : NO_OBJECT_SCOPE;
-  return { scope, ready: routeReadDone(widgetRead), failedNames: failedNamesOf(widgetRead) };
+  return {
+    scope,
+    ready: routeReadDone(widgetRead),
+    failedNames: failedNamesOf(widgetRead),
+    failedAnswer: failedAnswerOf(widgetRead),
+  };
 }
 
 /** The dashboard a dashboard route resolves to, and whether it is known yet (objectstack#28784). */
@@ -457,6 +479,13 @@ export interface AppObjectScopeRead {
    */
   failedNames: readonly string[];
   /**
+   * objectstack#29728 — what the server said for those failed reads, when one
+   * answered them (a 5xx, a 404 with a code this build does not know): its
+   * code and sentence, which the failed-read state draws in place of the
+   * network sentence. `null` when no server answered, or nothing failed.
+   */
+  failedAnswer: AnsweredLoadFailure | null;
+  /**
    * objectui#13052 — the ADR-0112 code the server refused the route's own
    * object with, when it answered with a refusal rather than a plain absence
    * (`OBJECT_PACKAGE_DISABLED`); `null` otherwise.
@@ -464,7 +493,7 @@ export interface AppObjectScopeRead {
   routeObjectRefusal: { objectName: string; code: string } | null;
 }
 
-const NOT_READ = { failedNames: [] as readonly string[], routeObjectRefusal: null };
+const NOT_READ = { failedNames: [] as readonly string[], failedAnswer: null, routeObjectRefusal: null };
 
 /**
  * The object scope the route at `subPath` (below `/apps/:appName`) reads, in
@@ -602,7 +631,11 @@ function readObjectRouteNames(
   const ready =
     routeReadDone(routeRead) &&
     (relatedNames.length === 0 || routeReadDone(read([...(objectName ? [objectName] : []), ...relatedNames])));
-  const routeOutcome = { failedNames: failedNamesOf(routeRead), routeObjectRefusal: refusalOf(routeRead, objectName) };
+  const routeOutcome = {
+    failedNames: failedNamesOf(routeRead),
+    failedAnswer: failedAnswerOf(routeRead),
+    routeObjectRefusal: refusalOf(routeRead, objectName),
+  };
   const names = appRequiredObjectNames(app);
   if (objectName) names.push(objectName);
   names.push(...relatedNames);

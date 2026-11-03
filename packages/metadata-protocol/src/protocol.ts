@@ -1534,6 +1534,45 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [ADR-0146 D2] The write intent and the body writer of a restore into
+     * the row `binding` names — the per-item rollback's ({@link rollbackMetaItem})
+     * and [#29414] a commit revert's restore limb ({@link revertCommit}), one
+     * derivation for both.
+     *
+     * A restore into the base's paired `.custom` row is the pair's declared
+     * override, as its save is: it edits no managed item, so the store is told
+     * a runtime-only write, and the restored body is judged by the override
+     * write gate into the pair ({@link overrideWriteVerdict}). A version that
+     * declares no override (a body the base row stored, which a commit plan
+     * recorded before #29414 can name) is refused as the save is
+     * (`overrideWriteRefusalError`, `403 NOT_OVERRIDABLE`), thrown from inside
+     * `deriveRestoredBody`, so nothing is written. Any other binding: the
+     * caller's `artifactBacked` decides the intent, and the body writer is
+     * {@link restoredBodyWriter}'s alone.
+     */
+    private restoreWriteFor(
+        singularType: string,
+        name: string,
+        binding: string | null,
+        artifactBacked: boolean,
+        source: string,
+    ): { intent: 'override-artifact' | 'runtime-only'; deriveRestoredBody: (historyBody: unknown) => Promise<unknown> } {
+        const owner = artifactBacked ? this.packagedArtifactOwner({ type: singularType, name }) : undefined;
+        const pairRow = owner !== undefined && isCustomizationPairOf(binding, owner);
+        const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !pairRow ? 'override-artifact' : 'runtime-only';
+        const writeRestored = this.restoredBodyWriter(singularType, name, binding, source);
+        const deriveRestoredBody = pairRow
+            ? async (historyBody: unknown): Promise<unknown> => {
+                const body = await writeRestored(historyBody);
+                const verdict = this.overrideWriteVerdict({ type: singularType, name, packageId: binding, item: body });
+                if (verdict.verdict === 'refuse') throw overrideWriteRefusalError(verdict);
+                return body;
+            }
+            : writeRestored;
+        return { intent, deriveRestoredBody };
+    }
+
+    /**
      * [#25278] The save door's refusal family, asked of a history body a
      * restore is about to make the active row.
      *
@@ -17585,9 +17624,17 @@ export class ObjectStackProtocolImplementation implements
                 // [#22877] …and the draft's own bundle member: another
                 // member's active row is not this member's pre-publish state,
                 // and the revert plan records the member it describes.
+                // [#29414] …and the publishing package's own row: every draft
+                // listed here is bound to `request.packageId` and is promoted
+                // into that package's row, so another package's active row of
+                // the same name (a row bound to the read-only base beside its
+                // `.custom` pair) is not this item's pre-publish state. Read
+                // package-agnostically, the pair's first publish was recorded
+                // as an edit of the base row's version, and its revert
+                // addressed the base row instead of removing the pair's.
                 const activeRow = (await this.findEnvironmentRow('sys_metadata', {
                     where: {
-                        type: d.type, name: d.name, state: 'active',
+                        type: d.type, name: d.name, state: 'active', package_id: request.packageId,
                         ...overlayMemberWhere(d.type, d.member),
                     },
                     context: { isSystem: true },
@@ -19984,6 +20031,18 @@ export class ObjectStackProtocolImplementation implements
      * rollback sentence naming the base's `.custom` pair) with nothing written,
      * and {@link rollbackToPackageCommit} reports it per item and continues.
      * The soft-remove limb stays open: removing such a row writes nothing.
+     *
+     * [#29414, ADR-0048] Both limbs address the committing package's own row
+     * (`package_id` = the commit's), as the plan {@link publishPackageDrafts}
+     * records describes it: a pair commit beside a row bound to its read-only
+     * base removes or restores the pair's row and leaves the base's served.
+     * The restore writes the committing package's row, in place or created
+     * again when it was deleted since, so this door never writes the
+     * package-less row; a commit of the read-only base itself is refused by
+     * the #29390 close. A restore into the base's paired `.custom` row is judged
+     * by the override write gate as {@link rollbackMetaItem} judges it
+     * ({@link restoreWriteFor}): a version declaring no override is refused
+     * into `failed[]`.
      */
     async revertCommit(request: {
         commitId: string;
@@ -20008,6 +20067,9 @@ export class ObjectStackProtocolImplementation implements
         );
         await this.ensureOverlayIndex();
         const row = await this.readRevertableCommit(request.commitId, request.packageId);
+        // [#29414] The package whose rows this commit's plan describes: every
+        // item's rows are read, removed and restored under it below.
+        const commitPackageId: string = row.package_id;
         const items = this.parseCommitItems(row.items);
         // #4556 — threaded into repo.put/delete → `recorded_by`; NULL when the
         // revert carries no human actor.
@@ -20154,7 +20216,14 @@ export class ObjectStackProtocolImplementation implements
             // Absent (the canonical member) on every other item, as before.
             const member = it.member;
             try {
-                const current = await repo.get(ref, { state: 'active', ...memberOption(member) });
+                // [#29414] The committing package's own row, and no other
+                // package's: the plan describes the rows this package's publish
+                // promoted into, so every read, removal and restore below names
+                // `commitPackageId`. Read package-agnostically, a pair commit
+                // beside a row bound to its read-only base addressed whichever
+                // row the driver returned first — the base row, refused below
+                // or restored in the pair's name.
+                const current = await repo.get(ref, { state: 'active', packageId: commitPackageId, ...memberOption(member) });
                 if (!it.existedBefore) {
                     // Created by this commit → soft-remove (metadata only; table stays).
                     //
@@ -20197,6 +20266,7 @@ export class ObjectStackProtocolImplementation implements
                             source: 'protocol.revertCommit',
                             intent,
                             state: 'active',
+                            packageId: commitPackageId,
                             ...memberOption(member),
                         });
                     }
@@ -20316,8 +20386,18 @@ export class ObjectStackProtocolImplementation implements
                     // The soft-remove limb above stated the same intent as a
                     // CONSTANT and was fixed the same way (#6620), so both limbs now
                     // derive it. The registry half of both is #6621, below.
-                    const intent: 'override-artifact' | 'runtime-only' =
-                        this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
+                    //
+                    // [#29414, ADR-0146 D2] …and a restore into the base's paired
+                    // `.custom` row is the pair's declared override, judged by the
+                    // override write gate exactly as {@link rollbackMetaItem}
+                    // judges it ({@link restoreWriteFor}, one derivation): a
+                    // version that declares no override — the base row's body a
+                    // plan recorded before #29414 names as the pair's pre-commit
+                    // version — is refused into `failed[]`, nothing written.
+                    const { intent, deriveRestoredBody } = this.restoreWriteFor(
+                        PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name, commitPackageId,
+                        this.isArtifactBacked(it.type, it.name), 'protocol.revertCommit',
+                    );
                     // [#6621 / #4636] The ownership key the write-through needs,
                     // read from the ROW rather than from the request — the sibling
                     // revert caller {@link rollbackMetaItem} reads it exactly this
@@ -20336,7 +20416,17 @@ export class ObjectStackProtocolImplementation implements
                     // fallible query downstream of a write that already succeeded —
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
-                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, member);
+                    //
+                    // [#29414, ADR-0048, ADR-0067 D3] The binding is the
+                    // committing package's, never another package's row's: the
+                    // restore writes the committing package's own row, in place
+                    // when it is stored and created again when it was deleted
+                    // since (`restoreVersion` is handed `commitPackageId` and
+                    // writes it either way). So this door never writes the
+                    // package-less row, and the package-less close has nothing
+                    // here to judge (every commit names its package); the write
+                    // naming the read-only base itself is closed below.
+                    const restorePackageId: string = commitPackageId;
                     // [#29390, ADR-0146 D1, D11] A restore writes the row this
                     // binding names, so a restore into a row bound to the
                     // read-only base itself (a commit recorded before #28905
@@ -20354,6 +20444,8 @@ export class ObjectStackProtocolImplementation implements
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
+                        // [#29414] The row restored is the committing package's.
+                        packageId: commitPackageId,
                         message: `revert commit ${request.commitId}`,
                         intent,
                         // [#21470] The divergent `name` refusal, [ADR-0086 D3]
@@ -20364,9 +20456,8 @@ export class ObjectStackProtocolImplementation implements
                         // in `failed[]` below, with nothing written. Judged under
                         // the SINGULAR type, the spelling the write-through
                         // registers under. See {@link restoredBodyWriter}.
-                        deriveRestoredBody: this.restoredBodyWriter(
-                            PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name, restorePackageId, 'protocol.revertCommit',
-                        ),
+                        // [ADR-0146 D2] …and, for the pair's row, the override write gate.
+                        deriveRestoredBody,
                         ...memberOption(member),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
@@ -20756,21 +20847,10 @@ export class ObjectStackProtocolImplementation implements
         // the override write gate as that save is ({@link overrideWriteVerdict}
         // into the pair): a version that declares no override is refused as
         // the save is, with nothing written.
-        const owner = artifactBacked ? this.packagedArtifactOwner({ type: singularType, name: request.name }) : undefined;
-        const pairRowRollback = owner !== undefined && isCustomizationPairOf(rollbackPackageId, owner);
-        const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !pairRowRollback
-            ? 'override-artifact' : 'runtime-only';
-        const writeRestored = this.restoredBodyWriter(singularType, request.name, rollbackPackageId, 'protocol.rollbackMetaItem');
-        const deriveRestoredBody = pairRowRollback
-            ? async (historyBody: unknown): Promise<unknown> => {
-                const body = await writeRestored(historyBody);
-                const verdict = this.overrideWriteVerdict({
-                    type: singularType, name: request.name, packageId: rollbackPackageId, item: body,
-                });
-                if (verdict.verdict === 'refuse') throw overrideWriteRefusalError(verdict);
-                return body;
-            }
-            : writeRestored;
+        // [#29414] The derivation a commit revert's restore limb shares ({@link restoreWriteFor}).
+        const { intent, deriveRestoredBody } = this.restoreWriteFor(
+            singularType, request.name, rollbackPackageId, artifactBacked, 'protocol.rollbackMetaItem',
+        );
         try {
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.

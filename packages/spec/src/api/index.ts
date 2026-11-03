@@ -62,6 +62,7 @@ export { zodIssuesToFields } from './zod-issues-to-fields';
 export * from './error-code-ledger.zod';
 export * from './protocol.zod';
 export * from './push-delivery.zod';
+export * from './push-relay.zod';
 // [#10235] Per-column sortability projection: the serve-time signal the object
 // metadata read publishes so grids never re-derive "virtual ⇒ unsortable" from
 // field type (2026-08-23 ruling, option A).

@@ -14,7 +14,7 @@ import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
-import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type AnsweredLoadFailure, type RecordSaveFeedback } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
 import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordSaveMessage } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
@@ -475,6 +475,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     scope: objectScope,
     ready: objectScopeReady,
     failedNames: routeObjectReadsFailed,
+    failedAnswer: routeObjectReadAnswer,
     routeObjectRefusal,
   } = readAppObjectScope(
     readObjectScope,
@@ -1553,7 +1554,9 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   // objectui#13052 — the route's object read failed (a 5xx, a
                   // network drop, a code this build does not know): say so in
                   // the shell, and let Retry ask those names once more.
+                  // objectstack#29728 — in the server's words when it answered.
                   <RouteObjectReadFailed
+                    answer={routeObjectReadAnswer}
                     onRetry={() => {
                       for (const name of routeObjectReadsFailed) metadata.invalidate('object', name);
                     }}
@@ -2137,8 +2140,15 @@ function RouteNotFound() {
  * Retry that asks again once (`invalidate` drops the failed read; the next
  * render asks it). The list's own load-failure copy: this is the same
  * question, a list that could not be loaded.
+ *
+ * objectstack#29728 — when a server answered the read (a 5xx, a 404 with a
+ * code this build does not know), `answer` carries its code and sentence
+ * (`answeredLoadFailure`, the rule the list, record and app page share): the
+ * sentence replaces the network one, and the code is drawn beneath it, as the
+ * app page's failed-read state draws it. The network sentence is only for a
+ * read no server answered.
  */
-function RouteObjectReadFailed({ onRetry }: { onRetry: () => void }) {
+function RouteObjectReadFailed({ answer, onRetry }: { answer: AnsweredLoadFailure | null; onRetry: () => void }) {
   const { t } = useObjectTranslation();
   // #25915 — drawn by the shared `DataErrorState`, so the failure is
   // `role="alert"` by construction. Retry is passed as `children` (not
@@ -2148,10 +2158,18 @@ function RouteObjectReadFailed({ onRetry }: { onRetry: () => void }) {
       <DataErrorState
         data-testid="route-object-read-failed"
         title={t('list.loadErrorTitle', { defaultValue: 'Couldn\u2019t load records' })}
-        message={t('list.loadErrorMessage', {
+        message={answer?.message ?? t('list.loadErrorMessage', {
           defaultValue: 'Something went wrong while loading this data. Check your connection and try again.',
         })}
       >
+        {answer?.code ? (
+          <code
+            data-testid="route-object-read-failed-code"
+            className="mb-3 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+          >
+            {answer.code}
+          </code>
+        ) : null}
         <Button onClick={onRetry} data-testid="route-object-read-failed-retry">
           {t('common.retry', { defaultValue: 'Retry' })}
         </Button>

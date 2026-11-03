@@ -1,0 +1,401 @@
+---
+title: Push Relay schema — API Protocol reference
+navTitle: Push Relay
+description: "Push relay wire protocol — what a server sends the hosted push relay, and what the relay answers."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Push relay wire protocol — what a server sends the hosted push relay, and
+what the relay answers.
+
+**Why there is a relay.** The store-published ObjectOS app is signed with
+ObjectStack's own APNs key and Firebase project, and those credentials
+never leave ObjectStack. So a server whose push transport is the relay
+(`PushRelayTransportConfigSchema`, `system/push-config.zod.ts`, the
+default) does not call APNs or FCM itself: it POSTs one
+`PushRelayRequestSchema` to the relay endpoint, and the relay
+forwards each delivery to its vendor. One schema, pinned by both ends: the
+push channel that sends (the server) and the relay that receives it (in
+objectstack-ai/cloud).
+
+**Who is asking.** The relay authenticates the server by its cloud binding
+credential (cloud ADR-0008, the `oscc_…` bearer the server received when
+it was bound), sent as the request's bearer token. The body carries no
+credential. A bad or revoked binding answers 401
+(`PushRelayErrorResponseSchema`).
+
+**ID-only payload.** The relay is a third party to the notification, so it
+never sees its content. A delivery's payload carries the push delivery data
+(`PushDeliveryDataSchema`: the notification id, its same-server route and
+the sending server's origin) and one generic line of visible text, and
+nothing else. There is no title or body: the shell reads the notification
+from the server after the tap, by its id. To the relay the payload is
+opaque: it puts it in the vendor message unchanged.
+
+**Declared ahead of its producer.** No push channel delivers yet, so
+nothing sends this request today; each schema here carries a
+`[PLANNED — not yet served]` marker in its `.describe()` until the push
+channel ships.
+
+<Callout type="info">
+**Source:** `packages/spec/src/api/push-relay.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { PushRelayDeliverySchema, PushRelayErrorSchema, PushRelayErrorResponseSchema, PushRelayPayloadSchema, PushRelayPrioritySchema, PushRelayRequestSchema, PushRelayResponseSchema, PushRelayResultSchema, PushRelayResultStatusSchema } from '@objectstack/spec/api';
+import type { PushRelayDelivery, PushRelayError, PushRelayErrorResponse, PushRelayPayload, PushRelayPriority, PushRelayRequest, PushRelayResponse, PushRelayResult, PushRelayResultStatus } from '@objectstack/spec/api';
+
+// Validate data
+const result = PushRelayDeliverySchema.parse(data);
+```
+
+---
+
+## PushRelayDelivery
+
+[PLANNED — not yet served] One relay delivery: a device token, its vendor, the ID-only payload and the delivery priority
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **token** | `string` | ✅ | The vendor device token, as the device registered it |
+| **vendor** | `Enum<'apns' \| 'fcm'>` | ✅ | The vendor the token belongs to: apns or fcm |
+| **payload** | `{ data: object; text: string }` | ✅ | The ID-only payload |
+| **priority** | `Enum<'high' \| 'normal'>` | ✅ | Vendor delivery priority |
+
+### Nested Shape: `PushRelayDelivery.payload`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `{ notificationId: string; route?: string; origin?: string }` | ✅ | The push delivery data: the notification id, its same-server route and the origin of the sending server. The relay puts it in the vendor message unchanged |
+| **text** | `string` | ✅ | One generic visible line the device shows (for example "You have a new notification"), in the device locale. Never the notification title or body |
+
+
+---
+
+## PushRelayError
+
+[PLANNED — not yet served] A push relay error: UNAUTHENTICATED (401, bad or revoked binding), RATE_LIMIT_EXCEEDED or QUOTA_EXCEEDED (429), each with its next step in helpText
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `'UNAUTHENTICATED'` | ✅ | The server binding credential was not accepted |
+| **message** | `string` | ✅ | Human-readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
+| **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
+| **httpStatus** | `401` | ✅ | HTTP status code |
+| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
+| **retryAfterSeconds** | `number` | optional | Seconds to wait before retrying |
+| **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
+| **details** | `{ reason: Enum<'binding_invalid' \| 'binding_revoked'> }` | ✅ | Why the binding was refused |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **timestamp** | `string` | optional | When the error occurred |
+| **requestId** | `string` | optional | Request ID for tracking |
+| **traceId** | `string` | optional | Distributed trace ID |
+| **documentation** | `string` | optional | URL to error documentation |
+| **helpText** | `string` | ✅ | The next step: bind the server to the cloud again |
+
+### Nested Shape: `PushRelayError[code='UNAUTHENTICATED'].details`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **reason** | `Enum<'binding_invalid' \| 'binding_revoked'>` | ✅ | binding_invalid: the relay does not recognise the credential; binding_revoked: it was valid and has been revoked |
+
+### Nested Shape: `PushRelayError[code='UNAUTHENTICATED'].fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field path (supports dot notation) |
+| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
+| **message** | `string` | ✅ | Human-readable error message, rendered in the caller’s locale |
+| **label** | `string` | optional | Field display label in the caller’s locale |
+| **value** | `any` | optional | The invalid value that was provided |
+| **constraint** | `Record<string, any>` | optional | The constraint that was violated, as discrete values (e.g. `{ maxLength: 512, actual: 3000 }`) |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `'RATE_LIMIT_EXCEEDED'` | ✅ | The server sent the relay too many requests |
+| **message** | `string` | ✅ | Human-readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
+| **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
+| **httpStatus** | `429` | ✅ | HTTP status code |
+| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
+| **retryAfterSeconds** | `integer` | ✅ | Seconds to wait before sending again |
+| **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
+| **details** | `any` | optional | Additional error context |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **timestamp** | `string` | optional | When the error occurred |
+| **requestId** | `string` | optional | Request ID for tracking |
+| **traceId** | `string` | optional | Distributed trace ID |
+| **documentation** | `string` | optional | URL to error documentation |
+| **helpText** | `string` | ✅ | The next step: send again after retryAfterSeconds |
+
+### Nested Shape: `PushRelayError[code='RATE_LIMIT_EXCEEDED'].fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field path (supports dot notation) |
+| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
+| **message** | `string` | ✅ | Human-readable error message, rendered in the caller’s locale |
+| **label** | `string` | optional | Field display label in the caller’s locale |
+| **value** | `any` | optional | The invalid value that was provided |
+| **constraint** | `Record<string, any>` | optional | The constraint that was violated, as discrete values (e.g. `{ maxLength: 512, actual: 3000 }`) |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `'QUOTA_EXCEEDED'` | ✅ | The push quota of the server plan is used up |
+| **message** | `string` | ✅ | Human-readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
+| **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
+| **httpStatus** | `429` | ✅ | HTTP status code |
+| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
+| **retryAfterSeconds** | `integer` | optional | Seconds until the quota resets, when known |
+| **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
+| **details** | `any` | optional | Additional error context |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **timestamp** | `string` | optional | When the error occurred |
+| **requestId** | `string` | optional | Request ID for tracking |
+| **traceId** | `string` | optional | Distributed trace ID |
+| **documentation** | `string` | optional | URL to error documentation |
+| **helpText** | `string` | ✅ | The next step: raise the plan, or wait for the quota to reset |
+
+### Nested Shape: `PushRelayError[code='QUOTA_EXCEEDED'].fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field path (supports dot notation) |
+| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
+| **message** | `string` | ✅ | Human-readable error message, rendered in the caller’s locale |
+| **label** | `string` | optional | Field display label in the caller’s locale |
+| **value** | `any` | optional | The invalid value that was provided |
+| **constraint** | `Record<string, any>` | optional | The constraint that was violated, as discrete values (e.g. `{ maxLength: 512, actual: 3000 }`) |
+
+---
+
+
+---
+
+## PushRelayErrorResponse
+
+[PLANNED — not yet served] The push relay error response: the house error envelope, for 401 (bad or revoked binding) and 429 (rate limit or quota)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `false` | ✅ | Always false for error responses |
+| **error** | `{ code: 'UNAUTHENTICATED'; message: string; userMessage?: string; refusal?: true; … } \| { code: 'RATE_LIMIT_EXCEEDED'; message: string; userMessage?: string; refusal?: true; … } \| { code: 'QUOTA_EXCEEDED'; message: string; userMessage?: string; refusal?: true; … }` | ✅ | Error details |
+| **meta** | `{ timestamp?: string; requestId?: string; traceId?: string }` | optional | Response metadata |
+
+### Nested Shape: `PushRelayErrorResponse.error[code='UNAUTHENTICATED']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `'UNAUTHENTICATED'` | ✅ | The server binding credential was not accepted |
+| **message** | `string` | ✅ | Human-readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
+| **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
+| **httpStatus** | `401` | ✅ | HTTP status code |
+| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
+| **retryAfterSeconds** | `number` | optional | Seconds to wait before retrying |
+| **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
+| **details** | `{ reason: Enum<'binding_invalid' \| 'binding_revoked'> }` | ✅ | Why the binding was refused |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **timestamp** | `string` | optional | When the error occurred |
+| **requestId** | `string` | optional | Request ID for tracking |
+| **traceId** | `string` | optional | Distributed trace ID |
+| **documentation** | `string` | optional | URL to error documentation |
+| **helpText** | `string` | ✅ | The next step: bind the server to the cloud again |
+
+### Nested Shape: `PushRelayErrorResponse.error[code='RATE_LIMIT_EXCEEDED']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `'RATE_LIMIT_EXCEEDED'` | ✅ | The server sent the relay too many requests |
+| **message** | `string` | ✅ | Human-readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
+| **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
+| **httpStatus** | `429` | ✅ | HTTP status code |
+| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
+| **retryAfterSeconds** | `integer` | ✅ | Seconds to wait before sending again |
+| **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
+| **details** | `any` | optional | Additional error context |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **timestamp** | `string` | optional | When the error occurred |
+| **requestId** | `string` | optional | Request ID for tracking |
+| **traceId** | `string` | optional | Distributed trace ID |
+| **documentation** | `string` | optional | URL to error documentation |
+| **helpText** | `string` | ✅ | The next step: send again after retryAfterSeconds |
+
+### Nested Shape: `PushRelayErrorResponse.error[code='QUOTA_EXCEEDED']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `'QUOTA_EXCEEDED'` | ✅ | The push quota of the server plan is used up |
+| **message** | `string` | ✅ | Human-readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
+| **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
+| **httpStatus** | `429` | ✅ | HTTP status code |
+| **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
+| **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
+| **retryAfterSeconds** | `integer` | optional | Seconds until the quota resets, when known |
+| **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
+| **details** | `any` | optional | Additional error context |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **timestamp** | `string` | optional | When the error occurred |
+| **requestId** | `string` | optional | Request ID for tracking |
+| **traceId** | `string` | optional | Distributed trace ID |
+| **documentation** | `string` | optional | URL to error documentation |
+| **helpText** | `string` | ✅ | The next step: raise the plan, or wait for the quota to reset |
+
+
+---
+
+## PushRelayPayload
+
+[PLANNED — not yet served] The ID-only payload of one relay delivery: the push delivery data and one generic visible line, with no title or body. Opaque to the relay
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `{ notificationId: string; route?: string; origin?: string }` | ✅ | The push delivery data: the notification id, its same-server route and the origin of the sending server. The relay puts it in the vendor message unchanged |
+| **text** | `string` | ✅ | One generic visible line the device shows (for example "You have a new notification"), in the device locale. Never the notification title or body |
+
+### Nested Shape: `PushRelayPayload.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **notificationId** | `string` | ✅ | Notification id — the one the inbox lists and markRead takes |
+| **route** | `string` | optional | The notification actionUrl, the value the inbox serves, when it is a same-server relative path; absent otherwise. The shell resolves it on tap as the inbox bell and Home do, never verbatim |
+| **origin** | `string` | optional | The origin of the server that sent the push (for example https://crm.example.com): the push channel copies it from the device row, which holds the origin the Console was loaded from when it registered the device. A mobile shell with several saved servers opens the tap on the saved server with this origin, and resolves route there. Absent when the device was registered without one |
+
+
+---
+
+## PushRelayPriority
+
+Vendor delivery priority: high delivers at once and wakes the device (APNs 10, FCM high); normal may wait for the device power state (APNs 5, FCM normal)
+
+### Allowed Values
+
+* `high`
+* `normal`
+
+
+---
+
+## PushRelayRequest
+
+[PLANNED — not yet served] The request a server sends the hosted push relay: one delivery per device token. Authenticated by the server cloud binding credential as its bearer token
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **deliveries** | `{ token: string; vendor: Enum<'apns' \| 'fcm'>; payload: object; priority: Enum<'high' \| 'normal'> }[]` | ✅ | The deliveries, one per device token. The response answers each one, in the same order |
+
+### Nested Shape: `PushRelayRequest.deliveries[number]`
+
+[PLANNED — not yet served] One relay delivery: a device token, its vendor, the ID-only payload and the delivery priority
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **token** | `string` | ✅ | The vendor device token, as the device registered it |
+| **vendor** | `Enum<'apns' \| 'fcm'>` | ✅ | The vendor the token belongs to: apns or fcm |
+| **payload** | `{ data: object; text: string }` | ✅ | The ID-only payload |
+| **priority** | `Enum<'high' \| 'normal'>` | ✅ | Vendor delivery priority |
+
+
+---
+
+## PushRelayResponse
+
+[PLANNED — not yet served] The push relay answer: one result per delivery token, ok, invalid or retry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **results** | `{ token: string; status: Enum<'ok' \| 'invalid' \| 'retry'> }[]` | ✅ | One result per delivery, in the order of the request deliveries |
+
+### Nested Shape: `PushRelayResponse.results[number]`
+
+[PLANNED — not yet served] The relay answer for one delivery: its device token and its outcome
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **token** | `string` | ✅ | The device token of the delivery this result answers |
+| **status** | `Enum<'ok' \| 'invalid' \| 'retry'>` | ✅ | What happened to the delivery |
+
+
+---
+
+## PushRelayResult
+
+[PLANNED — not yet served] The relay answer for one delivery: its device token and its outcome
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **token** | `string` | ✅ | The device token of the delivery this result answers |
+| **status** | `Enum<'ok' \| 'invalid' \| 'retry'>` | ✅ | What happened to the delivery |
+
+
+---
+
+## PushRelayResultStatus
+
+Outcome of one delivery: ok (the vendor accepted it), invalid (the vendor reports the token dead; stop delivering to it) or retry (a transient failure; the delivery may be sent again later)
+
+### Allowed Values
+
+* `ok`
+* `invalid`
+* `retry`
+
+
+---
+

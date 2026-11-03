@@ -132,6 +132,12 @@
       "reason": "Loader-derived. Authors write the `list` / `listViews` / `formViews` containers; the loader expands them and stamps `viewKind`. No author ever types it."
     },
     {
+      "key": "code:QUOTA_EXCEEDED|RATE_LIMIT_EXCEEDED|UNAUTHENTICATED",
+      "label": "push relay error",
+      "exempt": "not-authorable",
+      "reason": "Wire protocol between a server's push channel and the hosted push relay: the relay answers it and nobody writes it into metadata. The generated page at content/docs/references/api/push-relay.mdx is the reference."
+    },
+    {
       "key": "type:ack|cursor|edit|error|event|ping|pong|presence|subscribe|unsubscribe",
       "label": "websocket message",
       "exempt": "not-authorable",
