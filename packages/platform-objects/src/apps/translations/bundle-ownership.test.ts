@@ -21,7 +21,7 @@ const OWNED_OBJECTS = new Set([
   'sys_user', 'sys_session', 'sys_account', 'sys_verification', 'sys_organization',
   'sys_member', 'sys_invitation', 'sys_team', 'sys_team_member', 'sys_business_unit',
   'sys_business_unit_member', 'sys_api_key', 'sys_two_factor', 'sys_device_code',
-  'sys_user_preference', 'sys_oauth_application', 'sys_oauth_access_token',
+  'sys_user_preference', 'sys_personal_view', 'sys_oauth_application', 'sys_oauth_access_token',
   'sys_oauth_refresh_token', 'sys_oauth_consent', 'sys_oauth_resource',
   'sys_oauth_client_resource', 'sys_oauth_client_assertion', 'sys_jwks',
   // identity — external SSO provider (admin-facing, better-auth-managed)
