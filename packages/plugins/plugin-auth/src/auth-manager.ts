@@ -80,6 +80,7 @@ import {
 } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
+import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import {
   applyUserBan,
@@ -1604,6 +1605,12 @@ export class AuthManager {
     // appear after boot.
     assertScimAdminCoherence(config.plugins);
 
+    // A completed password reset ends the account's other sessions, always;
+    // an explicit `revokeSessionsOnPasswordReset: false` is refused here, at
+    // boot, rather than silently overridden (`password-reset-ends-sessions.ts`).
+    // `applyConfigPatch` re-runs it on the merged result.
+    assertPasswordResetEndsSessions(config.emailAndPassword);
+
     // The mobile sign-in hand-off's registered app schemes — same
     // boot-loudly rationale: an entry that is not a reverse-domain app scheme
     // is refused here, never dropped (`one-time-token-handoff.ts`).
@@ -2074,6 +2081,12 @@ export class AuthManager {
     // and the standing config keeps ruling.
     if ('plugins' in patch) {
       assertScimAdminCoherence(next.plugins);
+    }
+    // Same entry validation the constructor runs, on the MERGED block: a patch
+    // cannot ask a completed password reset to keep the account's other
+    // sessions. Refused loudly and the standing config keeps ruling.
+    if ('emailAndPassword' in patch) {
+      assertPasswordResetEndsSessions(next.emailAndPassword);
     }
     if ('trustedAppSchemes' in patch) {
       assertTrustedAppSchemes(next.trustedAppSchemes);

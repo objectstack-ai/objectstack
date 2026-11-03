@@ -309,8 +309,11 @@ describe('[#23598] the import reports an invitation the email transport did not 
     // address has an account or whether its mail went out.
     expect(throughFailing).toEqual(throughFine);
     expect(throughFailing).toEqual(noAccount);
-    // Both sends really ran, with the reset copy.
-    expect(attempts.filter((m) => m.to.address === failing).map((m) => m.template)).toEqual(['auth.password_reset']);
-    expect(attempts.filter((m) => m.to.address === fine).map((m) => m.template)).toEqual(['auth.password_reset']);
+    // Both sends really ran, with the reset copy — after the response, which
+    // is when the public door sends.
+    await vi.waitFor(() => {
+      expect(attempts.filter((m) => m.to.address === failing).map((m) => m.template)).toEqual(['auth.password_reset']);
+      expect(attempts.filter((m) => m.to.address === fine).map((m) => m.template)).toEqual(['auth.password_reset']);
+    });
   }, 60_000);
 });

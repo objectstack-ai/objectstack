@@ -120,6 +120,14 @@ async function boot(locale: string | undefined, extra: Record<string, unknown> =
 const USER = { id: 'u1', email: 'ada@example.com', name: 'Ada' };
 
 /**
+ * A reset requested through the public door (a call that carries its
+ * `Request`) is sent after the response, so the drives below wait for it to
+ * land before reading what was sent; a call with no request is awaited inline.
+ */
+const resetSent = (sent: any[]) =>
+  vi.waitFor(() => expect(sent.some((x: any) => x.template === 'auth.password_reset')).toBe(true));
+
+/**
  * Drive all five auth sends and return the recorded `sendTemplate` inputs.
  *
  * The change-email notice fires from the global after-hook rather than a named
@@ -317,6 +325,7 @@ async function driveWithHeader(
     { user: USER, url: 'http://x/reset', token: 't' },
     request,
   );
+  await resetSent(sent);
   await capturedConfig.emailVerification.sendVerificationEmail(
     { user: USER, url: 'http://x/verify', token: 't' },
     request,
@@ -522,6 +531,7 @@ async function driveResetWith(opts: {
     { user: USER, url: 'http://x/reset', token: 't' },
     request,
   );
+  await resetSent(sent);
   return { sent, reads };
 }
 
@@ -619,6 +629,7 @@ describe('#14762 — sys_user.locale is the top rung of the auth-mail ladder', (
       { user: USER, url: 'http://x/reset', token: 't' },
       new Request('http://x/any', { headers: { 'accept-language': 'zh-CN' } }),
     );
+    await resetSent(sent);
     expect(sent[0].locale).toBe('zh-CN');
   });
 
