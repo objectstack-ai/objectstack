@@ -1293,11 +1293,14 @@ export const CEILINGS = new Map([
   // `Request: progress` knocks went unanswered) go to an online sibling seat
   // of the same lane, which claims them with `Resume-from:` citing the brief;
   // the exceptions (a decision-card wait, no online sibling ⇒ 「待席」 on the
-  // round record, security items stay with `security#1`). The sign-off line's
-  // 「在飞默认交回队列」 was rewritten in place to the sibling. Ruling of record:
-  // amendment 6595840476 on #29754 (maintainer 「同意：下班席位的卡交给兄弟席」),
-  // under #29775 letter A, record 6595514258 (「同意29775 A」), which names this
-  // file. Measured delta +2 (96 → 98 lines); landed count, headroom 0.
+  // round record, security items stay with the security seat). The sign-off
+  // line keeps the `Release:` + `Resume-from:` transit back to `pm:queue`
+  // (`check-handover.mjs` (a) still reads it) and names the sibling as the
+  // next claimant; the two-unanswered-knocks case cites triage's round record
+  // through execution-duties.md's 接管 shape, since no brief exists. Ruling of
+  // record: amendment 6595840476 on #29754 (maintainer 「同意：下班席位的卡交给
+  // 兄弟席」), which names this file, under #29775 letter A, record 6595514258
+  // (「同意29775 A」). Measured delta +2 (96 → 98 lines); landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 98],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
