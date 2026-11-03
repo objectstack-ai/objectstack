@@ -18,14 +18,14 @@
 - 已发布面以包的 `exports` 映射为准:从入口类型图不可达、且 `exports` 不可寻址的 `.d.ts` 是
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
 - 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
-- 派发席达档调用被配额拒(HTTP 429)⇒ ⛔ 不降档审;PR 落交接行、留等复核标记,交分诊席。
-- `Contract-review-handoff: triage — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
-- 分诊只接无人在审的欠审 PR(draft 亦算):现 head 无记录、无活认领,且 (a)(b)(c) 之一成立。
-- (a) 交接行点名现 head 或 PR 带等复核标记,同轮接;(b) 现 head 已等满一轮分诊(约 60 分钟);
-- (c) 车道席已收班或不在总表;欠审清单 = `node scripts/pm/check-owed-reviews.mjs`,只读。
-- 车道或分诊起审前读 PR:现 head 有记录或活认领 ⇒ ⛔ 不起;否则先落认领行,一 head 一行:
+- 派发席席内达档审;被配额拒(HTTP 429)⇒ ⛔ 不降档,留标记落交接行,点复审席,无则兄弟席:
+- `Contract-review-handoff: <review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
+- 欠审 PR(含 draft)现 head 无记录、无活认领且 (a)(b)(c) 之一 ⇒ 车道或复审席接,⛔ 非分诊。
+- (a) 交接行点名现 head 或带等复核标记,同轮由所点席接;(b) 现 head 已等满一轮(约 60 分钟);
+- (c) 车道收班或离总表:欠审入交班简报待下席或复审席;清单 `scripts/pm/check-owed-reviews.mjs`。
+- 车道或复审席起审前读 PR:现 head 有记录或活认领 ⇒ ⛔ 不起;否则先落认领行,一 head 一行:
 - `Contract-review-claim: <session> · head <full sha> · <UTC>`
-- 认领随 head 移动或贴后 2 小时无记录失效;同 head 双认 ⇒ 车道胜,分诊回帖撤回、弃产出。
+- 认领随 head 移动或贴后 2 小时无记录失效;同 head 双认 ⇒ 车道胜,他方回帖撤回、弃产出。
 - 车道暂缓本 head 送审落 `Contract-review-hold: <session> · head <sha> · <reason> · until <condition>`
 - 新 head 即清;点名现 head 时 (b) 不起;条件满足由持有车道挂等复核标记或落交接行。
 - 逾 24 小时条件未满的 hold 列入分诊轮次记录(`check-owed-reviews.mjs` 标出)。
@@ -50,7 +50,7 @@
   而已挂 auto-merge ⇒ 派发席读到即照 AGENTS.md disarm 句撤挂,FAIL 记录点名欠撤挂;重挂照 ①。
 - ② PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
-- 落地时仍欠复核的 PR 在落地 head 复审,车道席或分诊按 (a)(b)(c) 接;FAIL ⛔ 不修已关 PR。
+- 落地时仍欠复核的 PR 在落地 head 复审,车道席或复审席按 (a)(b)(c) 接;FAIL ⛔ 不修已关 PR。
 - 每条 must-fix 引该记录立新卡、按发现定级;回退仅限主干红(p0,main-red 约定①)或安全边界。
 
 ## 等复核标记 `needs:contract-review`
