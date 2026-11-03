@@ -177,7 +177,7 @@ the vendor redirects to `GET …/connectors/oauth/callback`. An `authorization_c
 instance on `mcp` may omit the `https://` endpoints and `clientId`, discovered at connect.
 Name `clientId` for an app its publisher deploys; `clientSource: 'installer'` for one installed
 on deployments the publisher never sees: the administrator registers a client with the vendor
-against the `redirectUri` a `GET` on that path answers, then connects with `{ clientId, clientSecret }`
+against the `redirectUri` that `GET …/:name/connection` answers, then connects with `{ clientId, clientSecret }`
 (no secret for a public client; a reconnect naming none keeps it). The connection keeps it
 encrypted; a read shows `client: { source: 'installer', clientId, hasSecret }`.
 Still never park a short-lived token behind a `bearer` ref.
