@@ -12,6 +12,9 @@
  * (`auth-manager-auth-instance.ts`, `sendResetPassword`), and what the send
  * does is the server's to log, never the caller's to see — which it already
  * never was: better-auth answers `{ status: true }` whatever the send does.
+ * The phone-number reset request answers the same way, and its reset text is
+ * sent after the response on the same terms (`auth-manager-plugin-list.ts`,
+ * `sendPasswordResetOTP`).
  *
  * ## How
  *
@@ -44,12 +47,14 @@ export function runAfterResponse(task: () => Promise<unknown>, onFailure: (error
 }
 
 /**
- * Wrap a better-auth mail callback — called as `(data, request)` — so that a
+ * Wrap a better-auth send callback — called as `(data, request)` — so that a
  * call carrying its `Request` (every HTTP request: the public door) resolves at
  * once and the send runs after the response ({@link runAfterResponse}), its
  * failure going to `onFailure`. A call without one (a server-side `auth.api.*`
  * call, such as the identity import's) is handed straight to `send` — the same
- * promise — and awaited by its caller exactly as before.
+ * promise — and awaited by its caller exactly as before. A callback better-auth
+ * hands the endpoint context instead (the phone-number reset's) is called
+ * with that context's `request`, the value the emailed reset is handed.
  */
 export function sendAfterResponseOnPublicDoor<D>(
   send: (data: D, request?: unknown) => Promise<unknown>,
@@ -76,11 +81,12 @@ type FailureLogger = {
  * `error` when the host logger carries it, else its guaranteed `warn`, else —
  * no host logger at all — the console: the level better-auth's own
  * background-task log used for the same failure while the send ran inside the
- * request. Called through the property, never an extracted reference (a
- * class-based logger needs its receiver).
+ * request. `what` names the send, its medium included (`password-reset
+ * email`, `phone password-reset text`). Called through the property, never an
+ * extracted reference (a class-based logger needs its receiver).
  */
 export function logAfterResponseSendFailure(logger: unknown, what: string, error: unknown): void {
-  const message = `[AuthManager] ${what} email was not delivered: ${
+  const message = `[AuthManager] ${what} was not delivered: ${
     error instanceof Error ? error.message : String(error)
   }`;
   const sink = logger as FailureLogger | undefined;
