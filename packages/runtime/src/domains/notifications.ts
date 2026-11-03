@@ -20,16 +20,18 @@
  * as it did from the if-chain.
  *
  * Routes (path is the sub-path after `/notifications`):
- *   GET  ''          → listInbox    (query: read, type, limit — validated, #6928)
- *   POST /read       → markRead     (body: { ids: string[] })
- *   POST /read/all   → markAllRead
+ *   GET    ''                  → listInbox         (query: read, type, limit — validated, #6928)
+ *   POST   /read               → markRead          (body: { ids: string[] })
+ *   POST   /read/all           → markAllRead
+ *   POST   /devices            → registerDevice    (body: RegisterDeviceRequestSchema, ADR-0012 §6)
+ *   DELETE /devices/:deviceId  → unregisterDevice  (the caller's own device; another's is 404)
  */
 
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { CoreServiceName } from '@objectstack/spec/system';
-import { MarkNotificationsReadRequestSchema } from '@objectstack/spec/api';
+import { MarkNotificationsReadRequestSchema, RegisterDeviceRequestSchema } from '@objectstack/spec/api';
 import type { INotificationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import { validationFailure, fieldsFromZodIssues } from '../validation-failure.js';
@@ -96,6 +98,20 @@ const parseLimitWindow = (raw: unknown): number | undefined => parseIntegerParam
 function parseTypeFilter(raw: unknown): string | undefined {
     if (!raw) return undefined;
     return parseStringParam('type', raw);
+}
+
+/**
+ * The `:deviceId` path segment, decoded as the self-hosted router decodes a
+ * parameter. An escape that does not decode is kept raw rather than thrown on
+ * (the `meta` / `automation-hooks` precedent): a malformed id names no device
+ * this caller holds, so it gets the ordinary 404, never a 500.
+ */
+function decodeDeviceSegment(segment: string): string {
+    try {
+        return decodeURIComponent(segment);
+    } catch {
+        return segment;
+    }
 }
 
 export function createNotificationsDomain(deps: DomainHandlerDeps): DomainRoute {
@@ -169,11 +185,9 @@ export async function handleNotificationRequest(
     // is mounted, so that produced a ROUTE_NOT_FOUND whose hint ("check the API
     // discovery endpoint") pointed at a page that correctly does not list the
     // route. See ./unavailable.ts. The slot key is `notification`, singular.
-    if (!service || !isServiceServeable(service) || typeof service.listInbox !== 'function') {
+    if (!service || !isServiceServeable(service)) {
         return capabilityUnavailable(deps, 'notification');
     }
-    // Narrowed for the routes below: the entry probe established `listInbox`.
-    const inbox = service as INotificationService & Required<Pick<INotificationService, 'listInbox'>>;
 
     const m = method.toUpperCase();
     // split+filter drops leading/trailing/duplicate slashes without a regex
@@ -181,7 +195,50 @@ export async function handleNotificationRequest(
     // treatment the security domain got for the identical latent pattern.
     // Surfaced when the extraction (#3507) made this line "changed code":
     // the legacy `.replace(/\/+$/, '')` had carried the trap since ADR-0030.
-    const subPath = path.split('/').filter(Boolean).join('/');
+    const segments = path.split('/').filter(Boolean);
+    const subPath = segments.join('/');
+
+    // ── Push devices (ADR-0012 §6) ─────────────────────────────────────────
+    // The device registry is a capability of its own, separately optional on
+    // the contract from the inbox, so these faces probe THEIR member and sit
+    // ahead of the inbox probe below: a provider with a device registry and no
+    // inbox still serves them, and one with an inbox and no registry answers
+    // the 501 capability disclosure, never a 404. The owner is the session's
+    // user (bound above, after the anonymous floor); no body member names one.
+    if (segments[0] === 'devices') {
+        // POST /notifications/devices — register or refresh this user's device.
+        if (segments.length === 1 && m === 'POST') {
+            if (typeof service.registerDevice !== 'function') return capabilityUnavailable(deps, 'notification');
+            // Validated against the declared contract (`RegisterDeviceRequestSchema`,
+            // the catalog row's `requestSchema`), as mark-read is (#3899).
+            const parsed = RegisterDeviceRequestSchema.safeParse(body ?? {});
+            if (!parsed.success) {
+                const fields = fieldsFromZodIssues(parsed.error.issues);
+                throw validationFailure(
+                    `Invalid device registration body: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`,
+                    fields,
+                );
+            }
+            const result = await service.registerDevice(userId, parsed.data);
+            return { handled: true, response: deps.success(result) };
+        }
+        // DELETE /notifications/devices/:deviceId — the caller's own device only.
+        // A device id the caller does not hold (unknown, or another user's) is
+        // the service's `NOT_FOUND` throw, which the dispatcher answers 404:
+        // never a distinct "forbidden", so the id's existence is not disclosed.
+        if (segments.length === 2 && m === 'DELETE') {
+            if (typeof service.unregisterDevice !== 'function') return capabilityUnavailable(deps, 'notification');
+            const result = await service.unregisterDevice(userId, decodeDeviceSegment(segments[1]));
+            return { handled: true, response: deps.success(result) };
+        }
+        return { handled: false };
+    }
+
+    if (typeof service.listInbox !== 'function') {
+        return capabilityUnavailable(deps, 'notification');
+    }
+    // Narrowed for the routes below: the entry probe established `listInbox`.
+    const inbox = service as INotificationService & Required<Pick<INotificationService, 'listInbox'>>;
 
     // Each write route probes its OWN method rather than riding the entry
     // `listInbox` probe (#4127). The three are separately optional on the

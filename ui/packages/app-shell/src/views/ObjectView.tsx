@@ -76,6 +76,10 @@ import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListPersonalizedMarker } from './ListPersonalizedMarker.js';
 import { useObjectViewViewCrud } from './objectViewViewCrud.js';
+import { PERSONAL_VIEW_OBJECT, buildPersonalViewConfig, personalViewEntry, usePersonalViews } from './personalViews.js';
+import { PersonalViewNameDialog } from './PersonalViewNameDialog.js';
+import { parseListStateParams } from './userFilterUrlState.js';
+import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -394,6 +398,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // listViews.
     const [savedViews, setSavedViews] = useState<any[]>([]);
 
+    // objectstack#29635 — the reader's own views of this object, My views
+    // (`sys_personal_view` rows, `./personalViews.ts`). They join the list's
+    // views below, so the switcher, the pin and the address resolve them like
+    // any other view; a reader the server grants nothing reads none.
+    const personalViews = usePersonalViews({ dataSource, objectName: objectDef.name, userId: user?.id, perms });
+    const personalViewIds = useMemo(
+        () => new Set(personalViews.views.map((v) => v.id)),
+        [personalViews.views],
+    );
+
     // objectui#12418 — the signed-in user's OWN list state for this object:
     // the tab order, and per view the sort, the Filter panel's conditions and
     // the column layout. A toolbar change writes here (`sys_user_preference`
@@ -515,6 +529,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 type: 'grid',
             }),
         });
+        // The reader's own views, after the object's (objectstack#29635). A
+        // row id never carries a `.`, so it never names a package view; one
+        // that collides with a view id here is not added a second time.
+        for (const personal of personalViews.views) {
+            if (!viewList.some((v) => v.id === personal.id)) viewList.push(personalViewEntry(personal) as (typeof viewList)[number]);
+        }
 
         // Apply default columns to any grid-like view that has no explicit
         // columns (e.g. saved views created via "Add View" before the user
@@ -573,7 +593,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         });
 
         return { list: viewList, derivedColumnViewIds: derived };
-    }, [objectDef, savedViews, viewOverrides, t, orgAttribution, prefViewOrderKey]);
+    }, [objectDef, savedViews, viewOverrides, t, orgAttribution, prefViewOrderKey, personalViews.views]);
 
     // Active View State — merge saved draft if available for this view.
     // Resolution priority: URL viewId → ?view= → the reader's pinned view →
@@ -620,7 +640,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // name is the key), and not in draft preview, whose list is the draft
     // world while the probe reads the published one. A refusal replaces the
     // list below; any other answer keeps the fall-back to the default view.
-    const missedViewName = requestedViewId && !resolvedViewId && !previewDrafts
+    // objectstack#29635 — while the reader's own views are being read, a
+    // requested or pinned view the list does not hold yet may be one of them:
+    // the list waits for that read (`awaitingPersonalViews`), and the refusal
+    // probe is not asked. Any other open paints at once, and My views joins
+    // the switcher when the read lands.
+    const personalViewsLoading = personalViews.status === 'loading';
+    const awaitingPersonalViews = personalViewsLoading
+        && ((!!requestedViewId && !resolvedViewId) || (!!pinnedViewChoice && !pinnedViewId));
+    const missedViewName = requestedViewId && !resolvedViewId && !previewDrafts && !personalViewsLoading
         ? (requestedViewId.includes('.') ? requestedViewId : `${objectDef.name}.${requestedViewId}`)
         : null;
     const viewAccess = useMetaItemRefusal('view', missedViewName);
@@ -702,6 +730,91 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         activeViewId,
         baseView,
     });
+
+    // objectstack#29635 — Save as my view, and Rename and Delete on the
+    // reader's own views. Save is offered to any reader the server lets save
+    // one (`sys_personal_view` read and create), not to admins only; the name
+    // is asked in `PersonalViewNameDialog`. A reader who cannot read the
+    // list's own object is offered no Save: there is no list to keep.
+    const personalViewsReady = personalViews.status === 'ready';
+    const personalGrant = (action: 'create' | 'update') => !perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, action);
+    const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
+    const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'save' } | { mode: 'rename'; viewId: string } | null>(null);
+    const openPersonalView = (id: string) => {
+        if (viewId) navigate(`../${id}`, { relative: 'path' });
+        else navigate(`view/${id}`);
+    };
+    /** Save the list on screen as one of the reader's own views, and open it. */
+    const handleSavePersonalView = async (label: string): Promise<boolean> => {
+        if (!activeView) return false;
+        // The list's toolbar state is the address's (`uf_*`), through the same
+        // field gate its seed reads it with.
+        const acceptField = (field: string) =>
+            !!objectDef.fields?.[field]
+            && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
+        const built = buildPersonalViewConfig(objectDef.name, activeView, {
+            url: parseListStateParams(searchParams, acceptField),
+            preference: listPrefs.preference.perView?.[activeView.id],
+        });
+        if (!built.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
+            return false;
+        }
+        try {
+            openPersonalView(await personalViews.save(label, built.config));
+            return true;
+        } catch (err) {
+            console.error('[ObjectView] Failed to save a personal view:', err);
+            toast.error(t('form.saveError'), {
+                description: err instanceof Error ? err.message : String(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return false;
+        }
+    };
+    const handleRenamePersonalView = async (id: string, label: string): Promise<boolean> => {
+        try {
+            await personalViews.rename(id, label);
+            return true;
+        } catch (err) {
+            console.error('[ObjectView] Failed to rename a personal view:', err);
+            toast.error(t('objectViewActions.renameFailed'), {
+                description: err instanceof Error ? err.message : String(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return false;
+        }
+    };
+    /** Delete one of the reader's own views through the owner's door; the list falls back to the default view. */
+    const handleDeletePersonalView = async (id: string) => {
+        const target = personalViews.views.find((v) => v.id === id);
+        if (!target) return;
+        const confirmed = await confirmHandler(
+            t('console.objectView.deleteViewConfirm', { name: target.label }),
+            {
+                title: t('console.objectView.deleteViewTitle'),
+                confirmText: t('console.objectView.delete'),
+                cancelText: t('console.objectView.cancel'),
+            },
+        );
+        if (!confirmed) return;
+        try {
+            await personalViews.remove(id);
+            // The reader's pin on it goes with it, and an address naming it
+            // gives way to the list's own default.
+            if (pinnedViewChoice === id) setPinnedViewChoice(null);
+            if (id === activeViewId && viewId) navigate('../..', { relative: 'path' });
+        } catch (err) {
+            console.error('[ObjectView] Failed to delete a personal view:', err);
+            toast.error(t('objectViewActions.deleteFailed'), {
+                description: err instanceof Error ? err.message : String(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+        }
+    };
+    const renamingPersonalView = personalViewDialog?.mode === 'rename'
+        ? personalViews.views.find((v) => v.id === personalViewDialog.viewId)
+        : undefined;
 
     // Current user — also used below for `{current_user_id}` filter-token
     // substitution. The schema-action handlers (toast/navigate/api/flow/server)
@@ -837,6 +950,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         setPinnedViewId: setPinnedViewChoice,
         appSegment: appName,
         viewTotal,
+        personalViewIds,
+        onSavePersonalView: personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal
+            ? () => setPersonalViewDialog({ mode: 'save' })
+            : undefined,
+        onRenamePersonalView: personalViewsReady && personalGrant('update')
+            ? (id: string) => setPersonalViewDialog({ mode: 'rename', viewId: id })
+            : undefined,
+        onDeletePersonalView: personalViewsReady ? (id: string) => { void handleDeletePersonalView(id); } : undefined,
     });
     const handleListTotalChange = useCallback((total: number) => {
         if (!activeViewId) return;
@@ -946,7 +1067,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const onListViewAction = useCallback<typeof handleViewAction>((...args) => listHandlers.current.handleViewAction(...args), []);
     const onListEdit = useCallback((record: any) => listHandlers.current.onEdit?.(record), []);
     const listView = useMemo(
-        () => refusedViewFace ?? (viewAccess.checking ? null : (
+        () => refusedViewFace ?? (viewAccess.checking || awaitingPersonalViews ? null : (
             <PluginObjectView
                 schema={objectViewSchema}
                 dataSource={dataSource}
@@ -961,7 +1082,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 onViewAction={onListViewAction}
             />
         )),
-        [refusedViewFace, viewAccess.checking, objectViewSchema, dataSource, mergedViews, activeViewId, onListViewChange, onListEdit, handleRowClick, renderListView, onListCreateView, onListViewAction],
+        [refusedViewFace, viewAccess.checking, awaitingPersonalViews, objectViewSchema, dataSource, mergedViews, activeViewId, onListViewChange, onListEdit, handleRowClick, renderListView, onListCreateView, onListViewAction],
     );
 
     // The page column — header, list, panels — that the record drawer draws
@@ -1172,6 +1293,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                     existingLabels={views.map((v: any) => v.label).filter(Boolean)}
                     objectDef={objectDef}
                     onCreate={(cfg) => handleViewCreate(cfg)}
+                />
+                <PersonalViewNameDialog
+                    open={!!personalViewDialog}
+                    onOpenChange={(open) => { if (!open) setPersonalViewDialog(null); }}
+                    title={personalViewDialog?.mode === 'rename'
+                        ? t('view.rename', { defaultValue: 'Rename' })
+                        : t('view.switcher.saveAsMyView', { defaultValue: 'Save as my view' })}
+                    initialName={renamingPersonalView?.label ?? ''}
+                    onSubmit={(name) => (personalViewDialog?.mode === 'rename'
+                        ? handleRenamePersonalView(personalViewDialog.viewId, name)
+                        : handleSavePersonalView(name))}
+                    t={t}
                 />
              </div>
         </div>
