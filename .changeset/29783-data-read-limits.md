@@ -10,6 +10,8 @@ feat(data): a host-configured default and maximum page size for list, report and
 Clause-②: yes (widening)
 Metadata-protocol: none
 
+What Clause-② widens: the published error-code vocabulary. `ErrorCode` (the union `ApiErrorSchema.code` parses against) gains two registered members, `QUERY_PAGE_SIZE_EXCEEDED` and `QUERY_ROW_BUDGET_EXCEEDED`. No metadata an author writes changes, and no existing code, status or response shape moves.
+
 A deployment can now bound how many rows one data API read returns and walks. Three environment variables, each a positive integer; all three unset is today's behaviour exactly, so a self-hosted deployment that sets none of them answers as before:
 
 - **`OS_DATA_DEFAULT_PAGE_SIZE`** — the page a read gets when it names no `limit`. Unset with a maximum set, the maximum is the default.
