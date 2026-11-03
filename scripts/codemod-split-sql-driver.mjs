@@ -210,6 +210,12 @@ const PATH_READER_NEEDLES = Object.freeze({
   'keyed ? this.keyableTextLength(field) : null': 'scripts/check-keyed-text-bounds.mjs EMITTER_ANCHOR and the generate-string-family-width pin',
   'JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name)': 'packages/cli generate-field-type-vocabulary and generate-string-family-width pins',
   'if (FILE_REFERENCE_TYPES.has(type)) {': 'packages/cli generate-string-family-width pin',
+  // check-durability-degradation-log-level judges the `catch` around a
+  // durability call by following SAME-FILE helpers (its `functionBodies` is
+  // per source file): `this.logDurabilityFailure(…)` resolves only in
+  // sql-driver.ts, so a moved catch reads as "swallowed, no log" (measured:
+  // migrateMysqlDatetimeColumns / migrateMysqlTimeColumns red when moved).
+  'this.runWideningAlters(': 'scripts/check-durability-degradation-log-level.mjs resolves the catch\'s log helper in the same file',
 });
 
 /**
