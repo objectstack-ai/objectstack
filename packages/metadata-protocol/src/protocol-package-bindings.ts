@@ -316,7 +316,7 @@ const BORROWED_ENVELOPE_DECLINED_TYPES: ReadonlySet<string> = new Set([
     'dashboard',
     'report',
     'email_template',
-    // [#29613] The SEALED_ROW_SERVED_OVERRIDE_TYPES, spelled out (a test pins the two lists).
+    // [#29613] The SEALED_ROW_SERVED_OVERRIDE_TYPES, spelled out (`protocol-package-bindings.sealed-override.test.ts` pins both lists).
     'page',
     'app',
     'dataset',
