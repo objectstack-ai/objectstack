@@ -18,6 +18,11 @@
  * direction is pinned as hard as the rejection direction: a future "helpful"
  * widening of this guard onto the bulk surface goes RED here.
  *
+ * `InlineActionSchema` refuses the pair too (#29383, ruling record 6595808462
+ * letter A): an inline page action runs through the same runner, so the same
+ * two dialogs open, and its pick carries the `description` remedy. Both doors
+ * share one predicate and one message, pinned equal below.
+ *
  * The rejection tests assert the issue PATH and the MESSAGE SUBSTANCE rather
  * than a bare `success === false`. One condition, one wording: a refusal whose
  * message does not name both keys and point at the remedy sends the author
@@ -168,7 +173,7 @@ describe('what the `confirmText` + `params` guard must NOT touch', () => {
   });
 });
 
-describe('the pair guard is scoped to ActionSchema by SCHEMA BOUNDARY', () => {
+describe('the pair guard is scoped by SCHEMA BOUNDARY — the bulk def keeps the pair', () => {
   it('BulkActionDefSchema still ACCEPTS `confirmText` + non-empty `params`', () => {
     // The pinning test the boundary ruling asks for. This pairing is INTENDED
     // on the bulk surface: per that schema's own describe() text the params are
@@ -218,23 +223,77 @@ describe('the pair guard is scoped to ActionSchema by SCHEMA BOUNDARY', () => {
     expect(asAction.success).toBe(false);
   });
 
-  it('InlineActionSchema is out of reach too — it picks fields, not this refine chain', () => {
-    // Recording the guard's real blast radius rather than assuming it. Inline
-    // actions derive from the shared field factory via `.pick()`, so no
-    // refinement on `ActionSchema` reaches them — and the pick deliberately
-    // omits `description`, so the #7278 remedy has no slot on that surface to
-    // move a question into. Same reason the bulk defs were struck from the
-    // target set: a refusal whose remedy is unreachable is a dead end, not a
-    // guard. Whether the inline surface should gain `description` FIRST and the
-    // guard SECOND is left open on #7428 rather than presumed here.
+});
+
+describe('`confirmText` + non-empty `params` is refused on InlineActionSchema too', () => {
+  // #29383 (ruling record 6595808462, letter A). An inline page action runs
+  // through the registered action's runner — the `element:button` renderer
+  // hands both keys to the same `ActionRunner`, which awaits the confirm and
+  // THEN the param prompt — so the pair opens the same two dialogs here. The
+  // inline pick carries `description`, so the remedy has a slot on this door.
+  // Same predicate, same refusal: asserted against ActionSchema's own issue,
+  // so a second wording drifting onto one door goes red.
+  const inlineReject = {
+    type: 'url',
+    target: '/approvals?reject=1',
+    label: 'Reject',
+    params: [{ name: 'reason', label: 'Reason', type: 'textarea' }],
+  } as const;
+
+  it('refuses the pair at the `confirmText` path, with ActionSchema\'s own message', () => {
+    const result = InlineActionSchema.safeParse({ ...inlineReject, confirmText: 'Reject this request?' });
+
+    expect(result.success).toBe(false);
+    const issue = result.success
+      ? undefined
+      : result.error.issues.find((i) => i.path.join('.') === 'confirmText');
+    expect(issue?.code).toBe('custom');
+    expect(issue?.path).toEqual(['confirmText']);
+
+    const registered = guardIssue(ActionSchema.safeParse({
+      ...base,
+      confirmText: 'Reject this request?',
+      params: oneParam,
+    }));
+    expect(issue?.message).toBe(registered?.message);
+    expect(issue?.message).toContain('TWO dialogs');
+    expect(issue?.message).toContain('`description`');
+  });
+
+  it('refuses the localized-map form of `confirmText` too', () => {
+    const result = InlineActionSchema.safeParse({
+      ...inlineReject,
+      confirmText: { en: 'Reject this request?', 'zh-CN': '拒绝该请求？' },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.success ? undefined : result.error.issues.map((i) => i.path.join('.')))
+      .toContain('confirmText');
+  });
+
+  it('accepts the same action with the question on `description` and no `confirmText` — the remedy', () => {
+    const result = InlineActionSchema.safeParse({
+      ...inlineReject,
+      description: 'Reject this request? Say why — the requester sees it.',
+    });
+
+    expect(result.success, JSON.stringify((result as { error?: unknown }).error)).toBe(true);
+  });
+
+  it('accepts `confirmText` on a param-LESS inline action — the confirm is the only dialog', () => {
     const result = InlineActionSchema.safeParse({
       type: 'url',
       target: '/approvals?reject=1',
       label: 'Reject',
       confirmText: 'Reject this request?',
-      params: [{ name: 'reason', label: 'Reason', type: 'textarea' }],
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success, JSON.stringify((result as { error?: unknown }).error)).toBe(true);
+  });
+
+  it('accepts `confirmText` beside an EMPTY `params` array — nothing is collected, no second dialog', () => {
+    const result = InlineActionSchema.safeParse({ ...inlineReject, params: [], confirmText: 'Reject this request?' });
+
+    expect(result.success, JSON.stringify((result as { error?: unknown }).error)).toBe(true);
   });
 });

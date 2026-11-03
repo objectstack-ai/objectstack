@@ -118,6 +118,12 @@ export type PackageCustomizationsState =
       index: CustomizationMarkIndex;
       /** The base's listed name, else its id. */
       baseName: string;
+      /**
+       * objectstack#29786 — each contributing package's listed name, by the id
+       * a `contributions` entry names; a package the list cannot name is absent
+       * and its id stands in.
+       */
+      contributorNames: ReadonlyMap<string, string>;
     };
 
 /**
@@ -125,8 +131,9 @@ export type PackageCustomizationsState =
  * derives no pair: a customization package itself has none to read, and the
  * route refuses its id.
  *
- * The base's name comes from the package list the area already reads (one
- * request, `packages-io.ts`); when that list cannot name it, the id stands in.
+ * The base's name, and each contributing package's (objectstack#29786), come
+ * from the package list the area already reads (one request, `packages-io.ts`);
+ * when that list cannot name one, its id stands in.
  *
  * `refresh` (objectstack#28572): read again whenever it moves (Studio's
  * publish, which is what changes the served overrides). A re-read keeps the
@@ -138,15 +145,23 @@ export function usePackageCustomizations(baseId: string | null, refresh: unknown
   React.useEffect(() => {
     if (!readable || baseId === null) return;
     let cancelled = false;
-    const name = fetchListedPackageManifests().then(
-      (manifests) => manifests.get(baseId)?.name ?? baseId,
-      () => baseId,
-    );
-    Promise.all([fetchPackageCustomizations(baseId), name]).then(
-      ([read, baseName]) => {
+    const listed = fetchListedPackageManifests().catch(() => null);
+    Promise.all([fetchPackageCustomizations(baseId), listed]).then(
+      ([read, manifests]) => {
         if (cancelled) return;
         const index = indexCustomizations(baseId, read);
-        setAnswer({ id: baseId, state: index ? { status: 'read', read, index, baseName } : { status: 'off' } });
+        const baseName = manifests?.get(baseId)?.name ?? baseId;
+        // objectstack#29786 — the contributing packages are named as the base
+        // is: by the id, from the same package list.
+        const contributorNames = new Map<string, string>();
+        for (const c of read.contributions) {
+          const name = manifests?.get(c.packageId)?.name;
+          if (name) contributorNames.set(c.packageId, name);
+        }
+        setAnswer({
+          id: baseId,
+          state: index ? { status: 'read', read, index, baseName, contributorNames } : { status: 'off' },
+        });
       },
       (err: unknown) => {
         if (cancelled) return;

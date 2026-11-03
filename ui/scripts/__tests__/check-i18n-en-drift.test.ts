@@ -530,8 +530,26 @@ describe('the waiver ledger', () => {
     );
     expect(problems.map((p) => p.detail).sort()).toEqual([
       'missing a `reason`',
-      'missing an `issue` of the form objectui#1234',
+      'missing an `issue` of the form objectstack#1234 (or objectui#1234)',
     ]);
+  });
+
+  // objectstack#29729 — the ui tree lives in objectstack-ai/objectstack now, so
+  // a new waiver names an objectstack card; the objectui spelling stays valid
+  // for the entries that predate the move.
+  it('accepts an issue named objectstack#N as well as objectui#N', () => {
+    const enAfter = new Map([['real.key', 'text']]);
+    for (const issue of ['objectstack#29729', 'objectui#3650']) {
+      expect(checkLedger({ waivers: { 'real.key': { en: 'text', reason: 'r', issue } } }, enAfter)).toEqual([]);
+    }
+  });
+
+  it('CONTROL — still refuses any other issue spelling', () => {
+    const enAfter = new Map([['real.key', 'text']]);
+    for (const issue of ['objectstack 29729', 'objectstack#', 'cloud#12', '#29729', 'objectstack#29729x', 'objectui-3650']) {
+      const problems = checkLedger({ waivers: { 'real.key': { en: 'text', reason: 'r', issue } } }, enAfter);
+      expect(problems.map((p) => p.reason), issue).toEqual(['malformed-waiver']);
+    }
   });
 
   it('does not treat a waiver that fired nothing as an error', () => {
@@ -602,11 +620,19 @@ describe('the shipped ledger', () => {
     expect(Array.isArray(raw.note)).toBe(true);
   });
 
-  /** The designer section's own ratchet (objectui#8834). It ships EMPTY and its
-   *  population had 0 findings on arrival, so this ceiling starts at 0 — raising
-   *  it is a reviewed test edit in the same PR, exactly like WAIVER_CEILING. */
-  it('holds at most 0 designer waiver(s) — a ratchet, and this number only goes down', () => {
-    expect(Object.keys(ledger.designerWaivers)).toHaveLength(0);
+  /** The designer section's own ratchet (objectui#8834). It shipped EMPTY and its
+   *  population had 0 findings on arrival, so this ceiling started at 0 — raising
+   *  it is a reviewed test edit in the same PR, exactly like WAIVER_CEILING.
+   *
+   *  0 -> 7 (objectstack#29729). Studio's flow run status moved its en words to
+   *  the one the landing and the ledger switch use ("Switched on" / "Switched
+   *  off"); zh already read 已启用 / 已停用 on all seven keys, so it had nothing
+   *  to follow. */
+  it('holds at most 7 designer waiver(s) — a ratchet, and this number only goes down', () => {
+    expect(Object.keys(ledger.designerWaivers)).toHaveLength(7);
+    for (const entry of Object.values(ledger.designerWaivers) as Array<{ issue: string }>) {
+      expect(entry.issue).toMatch(ISSUE_PATTERN);
+    }
   });
 });
 

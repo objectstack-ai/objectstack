@@ -34,7 +34,6 @@
   "nonTest": {
     "packages/cloud-connection/src/marketplace-install-local-plugin.ts": 1,
     "packages/core/src/security/resolve-authz-context.ts": 1,
-    "packages/metadata-protocol/src/protocol.ts": 6,
     "packages/metadata-protocol/src/seed-loader.ts": 3,
     "packages/objectql/src/engine.ts": 8,
     "packages/plugins/plugin-approvals/src/approval-service.ts": 10,

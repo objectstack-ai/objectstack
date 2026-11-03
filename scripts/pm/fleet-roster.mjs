@@ -124,6 +124,11 @@ import { ghApi, PER_PAGE, readAllPages } from './gh-pages.mjs';
 // seat since #27637); this file reads them, never re-spells them.
 import * as mailboxOpen from './mailbox-open.mjs';
 import { LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX, MAILBOX_LABEL, mailboxOwner, SEAT_EPIC_KIND, seatKey } from './mailbox-open.mjs';
+// The seat signature line has ONE spelling, check-half-states' `SEAT_SIGNATURE_LINE`; this file reads it, never
+// re-spells it. The relay that imports `ROSTER_MARKER` from here (`fleet-write/dispatch.mjs`) already imports
+// check-half-states itself, so this import loads nothing new there. The opener's lane-word lists cannot import it
+// (the patrol loads the opener lazily, so that edge would be a cycle); the self-test holds the two equal.
+import { SEAT_SIGNATURE_LINE } from './check-half-states.mjs';
 // The seat record's heading and verdict have ONE reading, shared with H69 in
 // check-half-states; this file asks it, never re-spells the heading.
 import * as seatRecord from './seat-record.mjs';
@@ -292,19 +297,10 @@ export function epicSeatsHeld(lane, mailboxes) {
 }
 const isEpicLane = (lane) => lane.startsWith(`${SEAT_EPIC_KIND}:`);
 
-/**
- * The seat signature line `LANE#N · ACCOUNT · SESSION`, MIRRORED from `check-half-states.mjs`'s `SEAT_SIGNATURE_LINE`
- * (#27113) — not imported, so the relay never loads the patrol; the self-test holds the two patterns byte-equal.
- */
-const SIGNATURE_LINE = new RegExp(
-  '^((?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security))#([1-9][0-9]*) · ([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}) · (session_[A-Za-z0-9]{6,})$',
-  'u',
-);
-
 /** The seat a body is signed by — its FIRST non-empty line, `readSignatureLine`'s reading — as `LANE#N`, or null. Pure. */
 export function signedSeatOf(body) {
   const line = String(body ?? '').split(/\r?\n/).find((l) => l.trim() !== '');
-  const m = line === undefined ? null : SIGNATURE_LINE.exec(line.trim());
+  const m = line === undefined ? null : SEAT_SIGNATURE_LINE.exec(line.trim());
   return m ? `${m[1]}#${m[2]}` : null;
 }
 
@@ -657,7 +653,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'seat titles: lane, seat, repo, status, account, project': 13,
   'wall notes, closing refs, verdicts and mailboxes': 13,
   'the fixture snapshot: rows for the three repos': 25,
-  'one account on two seats of a lane: the second seat reads its own traces': 13,
+  // 13 → 14: the lane-grammar pin (the signature alternation equals the opener's lane-word lists, `coordinator` aside).
+  'one account on two seats of a lane: the second seat reads its own traces': 14,
   'the rendered body: marker, columns, footer, determinism': 10,
   'refusing to overwrite what is not the roster': 6,
   'the CLI: fixture runs offline, usage errors are exit 2': 6,
@@ -824,8 +821,12 @@ async function selfTest() {
       return [line.includes('| = seat 1 |'), line.includes(SUSPECTED_WALL)];
     })(), [true, false]);
     t('the comment read starts STALE_HOURS before now, and the footer names it', [activitySince(NOW), readsFor([R]).some((q) => q.startsWith(`GET /repos/${R}/issues/comments?since=`))], ['2026-11-01T22:00:00Z', true]);
-    const { SEAT_SIGNATURE_LINE, readSignatureLine } = await import('./check-half-states.mjs');
-    t('the signature pattern is check-half-states\' SEAT_SIGNATURE_LINE, byte for byte — mirrored, not imported', [SIGNATURE_LINE.source === SEAT_SIGNATURE_LINE.source, SIGNATURE_LINE.flags === SEAT_SIGNATURE_LINE.flags], [true, true]);
+    const { readSignatureLine } = await import('./check-half-states.mjs');
+    t('the signature pattern is check-half-states\' SEAT_SIGNATURE_LINE, imported — no second spelling of the lane alternation in this file', [/^import \{ SEAT_SIGNATURE_LINE \} from '\.\/check-half-states\.mjs';$/mu.test(readFileSync(SELF_PATH, 'utf8')), readFileSync(SELF_PATH, 'utf8').includes(['triage', 'director', 'coordinator'].join('|'))], [true, false]);
+    // The lane grammar's two remaining owners, held equal here (the only file that imports both): the signature's
+    // alternation and the opener's lane-word lists. `coordinator` is the one lane that signs and has no mailbox.
+    const signatureLanes = (/^\^\(\(\?:([^()]*)\)\)#/u.exec(SEAT_SIGNATURE_LINE.source)?.[1] ?? '').split('|');
+    t('⭐ the lane grammar is ONE set: the signature\'s kinds are the opener\'s kinds plus `epic`, its bare words the opener\'s bare lanes plus `coordinator` — a lane added to one side alone reds here', [signatureLanes.filter((a) => a.includes(':')).map((a) => a.slice(0, a.indexOf(':'))).sort(), signatureLanes.filter((a) => /^[a-z]+$/u.test(a)).sort(), signatureLanes.length], [[...mailboxOpen.SEAT_LANE_KINDS, SEAT_EPIC_KIND].sort(), [...mailboxOpen.SEAT_BARE_LANES, 'coordinator'].sort(), mailboxOpen.SEAT_LANE_KINDS.length + 1 + mailboxOpen.SEAT_BARE_LANES.length + 1]);
     const corpus = ['', sig('domain:server#2'), `\n\n  ${sig('domain:engine-core#3')}\r\nbody`, `body\n${sig('triage#1')}`, sig('security#1'), 'epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U', 'domain:server#0 · os-pm · session_01SharedSeatSess', 'domain:server#2 · os-pm · cse_01SharedSeatSess'];
     t('signedSeatOf reads every body as readSignatureLine does', corpus.map(signedSeatOf), corpus.map((b) => { const r = readSignatureLine(b); return r ? `${r.lane}#${r.seat}` : null; }));
   }

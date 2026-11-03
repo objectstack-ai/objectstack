@@ -25,8 +25,8 @@
  *    override, with no Customize and no read-only link;
  *  - the Data rail lists the pair's added object, marked, opening it names
  *    the pair;
- *  - nothing a third package contributes is drawn: no read names it
- *    (objectstack#28722), and the rail asks none;
+ *  - the rails ask no list of a third package: what it contributes comes from
+ *    the base's one customization read (objectstack#29786, below);
  *  - CONTROL: a base with no pair reads no pair list, and draws no mark and
  *    no filter.
  */
@@ -53,6 +53,8 @@ const srv = vi.hoisted(() => ({
   reads: [] as string[],
   ensure: [] as number[],
   saves: [] as Array<{ path: string; search: string; body: Record<string, unknown> }>,
+  /** objectstack#29786 — the read serves {@link CONTRIBUTIONS}, and the app and object hold what they target. */
+  contributed: false,
 }));
 
 vi.mock('@object-ui/auth', async (importOriginal) => {
@@ -133,6 +135,36 @@ const READ = {
   contributions: [],
   counts: { overrides: 1, extensions: 1, switchedOff: 0, contributions: 0 },
 };
+/**
+ * objectstack#29786 — what the third package contributes to the base: a nav
+ * entry into a group the app declares, one into a group it does not declare,
+ * one for another app, a field and a flow on `crm_account`, and a flow on
+ * `crm_deal`, which holds no flow of the base's.
+ */
+const CONTRIBUTIONS = [
+  { kind: 'field', object: 'crm_account', name: 'acme_score', packageId: ADDON },
+  { kind: 'flow', object: 'crm_account', name: 'acme_sync', packageId: ADDON },
+  { kind: 'flow', object: 'crm_deal', name: 'acme_deal_watch', packageId: ADDON },
+  { kind: 'nav', app: 'crm_app', group: 'service_group', name: 'nav_cases', packageId: ADDON },
+  { kind: 'nav', app: 'crm_app', group: 'ghost_group', name: 'nav_knowledge', packageId: ADDON },
+  { kind: 'nav', app: 'other_app', name: 'nav_elsewhere', packageId: ADDON },
+];
+/** The app with a declared group of its own that holds nothing. */
+const APP_WITH_GROUP = {
+  ...APP,
+  navigation: [...NAV, { id: 'service_group', type: 'group', label: 'Service', children: [] }],
+};
+/** `crm_account` as served: the third package's extension field merged in, as the engine merges it. */
+const ACCOUNT_SERVED = {
+  name: 'crm_account',
+  label: 'Account',
+  fields: {
+    name: { type: 'text', label: 'Account Name' },
+    acme_score: { type: 'number', label: 'Acme score' },
+  },
+};
+const readWith = (read: typeof READ) =>
+  srv.contributed ? { ...read, contributions: CONTRIBUTIONS, counts: { ...read.counts, contributions: CONTRIBUTIONS.length } } : read;
 const EMPTY_READ = { packageId: BASE, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
 
 /** The base's own lists, by type. The override is served under the base's name (ADR-0146 D8 item 2). */
@@ -183,6 +215,7 @@ beforeEach(() => {
   srv.reads.length = 0;
   srv.ensure.length = 0;
   srv.saves.length = 0;
+  srv.contributed = false;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -192,7 +225,7 @@ beforeEach(() => {
       if (method === 'GET') srv.reads.push(`${path}${url.search}`);
       if (path === '/api/v1/packages') return json({ success: true, data: packageRows() });
       if (path === `/api/v1/packages/${BASE}/customizations`) {
-        return json({ success: true, data: srv.pairListed ? READ : EMPTY_READ });
+        return json({ success: true, data: readWith(srv.pairListed ? READ : EMPTY_READ) });
       }
       if (path === `/api/v1/packages/${BASE}/ensure-customization` && method === 'POST') {
         const created = !srv.pairListed;
@@ -209,7 +242,12 @@ beforeEach(() => {
       if (path === '/api/v1/meta/app') {
         return json(url.searchParams.get('package') === PAIR ? [] : [{ name: 'crm_app', label: 'CRM' }]);
       }
-      if (path === '/api/v1/meta/app/crm_app/layers') return json({ code: null, overlay: null, overlayScope: null, effective: APP });
+      if (path === '/api/v1/meta/app/crm_app/layers') {
+        return json({ code: null, overlay: null, overlayScope: null, effective: srv.contributed ? APP_WITH_GROUP : APP });
+      }
+      if (srv.contributed && path === '/api/v1/meta/object/crm_account/layers') {
+        return json({ code: ACCOUNT_SERVED, overlay: null, overlayScope: null, effective: ACCOUNT_SERVED });
+      }
       const list = /^\/api\/v1\/meta\/([^/]+)$/.exec(path);
       if (list && method === 'GET') {
         const type = decodeURIComponent(list[1]!);
@@ -428,8 +466,8 @@ describe('the package switcher and the pair’s URLs (objectstack#28572)', () =>
   });
 });
 
-describe('nothing a third package contributes is drawn (objectstack#28722)', () => {
-  it('the rails ask no list of another package, and no row names one', async () => {
+describe('a third package’s lists are never asked (objectstack#28722, objectstack#29786)', () => {
+  it('the rails ask no list of another package, and with no contribution served no row names one', async () => {
     renderAt(`/studio/${BASE}/interfaces`);
     await interfacesReady();
     expect(srv.reads.filter((r) => r.includes(encodeURIComponent(ADDON)) || r.includes(`package=${ADDON}`))).toEqual([]);
@@ -476,5 +514,139 @@ describe('an item the pair adds reads its layers at the pair (objectstack#28584)
     for (const read of layersOf('dashboard', 'wins')) {
       expect(new URL(read, 'http://localhost').searchParams.get('package')).toBe(PAIR);
     }
+  });
+});
+
+/**
+ * objectstack#29786 — what a third package contributes to the base, drawn on
+ * each pillar from the base's one customization read: greyed, named by the
+ * contributing package ("from Acme add-on"), and opening that package.
+ */
+describe('items another package contributes are drawn greyed, with the package (objectstack#29786)', () => {
+  const FROM_ACME = tFormat('engine.studio.contributed.from', 'en', { package: 'Acme add-on' });
+  const contributed = (root: HTMLElement, kind: string, name: string) =>
+    root.querySelector<HTMLElement>(`[data-contributed="${kind}"][data-testid="contributed-${kind}-${name}"]`);
+
+  it('Interfaces: a nav entry draws in the group it names, which is no longer empty; an undeclared group’s entry draws at the top level and says so', async () => {
+    srv.contributed = true;
+    renderAt(`/studio/${BASE}/interfaces`);
+    await interfacesReady();
+    await waitFor(() => expect(contributed(ifRail(), 'nav', 'nav_cases')).not.toBeNull(), { timeout: 8000 });
+
+    const cases = contributed(ifRail(), 'nav', 'nav_cases')!;
+    expect(cases).toHaveTextContent('nav_cases');
+    expect(within(cases).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
+    expect(within(cases).getByTestId('contribution-mark')).toHaveAttribute('data-package', ADDON);
+    expect(cases.className).toMatch(/opacity-70/);
+    // Under the app's own "Service" group, which held nothing of its own.
+    // The group's header is a button; the group is the element that holds it and its rows.
+    const group = within(ifRail()).getByText('Service').closest('button')!.parentElement!;
+    expect(group).toContainElement(cases);
+    expect(within(ifRail()).queryByText(t('engine.studio.if.emptyGroup', 'en'))).toBeNull();
+
+    const knowledge = contributed(ifRail(), 'nav', 'nav_knowledge')!;
+    expect(knowledge).not.toBeNull();
+    expect(group).not.toContainElement(knowledge);
+    expect(knowledge.getAttribute('title')).toContain(
+      tFormat('engine.studio.contributed.undeclaredGroup', 'en', { group: 'ghost_group' }),
+    );
+    // Another app's entry is not this app's.
+    expect(contributed(ifRail(), 'nav', 'nav_elsewhere')).toBeNull();
+    // Contributed entries are no nav entries of the base: no row of the tree's own (`type · name`) names them.
+    expect(within(ifRail()).queryByTitle(/nav_cases$/)).toBeNull();
+  });
+
+  it('Interfaces: a contributed entry opens the contributing package', async () => {
+    srv.contributed = true;
+    renderAt(`/studio/${BASE}/interfaces`);
+    await interfacesReady();
+    await waitFor(() => expect(contributed(ifRail(), 'nav', 'nav_cases')).not.toBeNull(), { timeout: 8000 });
+    fireEvent.click(contributed(ifRail(), 'nav', 'nav_cases')!);
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(ADDON)}/interfaces`));
+  });
+
+  it('CONTROL: with nothing contributed, the declared empty group still says it is empty', async () => {
+    srv.contributed = true;
+    const answer = CONTRIBUTIONS.splice(0, CONTRIBUTIONS.length);
+    try {
+      renderAt(`/studio/${BASE}/interfaces`);
+      await interfacesReady();
+      await waitFor(() => expect(within(ifRail()).getByText(t('engine.studio.if.emptyGroup', 'en'))).toBeInTheDocument(), {
+        timeout: 8000,
+      });
+      expect(ifRail().querySelector('[data-contributed]')).toBeNull();
+    } finally {
+      CONTRIBUTIONS.push(...answer);
+    }
+  });
+
+  it('Data: the contributed field is marked in the Form layout, once, and its properties are read-only while the base’s are not', async () => {
+    srv.contributed = true;
+    renderAt(`/studio/${BASE}/data`);
+    await waitFor(() => expect(within(dataRail()).getByText('Account')).toBeInTheDocument(), { timeout: 8000 });
+    fireEvent.click(within(dataRail()).getByText('Account').closest('button')!);
+    fireEvent.click(await screen.findByText(t('engine.studio.data.tab.form', 'en'), undefined, { timeout: 8000 }));
+
+    const card = await waitFor(
+      () => {
+        const el = document.querySelector<HTMLElement>('[data-contributed="field"]');
+        expect(el).not.toBeNull();
+        return el!;
+      },
+      { timeout: 8000 },
+    );
+    expect(card).toHaveTextContent('Acme score');
+    // Never a drag source, yet still a card a click selects: not announced as disabled.
+    expect(card).not.toHaveAttribute('aria-disabled', 'true');
+    expect(within(card).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
+    expect(card.getAttribute('title')).toBe(
+      tFormat('engine.studio.contributed.fieldTitle', 'en', { name: 'acme_score', package: 'Acme add-on' }),
+    );
+    // Marked where it is drawn: no second copy of it.
+    expect(screen.getAllByText('Acme score')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-contributed="field"]')).toHaveLength(1);
+
+    fireEvent.click(card);
+    const rail = await screen.findByTestId('data-field-inspector', undefined, { timeout: 8000 });
+    await waitFor(() => expect(rail.querySelector('[data-disabled-reason]')).not.toBeNull());
+    expect(rail).toHaveTextContent(
+      tFormat('engine.studio.contributed.fieldTitle', 'en', { name: 'acme_score', package: 'Acme add-on' }),
+    );
+
+    // CONTROL: the base's own field opens in the pair's display-property mode, not read-only.
+    fireEvent.click(screen.getByLabelText(tFormat('engine.studio.designer.fieldAriaReadOnly', 'en', { label: 'Account Name' })));
+    await waitFor(() => expect(screen.getByTestId('data-field-inspector').querySelector('[data-disabled-reason]')).toBeNull());
+  });
+
+  it('Automations: a contributed flow draws in its object’s group, an object with no flow of the base’s gets one, and a row opens the contributor', async () => {
+    srv.contributed = true;
+    renderAt(`/studio/${BASE}/automations`);
+    const autoRail = await screen.findByTestId('studio-rail-automations', undefined, { timeout: 8000 });
+    await waitFor(() => expect(contributed(autoRail, 'flow', 'acme_sync')).not.toBeNull(), { timeout: 8000 });
+
+    const accountGroup = within(autoRail).getByTestId('auto-rail-group-crm_account');
+    const sync = contributed(autoRail, 'flow', 'acme_sync')!;
+    expect(accountGroup).toContainElement(sync);
+    expect(within(sync).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
+    expect(within(autoRail).getByTestId('auto-rail-group-crm_deal')).toContainElement(
+      contributed(autoRail, 'flow', 'acme_deal_watch'),
+    );
+    // The base ships no flow: the rail does not say "no flows".
+    expect(within(autoRail).queryByText(t('engine.studio.auto.none', 'en'))).toBeNull();
+
+    fireEvent.click(sync);
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(ADDON)}/automations?surface=`),
+    );
+    expect(screen.getByTestId('location').textContent).toContain('acme_sync');
+  });
+
+  it('one reader: no request beyond the base’s customization read names the contributing package', async () => {
+    srv.contributed = true;
+    renderAt(`/studio/${BASE}/automations`);
+    const autoRail = await screen.findByTestId('studio-rail-automations', undefined, { timeout: 8000 });
+    await waitFor(() => expect(contributed(autoRail, 'flow', 'acme_sync')).not.toBeNull(), { timeout: 8000 });
+    expect(srv.reads.filter((r) => r.includes(encodeURIComponent(ADDON)) || r.includes(`package=${ADDON}`))).toEqual([]);
+    expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`)).length).toBeGreaterThan(0);
   });
 });
