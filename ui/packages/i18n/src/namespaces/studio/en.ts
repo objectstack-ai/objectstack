@@ -416,6 +416,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.lookup.searchHostFields': "Search this object's fields…",
   'designer.field.lookup.pageSize': 'Picker page size',
   'designer.field.lookup.allowCreate': 'Allow quick-create',
+  'designer.field.lookup.referenceNameVisible': 'Show Name When Unreadable',
+  'designer.field.lookup.referenceNameVisible.help': "Lets a reader of this record see the referenced record's name, as plain text with no link, even when they may not open that record. Nothing else of it is shown, and a field-level rule on the name still holds (the name then reads Record # and the id). Unset: such a reference shows as a restricted record.",
   'designer.field.relatedList.heading': 'Related list on the parent record',
   'designer.field.relatedList.shown': 'Show',
   'designer.field.relatedList.hidden': 'Don\'t show',
@@ -2533,6 +2535,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.bannerTitle':
     'This matrix lists only the objects this package declares, and “Save” merges just that slice — grants contributed by other packages are preserved. Edits are saved as package drafts and go live when you Publish the package (top bar), exactly like Data and Interfaces.',
   'engine.studio.access.banner': 'This package’s objects · saved as draft',
+  // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
+  'engine.studio.access.bannerPair': 'This package’s and {package}’s objects · saved as draft',
+  'engine.studio.access.bannerTitlePair':
+    'This permission set is in the customization package for {package}, so the matrix lists {package}’s objects as well as the ones this package declares, and “Save” merges just that slice — grants contributed by other packages are preserved. Edits are saved as package drafts and go live when you Publish the package (top bar).',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
     'This matrix lists only the objects this package declares. The package is read-only: its permission sets can be viewed here, but not changed.',

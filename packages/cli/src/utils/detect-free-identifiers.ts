@@ -36,10 +36,12 @@
  * so the handler falls back to the bundle (where it runs in Node and works).
  */
 
-// `ts-morph` is already a CLI runtime dependency and re-exports the full
-// TypeScript compiler namespace, so we use its `ts` rather than adding a direct
-// `typescript` dependency.
-import { ts } from 'ts-morph';
+// The compiler namespace comes from `typescript`, a direct CLI runtime
+// dependency on the same `^6.0.3` line `@objectstack/lint` declares. The CLI
+// uses the compiler API and nothing else, so it does not take it through
+// `ts-morph`, whose `@ts-morph/common` would add a second bundled compiler and
+// its own `minimatch` line to every install.
+import ts from 'typescript';
 
 /**
  * Identifiers the HOOK SANDBOX provides ambiently — the allowlist proper.

@@ -219,4 +219,8 @@ export {
     NotificationTemplate,
     HttpDelivery,
     SYS_HTTP_DELIVERY,
+    UserDevice,
 } from './objects/index.js';
+
+// Push device registry (ADR-0012 §6) — `INotificationService`'s device members.
+export { USER_DEVICE_OBJECT } from './device-registry.js';

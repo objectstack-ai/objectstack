@@ -359,6 +359,7 @@ import {
   newField,
   toFieldNameLoose,
 } from '../metadata-admin/previews/object-fields-io.js';
+import { romanizeHan } from '../metadata-admin/romanizeHan.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import {
   ExternalObjectNotice,
@@ -2857,6 +2858,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           publishing={publishing}
           posture={changesPosture}
           renderEntryNote={renderPublishRefusal}
+          // ADR-0146 D3 — reviewing the pair's drafts, the sheet names the
+          // base they are saved for.
+          customizationOf={pairId !== null ? baseLabel : undefined}
         />
 
         <CreateItemDialog
@@ -7153,14 +7157,15 @@ function nextFieldName(existing: string[]): string {
 
 /**
  * The api name of a field added with `label` (objectui#12516): the name the
- * field inspector's Label derives from it (`toFieldNameLoose`), or, as the
+ * field inspector's Label derives from it (`toFieldNameLoose`, a Chinese label
+ * through its pinyin as the popover previewed it — `romanizeHan`), or, as the
  * inspector keeps the default when that derivation is empty (a label with no
  * Latin letters) or names another field, the next free `field_<N>`. The Add
  * field popover asks for the name in those two cases (objectui#13389), so the
  * `field_<N>` fallback is left for a caller that hands no name.
  */
 function addedFieldName(label: string, existing: string[]): string {
-  const derived = toFieldNameLoose(label);
+  const derived = toFieldNameLoose(romanizeHan(label));
   return derived && !existing.includes(derived) ? derived : nextFieldName(existing);
 }
 
@@ -7170,7 +7175,7 @@ function addedFieldName(label: string, existing: string[]): string {
  * free `field_<N>__c`.
  */
 function addedExtensionFieldName(label: string, existing: string[]): string {
-  const derived = extensionFieldName(toFieldNameLoose(label).replace(/_+$/, ''));
+  const derived = extensionFieldName(toFieldNameLoose(romanizeHan(label)).replace(/_+$/, ''));
   if (derived && !existing.includes(derived)) return derived;
   let i = existing.length + 1;
   let name = extensionFieldName(`field_${i}`);
@@ -9817,11 +9822,26 @@ async function readFlowDefinitions(client: MetadataClient, packageId: string | n
 async function readObjectLabels(client: MetadataClient, packageId: string | null, locale: string): Promise<Map<string, string>> {
   const labels = new Map<string, string>();
   try {
-    const objects = await client.list<Record<string, unknown>>('object', packageId === null ? {} : { packageId });
+    // The package's pending object drafts too, as the Data rail lists them: a
+    // flow on an object not published yet is grouped under it, and the header
+    // reads its label (the `_drafts` row carries one), not its name. A
+    // published object keeps its published label; a failed draft read adds
+    // none and leaves the published index whole (an async function, so even
+    // a throw before the read is sent rejects into the catch).
+    const readDrafts = async (): Promise<Array<{ name?: string | null; label?: I18nLabel | null }>> =>
+      (await client.listDrafts(packageId === null ? { type: 'object' } : { packageId, type: 'object' })) ?? [];
+    const [objects, drafts] = await Promise.all([
+      client.list<Record<string, unknown>>('object', packageId === null ? {} : { packageId }),
+      readDrafts().catch(() => []),
+    ]);
     for (const object of objects ?? []) {
       if (!object || typeof object.name !== 'string' || !object.name) continue;
       const label = resolveI18nLabel(object.label as I18nLabel | undefined, locale)?.trim();
       labels.set(object.name, label || object.name);
+    }
+    for (const draft of drafts) {
+      if (!draft || typeof draft.name !== 'string' || !draft.name || labels.has(draft.name)) continue;
+      labels.set(draft.name, resolveI18nLabel(draft.label ?? undefined, locale)?.trim() || draft.name);
     }
   } catch {
     /* an empty index */
@@ -12200,9 +12220,18 @@ export function AccessPillar({
   // The note speaks for what the main panel shows: the open set, or the
   // package-wide OWD overview and empty header, which are the base's.
   const noteReadOnly = owdOpen || current === null ? packageReadOnly : readOnly;
+  // objectstack#29674 — an open set the pair adds lists its base's objects
+  // too (`permissionObjectScopePackages`), so its note names the base instead
+  // of claiming "this package's objects" only.
+  const notePairBase = !owdOpen && current !== null && currentAddedIn ? (customization?.baseLabel ?? railPackageId) : null;
   const accessStatus: StudioItemStatus | undefined = noteReadOnly
     ? undefined
-    : { label: t('engine.studio.access.banner', locale), title: t('engine.studio.access.bannerTitle', locale) };
+    : notePairBase !== null
+      ? {
+          label: tFormat('engine.studio.access.bannerPair', locale, { package: notePairBase }),
+          title: tFormat('engine.studio.access.bannerTitlePair', locale, { package: notePairBase }),
+        }
+      : { label: t('engine.studio.access.banner', locale), title: t('engine.studio.access.bannerTitle', locale) };
   const accessNoteEl = accessStatus ? (
     <StudioStatusChip {...accessStatus} />
   ) : (

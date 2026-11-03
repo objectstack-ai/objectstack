@@ -130,6 +130,7 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
 import { toast } from 'sonner';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+import { answerObjectViewRead } from './__tests__/objectViewRoute';
 
 const OBJECT_NAME = 'track_note';
 const SAVED_ID = `${OBJECT_NAME}.mine`;
@@ -231,15 +232,18 @@ function makeStore(seed: Record<string, any>[]) {
 function pageDataSource(meta: any) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    // objectstack#29550: the adapter reads one object's views on
+    // `GET /meta/view?object=`, answered here from the same store.
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => meta.getItems('view')))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta };
+  ds.client = { meta, getLocale: () => undefined };
   return {
     find: vi.fn(async () => ({ data: [], total: 0 })),
     findOne: vi.fn(async () => null),
