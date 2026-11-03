@@ -634,13 +634,13 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect(published).toMatchObject({ success: true, publishedCount: 3, failedCount: 0 });
     });
 
-    it('[#29233] the region verdict on the draft read is the registry rule\'s: the engine\'s sentence, at the item root', async () => {
+    it('[#29233] the region verdict on the draft read is the registry rule\'s: the engine\'s sentence, at the container it names (#29558)', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         // A one-branch parallel block nested in a try region. The registry rule
-        // judges the flow as one unit (as the engine does) and anchors the
-        // flow itself, so the item-relative path is the item root; the
-        // sentence names the region.
+        // judges the flow as one unit (as the engine does) and, since #29558,
+        // anchors the container the engine's refusal names, so the
+        // item-relative path is that parallel node inside the try region.
         const flow = regionFlow('nested_region', {
             id: 'guard', type: 'try_catch', label: 'Guard',
             config: {
@@ -656,7 +656,7 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         const diagnostics = await draftDiagnostics(protocol, 'flow', flow.name);
         expect(diagnostics.valid).toBe(false);
         expect((diagnostics.errors ?? []).filter((e) => e.code === 'flow-region-shape-invalid')).toEqual([{
-            path: '',
+            path: 'nodes.1.config.try.nodes.0',
             message: "Flow 'nested_region' would be refused at registration: parallel 'fan': a parallel block needs at least 2 branches",
             code: 'flow-region-shape-invalid',
         }]);

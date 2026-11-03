@@ -116,10 +116,10 @@ export const UNMANAGED_INSTALL_KEY_DISPOSITIONS: Readonly<Record<string, Unmanag
   // environment's own package and makes no promise about how it installs.
   installModes: 'door',
   // [#28640 ruling ③A] The export's list of the maps it withheld whole,
-  // declared ahead of its producer: the server half (#29342) has the door read
-  // it to name each incomplete map in its answer. This row is live today — it
-  // keeps the import from refusing an export that carries the key. It
-  // describes the exchange, not the package, so the base never carries it.
+  // served: the install-local door reads it to name each incomplete map in its
+  // answer, and this row keeps the import from refusing an export that carries
+  // the key. It describes the exchange, not the package, so the base never
+  // carries it.
   withheldMaps: 'door',
   // The export's display label. No manifest the base is installed with
   // declares one (`PackageInstallManifestSchema` is closed and has no

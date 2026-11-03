@@ -13,7 +13,12 @@ import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
-import { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from '@objectstack/rest';
+import {
+    FEDERATION_READ_CAPABILITY,
+    FEDERATION_WRITE_CAPABILITY,
+    federationCapabilityRefusal,
+    type FederationCallKind,
+} from '@objectstack/rest';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { actionInvocationFailure, recordActionInvocation, withActionSurface } from '../action-invocation-audit.js';
@@ -936,7 +941,14 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // administrator too. Read off the SAME envelope the per-call gate
         // reads ({@link heldFederationCapabilities}), so listing and calling
         // cannot disagree; nothing a grant can do changes.
-        ...(heldFederationCapabilities(ec).length > 0
+        //
+        // [2026-11-03 ruling] "Some call of the pair can pass" is asked of the
+        // family's one rule (`federationCapabilityRefusal`), not of "holds
+        // either capability": both calls answer remote structure, so both
+        // need the read capability, and an envelope holding only the write one
+        // can pass neither — it is carried neither, as a `metadata:write`-only
+        // grant is.
+        ...(federationPairCallable(ec)
             ? {
                 listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
                     (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
@@ -958,29 +970,44 @@ function heldFederationCapabilities(ec: any): string[] {
     return [FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY].filter((cap) => held.includes(cap));
 }
 
+/** The kinds of the pair's two calls: `list_remote_tables` reads, `import_object` writes. */
+const FEDERATION_PAIR_KINDS: readonly FederationCallKind[] = ['read', 'write'];
+
+/**
+ * [#28938, 2026-11-03 ruling] Whether some call of the federation pair can
+ * pass for this envelope — judged by the family's one rule
+ * (`federationCapabilityRefusal`, `@objectstack/rest`) over the same held set
+ * {@link federationService} judges each call by, so the pair is listed
+ * exactly where one of its calls is admitted.
+ */
+function federationPairCallable(ec: any): boolean {
+    const held = heldFederationCapabilities(ec);
+    return FEDERATION_PAIR_KINDS.some((kind) => federationCapabilityRefusal(kind, held) === undefined);
+}
+
 /**
  * [#27745] The `external-datasource` service for one federation tool call, or
  * the refusal the REST twin answers: `403 PERMISSION_DENIED` without the
- * capability the call's kind needs (asked first, as the route asks it, so a
- * caller without it cannot learn which services the host wires), `503
+ * capabilities the call's kind needs (asked first, as the route asks it, so a
+ * caller without them cannot learn which services the host wires), `503
  * SERVICE_UNAVAILABLE` on a host with no federation service.
+ *
+ * [2026-11-03 ruling] The capability decision is the REST family's own
+ * `federationCapabilityRefusal`, not a copy of it: seeing a datasource's
+ * remote structure needs the read capability on every route, writes included,
+ * so `import_object` — which answers with the generated definition — needs
+ * the read capability as well as the write one, and its refusal is the
+ * route's sentence.
  */
 async function federationService(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     ec: any,
-    kind: 'read' | 'write',
+    kind: FederationCallKind,
 ): Promise<IExternalDatasourceService> {
-    const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
-    if (!heldFederationCapabilities(ec).includes(required)) {
-        throw Object.assign(
-            new Error(
-                kind === 'write'
-                    ? `Creating metadata from an external datasource requires the \`${required}\` capability.`
-                    : `Introspecting an external datasource requires the \`${required}\` capability.`,
-            ),
-            { code: 'PERMISSION_DENIED', status: 403 },
-        );
+    const refusal = federationCapabilityRefusal(kind, heldFederationCapabilities(ec));
+    if (refusal !== undefined) {
+        throw Object.assign(new Error(refusal), { code: 'PERMISSION_DENIED', status: 403 });
     }
     let service: IExternalDatasourceService | undefined;
     try {

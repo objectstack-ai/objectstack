@@ -611,6 +611,12 @@ export interface StudioItemHeaderProps {
    * id. Omitted: nothing folds.
    */
   foldMenu?: 'pillar' | { label: string; testId?: string };
+  /**
+   * objectstack#29691 (ADR-0146 D3) — one line under the title row, above the
+   * tabs: where this item's edits are saved. Outside the title row, so the
+   * fold never measures it.
+   */
+  note?: React.ReactNode;
   testId?: string;
   className?: string;
 }
@@ -627,6 +633,7 @@ export function StudioItemHeader({
   tabs,
   leading,
   foldMenu,
+  note,
   testId,
   className,
 }: StudioItemHeaderProps): React.ReactElement {
@@ -704,6 +711,11 @@ export function StudioItemHeader({
           </div>
         )}
       </div>
+      {note && (
+        <p data-slot="item-note" className="-mt-1 truncate pb-1 text-[11px] leading-4 text-muted-foreground">
+          {note}
+        </p>
+      )}
       {tabs && (
         <nav ref={tabRowRef} data-fade={fade} className={STUDIO_TAB_ROW}>
           <StudioFoldRowContext.Provider value={tabFold}>{tabs}</StudioFoldRowContext.Provider>

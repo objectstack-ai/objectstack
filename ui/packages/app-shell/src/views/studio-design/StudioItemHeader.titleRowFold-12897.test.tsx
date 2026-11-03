@@ -20,6 +20,11 @@
  * row, with the tools (the header's fold contract, as `StudioItemTools` keeps
  * it) and the header's own ⋯ as boxes of their own, and the twelve
  * characters' width stubbed on the text range.
+ *
+ * objectstack#29691 (the note describe block) — the header's note line (where
+ * a pair's edits are saved) sits under the title row, never in it: a note as
+ * wide as the row leaves the fold as it was. The stub gives the note its width
+ * wherever it is, so a note drawn inside the row takes the title's room.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -49,6 +54,8 @@ const OWN_MORE = 32;
 /** objectstack#29693 — a labelled action: its glyph, and its label while the row shows labels. */
 const ACTION_GLYPH = 28;
 const ACTION_LABEL = 60;
+/** objectstack#29691 — the note line's text: wider than the title row leaves free. */
+const NOTE = 400;
 const layout = { row: 632 };
 
 const resizeCallbacks = new Set<() => void>();
@@ -74,8 +81,14 @@ const kindChipWidth = () => {
   const chip = screen.queryByTestId('hdr-kind-chip');
   return chip && !chip.closest('[role="menu"]') ? KIND_CHIP : 0;
 };
+/** objectstack#29691 — the note, while it is a box of the title row. */
+const noteInRowWidth = () => {
+  const note = document.querySelector('[data-slot="item-note"]');
+  return note?.parentElement && isRow(note.parentElement) ? NOTE : 0;
+};
 /** The title's box: what the row leaves it, capped at its text. */
-const titleBox = () => Math.max(0, Math.min(TITLE_TEXT, layout.row - ICON - kindChipWidth() - actionsWidth()));
+const titleBox = () =>
+  Math.max(0, Math.min(TITLE_TEXT, layout.row - ICON - kindChipWidth() - actionsWidth() - noteInRowWidth()));
 
 beforeEach(() => {
   layout.row = 632;
@@ -103,6 +116,7 @@ beforeEach(() => {
       if (this.dataset.testid === 'hdr-more') return rect(OWN_MORE);
       if (this.hasAttribute('data-studio-fold-label')) return rect(labelsShown() ? ACTION_LABEL : 1);
       if (this.dataset.testid === 'hdr-title') return rect(titleBox());
+      if (this.dataset.slot === 'item-note') return rect(NOTE);
       if (this.parentElement && isRow(this.parentElement)) {
         // The identity chips' wrapper is a `contents` box in the console;
         // with no stylesheet here it is a box as wide as the chips it holds.
@@ -244,6 +258,7 @@ function FoldingLeaf({
   onCustomize = () => {},
   onToggle = () => {},
   kind = 'View',
+  note,
 }: {
   /** What the kind chip holds: its word, or (objectstack#29692) the override mark. */
   kind?: React.ReactNode;
@@ -253,6 +268,8 @@ function FoldingLeaf({
   labelled?: boolean;
   onCustomize?: () => void;
   onToggle?: () => void;
+  /** objectstack#29691 — the header's note line. */
+  note?: React.ReactNode;
 }) {
   return (
     <StudioItemHeader
@@ -265,6 +282,8 @@ function FoldingLeaf({
         </span>
       }
       foldMenu={foldMenu ? { label: 'More', testId: 'hdr-more' } : undefined}
+      note={note}
+      tabs={<button type="button">Fields</button>}
       actions={
         <>
           {labelled && <StudioCustomizeButton block={null} baseLabel="HotCRM" locale="en" onCustomize={onCustomize} />}
@@ -510,5 +529,53 @@ describe('the override mark folded into the ⋯ menu (objectstack#29692)', () =>
     expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(onRestore).not.toHaveBeenCalled();
+  });
+});
+
+describe('the note line sits under the title row, outside the fold (objectstack#29691)', () => {
+  let rangeSpy: { mockRestore: () => void } | null = null;
+  beforeEach(() => {
+    rangeSpy = vi.spyOn(Range.prototype, 'getBoundingClientRect').mockImplementation(() => rect(READABLE));
+  });
+  afterEach(() => {
+    rangeSpy?.mockRestore();
+    rangeSpy = null;
+  });
+
+  const SAVED_TO = 'Saved to HotCRM’s customizations';
+  const titleRow = () => screen.getByTestId('hdr-title').parentElement as HTMLElement;
+  const note = () => document.querySelector('[data-slot="item-note"]') as HTMLElement | null;
+
+  it('the note is a line of its own, after the title row and before the tabs', () => {
+    render(<FoldingLeaf note={SAVED_TO} />);
+    expect(note()).toHaveTextContent(SAVED_TO);
+    expect(isRow(titleRow())).toBe(true);
+    expect(titleRow()).not.toContainElement(note());
+    expect(titleRow().nextElementSibling).toBe(note());
+    expect(note()!.nextElementSibling?.tagName).toBe('NAV');
+  });
+
+  it('a note wider than the free room folds nothing: at 632 px the chips and the tools stay, with no ⋯', () => {
+    render(<FoldingLeaf note={SAVED_TO} />);
+    // In the row, the 400 px note would leave the title 632 − 32 − 38 − 146 − 137 − 400 = −121 px.
+    expect(screen.getByTestId('probe-tools')).toBeInTheDocument();
+    expect(screen.getByTestId('hdr-kind-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('hdr-more')).toBeNull();
+    expect(titleBox()).toBe(TITLE_TEXT);
+  });
+
+  it('the row follows its own width with the note there: folds at 330 px, unfolds at 480 px', () => {
+    render(<FoldingLeaf note={SAVED_TO} />);
+    resizeRow(330);
+    expect(screen.queryByTestId('probe-tools')).toBeNull();
+    resizeRow(480);
+    expect(screen.getByTestId('probe-tools')).toBeInTheDocument();
+    expect(screen.queryByTestId('hdr-more')).toBeNull();
+  });
+
+  it('CONTROL: without a note there is no note line, and the tabs follow the title row', () => {
+    render(<FoldingLeaf />);
+    expect(note()).toBeNull();
+    expect(titleRow().nextElementSibling?.tagName).toBe('NAV');
   });
 });

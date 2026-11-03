@@ -140,10 +140,13 @@ describe('ObjectStackDataSource.find — enable-block denials are surfaced, not 
   });
 
   it('CONTROL: a 404 RECORD_NOT_FOUND is not an enable-block denial', async () => {
+    // On a platform collection, so the 404 takes the optional-collection
+    // branch. A non-registry object's 404 is rethrown instead
+    // (findMissingObject-29782.test.ts).
     const find = vi.fn().mockRejectedValue(clientError('No such record', 404, 'RECORD_NOT_FOUND'));
     const ds = makeDS(find);
 
-    await expect(ds.find('account')).resolves.toMatchObject({ data: [], total: 0 });
+    await expect(ds.find('sys_comment')).resolves.toMatchObject({ data: [], total: 0 });
   });
 
   it('CONTROL: a 2xx with zero rows resolves as an ordinary empty result', async () => {

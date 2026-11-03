@@ -26,7 +26,11 @@
  *  - a walled tenant admin sees Customize disabled, and nothing is asked;
  *  - a refused save and a refused publish read as the server sent them;
  *  - CONTROLS: the base's flow with no override offers no Restore; a
- *    writable package's flow keeps Delete flow and its definition switch.
+ *    writable package's flow keeps Delete flow and its definition switch;
+ *  - objectstack#29691: a customized flow (unlocked, or a published
+ *    override) has the header say where it is saved ("Saved to HotCRM’s
+ *    customizations"); the base's flow before Customize, and a writable
+ *    package's flow, say nothing of the kind.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -490,5 +494,41 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await openMenu();
     expect(screen.getByTestId('auto-item-delete')).toBeInTheDocument();
     expect(screen.queryByTestId('studio-restore-original')).toBeNull();
+  });
+});
+
+describe('the flow header says where a customized flow is saved (objectstack#29691)', () => {
+  const SAVED_TO = 'Saved to HotCRM’s customizations';
+  const savedTo = () => within(header()).queryByTestId('auto-flow-saved-to');
+
+  it('Customize unlocks the flow, and the header says it is saved to the base’s customizations', async () => {
+    mount();
+    await openFlow();
+    expect(savedTo()).toBeNull();
+    await customize();
+    await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    expect(savedTo()!.closest('[data-slot="item-note"]')).not.toBeNull();
+  });
+
+  it('a published override says it on open', async () => {
+    srv.pairActive = { ...strip(BASE_FLOW), label: 'Notify owner and manager', overrides: DECLARATION };
+    srv.pairExists = true;
+    mount({ listedPair: PAIR });
+    await openFlow(/^Notify owner and manager$/);
+    await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+  });
+
+  it('CONTROL: the base’s flow before Customize says nothing of the kind', async () => {
+    mount({ listedPair: PAIR });
+    await openFlow();
+    await within(header()).findByTestId('studio-customize', undefined, { timeout: 8000 });
+    expect(savedTo()).toBeNull();
+    expect(header().querySelector('[data-slot="item-note"]')).toBeNull();
+  });
+
+  it('CONTROL: a writable package’s flow says nothing of the kind', async () => {
+    mount({ readOnly: false });
+    await openFlow();
+    expect(savedTo()).toBeNull();
   });
 });

@@ -10,6 +10,9 @@ import {
   GetAuthConfigResponseSchema,
   EndpointMapping,
   getAuthEndpointUrl,
+  OneTimeTokenHandoffQuerySchema,
+  OneTimeTokenVerifyRequestSchema,
+  OneTimeTokenVerifyResponseSchema,
 } from './auth-endpoints.zod';
 import {
   PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS,
@@ -353,5 +356,85 @@ describe('DeviceRequestResponse.interval \u2192 intervalSeconds', () => {
     expect(parsed.intervalSeconds).toBe(5);
     expect(parsed).not.toHaveProperty('interval');
     expect(DeviceRequestResponseSchema.parse(base).intervalSeconds).toBe(2);
+  });
+});
+
+describe('mobile sign-in hand-off (one-time token)', () => {
+  // 43 base64url characters: an S256 challenge, and a verifier at the RFC 7636 minimum.
+  const challenge = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+  const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+  const token = 'aB3-_xYz0123456789abcdefGHIJKLmn';
+
+  it('declares the hand-off and the vendor verify route, and not the client-refused generate', () => {
+    expect(AuthEndpointPaths.oneTimeTokenHandoff).toBe('/one-time-token/handoff');
+    expect(AuthEndpointPaths.oneTimeTokenVerify).toBe('/one-time-token/verify');
+    expect(Object.values(AuthEndpointPaths)).not.toContain('/one-time-token/generate');
+  });
+
+  it('accepts a hand-off query with and without the challenge method', () => {
+    const base = { redirect_uri: 'com.example.app://auth/callback', code_challenge: challenge };
+    expect(OneTimeTokenHandoffQuerySchema.safeParse(base).success).toBe(true);
+    expect(
+      OneTimeTokenHandoffQuerySchema.safeParse({ ...base, code_challenge_method: 'S256' }).success,
+    ).toBe(true);
+  });
+
+  it('closes the hand-off parameter set: an unknown parameter is refused', () => {
+    const result = OneTimeTokenHandoffQuerySchema.safeParse({
+      redirect_uri: 'com.example.app://auth/callback',
+      code_challenge: challenge,
+      state: 'x',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0].code).toBe('unrecognized_keys');
+  });
+
+  it('refuses the plain method, a malformed challenge, a missing challenge and an empty redirect_uri', () => {
+    const base = { redirect_uri: 'com.example.app://cb', code_challenge: challenge };
+    const plain = OneTimeTokenHandoffQuerySchema.safeParse({ ...base, code_challenge_method: 'plain' });
+    expect(plain.success).toBe(false);
+    expect(plain.error!.issues[0].path).toEqual(['code_challenge_method']);
+    const short = OneTimeTokenHandoffQuerySchema.safeParse({ ...base, code_challenge: challenge.slice(1) });
+    expect(short.success).toBe(false);
+    expect(short.error!.issues[0].path).toEqual(['code_challenge']);
+    const padded = OneTimeTokenHandoffQuerySchema.safeParse({ ...base, code_challenge: `${challenge.slice(1)}=` });
+    expect(padded.success).toBe(false);
+    const emptyUri = OneTimeTokenHandoffQuerySchema.safeParse({ ...base, redirect_uri: '' });
+    expect(emptyUri.success).toBe(false);
+    expect(emptyUri.error!.issues[0].path).toEqual(['redirect_uri']);
+    const missing = OneTimeTokenHandoffQuerySchema.safeParse({ redirect_uri: base.redirect_uri });
+    expect(missing.success).toBe(false);
+    expect(missing.error!.issues[0].path).toEqual(['code_challenge']);
+  });
+
+  it('accepts a verify body carrying the token, a dot and the verifier', () => {
+    expect(OneTimeTokenVerifyRequestSchema.safeParse({ token: `${token}.${verifier}` }).success).toBe(true);
+    // A verifier may itself contain dots and tildes (RFC 7636 unreserved set): the split is on the FIRST dot.
+    expect(
+      OneTimeTokenVerifyRequestSchema.safeParse({ token: `${token}.${verifier.slice(0, 40)}.~_` }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a verify body without the verifier binding, or with a short verifier', () => {
+    const bare = OneTimeTokenVerifyRequestSchema.safeParse({ token });
+    expect(bare.success).toBe(false);
+    expect(bare.error!.issues[0].path).toEqual(['token']);
+    const short = OneTimeTokenVerifyRequestSchema.safeParse({ token: `${token}.${verifier.slice(1)}` });
+    expect(short.success).toBe(false);
+  });
+
+  it('parses the vendor verify body: the session and its user, unwrapped', () => {
+    const body = {
+      session: {
+        id: 's1',
+        token: 'session-token',
+        userId: 'u1',
+        expiresAt: '2026-11-10T03:00:00.000Z',
+        createdAt: '2026-11-03T03:00:00.000Z',
+      },
+      user: { id: 'u1', email: 'ada@example.com', emailVerified: true, name: 'Ada', image: null },
+    };
+    const result = OneTimeTokenVerifyResponseSchema.safeParse(body);
+    expect(result.success).toBe(true);
   });
 });

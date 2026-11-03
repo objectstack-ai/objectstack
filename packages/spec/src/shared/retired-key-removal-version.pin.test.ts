@@ -48,7 +48,9 @@
  * its surface. A tombstone row reads the key's parse refusal and its
  * `[REMOVED]` description, which are the two channels. A refusal row reads the
  * refusal the surface answers, for a value or union-arm retirement that has no
- * key to tombstone. Two guards keep the join honest:
+ * key to tombstone. A todo row reads the TODO a data-at-rest conversion reports
+ * for a stored shape it leaves as stored, which `os migrate meta` prints to the
+ * owner. Two guards keep the join honest:
  *
  *   - every retired entry whose `retiredAfter` is the newest published stable
  *     release must have a row, so a future retirement cannot ship its
@@ -95,7 +97,7 @@ import { InterfacePageConfigSchema, PageComponentSchema, PageSchema } from '../u
 import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema, VIEW_METADATA_MEMBERS, ViewScopeSchema, ViewSharingSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
-import { TranslationItemSchema } from '../system/translation.zod';
+import { TranslationBundleSchema, TranslationItemSchema } from '../system/translation.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
@@ -220,6 +222,20 @@ const refusal = (where: string, parse: () => Parse, at?: PropertyKey): Renderer 
   return issues.map((issue) => ({ where, text: issue.message }));
 };
 
+/**
+ * The TODO a retired conversion reports for a stored shape it cannot rewrite
+ * without a guess, run on `stack`: the prescription the owner of a stored row
+ * meets in `os migrate meta`, which has no parse refusal to read.
+ */
+const todo = (where: string, id: string, stack: Record<string, unknown>): Renderer => () => {
+  const conversion = ALL_CONVERSIONS.find((c) => c.id === id);
+  if (!conversion) throw new Error(`${where}: no conversion \`${id}\``);
+  const reasons: string[] = [];
+  conversion.apply(stack, () => {}, { reportTodo: (detail) => reasons.push(detail.reason) });
+  expect(reasons.length, `${where} must be reported`).toBeGreaterThan(0);
+  return reasons.map((text) => ({ where, text }));
+};
+
 const ELEMENTS: readonly (readonly [unknown, string, readonly string[]])[] = [
   [ElementNumberPropsSchema, 'element:number', ['object', 'filter']],
   [ElementRecordPickerPropsSchema, 'element:record_picker', ['object', 'filter', 'sort', 'limit']],
@@ -278,6 +294,19 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       "a translation item's locale written with '_'",
       () => TranslationItemSchema.safeParse({ name: 'zh_cn', locale: 'zh_CN', messages: { commonSave: '保存' } }),
       'locale',
+    ),
+  ],
+  // #28993: the case fold corrects a lone tag, so what an author meets is the
+  // collision two keys of one bundle make once folded, at the parse and at rest.
+  'translation-locale-tag-case-folded': [
+    refusal(
+      'a translation bundle holding `zh-cn` beside `zh-CN`',
+      () => TranslationBundleSchema.safeParse({ 'zh-cn': { messages: { x: 'a' } }, 'zh-CN': { messages: { x: 'b' } } }),
+    ),
+    todo(
+      'a stored translation bundle holding `zh-cn` beside `zh-CN`',
+      'translation-locale-tag-case-folded',
+      { translations: [{ 'zh-cn': { messages: { x: 'a' } }, 'zh-CN': { messages: { x: 'b' } } }] },
     ),
   ],
   'manifest-permissions-string-list-removed': [

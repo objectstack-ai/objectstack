@@ -113,6 +113,9 @@ import {
     QUERY_TRANSPORT_DOLLAR_ALIASES,
     QUERY_TRANSPORT_DOLLAR_PARAMS,
     type DroppedFieldsEvent,
+    type EngineAggregateOptions,
+    type EngineCountOptions,
+    type EngineQueryOptions,
     type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
     externalBindingDatasourceRefusal,
@@ -6121,7 +6124,7 @@ export class ObjectStackProtocolImplementation implements
         const hasGroupBy = Array.isArray(options.groupBy) && options.groupBy.length > 0;
         const hasAggregations = Array.isArray(options.aggregations) && options.aggregations.length > 0;
         if (hasGroupBy || hasAggregations) {
-            const records = await this.engine.aggregate(request.object, {
+            const aggregateQuery: EngineAggregateOptions = {
                 where: options.where,
                 groupBy: options.groupBy,
                 aggregations: options.aggregations,
@@ -6140,7 +6143,8 @@ export class ObjectStackProtocolImplementation implements
                 search: options.search,
                 searchFields: options.searchFields,
                 context: options.context,
-            } as any);
+            };
+            const records = await this.engine.aggregate(request.object, aggregateQuery);
             // Apply limit client-side (EngineAggregateOptions doesn't carry limit).
             // `records` is the full grouped set, so its length IS the real total
             // and `hasMore` follows from whether the slice dropped any groups.
@@ -6209,6 +6213,25 @@ export class ObjectStackProtocolImplementation implements
         // projection named only the body, and taken back off before serving.
         const bodyProjection = storedMetadataBodyProjection(request.object, options.fields);
         if (bodyProjection.addedType) options.fields = bodyProjection.fields;
+        // [#29764] The bag `engine.find` receives is typed as the engine declares
+        // it. `options` is the caller's normalized request bag, and by this line
+        // every key the normalizer does not hand on has been folded, deleted or
+        // moved into `where`. What can still stand is the find set below, plus
+        // `groupBy` / `aggregations` holding null at most (a non-empty one took
+        // the aggregate branch above, an empty one was refused). The engine reads
+        // a null option as absent, so leaving those two out changes nothing. Keys
+        // are copied only when present, so the engine sees the same bag as before.
+        const findQuery: EngineQueryOptions = {
+            ...(options.context !== undefined ? { context: options.context } : {}),
+            ...(options.where !== undefined ? { where: options.where } : {}),
+            ...(options.fields !== undefined ? { fields: options.fields } : {}),
+            ...(options.orderBy !== undefined ? { orderBy: options.orderBy } : {}),
+            ...(options.limit !== undefined ? { limit: options.limit } : {}),
+            ...(options.offset !== undefined ? { offset: options.offset } : {}),
+            ...(options.search !== undefined ? { search: options.search } : {}),
+            ...(options.searchFields !== undefined ? { searchFields: options.searchFields } : {}),
+            ...(options.expand !== undefined ? { expand: options.expand } : {}),
+        };
         // [#21207] …and its stored CONTENT HASH (`checksum`, `previous_checksum`)
         // is served in keyed form — never the stored value, which beside the
         // projected body confirms a guess at the withheld material offline —
@@ -6217,7 +6240,7 @@ export class ObjectStackProtocolImplementation implements
             request.object,
             redactStoredMetadataRows(
                 request.object,
-                await this.engine.find(request.object, options),
+                await this.engine.find(request.object, findQuery),
                 { dropType: bodyProjection.addedType },
             ),
             this.storedHashDigest(),
@@ -6293,12 +6316,13 @@ export class ObjectStackProtocolImplementation implements
                 // TypeScript cannot narrow it back across the try/catch.
                 let counted: number;
                 try {
-                    counted = await this.engine.count(request.object, {
+                    const countQuery: EngineCountOptions = {
                         where: options.where,
                         search: options.search,
                         searchFields: options.searchFields,
                         context: options.context,
-                    } as any);
+                    };
+                    counted = await this.engine.count(request.object, countQuery);
                 } catch {
                     // engine.count() has its own find().length fallback; if it still
                     // throws, degrade to a page-local total rather than failing the list.
@@ -6368,7 +6392,18 @@ export class ObjectStackProtocolImplementation implements
             if (Object.keys(served).length > 0) queryOptions.expand = served;
         }
 
-        const result = await this.engine.findOne(request.object, queryOptions);
+        // [#29764] The bag `engine.findOne` receives is typed as the engine
+        // declares it. `queryOptions` stays the working bag: the projection
+        // helpers above answer `unknown` (they serve the raw list query too), so
+        // its `fields` has no declared type until it is handed on here. Keys are
+        // copied only when present, so the engine sees the same bag as before.
+        const findOneQuery: EngineQueryOptions = {
+            where: queryOptions.where,
+            ...(queryOptions.context !== undefined ? { context: queryOptions.context } : {}),
+            ...(queryOptions.fields !== undefined ? { fields: queryOptions.fields } : {}),
+            ...(queryOptions.expand !== undefined ? { expand: queryOptions.expand } : {}),
+        };
+        const result = await this.engine.findOne(request.object, findOneQuery);
         if (result) {
             return {
                 object: request.object,
@@ -6452,7 +6487,7 @@ export class ObjectStackProtocolImplementation implements
 
         const source = await this.engine.findOne(
             request.object,
-            { where: { id: request.id }, ...(ctxOpt as any) } as any,
+            { where: { id: request.id }, ...ctxOpt },
         );
         if (!source) throw recordNotFoundError(request.object, request.id);
 
@@ -6609,7 +6644,7 @@ export class ObjectStackProtocolImplementation implements
      * token, a caller whose read of the row is refused gets that read refusal.
      */
     private async probeRecord(object: string, id: string): Promise<any> {
-        return this.engine.findOne(object, { where: { id }, context: { isSystem: true } } as any);
+        return this.engine.findOne(object, { where: { id }, context: { isSystem: true } });
     }
 
     /**
