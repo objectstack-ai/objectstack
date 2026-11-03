@@ -6316,6 +6316,18 @@ describe('ApprovalService — a request with no submitter is recalled, reminded 
       engine: engine as any, clock: { now: () => new Date(1758000000000 + (n++) * 1000) },
       recordReaderVisibleObjects: ['opportunity'],
     });
+    // A flow whose approval node declares the `revise` out-edge send-back needs.
+    svc.attachAutomation({
+      async resume() { /* resumed */ },
+      async cancelRun() { /* handed back */ },
+      async getFlow() {
+        return {
+          name: 'deal_approval',
+          nodes: [{ id: 'approve_step', type: 'approval' }, { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE }],
+          edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
+        };
+      },
+    } as any);
     return { engine, svc };
   };
   const open = async (
