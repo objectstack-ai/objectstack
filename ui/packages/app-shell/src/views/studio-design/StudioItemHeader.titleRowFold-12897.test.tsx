@@ -265,7 +265,7 @@ function FoldingLeaf({
       actions={
         <>
           {labelled && <StudioCustomizeButton block={null} baseLabel="HotCRM" locale="en" onCustomize={onCustomize} />}
-          {labelled && <FlowLedgerSwitch checked reading="on" locale="en" onToggle={onToggle} />}
+          {labelled && <FlowLedgerSwitch checked reading="on" busy={false} locale="en" onToggle={onToggle} />}
           <ProbeTools onOpen={onOpen} />
           <button type="button">Open in Data</button>
         </>
