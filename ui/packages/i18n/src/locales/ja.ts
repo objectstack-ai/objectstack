@@ -3002,6 +3002,12 @@ const ja = {
       saved: "言語の設定を更新しました。",
       readOnly: "このアカウントの言語は管理者が管理しています。",
     },
+    appLock: {
+      title: "アプリロック",
+      off: "オフ",
+      onImmediately: "オン：アプリを離れるとすぐにロック",
+      onAfter: "オン：アプリを離れて{{duration}}後にロック",
+    },
     password: {
       changeTitle: "パスワードを変更",
       setTitle: "ローカルパスワードを設定",
