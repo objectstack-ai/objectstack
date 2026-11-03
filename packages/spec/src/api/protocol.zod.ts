@@ -3519,11 +3519,9 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
 /**
  * Register or refresh a push device for the signed-in user (ADR-0012 §6).
  *
- * **Declared ahead of its producer.** No route serves this body yet: the
- * device routes land together with their handlers, and until then each of
- * the four device schemas below carries a `[PLANNED — not yet served]` marker
- * in its `.describe()`. What follows is the contract that route owes, not a
- * description of something running.
+ * Served by `POST /api/v1/notifications/devices` (its row in
+ * `DEFAULT_NOTIFICATION_ROUTES`); unregister is
+ * `DELETE /api/v1/notifications/devices/:deviceId`.
  *
  * One request does both: registering a `deviceId` the user already has
  * refreshes that device (its token, vendor, app and locale) instead of adding
@@ -3537,9 +3535,6 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
  * The stored device a registration produces is `UserDeviceSchema`
  * (`system/push-device.zod.ts`).
  */
-// The marker comes off when the server device-registry slice (#29068) mounts
-// POST /api/v1/notifications/devices and the unregister route, adds their rows
-// to DEFAULT_NOTIFICATION_ROUTES and flips that table's catalog pin.
 export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   token: z.string().describe('Device push notification token'),
   platform: z.enum(PUSH_DEVICE_PLATFORMS).describe('Device platform'),
@@ -3554,23 +3549,20 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
   locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
-}).describe(
-  '[PLANNED — not yet served] Register or refresh a push device for the signed-in user. No route serves it yet; '
-  + 'the device routes land together with their handlers',
-));
+}).describe('Register or refresh a push device for the signed-in user'));
 
 export const RegisterDeviceResponseSchema = lazySchema(() => z.object({
   deviceId: z.string().describe('Registered device ID'),
   success: z.boolean().describe('Whether registration succeeded'),
-}).describe('[PLANNED — not yet served] Answer to a device registration: the device id the client keeps'));
+}).describe('Answer to a device registration: the device id the client keeps'));
 
 export const UnregisterDeviceRequestSchema = lazySchema(() => z.object({
   deviceId: z.string().describe('Device ID to unregister'),
-}).describe('[PLANNED — not yet served] Unregister one of the signed-in user\'s push devices'));
+}).describe('Unregister one of the signed-in user\'s push devices'));
 
 export const UnregisterDeviceResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe('Whether unregistration succeeded'),
-}).describe('[PLANNED — not yet served] Answer to a device unregistration'));
+}).describe('Answer to a device unregistration'));
 
 export const NotificationPreferencesSchema = lazySchema(() => z.object({
   email: z.boolean().default(true).describe('Receive email notifications'),

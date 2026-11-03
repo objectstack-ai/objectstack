@@ -225,13 +225,12 @@ export interface INotificationService {
      * `UnregisterDeviceResponseSchema` (`api/protocol.zod.ts`), and the stored
      * device `UserDeviceSchema` (`system/push-device.zod.ts`).
      *
-     * Declared ahead of their implementation: no provider implements them
-     * and no route calls them yet. They are the contract the device registry
-     * and its routes owe when they land, not a description of running code.
+     * Implemented by `@objectstack/service-messaging` (`MessagingService`,
+     * over `sys_user_device`); `registerDevice` and `unregisterDevice` are
+     * served by `POST` / `DELETE /api/v1/notifications/devices`.
+     * `listDevices` has no route, and `invalidateDeviceToken` is called by
+     * the push channel's invalid-recipient path.
      */
-    // First implementation and callers: the server device-registry slice
-    // (#29068); the push channel's invalid-recipient path calls
-    // invalidateDeviceToken (#29041).
 
     /**
      * Register or refresh a push device for this user.
