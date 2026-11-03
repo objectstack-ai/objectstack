@@ -392,6 +392,7 @@ import {
   rowsWithDeclaredColumnsOnly,
   rowsWithSelectedColumnsAnswered,
   selectedStoredColumns,
+  storedColumnsLeftUnwritten,
   withDeclaredColumnsOnly,
   withSelectedColumnsAnswered,
 } from './declared-read-columns.js';
@@ -16686,6 +16687,22 @@ export class ObjectQL implements IObjectQLEngine {
         result = isBatch
           ? rowsWithDeclaredColumnsOnly(result as unknown[], declaredInsertColumns)
           : withDeclaredColumnsOnly(result, declaredInsertColumns);
+        // [#29538] …and answered on every stored declared column, as the next
+        // read of the row answers it (#29408): a column the driver did not
+        // echo (driver-mongodb and driver-memory store only written keys) is
+        // `null`. A write names no projection, so it selects the whole stored
+        // record. Before the formulas, so a formula over an unwritten column
+        // evaluates against `null` as the read's does; inside the verb, so the
+        // security middleware's field mask still deletes an FLS-refused key.
+        // A column the row's payload carried a value for is stored, so it is
+        // never answered `null`: a driver that did not echo it leaves it
+        // absent (`storedColumnsLeftUnwritten`). Rows pair with `liveRows` by
+        // index, which the one-row-per-input guard above holds.
+        const insertAnswerColumns = selectedStoredColumns(schemaForValidation, undefined);
+        result = isBatch
+          ? (result as unknown[]).map((row, i) =>
+              withSelectedColumnsAnswered(row, storedColumnsLeftUnwritten(insertAnswerColumns, liveRows[i])))
+          : withSelectedColumnsAnswered(result, storedColumnsLeftUnwritten(insertAnswerColumns, liveRows[0]));
 
         // Coerce `boolean` fields (SQLite/libsql return 0/1) to real booleans on
         // the after-hook view so flow trigger conditions (`record.is_escalated
@@ -18355,6 +18372,12 @@ export class ObjectQL implements IObjectQLEngine {
                // `data.record.updated` event and the door's ingress strip. A
                // `null` readback (the row left the caller's scope) stays `null`.
                result = withDeclaredColumnsOnly(result, declaredColumnSet(updateSchema));
+               // [#29538] Same answer on the stored declared columns as the
+               // insert result and the next read (#29408), less those the
+               // PATCH or the stored row before it carried a value for.
+               result = withSelectedColumnsAnswered(result, storedColumnsLeftUnwritten(
+                 selectedStoredColumns(updateSchema, undefined), hookContext.input.data, priorRecord,
+               ));
                // [#27495] The handle the stored row named before, where this
                // statement cleared or replaced it.
                retiredSecrets = retiredSecretSlots(updateSchema, [priorRecord], hookContext.input.data);
