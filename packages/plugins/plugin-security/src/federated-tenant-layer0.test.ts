@@ -202,7 +202,10 @@ describe('[#7835] Layer 0 vs federated (external) objects', () => {
         { name: 'app_region_scope', object: '*', operation: 'all', using: 'region == current_user.organization_id' },
       ],
     } as unknown as PermissionSet;
-    const schema = federatedSchema();
+    // Declared shared (ADR-0015 §10), so Layer 0 contributes nothing and the
+    // authored Layer 1 predicate is the whole filter; an object stating no scope
+    // would AND the deny sentinel in front of it instead.
+    const schema = { ...federatedSchema({ tenancy: { enabled: false } }), fields: { ...REMOTE_COLUMNS } } as Record<string, unknown>;
     (schema.fields as Record<string, unknown>).region = { type: 'text', label: 'Region' };
     const services: Record<string, unknown> = {
       manifest: { register: vi.fn() },

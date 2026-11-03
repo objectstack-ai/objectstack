@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: one real-kernel boot in beforeAll (ObjectQL, the sqlite-wasm default datasource, Hono on port 0, auth, datasource admin, security, sharing, REST, the dispatcher and the spike's plugin driver) with real sign-ups, shared by all 12 cases, the boot itself the subject of cases (a) and (b); 2.9 s in a local run, the cases 0.24 s of it; slowest CI reading 12.4 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up
+// test-budget: 30 — spawns the real producer once per single-cause fixture: two real-kernel boots, one per posture (ObjectQL, the sqlite-wasm default datasource, Hono on port 0, auth, datasource admin, security, sharing, REST, the dispatcher and the spike's plugin driver) with real sign-ups, the `single` boot shared by the 12 cases (a) to (g) and itself the subject of (a) and (b), the `isolated` boot shared by the 6 cases of (h), plus the refused boot that is case (h6)'s subject; 4.6 s of cases in a local run against 2.9 s before the third boot; the single-boot file's slowest CI reading was 12.4 s (scheduled full-battery run 41255489006, Test Core shard log), scaled by the local ratio and x 1.25, rounded up — re-measure on the first scheduled run that carries (h)
 
 /**
  * Spike: a virtual object on a plugin driver, end to end in a booted kernel
@@ -43,7 +43,7 @@ import { ObjectQLPlugin, EXTERNAL_ROW_CAP, unwrapExternalDriverFloor } from '@ob
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
 import { AuthPlugin } from '@objectstack/plugin-auth';
-import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
+import { SecurityPlugin, appSecurityPluginOptions, RLS_DENY_FILTER } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import {
@@ -633,4 +633,327 @@ describe('(g) object permission sets apply to the external object', () => {
     expect(calls.slice(mark)).toEqual([]);
     expect(rows.find((r) => r.id === 'n_cut')?.name).toBe('Cut');
   });
+});
+
+// ---------------------------------------------------------------------------
+// (h) Under a walled tenancy posture every external object states its
+// organization scope (ADR-0015 §10)
+// ---------------------------------------------------------------------------
+//
+// The boot above runs the `single` posture, where no wall is enforced and no
+// declaration is owed — `spike_node` and `spike_owned` state nothing and boot;
+// that block is this one's control. This block boots the same composition
+// again under `isolated`: the posture request, the platform owner a walled boot
+// declares, and the stand-in `org-scoping` provider `@objectstack/verify`
+// mounts for `multiTenant: 'posture-only'`. Two members, each in one
+// organization, read the same objects through the HTTP door.
+
+/** Declares its own `organization_id`: the remote rows carry the column and the driver returns it. */
+const WALLED = 'spike_walled';
+/** Declares `organization_id` too, but its driver IGNORES `where` — the engine's floor re-applies it. */
+const WALLED_BLIND = 'spike_walled_blind';
+/** Declares `tenancy: { enabled: false }`: shared by every organization. */
+const SHARED = 'spike_shared';
+/** Declares `systemFields: { tenant: false }`: the same, spelled on the system fields. */
+const SHARED_SYSTEM_FIELDS = 'spike_shared_sf';
+/** A local object, stored by the platform — the walled control. */
+const LOCAL = 'spike_local';
+/** Registered AFTER the boot and stating nothing: denied, never read as shared. */
+const LATE = 'spike_late';
+/** States nothing at boot: the boot is refused by name. */
+const UNDECLARED = 'spike_undeclared';
+/** Declares `tenancy.tenantField` naming a column the wall does not read: refused the same way. */
+const FOREIGN_FIELD = 'spike_foreign_field';
+const WALLED_SET = 'spike_walled_reader';
+const ORG_A = 'org_spike_a';
+const ORG_B = 'org_spike_b';
+const A_EMAIL = 'a@spike-walled.test';
+const B_EMAIL = 'b@spike-walled.test';
+
+const walledTables: Record<string, Row[]> = {
+  [WALLED]: [
+    { id: 'w_a', name: 'A walled', organization_id: ORG_A },
+    { id: 'w_b', name: 'B walled', organization_id: ORG_B },
+    // A row the remote serves with NO organization column: nobody's.
+    { id: 'w_none', name: 'No organization' },
+  ],
+  [WALLED_BLIND]: [
+    { id: 'wb_a', name: 'A blind', organization_id: ORG_A },
+    { id: 'wb_b', name: 'B blind', organization_id: ORG_B },
+    { id: 'wb_none', name: 'No organization' },
+  ],
+  [SHARED]: [{ id: 's_1', name: 'Shared 1' }, { id: 's_2', name: 'Shared 2' }],
+  [SHARED_SYSTEM_FIELDS]: [{ id: 'sf_1', name: 'Shared SF 1' }],
+  [LATE]: [{ id: 'l_a', name: 'A late', organization_id: ORG_A }, { id: 'l_b', name: 'B late', organization_id: ORG_B }],
+};
+const walledCalls: Call[] = [];
+
+/** The spike driver over the walled tables, blind to `where` on exactly one object. */
+function createWalledDriver(): IDataDriver {
+  const inner = createSpikeTreeDriver(walledTables, walledCalls);
+  const blind = {
+    ...inner,
+    async find(object: string, query: DriverQuery = {}) {
+      if (object !== WALLED_BLIND) return inner.find(object, query);
+      walledCalls.push({ method: 'find', object, query: snapshot(query) });
+      return (walledTables[object] ?? []).map((r) => ({ ...r }));
+    },
+  };
+  return blind as unknown as IDataDriver;
+}
+
+/** The `org-scoping` stand-in `@objectstack/verify` mounts for `multiTenant: 'posture-only'`. */
+const orgScopingStandIn: Plugin & { supportedPostures: readonly string[] } = {
+  name: 'com.spike.simulated-org-scoping',
+  version: '1.0.0',
+  providesServices: ['org-scoping'],
+  supportedPostures: ['group', 'isolated'],
+  init: async (ctx: PluginContext) => { ctx.registerService('org-scoping', orgScopingStandIn); },
+};
+
+const externalObject = (name: string, remoteName: string, extra: Record<string, unknown> = {}) => ({
+  name,
+  label: name,
+  datasource: DATASOURCE,
+  external: { remoteName },
+  sharingModel: 'public_read_write' as const,
+  fields: { name: { type: 'text' as const, label: 'Name' } },
+  ...extra,
+});
+
+const WALLED_DATASOURCE = {
+  name: DATASOURCE,
+  label: 'Spike remote (plugin driver, walled)',
+  driver: DATASOURCE,
+  schemaMode: 'external' as const,
+  config: {},
+  external: { allowWrites: false, validation: { onMismatch: 'fail' as const, checkOnBoot: false } },
+};
+
+const WALLED_STACK = defineStack({
+  manifest: { id: 'com.spike.plugin-driver-walled', name: 'Plugin driver spike, walled', version: '1.0.0', type: 'app' },
+  datasources: [WALLED_DATASOURCE],
+  objects: [
+    externalObject(WALLED, 'walled', { fields: { name: { type: 'text', label: 'Name' }, organization_id: { type: 'text', label: 'Organization' } } }),
+    externalObject(WALLED_BLIND, 'walled_blind', { fields: { name: { type: 'text', label: 'Name' }, organization_id: { type: 'text', label: 'Organization' } } }),
+    externalObject(SHARED, 'shared', { tenancy: { enabled: false } }),
+    externalObject(SHARED_SYSTEM_FIELDS, 'shared_sf', { systemFields: { tenant: false } }),
+    { name: LOCAL, label: LOCAL, sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } },
+  ],
+  permissions: [
+    {
+      name: WALLED_SET,
+      label: 'Walled reader',
+      objects: {
+        [WALLED]: { allowRead: true },
+        [WALLED_BLIND]: { allowRead: true },
+        [SHARED]: { allowRead: true },
+        [SHARED_SYSTEM_FIELDS]: { allowRead: true },
+        [LOCAL]: { allowRead: true, allowCreate: true },
+      },
+    },
+  ],
+});
+
+/** The same stack with the two objects a walled boot refuses. */
+const REFUSED_STACK = defineStack({
+  manifest: { id: 'com.spike.plugin-driver-refused', name: 'Plugin driver spike, refused', version: '1.0.0', type: 'app' },
+  datasources: [WALLED_DATASOURCE],
+  objects: [
+    externalObject(SHARED, 'shared', { tenancy: { enabled: false } }),
+    externalObject(UNDECLARED, 'undeclared'),
+    externalObject(FOREIGN_FIELD, 'foreign', {
+      tenancy: { enabled: true, tenantField: 'remote_org' },
+      fields: { name: { type: 'text', label: 'Name' }, remote_org: { type: 'text', label: 'Remote org' } },
+    }),
+  ],
+});
+
+async function composeWalled(stack: unknown, walledDriver: IDataDriver): Promise<ObjectKernel> {
+  const k = new ObjectKernel();
+  await k.use(new ObjectQLPlugin());
+  await k.use(new DefaultDatasourcePlugin({ driver: 'sqlite-wasm', config: { filename: ':memory:' } }));
+  await k.use(new HonoServerPlugin({ port: 0 }));
+  await k.use(spikeTreeDriverPlugin(walledDriver));
+  await k.use(orgScopingStandIn);
+  await k.use(new AppPlugin(stack as any));
+  await k.use(new PlatformObjectsPlugin());
+  await k.use(new AuthPlugin({ secret: 'plugin-driver-external-object-spike-walled-secret' }));
+  await k.use(new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() }));
+  await k.use(new ExternalDatasourceServicePlugin());
+  await k.use(createExternalValidationPlugin());
+  await k.use(new SecurityPlugin(appSecurityPluginOptions(stack as any)));
+  await k.use(new SharingServicePlugin());
+  await k.use(createRestApiPlugin({}));
+  await k.use(createDispatcherPlugin({}));
+  return k;
+}
+
+describe('(h) under the `isolated` posture every external object states its organization scope', () => {
+  let wKernel: ObjectKernel;
+  let wHttp: any;
+  let wApp: any;
+  let wEngine: any;
+  let tokenA: string;
+  let tokenB: string;
+  const prevEnv: Record<string, string | undefined> = {};
+
+  const wReq = (path: string, init?: RequestInit) => wApp.request(`${ORIGIN}${API}${path}`, init);
+  const wAs = (token: string, method: string, path: string, payload?: unknown) =>
+    wReq(path, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}),
+    });
+  const idsOf = (body: any): string[] => ((body?.records ?? []) as Row[]).map((r) => String(r.id)).sort();
+  const whereSentTo = (object: string): unknown =>
+    (walledCalls.filter((c) => c.object === object && c.method === 'find').at(-1)?.query as { where?: unknown } | undefined)?.where;
+
+  /** Make `email` a member of `org` holding the reader set, then sign in: the session carries the one membership. */
+  async function memberOf(email: string, org: string): Promise<string> {
+    await wEngine.insert('sys_invitation', {
+      id: `inv_spike_walled_${email.split('@')[0]}`, email, status: 'pending', organization_id: org,
+      role: 'member', inviter_id: 'usr_spike_walled_inviter', expires_at: new Date(Date.now() + 3_600_000),
+    }, { context: { isSystem: true, tenantId: org } });
+    const signedUp = await wReq('/auth/sign-up/email', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: MEMBER_PASSWORD, name: email.split('@')[0] }),
+    });
+    if (!signedUp.ok) throw new Error(`walled signUp failed: ${signedUp.status} ${await signedUp.text()}`);
+    const users = await wEngine.find('sys_user', { where: { email }, limit: 1, context: { isSystem: true } });
+    const userId = String(users?.[0]?.id);
+    await wEngine.insert('sys_member', { id: `mem_${userId}`, organization_id: org, user_id: userId, role: 'member' }, { context: { isSystem: true, tenantId: org } });
+    await wEngine.insert('sys_user_permission_set', { id: `ups_${userId}`, user_id: userId, permission_set: WALLED_SET, granted_by: null }, { context: { isSystem: true, tenantId: org } });
+    const signedIn = await wReq('/auth/sign-in/email', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: MEMBER_PASSWORD }),
+    });
+    if (!signedIn.ok) throw new Error(`walled signIn failed: ${signedIn.status} ${await signedIn.text()}`);
+    return ((await signedIn.json()) as any).token;
+  }
+
+  beforeAll(async () => {
+    for (const k of ['NODE_ENV', 'OS_TENANCY_POSTURE', 'OS_PLATFORM_OWNER_EMAIL']) prevEnv[k] = process.env[k];
+    process.env.NODE_ENV = 'development';
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    process.env.OS_PLATFORM_OWNER_EMAIL = ADMIN.email;
+
+    wKernel = await composeWalled(WALLED_STACK, createWalledDriver());
+    await wKernel.bootstrap();
+    wHttp = await wKernel.getServiceAsync('http-server');
+    wApp = wHttp.getRawApp();
+    wEngine = await wKernel.getServiceAsync('objectql');
+    await wEngine.insert('sys_organization', { id: ORG_A, name: 'Org A', slug: ORG_A }, { context: { isSystem: true } });
+    await wEngine.insert('sys_organization', { id: ORG_B, name: 'Org B', slug: ORG_B }, { context: { isSystem: true } });
+    tokenA = await memberOf(A_EMAIL, ORG_A);
+    tokenB = await memberOf(B_EMAIL, ORG_B);
+  }, BOOT_TIMEOUT);
+
+  afterAll(async () => {
+    try { await wHttp?.close?.(); } catch { /* best-effort */ }
+    try { await wKernel?.shutdown?.(); } catch { /* best-effort */ }
+    for (const [k, v] of Object.entries(prevEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }, 60_000);
+
+  it('(h1) an external object declaring its own `organization_id` is walled: A reads only A, B only B, and a row without the column reads to no one', async () => {
+    const a = await wAs(tokenA, 'GET', `/data/${WALLED}`);
+    const bodyA = await readJson(a);
+    expect(a.status, JSON.stringify(bodyA)).toBe(200);
+    expect(idsOf(bodyA)).toEqual(['w_a']);
+    // The remote is asked for A's organization and nothing else.
+    expect(JSON.stringify(whereSentTo(WALLED))).toContain(`"organization_id":"${ORG_A}"`);
+    const b = await wAs(tokenB, 'GET', `/data/${WALLED}`);
+    const bodyB = await readJson(b);
+    expect(b.status, JSON.stringify(bodyB)).toBe(200);
+    expect(idsOf(bodyB)).toEqual(['w_b']);
+  });
+
+  it('(h2) a driver that ignores `where` stays walled: the floor re-applies the organization predicate to what it answered', async () => {
+    const a = await wAs(tokenA, 'GET', `/data/${WALLED_BLIND}`);
+    const bodyA = await readJson(a);
+    expect(a.status, JSON.stringify(bodyA)).toBe(200);
+    expect(idsOf(bodyA)).toEqual(['wb_a']);
+    // The predicate WAS sent — the driver chose to ignore it — and the row
+    // without an organization column is filtered to no one.
+    expect(JSON.stringify(whereSentTo(WALLED_BLIND))).toContain(`"organization_id":"${ORG_A}"`);
+    const b = await wAs(tokenB, 'GET', `/data/${WALLED_BLIND}`);
+    expect(idsOf(await readJson(b))).toEqual(['wb_b']);
+  });
+
+  it('(h3) an external object declaring `tenancy: { enabled: false }` or `systemFields: { tenant: false }` is shared: A and B read the same rows', async () => {
+    for (const object of [SHARED, SHARED_SYSTEM_FIELDS]) {
+      const a = await wAs(tokenA, 'GET', `/data/${object}`);
+      const bodyA = await readJson(a);
+      expect(a.status, JSON.stringify(bodyA)).toBe(200);
+      const b = await wAs(tokenB, 'GET', `/data/${object}`);
+      const bodyB = await readJson(b);
+      expect(idsOf(bodyA)).toEqual((walledTables[object] ?? []).map((r) => String(r.id)).sort());
+      expect(idsOf(bodyB)).toEqual(idsOf(bodyA));
+      // No organization predicate reaches the remote: the object has no such column.
+      expect(JSON.stringify(whereSentTo(object) ?? null)).not.toContain('organization_id');
+    }
+  });
+
+  it('(h4) CONTROL: a local object stays walled under the same boot', async () => {
+    expect((await wAs(tokenA, 'POST', `/data/${LOCAL}`, { name: 'A local' })).status).toBeLessThan(300);
+    expect((await wAs(tokenB, 'POST', `/data/${LOCAL}`, { name: 'B local' })).status).toBeLessThan(300);
+    const a = await readJson(await wAs(tokenA, 'GET', `/data/${LOCAL}`));
+    const b = await readJson(await wAs(tokenB, 'GET', `/data/${LOCAL}`));
+    expect((a.records as Row[]).map((r) => r.name)).toEqual(['A local']);
+    expect((b.records as Row[]).map((r) => r.name)).toEqual(['B local']);
+  });
+
+  it('(h5) an external object registered AFTER the boot that states no scope is denied: zero rows for every organization, never shared', async () => {
+    wEngine.registry.registerObject({
+      name: LATE,
+      label: 'Late',
+      datasource: DATASOURCE,
+      external: { remoteName: 'late' },
+      sharingModel: 'public_read_write',
+      fields: { name: { type: 'text', label: 'Name' } },
+    });
+    await wEngine.syncObjectSchema(LATE);
+    // No stack permission can name an object the stack does not declare, so the
+    // verdict is read where the HTTP door reads it: the security service's read
+    // filter for each member — the Layer 0 wall, with no business policy beside it.
+    const security = wKernel.getService<{ getReadFilter(object: string, ctx: unknown): Promise<unknown> }>('security');
+    const forA = await security.getReadFilter(LATE, { userId: 'usr_spike_a', tenantId: ORG_A, positions: [] });
+    const forB = await security.getReadFilter(LATE, { userId: 'usr_spike_b', tenantId: ORG_B, positions: [] });
+    // The spec's frozen deny sentinel, by identity (ADR-0139 D2 step 2).
+    expect(forA).toBe(RLS_DENY_FILTER);
+    expect(forB).toBe(RLS_DENY_FILTER);
+    // …and what a read carrying that filter asks the remote: nothing it holds.
+    const mark = walledCalls.length;
+    const rows = await wEngine.find(LATE, { where: forA, context: { isSystem: true } });
+    expect(rows).toEqual([]);
+    const seen = walledCalls.slice(mark).filter((c) => c.object === LATE);
+    expect(seen.length).toBeGreaterThan(0);
+    for (const call of seen) expect(JSON.stringify(call.query)).toMatch(/__rls_deny__|__deny_all__/);
+    // CONTROL: the same member on the declared shared object reads unwalled.
+    expect(await security.getReadFilter(SHARED, { userId: 'usr_spike_a', tenantId: ORG_A, positions: [] })).toBeUndefined();
+  });
+
+  it('(h6) an external object that states no scope at boot is refused BY NAME, with the three ways out; so is a `tenancy.tenantField` the wall cannot read', async () => {
+    const refused = await composeWalled(REFUSED_STACK, createSpikeTreeDriver({}, []));
+    let thrown: unknown;
+    try {
+      await refused.bootstrap();
+    } catch (e) {
+      thrown = e;
+    } finally {
+      try { await refused.shutdown(); } catch { /* best-effort */ }
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error & { name: string; objects?: Array<{ object: string }> };
+    expect(error.name).toBe('ExternalObjectOrganizationScopeUndeclaredError');
+    expect(error.objects?.map((o) => o.object)).toEqual([FOREIGN_FIELD, UNDECLARED]);
+    expect(error.message).toContain("'isolated' tenancy posture every external object states its organization scope");
+    expect(error.message).toContain(`'${UNDECLARED}'`);
+    expect(error.message).toContain('`organization_id` field of its own');
+    expect(error.message).toContain('`tenancy: { enabled: false }`');
+    expect(error.message).toContain('`systemFields: { tenant: false }`');
+    expect(error.message).toContain(`'${FOREIGN_FIELD}' declares \`tenancy.tenantField: 'remote_org'\``);
+    expect(error.message).toContain("`external.columnMap: { remote_org: 'organization_id' }`");
+    // The declared object is not named.
+    expect(error.message).not.toContain(`'${SHARED}'`);
+  }, BOOT_TIMEOUT);
 });

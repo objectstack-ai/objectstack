@@ -160,7 +160,10 @@ const MEMBER_CTX = { userId: 'u1', tenantId: 'org-1', positions: [], permissions
  * `kernel:ready` handlers so a case can run the boot gate itself.
  */
 async function bootWith(objects: Array<Record<string, unknown>>, opts: { posture?: string; hook?: boolean } = {}) {
-  const byName = new Map(objects.map((o) => [o.name as string, o]));
+  // The identity objects the plugin's OTHER `kernel:ready` gate asks for, so running
+  // every recorded handler judges only the declaration under test.
+  const identity = [{ name: 'sys_user', fields: {} }, { name: 'sys_member', fields: {} }];
+  const byName = new Map([...identity, ...objects].map((o) => [o.name as string, o]));
   const ready: Array<() => unknown> = [];
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
