@@ -66,6 +66,7 @@ function makeAdapter(status: number, body: unknown) {
     );
   });
   const ds: any = new ObjectStackAdapter({ baseUrl: 'http://test.local', fetch: fetchImpl });
+  ds.__fetch = fetchImpl;
   return ds;
 }
 
@@ -152,5 +153,55 @@ describe('object list · an OBJECT_API_DISABLED 404 is not an empty list (#4408)
       expect(container.querySelector('[data-testid="empty-state"]')).not.toBeNull();
     });
     expect(container.querySelector('[data-testid="list-error-state"]')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#29782 — the same masking one code over, on the list's plain
+ * read path. An object that failed to register answers 404
+ * `OBJECT_NOT_FOUND`. The adapter's plain `find()` (no `$expand`, no
+ * `$search`) degraded that to zero rows and memoised it, so the list said
+ * "no data yet" about an object that does not exist, and #29704's panel
+ * (the server's sentence and code) was reachable only on the raw path. The
+ * empty answer now belongs to platform collections alone
+ * (`isPlatformProvidedObjectName`); `sys_jwks` above is one, which is why the
+ * bare-404 control there still reads empty.
+ */
+describe('object list · a 404 OBJECT_NOT_FOUND on the plain read path is not an empty list (objectstack#29782)', () => {
+  const missingSchema: ListViewSchema = {
+    type: 'list-view',
+    objectName: 'crm_invoice',
+    fields: ['name'],
+  } as ListViewSchema;
+
+  it("shows the server's sentence and code, not the empty state", async () => {
+    const ds = makeAdapter(404, {
+      success: false,
+      error: { code: 'OBJECT_NOT_FOUND', message: "Object 'crm_invoice' is not registered" },
+    });
+    const { container } = render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView schema={missingSchema} dataSource={ds} />
+      </SchemaRendererProvider>,
+    );
+
+    const panel = await waitFor(() => {
+      const el = container.querySelector('[data-testid="list-error-state"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+
+    expect(panel.textContent).toContain("Object 'crm_invoice' is not registered");
+    expect(panel.querySelector('[data-testid="list-error-code"]')?.textContent).toBe('OBJECT_NOT_FOUND');
+    expect(panel.textContent).not.toMatch(/connection/i);
+    expect(container.querySelector('[data-testid="empty-state"]')).toBeNull();
+
+    // Every data read the list made took the plain path: the masking lived
+    // there, so a read that went raw would make this pass for the wrong reason.
+    const dataCalls = (ds.__fetch.mock.calls as unknown[][])
+      .map(([url]) => String(url))
+      .filter((u) => u.includes('/data/'));
+    expect(dataCalls.length).toBeGreaterThan(0);
+    expect(dataCalls.every((u) => !/populate=|[$]?search=/.test(decodeURIComponent(u)))).toBe(true);
   });
 });

@@ -1286,7 +1286,7 @@ export const MAILBOX_KEYS = Object.freeze([
   { id: 'notify:seat-online', kind: 'Notify', key: 'seat-online', from: 'the seating session (or a forced takeover, for the walled account)', to: 'the lane\'s sibling seats and triage', when: 'at seating', template: 'Notify: seat-online · LANE#N · LOGIN · mailbox #m · patrol TRIGGER_ID · takes: #a #b …' },
   { id: 'notify:seat-offline', kind: 'Notify', key: 'seat-offline', from: 'the signing-off session', to: 'the lane\'s sibling seats and triage', when: 'at sign-off', template: 'Notify: seat-offline · LANE#N · in-flight: … · stay-behind: … · brief ID' },
   { id: 'notify:split', kind: 'Notify', key: 'split', from: 'a seat of a multi-seat lane', to: 'its sibling seats', when: 'at round open, only when the list changed', template: 'Notify: split · LANE#N · takes: … · leaves: …' },
-  { id: 'notify:security', kind: 'Notify', key: 'security', from: 'the finder — any seat, dev or QA runner', to: 'security#1', when: 'its relay `advisory_create` draft landed; the opaque advisory id ALONE — never a mechanism, a path or an object name', template: 'Notify: security · GHSA-ID' },
+  { id: 'notify:security', kind: 'Notify', key: 'security', from: 'the seat holding the finding (a dev\'s or a QA runner\'s reaches its PM session privately first); triage, for a public card it labelled `security`', to: 'security#1', when: 'the seat\'s relay `advisory_create` draft landed: the opaque advisory id ALONE; or triage labelled a public card `security`: its number ALONE — never a mechanism, a path or an object name', template: 'Notify: security · GHSA-ID or #n' },
 ]);
 /** One event, one line: the longest a mailbox line may be, in bytes (the text's 「≤200 字节」). */
 export const MAILBOX_LINE_MAX_BYTES = 200;
@@ -1316,8 +1316,10 @@ const SERIAL_REF = /^#([1-9][0-9]*) behind #([1-9][0-9]*)$/;
 /** A ruling's option LETTER as the record spells it (`A`, `B′`, `乙`): one short token, never a number reference. */
 const RULING_LETTER_REF = /^[^\s#`]{1,12}$/u;
 /**
- * `GHSA-xxxx-xxxx-xxxx` — a repository security advisory's opaque id, the ONE field `Notify: security` carries
- * (`security-findings.md`: the id alone, never a mechanism, a path or an object name). MIRRORED from the relay's
+ * `GHSA-xxxx-xxxx-xxxx` — a repository security advisory's opaque id, the ONE field `Notify: security` carries from
+ * the seat holding a finding (`security-findings.md`: the id alone, never a mechanism, a path or an object name);
+ * triage's hand-over of a public card it labelled `security` carries that card's `#n` alone instead (`NUMBER_REF`,
+ * `lanes/security.md`). Never both on one line. MIRRORED from the relay's
  * `GHSA_ID_SHAPE` (`fleet-write/ops.mjs`, its reading of the id an advisory write lands) — not imported, so the
  * patrol graph never loads the relay; the self-test holds the two equal.
  */
@@ -1430,7 +1432,11 @@ const MAILBOX_FIELD_READERS = Object.freeze({
   'notify:security': (p) => {
     if (p.length !== 2) return null;
     const advisory = ADVISORY_ID_REF.exec(p[1]);
-    return advisory ? { advisory: advisory[0], numbers: [] } : null;
+    if (advisory) return { advisory: advisory[0], numbers: [] };
+    // A public card triage labelled `security` (`lanes/security.md`): its number is already public and names no
+    // mechanism, so it rides the doorbell as the one field — the card, never the card AND an id.
+    const card = NUMBER_REF.exec(p[1]);
+    return card ? { card: Number(card[1]), numbers: [Number(card[1])] } : null;
   },
   'notify:contract-review': (p) => {
     if (p.length !== 3) return null;
@@ -2213,7 +2219,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // per new key reading, the patrol and `patrol none` readings, the both-ways table pin that replaced the
   // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout, the invented
   // keys that stay refused, and the two end-to-end pins through check-half-states H72 (31 → 44 cases).
-  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 40,
+  // Raised 40 → 41 with the `Notify: security · #n` reading (a labelled public card handed to the security seat).
+  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 41,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 21,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
@@ -2803,7 +2810,8 @@ export async function selfTest() {
   t('⭐ `Notify: ruling` reads the card, the letter and the record id — a primed or CJK letter reads, a sentence does not', (() => { const r = readMailboxLine(DB.ru); return r.state === 'read' && r.id === 'notify:ruling' && r.card === 28117 && r.letter === 'A' && r.record === 6545646924 && r.numbers.join() === '28117' && readMailboxLine(DB.ru.replace(' A ', ' B′ ')).letter === 'B′' && readMailboxLine(DB.ru.replace(' A ', ' 乙 ')).letter === '乙' && readMailboxLine(MSG('Notify: ruling · #28117 A (record 6545646924, 「同意」) · your draft #28430')).state === 'unreadable'; })());
   t('⭐ `Notify: serial` reads the waiting card and the card it waits for; `Notify: landed` releases it', (() => { const r = readMailboxLine(DB.se); const l = readMailboxLine(DB.la); return r.state === 'read' && r.id === 'notify:serial' && r.card === 28572 && r.behind === 28562 && r.numbers.join() === '28572,28562' && l.state === 'read' && l.id === 'notify:landed' && l.card === 28562 && l.numbers.join() === '28562' && readMailboxLine(MSG('Notify: serial · #28572 · #28562')).state === 'unreadable'; })());
   t('⭐ `Notify: security` under `To: security#1` reads to the security seat (a bare lane `seatKey` spells) with the advisory\'s opaque id and nothing else — it names no card, so `numbers` is empty', (() => { const r = readMailboxLine(DB.sec); return r.state === 'read' && r.to === 'security#1' && r.id === 'notify:security' && r.kind === 'Notify' && r.key === 'security' && r.advisory === 'GHSA-7q4h-9x2m-5c8v' && r.numbers.length === 0 && readMailboxLine(MSG('Notify: security · GHSA-7q4h-9x2m-5c8v', 'security')).to === 'security#1'; })());
-  t('⛔ `Notify: security` carrying free text, a second field, a card number, an upper-case or short id, or no id at all is unreadable — nothing but the opaque id rides the doorbell', ['Notify: security · see the advisory', 'Notify: security · GHSA-7q4h-9x2m-5c8v · packages/x/src/door.ts', 'Notify: security · GHSA-7q4h-9x2m-5c8v · see the advisory', 'Notify: security · #28001', 'Notify: security · GHSA-7Q4H-9X2M-5C8V', 'Notify: security · GHSA-7q4h-9x2m', 'Notify: security'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'));
+  t('⛔ `Notify: security` carrying free text, a second field, an upper-case or short id, or no id at all is unreadable — nothing but the opaque id, or a labelled card\'s number alone, rides the doorbell', ['Notify: security · see the advisory', 'Notify: security · GHSA-7q4h-9x2m-5c8v · packages/x/src/door.ts', 'Notify: security · GHSA-7q4h-9x2m-5c8v · see the advisory', 'Notify: security · GHSA-7Q4H-9X2M-5C8V', 'Notify: security · GHSA-7q4h-9x2m', 'Notify: security'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'));
+  t('⭐ `Notify: security · #n` — triage handing a public card it labelled `security` to the seat — reads the card ALONE; the card beside an id, a second field, a PR, `#0` and the bare template stay unreadable', (() => { const r = readMailboxLine(MSG('Notify: security · #29761', 'security#1')); return r.state === 'read' && r.to === 'security#1' && r.id === 'notify:security' && r.card === 29761 && r.advisory === undefined && r.numbers.join() === '29761' && ['Notify: security · #29761 · GHSA-7q4h-9x2m-5c8v', 'Notify: security · #29761 · see the card', 'Notify: security · PR #29761', 'Notify: security · #0', 'Notify: security · GHSA-ID or #n'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'); })());
   t('⭐ every key of the table is named, as `Kind: key` in a code span, in the protocol text (`references/project-forms.md` 〈信箱 PR〉), and that section names NO other key — the table in both directions — and points at `--mailbox-keys` for the full spellings', (() => { const forms = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/project-forms.md', import.meta.url), 'utf8'); const at = forms.indexOf('\n## 信箱 PR\n'); const section = at < 0 ? '' : forms.slice(at + 1).split(/\n## /)[0]; const named = new Set([...section.matchAll(/`(Request|Notify): ([a-z-]+)`/g)].map((m) => `${m[1]}: ${m[2]}`)); const table = new Set(MAILBOX_KEYS.map((k) => `${k.kind}: ${k.key}`)); return section !== '' && named.size === table.size && [...table].every((k) => named.has(k)) && section.includes('--mailbox-keys'); })());
   t('⭐ every template, sent VERBATIM, is not an event — a placeholder (`#n`, `SHA`, `LANE#N`, `p0 or p1`, `TRIGGER_ID`, `ID`) never reads as one', MAILBOX_KEYS.every((k) => readMailboxLine(MSG(k.template)).state === 'unreadable'));
   t('⭐ `--mailbox-keys` prints exactly `mailboxKeyLines()` — every template, with its row under it — and exits 0', (() => { const r = faceCli(['--mailbox-keys']); return r.status === 0 && r.stdout === `${mailboxKeyLines().join('\n')}\n` && MAILBOX_KEYS.every((k) => r.stdout.includes(`${k.template}\n    ${k.from} → ${k.to}; ${k.when}\n`)) && usageLines().join('\n').includes('--mailbox-keys'); })());

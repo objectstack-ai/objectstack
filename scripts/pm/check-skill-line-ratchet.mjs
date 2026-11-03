@@ -1515,7 +1515,17 @@ export const CEILINGS = new Map([
   // never-public rules stay in security-findings.md. A NEW file, so this is an
   // added row and no other row moves; set at the landed line count (headroom 0,
   // same convention).
-  ['.claude/skills/pm-dispatch/references/lanes/security.md', 34],
+  // 34 → 53 (#29726): the maintainer's working rules for the seat — the
+  // isolated `CONTRACT_REVIEW_TIER` review before any question reaches the
+  // maintainer, cloud orders for heavy fixes, the per-object close-out, the
+  // relay `closed` move on merge and the pre-release publish-or-not list, the
+  // intake and read rules — plus the review's S1 (two restated lines become
+  // pointers) and S2 (the label is the hand-over). Ruling of record: that card's
+  // body (rulings 1–3, each verbatim there; the order to write them in is
+  // 「这些都应该写到你的skills」), and its amendment comment 6595626876 (「目前的修复都关闭」,
+  // 「你处理完的可以都先关闭」, 「哪些高危要发布应该在我版本发布前决策吧」). Measured
+  // delta +19 (34 → 53 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/security.md', 53],
   // Project Director seat charter (maintainer ruling 2026-08-27, verbatim:
   // 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」; the file
   // carries it as a rule line since the rules-only rewrite, not as this quotation)

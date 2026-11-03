@@ -106,6 +106,7 @@ import { useDraftAutoSave, type DraftSend } from '../studio-design/useDraftAutoS
 // objectui#12456 — the Studio Access pillar's presentation draws the shared item header.
 import { StudioItemHeader, StudioTab } from '../studio-design/StudioItemHeader.js';
 import { STUDIO_KIND_CHIP } from '../studio-design/studio-tokens.js';
+import type { CustomizationMarkKind } from '../studio-design/customizationMarks.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import {
   t as translate,
@@ -580,13 +581,23 @@ export interface PermissionMatrixEditPageProps {
    * is the routed page's. Omitted (Setup's permission page): unchanged.
    */
   studio?: PermissionStudioChrome;
+  /**
+   * objectstack#29809 (ADR-0146 D3) — the customization mark the host's rail
+   * draws for this set (`customizationMarks.ts`, the one rule): on a read-only
+   * base, `'added'` for a set its `<base>.custom` pair holds (a New similar
+   * copy or a set created there), `'customized'` for a served override of a
+   * base set. Set only by the Studio Access pillar; omitted (Setup, the
+   * metadata admin) or `null` (no mark, or the read has not answered),
+   * nothing changes. Read by the provenance badge alone.
+   */
+  customizationMark?: CustomizationMarkKind | null;
 }
 
 /* ────────────────────────────────────────────────────────────────── */
 /* Component                                                          */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio }: PermissionMatrixEditPageProps) {
+export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio, customizationMark = null }: PermissionMatrixEditPageProps) {
   // objectstack ADR-0146 D1 (#28561) — Studio's "All metadata" area mounts this
   // editor through the routed item page, which hands it no `readOnly`: a
   // read-only package's area is the host gate here, as a pillar's prop is.
@@ -724,7 +735,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // envelope's code artifact), else it was authored in this environment. Spec
   // 18 retired the authored `managedBy` (objectstack#23891), and no served
   // datum names a "platform" set, so there are two answers (objectui#12753).
-  const shippedByPackage = !!packageId || codeIsArtifact;
+  // objectstack#29809 (ADR-0146 D3) — a base's `<base>.custom` pair is a
+  // package too, so its door's `packageId` alone called a set the pair adds
+  // "Package" beside the rail's "Added". The host's mark answers that, by the
+  // rule its rail draws from: an added set is the environment's own, whatever
+  // door opened it. A customized base set stays the base's ("Package").
+  const shippedByPackage = customizationMark !== 'added' && (!!packageId || codeIsArtifact);
   const artifactArmOpen = !!entry?.allowEnvironmentOverlay && servedEditable !== false;
   const typeTierOpen = !!(entry?.allowEnvironmentOverlay || entry?.allowRuntimeCreate);
   const canWriteByType = artifactTierApplies ? artifactArmOpen : typeTierOpen;
@@ -1960,7 +1976,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           this editor already fetches (`codeIsArtifact`, the artifact
           gate's own input). At the environment scope there is no
           `packageId`, so a set a code package ships read "Custom" beside
-          its own lock. */}
+          its own lock. A set a base's pair adds reads "Custom" (the host's
+          `customizationMark`, objectstack#29809). */}
       <Badge variant="outline" className="text-[10px] shrink-0" data-testid="perm-provenance-badge">
         {shippedByPackage ? t('perm.badge.package') : t('perm.badge.custom')}
       </Badge>

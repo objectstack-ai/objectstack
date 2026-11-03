@@ -137,14 +137,27 @@ function roleHolderPredicate(roleName: string, org: string | null | undefined): 
 const MEMBERSHIP_PAGE_ROWS = 10000;
 
 /**
+ * What a refused read was for, which decides how its refusal words the
+ * consequence: a holder-set `expansion`, a user-scoped holder `check`, or a
+ * `lookup` of the one person a head or manager column names.
+ */
+type HolderReadKind = 'expansion' | 'check' | 'lookup';
+
+/**
  * [#29503] Why a holder read refused, as one sentence family: what could not
  * be read, the reason, and why the answer is a refusal rather than "nobody".
  * The driver's error rides along as `cause`.
+ *
+ * [#29792] A `lookup` reads one person (a unit's head, a user's manager), not
+ * a set of holders, so its refusal says so: answering "none" would drop that
+ * person from whatever the caller routes through the answer.
  */
-function holderReadRefusal(subject: string, reason: string, cause: unknown, kind: 'expansion' | 'check'): Error {
+function holderReadRefusal(subject: string, reason: string, cause: unknown, kind: HolderReadKind): Error {
   const consequence = kind === 'expansion'
     ? 'A shortened or empty holder set would withhold or revoke the grants it confers, so the expansion refuses instead.'
-    : 'Answering "not a holder" would revoke the grants the holding confers, so the check refuses instead.';
+    : kind === 'check'
+      ? 'Answering "not a holder" would revoke the grants the holding confers, so the check refuses instead.'
+      : 'Answering "none" would drop the person it names from everything routed through the answer, so the lookup refuses instead.';
   return Object.assign(
     new Error(`[sharing] ${subject} could not be read: ${reason}. ${consequence}`),
     cause === undefined ? {} : { cause },
@@ -188,8 +201,11 @@ export async function readMembershipToCompletion(
     fields: readonly string[];
     subject: string;
     pageRows?: number;
-    /** A user-scoped holder check words its refusal as a check, not an expansion. */
-    kind?: 'expansion' | 'check';
+    /**
+     * A user-scoped holder check words its refusal as a check, and a single
+     * head or manager lookup as a lookup; the default is an expansion.
+     */
+    kind?: HolderReadKind;
   },
 ): Promise<Record<string, unknown>[] | null> {
   const rows: Record<string, unknown>[] = [];
@@ -374,24 +390,30 @@ export class TeamGraphService implements ITeamGraphService {
    *
    * Resolution order matches `expandRoleUsers` exactly — the argument, else the
    * instance's `organizationId`, else no screen at all.
+   *
+   * [#29792] The `sys_user` read goes through {@link readMembershipToCompletion}
+   * as a `lookup`, the read `BusinessUnitGraphService`'s standalone fallback
+   * uses: a read that FAILS throws and nothing is cached for it, so the next
+   * caller on the same pass reads again. It caught any error to `null` ("no
+   * manager") and cached that `null` under `org::userId` for the pass, so a
+   * consumer naming "the owner's manager" dropped the manager on an outage and
+   * kept dropping it after the read recovered. A stack that never materialises
+   * `sys_user` has no manager on file and answers `null`. The organization
+   * screen keeps its ruled fail-open posture ({@link managerIsProvablyOutsideOrg}).
    */
   async managerOf(userId: string, organizationId?: string): Promise<string | null> {
     if (!userId) return null;
     const org = organizationId ?? this.organizationId;
     const key = `${org ?? '*'}::${userId}`;
     if (this.cache.manager!.has(key)) return this.cache.manager!.get(key) ?? null;
-    let row: any = null;
-    try {
-      const rows = await this.engine.find('sys_user', {
-        where: { id: userId },
-        fields: ['id', 'manager_id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      row = Array.isArray(rows) ? rows[0] : null;
-    } catch {
-      row = null;
-    }
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_user',
+      where: { id: userId },
+      fields: ['manager_id'],
+      subject: `the manager of user '${userId}'`,
+      kind: 'lookup',
+    });
+    const row = rows?.[0];
     let mgr = row?.manager_id ? String(row.manager_id) : null;
     if (mgr && (await managerIsProvablyOutsideOrg(this.engine, mgr, org))) mgr = null;
     this.cache.manager!.set(key, mgr);
