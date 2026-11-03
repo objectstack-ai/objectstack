@@ -307,8 +307,8 @@ const ORG_ADMINS = ['orgAdmin', 'orgAdminNoBypass'] as const;
 
 /** `caller`'s own by-id read of `id`: the read door's answer to it. */
 function readAs(h: Harness, table: Table, id: string, caller: Caller) {
-  const { positions, permissions, ...rest } = CALLERS[caller];
-  const context = { ...rest, positions: [...positions], permissions: [...permissions] };
+  const { positions, permissions, accessible_org_ids, ...rest } = CALLERS[caller];
+  const context = { ...rest, positions: [...positions], permissions: [...permissions], accessible_org_ids: [...accessible_org_ids] };
   return h.engine.findOne(table, { where: { id }, context });
 }
 
