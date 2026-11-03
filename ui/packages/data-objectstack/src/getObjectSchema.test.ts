@@ -150,11 +150,10 @@ describe('ObjectStackAdapter.getObjectSchema', () => {
 /**
  * objectstack#29728 — a failed by-name read that is not a 404 is rewrapped by
  * `createErrorFromResponse`, which replaces the server's ADR-0112 code with its
- * own taxonomy and stamps `500` on a request that got no answer. The rewrap
- * keeps the transport's own error as `details.originalError` (as the 404 arm's
- * `MetadataNotFoundError` does), so a reader can tell whether, and what, the
- * server answered. The wrapper's class, code, statusCode and message are
- * unchanged.
+ * own taxonomy. The rewrap keeps the transport's own error as
+ * `details.originalError` (as the 404 arm's `MetadataNotFoundError` does), so
+ * a reader can tell what the server answered. Since objectstack#29885 a
+ * request that got no answer carries no `statusCode` on the wrapper either.
  */
 describe('ObjectStackAdapter.getObjectSchema keeps the server answer as the cause of a non-404 failure (objectstack#29728)', () => {
   beforeEach(() => clearSharedDiscoveryCache());
@@ -196,7 +195,7 @@ describe('ObjectStackAdapter.getObjectSchema keeps the server answer as the caus
     expect(err.details.originalError).toMatchObject({ status: 500, code: 'INTERNAL_ERROR', message: 'Database connection refused.' });
   });
 
-  it('no answer: the wrapper still reads 500, and its cause is the bare fetch failure, with no status', async () => {
+  it('no answer: the wrapper carries no status (objectstack#29885), and its cause is the bare fetch failure', async () => {
     const drop = new TypeError('Failed to fetch');
     const adapter = adapterAnswering(() => {
       throw drop;
@@ -204,7 +203,7 @@ describe('ObjectStackAdapter.getObjectSchema keeps the server answer as the caus
     const err: any = await adapter.getObjectSchema('account').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ObjectStackError);
     expect(err.code).toBe('UNKNOWN_ERROR');
-    expect(err.statusCode).toBe(500);
+    expect(err.statusCode).toBeUndefined();
     expect(err.message).toBe('Failed to fetch');
     expect(err.details.originalError).toBe(drop);
   });
