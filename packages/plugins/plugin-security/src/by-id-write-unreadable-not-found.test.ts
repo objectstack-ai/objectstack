@@ -19,6 +19,13 @@
  *     write — are not addressed by the caller, so they keep the answer they
  *     had before: the record-level 403, which names nothing. A not-found there
  *     would carry an id the caller never supplied.
+ *  5. The ADR-0090 D12 administration gate, which refuses a write to the
+ *     permission-assignment objects before any grant is read, answers the
+ *     addressed by-id update and delete of a caller whose read of the object
+ *     is refused with that read refusal, for a row and for an id naming none
+ *     alike. A caller who reads the object, and an insert, keep the gate's own
+ *     sentence; an administrator still writes. (Its own rig, at the foot of
+ *     the file: the two assignment objects and three more permission sets.)
  *
  * The rig is one permission set over two objects: a public parent, and a
  * child whose rows a caller reads when it owns them or they are flagged
@@ -35,6 +42,10 @@ import { recordNotFoundError } from '@objectstack/core';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { SysUserPosition } from './objects/sys-user-position.object.js';
+import { SysUser } from '@objectstack/platform-objects/identity';
+import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -251,5 +262,178 @@ describe('a by-id write the platform issues under the caller\'s context keeps th
     const r = await boot();
     expect(await r.update(CHILD, 'c_hidden')).toMatchObject({ kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 });
     expect(await r.remove(CHILD, 'c_kid')).toMatchObject({ kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 });
+  });
+});
+
+
+// ── The delegated-administration gate (ADR-0090 D12) ─────────────────────────
+//
+// The gate refuses a write to the permission-assignment objects on the caller
+// and the object alone, before any grant is read, in its own words. For a
+// by-id update or delete the caller addressed, a caller whose read of the
+// object is refused gets the read door's refusal from it instead: the answer
+// that caller's by-id read gives for every id, so a row and an id naming none
+// answer alike. A caller who reads the object keeps the gate's own sentence,
+// an insert (which names no row) keeps it too, and an administrator still
+// writes.
+
+const ASSIGNMENT_OBJECTS = ['sys_user_permission_set', 'sys_user_position'] as const;
+type AssignmentObject = (typeof ASSIGNMENT_OBJECTS)[number];
+const SEEDED_ROW: Record<AssignmentObject, string> = { sys_user_permission_set: 'ups_seeded', sys_user_position: 'upos_seeded' };
+const NOWHERE = 'zz_nowhere_0001';
+const GATE_SENTENCE = 'requires tenant-level administration or a delegated adminScope';
+const ADMIN_SET = defaultPermissionSets.find((p) => p.name === ADMIN_FULL_ACCESS)!;
+
+/** Holds no grant on either object (its one set names the two business objects above). */
+const NO_GRANT = { userId: 'usr_nf_nogrant', positions: [], permissions: ['qa_nf_guard'], posture: 'MEMBER' };
+/** May create, update and delete both objects, and read neither. */
+const WRITE_NO_READ = { userId: 'usr_nf_writer', positions: [], permissions: ['qa_nf_blind_writer'], posture: 'MEMBER' };
+/** Reads both objects, and holds nothing else on them. */
+const READER = { userId: 'usr_nf_reader', positions: [], permissions: ['qa_nf_reader'], posture: 'MEMBER' };
+const ADMIN = { userId: 'usr_nf_admin', positions: [], permissions: [ADMIN_FULL_ACCESS], posture: 'PLATFORM_ADMIN' };
+
+const gateEngines: ObjectQL[] = [];
+afterEach(async () => {
+  for (const engine of gateEngines.splice(0)) {
+    try { await engine.destroy(); } catch { /* noop */ }
+  }
+});
+
+type Read = { kind: 'read'; row: unknown } | ({ kind: 'refused' } & Refusal);
+
+interface GateRig {
+  read: (caller: object, object: string, id: string) => Promise<Read>;
+  write: (caller: object, verb: 'update' | 'delete', object: string, id: string) => Promise<Outcome>;
+  insert: (caller: object, object: string, row: Record<string, unknown>) => Promise<Outcome>;
+  stored: (object: string, id: string) => Promise<Record<string, unknown> | null>;
+}
+
+async function bootGateRig(): Promise<GateRig> {
+  const engine = new ObjectQL();
+  engine.registerDriver(
+    new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
+    true,
+  );
+  await engine.init();
+  engine.registerApp({
+    id: 'com.objectstack.qa.by-id-write-administration-gate',
+    name: 'By-id write: the administration gate answers a caller who cannot read',
+    version: '1.0.0',
+    type: 'plugin',
+    scope: 'system',
+    objects: [SysUserPermissionSet, SysUserPosition],
+  } as never);
+  await engine.syncSchemas();
+  // `sys_user` registered and unprovisioned, as in the sibling suites: the
+  // assignment rows' title formula reads through it.
+  if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.by-id-write-administration-gate');
+  await installDefaultOrganization(engine);
+  await engine.insert('sys_user_permission_set', { id: SEEDED_ROW.sys_user_permission_set, user_id: OTHER, permission_set: 'qa_nf_guard' }, SYS);
+  await engine.insert('sys_user_position', { id: SEEDED_ROW.sys_user_position, user_id: OTHER, position: 'qa_pos' }, SYS);
+  gateEngines.push(engine);
+
+  const grant = (allowRead: boolean, write: boolean) =>
+    Object.fromEntries(ASSIGNMENT_OBJECTS.map((o) => [o, { allowRead, allowCreate: write, allowEdit: write, allowDelete: write }]));
+  const sets = [
+    MEMBER_DEFAULT,
+    ADMIN_SET,
+    PermissionSetSchema.parse({
+      name: 'qa_nf_guard',
+      objects: {
+        [PARENT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+        [CHILD]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+      },
+    }),
+    PermissionSetSchema.parse({ name: 'qa_nf_blind_writer', objects: grant(false, true) }),
+    PermissionSetSchema.parse({ name: 'qa_nf_reader', objects: grant(true, false) }),
+  ];
+  const services: Record<string, unknown> = {
+    manifest: { register: vi.fn() },
+    objectql: engine,
+    metadata: {
+      get: async (type: string, name: string) =>
+        type === 'permission' ? sets.find((s) => s.name === name) ?? null : engine.getSchema(name) ?? null,
+      list: async () => sets,
+    },
+  };
+  const ctx = {
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    registerService: vi.fn(),
+    hook: () => undefined,
+    getService: (name: string) => {
+      if (!(name in services)) throw new Error(`service not registered: ${name}`);
+      return services[name];
+    },
+  };
+  const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+  await plugin.init(ctx as never);
+  await plugin.start(ctx as never);
+
+  return {
+    read: (caller, object, id) =>
+      engine.findOne(object, { where: { id }, context: { ...caller } } as never).then(
+        (row): Read => ({ kind: 'read', row }),
+        (e: any): Read => ({ kind: 'refused', code: e?.code, status: e?.statusCode ?? e?.status, message: String(e?.message), name: e?.name }),
+      ),
+    write: (caller, verb, object, id) =>
+      outcome(
+        verb === 'update'
+          ? engine.update(object, { reason: 'renamed' }, { where: { id }, context: { ...caller } } as never)
+          : engine.delete(object, { where: { id }, context: { ...caller } } as never),
+      ),
+    insert: (caller, object, row) => outcome(engine.insert(object, row, { context: { ...caller } } as never)),
+    stored: async (object, id) =>
+      ((await engine.findOne(object, { where: { id }, context: { isSystem: true } } as never)) ?? null) as Record<string, unknown> | null,
+  };
+}
+
+describe('the administration gate answers a by-id write from a caller who cannot read the object with that read\'s refusal', () => {
+  for (const object of ASSIGNMENT_OBJECTS) {
+    for (const verb of ['update', 'delete'] as const) {
+      for (const [label, caller] of [['no grant on the object', NO_GRANT], ['a write grant without a read grant', WRITE_NO_READ]] as const) {
+        it(`${object} ${verb}, ${label}: the row and an id naming none get the read door's refusal`, async () => {
+          const r = await bootGateRig();
+          const id = SEEDED_ROW[object];
+          const before = await r.stored(object, id);
+          // The precondition, read off the read door: it refuses this caller.
+          const read = await r.read(caller, object, id);
+          expect(read).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+
+          const row = await r.write(caller, verb, object, id);
+          const none = await r.write(caller, verb, object, NOWHERE);
+
+          expect(row, 'the row').toEqual(read);
+          expect(none, 'an id naming none').toEqual(read);
+          expect(await r.stored(object, id), 'refused means untouched').toEqual(before);
+        });
+      }
+
+      it(`${object} ${verb}, a caller who reads the object: the row and an id naming none keep the gate's own refusal`, async () => {
+        const r = await bootGateRig();
+        const id = SEEDED_ROW[object];
+        expect(await r.read(READER, object, id)).toMatchObject({ kind: 'read', row: { id } });
+
+        const row = await r.write(READER, verb, object, id);
+        const none = await r.write(READER, verb, object, NOWHERE);
+
+        expect(row).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+        expect(row.kind === 'refused' && row.message).toContain(GATE_SENTENCE);
+        expect(withoutId(none, NOWHERE)).toEqual(withoutId(row, id));
+      });
+    }
+  }
+
+  it('an administrator still updates an assignment row, and gets not-found for an id naming none', async () => {
+    const r = await bootGateRig();
+    expect(await r.write(ADMIN, 'update', 'sys_user_permission_set', SEEDED_ROW.sys_user_permission_set)).toEqual({ kind: 'landed' });
+    expect((await r.stored('sys_user_permission_set', SEEDED_ROW.sys_user_permission_set))?.reason).toBe('renamed');
+    expect(await r.write(ADMIN, 'update', 'sys_user_permission_set', NOWHERE)).toMatchObject({ kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 });
+  });
+
+  it('an insert names no row, so a caller who cannot read the object keeps the gate\'s own refusal', async () => {
+    const r = await bootGateRig();
+    const got = await r.insert(NO_GRANT, 'sys_user_permission_set', { user_id: OTHER, permission_set: 'qa_nf_guard' });
+    expect(got).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+    expect(got.kind === 'refused' && got.message).toContain(GATE_SENTENCE);
   });
 });

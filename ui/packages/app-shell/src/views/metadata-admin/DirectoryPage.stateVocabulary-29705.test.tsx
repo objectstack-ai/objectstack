@@ -28,6 +28,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+import { en as CONSOLE_EN, zh as CONSOLE_ZH } from '@object-ui/i18n/locales';
 import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHost';
 import type { RichMetadataTypeEntry } from './useMetadata';
 
@@ -200,8 +201,8 @@ const VOCABULARY: ReadonlyArray<{ state: string; key: string; en: string; zh: st
   { state: 'can be added', key: 'engine.studio.customize.addable', en: 'Can be added', zh: '可新增' },
   { state: 'customized', key: 'engine.customizationMark.customized', en: 'Customized ({baseName})', zh: '已定制（{baseName}）' },
   { state: 'added', key: 'engine.customizationMark.added', en: 'Added', zh: '新增' },
-  // en still reads "Off" here; its move to "Switched off" is objectstack#29729.
-  { state: 'switched off', key: 'engine.studio.auto.off', en: 'Off', zh: '已停用' },
+  { state: 'switched off', key: 'engine.studio.auto.off', en: 'Switched off', zh: '已停用' },
+  { state: 'switched on', key: 'engine.studio.auto.on', en: 'Switched on', zh: '已启用' },
 ];
 
 /** Every other key that draws one of the states, and the word it must carry. */
@@ -286,5 +287,110 @@ describe('Access: sharing settings in zh carry no English doublet or bare OWD (o
     // en is untouched.
     expect(EN['perm.owd.private']).toBe('Private');
     expect(EN['engine.studio.access.colOwd']).toBe('OWD');
+  });
+});
+
+/**
+ * objectstack#29729 — the words #29705 left with a second spelling outside its
+ * diff. A switched-on or switched-off flow or action reads 启用 / 停用 in zh and
+ * "Switched on" / "Switched off" in en wherever Studio and Setup name that
+ * state; the Customize act reads 定制 (its state is 已定制, its offer 可定制);
+ * a permission set no package ships reads 新增 / "Added", not 自定义.
+ */
+describe('one word per state, the second pass (objectstack#29729)', () => {
+  const SWITCHED_ON = ['engine.studio.auto.on', 'engine.studio.auto.enabled', 'engine.studio.auto.ledger.on', 'engine.studio.auto.ledger.notRunning', 'engine.studio.auto.ledger.switchedOn'];
+  const SWITCHED_OFF = ['engine.studio.auto.off', 'engine.studio.auto.offTitle', 'engine.studio.auto.disabled', 'engine.studio.auto.disabledToast', 'engine.studio.auto.ledger.off', 'engine.studio.auto.ledger.switchedOff'];
+  const LEDGER_PROSE = ['engine.studio.auto.ledger.hint', 'engine.studio.auto.ledger.walled'];
+
+  it.each(SWITCHED_ON)('%s: switched on is 启用 / "Switched on" (or "switched on")', (key) => {
+    expect(ZH[key]).toContain('启用');
+    expect(EN[key]).toMatch(/switched on/i);
+  });
+
+  it.each(SWITCHED_OFF)('%s: switched off is 停用 / "Switched off" (or "switched off")', (key) => {
+    expect(ZH[key]).toContain('停用');
+    expect(EN[key]).toMatch(/switched off/i);
+  });
+
+  it.each([...SWITCHED_ON, ...SWITCHED_OFF, ...LEDGER_PROSE])('%s: no 开启 / 关闭 in zh, no On/Off/Enabled/Disabled in en', (key) => {
+    expect(ZH[key]).not.toMatch(/开启|关闭/u);
+    // The old state labels: a bare word, or the word before "for this deployment" / " — …".
+    expect(EN[key]).not.toMatch(/^(On|Off|Enabled|Disabled)( for | — |,|$)/u);
+  });
+
+  it("Setup's packaged actions name the same state the same way", () => {
+    const zh = (CONSOLE_ZH as any).packagedAutomation;
+    expect(zh.on).toBe('已启用');
+    expect(zh.off).toBe('已停用');
+    expect(zh.actionsSubtitle).toContain('停用后');
+    expect(zh.actionsSubtitle).not.toMatch(/关闭/u);
+    // CONTROL: en keeps its own pair for this page.
+    expect((CONSOLE_EN as any).packagedAutomation.off).toBe('Off');
+  });
+
+  // The switch-off confirm, its toasts and the cell all name one state: a
+  // user who switches an action off must not read 关闭 in the dialog, 已关闭
+  // in the toast and 已停用 in the column.
+  it.each(Object.keys((CONSOLE_ZH as any).packagedAutomation))(
+    "Setup's packaged actions zh row %s: no 开启 / 关闭",
+    (key) => {
+      expect((CONSOLE_ZH as any).packagedAutomation[key]).not.toMatch(/开启|关闭/u);
+    },
+  );
+
+  it("Setup's packaged actions: the confirm, the toasts and the cell share 启用 / 停用", () => {
+    const zh = (CONSOLE_ZH as any).packagedAutomation;
+    expect(zh.switchedOn).toBe('「{{label}}」已启用。');
+    expect(zh.switchedOff).toBe('「{{label}}」已在本部署中停用。');
+    expect(zh.actionOffTitle).toBe('停用「{{label}}」？');
+    expect(zh.actionOffBody).toMatch(/^在重新启用之前/u);
+    expect(zh.actionOffConfirm).toBe('停用');
+  });
+
+  const CUSTOMIZE_ACT = [
+    'engine.studio.customize.action',
+    'engine.studio.customize.actionTitle',
+    'engine.studio.customize.walled',
+    'engine.studio.customize.noVersion',
+    'engine.studio.customize.draftFooter',
+    'engine.studio.customize.restoreBody',
+    'engine.studio.customize.restoreFlowBody',
+    'engine.edit.resetConfirmBody',
+    'engine.studio.landing.description',
+    'engine.studio.landing.readonlyHint',
+    'engine.studio.area.formEditor.oneLocale',
+    'engine.studio.area.formEditor.translationWhole',
+  ];
+
+  it.each(CUSTOMIZE_ACT)('%s: the Customize act reads 定制, never 自定义', (key) => {
+    expect(ZH[key]).toContain('定制');
+    expect(ZH[key]).not.toContain('自定义');
+  });
+
+  it('the Customize button and the landing lines that quote it agree', () => {
+    expect(ZH['engine.studio.customize.action']).toBe('定制');
+    expect(ZH['engine.studio.landing.description']).toContain('「定制」');
+    expect(ZH['engine.studio.landing.readonlyHint']).toContain('「定制」');
+  });
+
+  // CONTROL: 自定义 meaning "user-defined" (a custom value, key, renderer, page
+  // or code) is another sense and keeps its word.
+  it.each([
+    'engine.inspector.action.mode.custom',
+    'engine.inspector.flowNode.advancedHint',
+    'engine.inspector.flowEdge.branchCustom',
+    'engine.inspector.combo.noMatch',
+    'engine.form.fallbackJson',
+    'engine.studio.if.kindDesc.page',
+    'engine.flowNode.script.hint',
+  ])('CONTROL — %s keeps 自定义 (user-defined, not the Customize act)', (key) => {
+    expect(ZH[key]).toContain('自定义');
+  });
+
+  it('a permission set no package ships reads the added word, not 自定义 / "Custom"', () => {
+    expect(ZH['perm.badge.custom']).toBe(ZH['engine.customizationMark.added']);
+    expect(EN['perm.badge.custom']).toBe(EN['engine.customizationMark.added']);
+    // CONTROL: the shipped answer is untouched.
+    expect(EN['perm.badge.package']).toBe('Package');
   });
 });

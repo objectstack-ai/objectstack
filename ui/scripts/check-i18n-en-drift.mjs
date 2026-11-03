@@ -181,8 +181,13 @@ export const packPath = (lang) => `packages/i18n/src/locales/${lang}.ts`;
 /** Where the waiver ledger lives, repo-relative. */
 export const LEDGER_PATH = 'scripts/i18n-en-drift-baseline.json';
 
-/** A ledger entry must name the issue that justifies it, in this spelling. */
-export const ISSUE_PATTERN = /^objectui#\d+$/;
+/**
+ * A ledger entry must name the issue that justifies it, in this spelling. The
+ * ui tree moved into objectstack-ai/objectstack, so a new waiver names an
+ * `objectstack#N` card; the `objectui#N` spelling stays for the entries that
+ * predate the move (objectstack#29729).
+ */
+export const ISSUE_PATTERN = /^(?:objectui|objectstack)#\d+$/;
 
 // -- pack parsing -------------------------------------------------------------
 
@@ -533,7 +538,7 @@ export function checkLedger(ledger, enAfter) {
       problems.push({ reason: 'malformed-waiver', key, detail: 'missing a `reason`' });
     }
     if (typeof entry.issue !== 'string' || !ISSUE_PATTERN.test(entry.issue)) {
-      problems.push({ reason: 'malformed-waiver', key, detail: 'missing an `issue` of the form objectui#1234' });
+      problems.push({ reason: 'malformed-waiver', key, detail: 'missing an `issue` of the form objectstack#1234 (or objectui#1234)' });
     }
     if (!enAfter.has(key)) {
       problems.push({ reason: 'stale-waiver', key, detail: 'this key no longer exists in the en pack' });
@@ -868,7 +873,7 @@ if (invokedDirectly) {
         'serving a retired sentence, one of them as an idiomatic translation that every other\n' +
         'gate reads as perfectly healthy. Nothing downstream can find it again.\n' +
         `If a translation genuinely does not need to change, say so in ${LEDGER_PATH}:\n` +
-        '  { "<key>": { "en": "<the new en text, verbatim>", "reason": "…", "issue": "objectui#1234" } }\n' +
+        '  { "<key>": { "en": "<the new en text, verbatim>", "reason": "…", "issue": "objectstack#1234" } }\n' +
         'A waiver covers that one sentence and expires the next time the key changes.',
     );
   }
@@ -891,7 +896,7 @@ if (invokedDirectly) {
         'so fixing only the English half would have left the Chinese designer telling the old lie with\n' +
         'every gate in this repo green. The key is prefixed with its table.\n' +
         `If the zh row genuinely does not need to change, say so in ${LEDGER_PATH}:\n` +
-        '  { "designerWaivers": { "<TABLE.key>": { "en": "<the new en text, verbatim>", "reason": "…", "issue": "objectui#1234" } } }\n' +
+        '  { "designerWaivers": { "<TABLE.key>": { "en": "<the new en text, verbatim>", "reason": "…", "issue": "objectstack#1234" } } }\n' +
         'A waiver covers that one sentence and expires the next time the key changes.',
     );
   }
