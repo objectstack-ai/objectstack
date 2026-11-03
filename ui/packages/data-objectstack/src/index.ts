@@ -3613,7 +3613,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
             : undefined,
         });
         if (!res.ok) {
-          throw new Error(`discovery ${res.status} ${res.statusText}`);
+          // The server answered: its status rides on the error, so the
+          // ConnectionError below carries the server's status rather than
+          // none (objectstack#29916).
+          throw Object.assign(new Error(`discovery ${res.status} ${res.statusText}`), {
+            status: res.status,
+          });
         }
         const body = await res.json();
         return body && typeof body.success === 'boolean' && 'data' in body
@@ -3635,10 +3640,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       this.setConnectionState('connected');
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to connect to ObjectStack server';
+      // A status only when discovery was answered (the `!res.ok` throw above);
+      // a rejected `fetch` got no answer and the error carries no status
+      // (objectstack#29916).
+      const answeredStatus = (error as { status?: unknown } | null)?.status;
       const connectionError = new ConnectionError(
         errorMessage,
         undefined,
-        { originalError: error }
+        { originalError: error },
+        typeof answeredStatus === 'number' ? answeredStatus : undefined,
       );
 
       this.setConnectionState('error', connectionError);
@@ -3788,6 +3798,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       if (this.connectionState !== 'reconnecting') this.setConnectionState('reconnecting');
       return;
     }
+    // No status: nothing answered this request (objectstack#29916).
     this.setConnectionState(
       'error',
       new ConnectionError(
