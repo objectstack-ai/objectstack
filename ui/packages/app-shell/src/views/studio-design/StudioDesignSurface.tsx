@@ -12572,6 +12572,9 @@ export function AccessPillar({
               readOnly={readOnly}
               onDirtyChange={setMatrixDirty}
               embedded
+              // objectstack#29809 — the header's provenance chip reads the
+              // mark this set's rail row draws, so the two tell one story.
+              customizationMark={railMarks?.markOf({ type: 'permission', name: current, addedIn: currentAddedIn }) ?? null}
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,
