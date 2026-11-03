@@ -8761,7 +8761,10 @@ export class ObjectStackProtocolImplementation implements
      *    regime D6 recognises — the package definition wins. Such rows were
      *    written through the `OS_METADATA_WRITABLE` hatch before the seal; they
      *    stay at rest, untouched, and the boot report names them per type with
-     *    the two remedies ({@link reportSealedOverlayRows}).
+     *    the two remedies ({@link reportSealedOverlayRows}). [#29613] Except,
+     *    for a `page`, `app`, `dataset`, `doc` or `book`, the shipping
+     *    package's declared `.custom` override (`row`, below): ADR-0146 D8
+     *    item 2 serves it, as a dashboard's.
      *
      * ⛔ Never a row's, slot's or body's `origin` — the caller sets it.
      *
@@ -10848,11 +10851,11 @@ export class ObjectStackProtocolImplementation implements
      * after, measured for each reader. What changes is the registry-direct
      * read of the name, which answers the shipping package's own item.
      *
-     * ⛔ Those three types only. A row of a package that ships its own artifact
-     * of the name keeps its bare entry (#4624). `page`, `app`, `dataset`, `doc`
-     * and `book` still register: their reads serve a pair's override from the
-     * bare entry, so it can go only once they serve it from the row. `flow`
-     * registers with no artifact envelope (below).
+     * ⛔ Those three types, and [#29613] `page`, `app`, `dataset`, `doc` and
+     * `book`, whose reads serve a pair's declared override from its row since
+     * {@link declinesStoredRow} admits it. A row of a package that ships its own
+     * artifact of the name keeps its bare entry (#4624). `flow` registers with
+     * no artifact envelope (below).
      *
      * ## [#23233] The entry carries the row's package binding
      *
@@ -11012,7 +11015,7 @@ export class ObjectStackProtocolImplementation implements
         // bound to a package that ships no artifact of its name, under a name
         // another package ships, is not registered under the bare name, where
         // it would wear that other package's envelope. Its reads answer it from
-        // its row. ⛔ Those three types only.
+        // its row. ⛔ Those three types, and [#29613] page, app, dataset, doc and book.
         if (declinesBorrowedEnvelope(canonicalType, options.packageId, artifact)) return true;
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
