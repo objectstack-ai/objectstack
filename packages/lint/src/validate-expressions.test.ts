@@ -976,6 +976,113 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(typeMismatches(issues)).toEqual([]);
     });
 
+    // [#29926] A record-triggered flow's start and edge conditions: the engine
+    // throws on the fault, so the RUN fails there while the write that fired
+    // it lands. The null-guard twin refuses there with that outcome
+    // (`run-fails`, #29026); the type mismatch now does the same, worded so.
+    it('refuses a type mismatch in a record-triggered flow condition with the run-fails wording (#29926)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
+        flows: [{
+          name: 'opp_flow',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update', condition: 'title * 2 > 10' } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'title > 5' }],
+        }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.map(i => [i.where, i.severity, i.path])).toEqual([
+        ["flow 'opp_flow' · node 'start' (start) condition", 'error', 'flows[0].nodes[0].config.condition'],
+        ["flow 'opp_flow' · edge 'e1' (start→end) condition", 'error', 'flows[0].edges[0].condition'],
+      ]);
+      for (const i of found) {
+        expect(i.message).toContain('fails the run: the flow stops at this condition, the write that fired it still lands');
+        expect(i.message).not.toMatch(/evaluates to null|is refused/);
+      }
+      expect(found[0].message).toMatch(/`size\(title\)`/);
+    });
+
+    it('keeps the warning on a flow that is not record-triggered, and on an inert node condition (#29926)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text', required: true } } }],
+        flows: [{
+          name: 'rt_flow',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', triggerType: 'record-after-update' } },
+            { id: 'mid', type: 'assignment', config: { condition: 'title > 5' } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'mid' }, { id: 'e2', source: 'mid', target: 'end' }],
+        }],
+      });
+      const found = typeMismatches(issues);
+      expect(found.map(i => [i.where, i.severity])).toEqual([
+        ["flow 'rt_flow' · node 'mid' (assignment) condition", 'warning'],
+      ]);
+    });
+
+    // [#29926] An advisory rule (`severity: 'warning' | 'info'`) that cannot be
+    // evaluated is logged and skipped — the write proceeds (#24782). The
+    // nullable twin refuses it at publish; so does the type mismatch, and
+    // both now say what really happens instead of "the write is refused".
+    it('refuses a type mismatch in an advisory validation rule without claiming the write is refused (#29926)', () => {
+      for (const severity of ['warning', 'info'] as const) {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'crm_lead',
+            fields: { title: { type: 'text', required: true } },
+            validations: [
+              { name: 'adv', severity, condition: 'record.title > 5' },
+              {
+                name: 'c',
+                severity,
+                type: 'conditional',
+                when: 'record.title == "y"',
+                then: { name: 'c_then', type: 'script', condition: 'record.title * 2 > 1', message: 'm' },
+                message: 'm',
+              },
+            ],
+          }],
+        });
+        const found = typeMismatches(issues);
+        expect(found.map(i => [i.where, i.severity]), severity).toEqual([
+          ["object 'crm_lead' · validation 'adv'", 'error'],
+          ["object 'crm_lead' · validation rule 'c' then → 'c_then'", 'error'],
+        ]);
+        for (const i of found) {
+          expect(i.message).toContain('the rule is advisory, so a rule that cannot be evaluated is skipped, not refused');
+          expect(i.message).not.toMatch(/is refused|evaluates to null/);
+        }
+      }
+    });
+
+    it('gives the nullable twin the same outcome on one advisory rule, and keeps fail-closed on an error rule (#29926)', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'crm_lead',
+          fields: { qty: { type: 'number' }, title: { type: 'text', required: true } },
+          validations: [
+            { name: 'adv', severity: 'warning', condition: 'record.qty > 1000 && record.title > 5' },
+            { name: 'hard', condition: 'record.qty > 1000 && record.title > 5' },
+          ],
+        }],
+      });
+      const adv = issues.filter(i => i.path === 'objects[0].validations[0].condition');
+      const hard = issues.filter(i => i.path === 'objects[0].validations[1].condition');
+      expect(adv.map(i => i.severity)).toEqual(['error', 'error']);
+      expect(hard.map(i => i.severity)).toEqual(['error', 'error']);
+      // Neither verdict on the advisory rule claims a refused write …
+      for (const i of adv) {
+        expect(i.message).toMatch(/advisory/);
+        expect(i.message).not.toMatch(/rejected|is refused/);
+      }
+      // … and on the `error` rule both do.
+      expect(hard.find(i => /declares as nullable/.test(i.message))!.message).toMatch(/write is rejected fail-closed/);
+      expect(typeMismatches(hard)[0].message).toMatch(/the write \(or the operation a hook guards\) is refused/);
+    });
+
     it('warns on a flattened flow condition doing arithmetic on a bare text field', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'crm_opportunity', fields: { title: { type: 'text' }, amount: { type: 'currency' } } }],
@@ -3557,8 +3664,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   {
     receiver: 'rule',
     // `expression` / `predicate` / `formula` are absent — the chain that put
-    // the canonical `condition` in third place (#5017).
-    expected: ['condition', 'name', 'when'],
+    // the canonical `condition` in third place (#5017). [#29926] `severity`
+    // picks the rule's fault outcome (an advisory rule is skipped, not refused).
+    expected: ['condition', 'name', 'severity', 'when'],
     declaredBy: 'the ObjectSchema.validations[] union',
     keys: () => shapeKeysOf(ObjectSchema.shape.validations),
   },
@@ -3823,6 +3931,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // bare-name set. Their keys are that module's result key and Set
       // methods, never metadata keys.
       'rootScope', 'declaredVariables', 'nullGuardBare',
+      // [#29926] The fault-outcome ledger's own site descriptor (`kind`,
+      // `severity`, `recordTriggered`), built at each call site from the
+      // tabled receivers (`rule.severity`) — never read off metadata itself.
+      'site',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

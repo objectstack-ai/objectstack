@@ -71,6 +71,7 @@ import {
   validateExpression,
   introspectScope,
   inferExpressionType,
+  type ExprFaultOutcome,
   type FieldRole,
 } from '@objectstack/formula';
 // [#16913] The unknown-key error map every `strictToolInput` shape below is
@@ -633,14 +634,18 @@ function jsonText(value: unknown): string {
  */
 const VALIDATE_SITE_MAP: Record<
   string,
-  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType; optionLabels?: true; faultOutcome?: 'fail-closed' }
+  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType; optionLabels?: true; faultOutcome?: ExprFaultOutcome }
 > = {
   formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
   // [#29904] A validation rule fails closed (a fault refuses the write), so the
   // publish gate grades a text-vs-number comparison there an error; the tool
   // answers what the gate will.
   validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema, faultOutcome: 'fail-closed' },
-  flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema },
+  // [#29926] A condition with the object's fields bound bare is a
+  // record-triggered flow's (the trigger record is flattened into the run's
+  // variables); there a fault fails the run while the write that fired it
+  // lands, and the gate grades a text-vs-number comparison an error worded so.
+  flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema, faultOutcome: 'run-fails' },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
 
@@ -1049,7 +1054,7 @@ export function registerObjectTools(
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
           'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, where it refuses ' +
-          'the write; date-equality pitfalls), plus the fields and stdlib ' +
+          'the write, and at a `flow_condition`, where it fails the run; date-equality pitfalls), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions).',
         inputSchema: strictToolInput(

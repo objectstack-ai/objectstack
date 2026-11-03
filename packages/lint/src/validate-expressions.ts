@@ -96,7 +96,7 @@ import {
   buildScope,
   declaresOptionsOnceServed,
 } from '@objectstack/formula';
-import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
+import type { ExprFaultOutcome, RelationshipTraversalAnalysis } from '@objectstack/formula';
 import {
   collectFlowGraphs,
   flowNodeConfigRefusals,
@@ -1283,36 +1283,62 @@ function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): b
 }
 
 /**
+ * [#29904, #29926] The FAULT-OUTCOME ledger: what each predicate site's runtime
+ * does once an expression there faults, decided here and nowhere else. The
+ * answer is handed to the shared validator as `ExprSchemaHint.faultOutcome`
+ * (the `type-mismatch` verdict: a text or boolean field ordered or
+ * arithmetic'd against a number) and to {@link checkNullGuards} as its
+ * `NullGuardOutcome` (the nullable-comparison verdict) — the same token, so
+ * the two verdicts never tell one rule two different stories.
+ *
+ * Read off each evaluator:
+ *
+ * | site                                   | runtime on a fault                                         | outcome |
+ * |:---------------------------------------|:-----------------------------------------------------------|:--------|
+ * | validation rule `condition` / `when`, nested branches — `severity: 'error'` (the default) | `rule-validator.ts` `checkPredicate` / `checkConditional`: "write rejected" (#4649) | `fail-closed` |
+ * | the same, `severity: 'warning'` / `'info'` (the TOP-LEVEL rule's; a nested branch inherits it) | `evaluateValidationRules`: logged, "write proceeded: the rule is advisory" (#24782) | `fail-open` |
+ * | field `requiredWhen`, `readonlyWhen`   | `rule-validator.ts`: refuses the write (ADR-0137 D2)         | `fail-closed` |
+ * | option `visibleWhen`                   | `evaluateOptionVisibility`: refuses a write picking it (ADR-0137 D2, #22402) | `fail-closed` |
+ * | hook `condition`                       | `hook-wrappers.ts`: aborts the operation (#4775)             | `fail-closed` |
+ * | flow start / edge condition — record-triggered flow | `evaluateCondition` throws (ADR-0032 §1c); the trigger isolates the write: the run fails, the write lands | `run-fails` |
+ * | flow `decision` branch — record-triggered flow | the same; the null-guard verdict only (the branch is validated without the object's field types, so no `type-mismatch` reaches it) | `run-fails` |
+ * | flow condition, any other flow         | no total trigger record is bound (see `validate-null-guards.ts`'s ledger) | — not declared |
+ * | a flow node's `condition` other than the top-level start node's | inert (`flow-inert-node-condition`) | — |
+ * | field `expression` (formula)           | reads null                                                   | — the warning's text is true |
+ * | field `visibleWhen` / `settledWhen`, `conditionalFormatting`, field group `visibleWhen`, action `visible` / `disabled` / `pressed`, app landing `visible` | evaluated by the renderer: shows, hides or styles, never refuses a write | — |
+ * | sharing rule `condition`               | compiled to a query filter, not evaluated as CEL per row     | — |
+ *
+ * RLS / permission-set row predicates never reach this validator: they are
+ * judged by their own enforceability gates and compiled to a filter too.
+ * Where a site declares an outcome, a `type-mismatch` is an ERROR under that
+ * outcome's own code, the severity the null-guard verdict has there; where it
+ * declares none, it stays the advisory warning. An advisory rule is graded
+ * `error` too: the twin refuses it, and a rule that can never be evaluated
+ * never gives its advisory — the message says so instead of a refused write.
+ */
+type FaultSite =
+  | { readonly kind: 'validation rule'; readonly severity: unknown }
+  | { readonly kind: 'field write rule' | 'option visibleWhen' | 'hook condition' }
+  | { readonly kind: 'flow condition'; readonly recordTriggered: boolean };
+
+/** The ledger above, as the one function every call site asks. */
+function faultOutcomeOf(site: FaultSite): (ExprFaultOutcome & NullGuardOutcome) | undefined {
+  switch (site.kind) {
+    case 'validation rule':
+      // The runtime's own test: `severity !== 'error'` (default `'error'`).
+      return site.severity === 'warning' || site.severity === 'info' ? 'fail-open' : 'fail-closed';
+    case 'flow condition':
+      return site.recordTriggered ? 'run-fails' : undefined;
+    default:
+      return 'fail-closed';
+  }
+}
+
+/**
  * [#20078] The field-level predicate slots a read THROUGH a reference field is
  * refused on: the two field-rule slots the server evaluates on a write, and a
  * select option's own `visibleWhen`.
  */
-/**
- * [#29904] The predicate sites whose runtime FAILS CLOSED — an expression that
- * cannot be evaluated refuses the write (or aborts the operation) it guards,
- * never skipped — handed to the shared validator as
- * `ExprSchemaHint.faultOutcome`. There a `type-mismatch` (a text or boolean
- * field ordered or arithmetic'd against a number) is an ERROR, as the
- * nullable-comparison verdict (`checkNullGuards`, `'fail-closed'`) already is
- * at the same sites; everywhere else it stays the advisory warning.
- *
- * The one decision of which site fails closed, read off each evaluator:
- *
- * | site                                   | runtime on a fault                                         | passes |
- * |:---------------------------------------|:-----------------------------------------------------------|:-------|
- * | validation rule `condition` / `when`, nested branches | `rule-validator.ts` `checkPredicate` / `checkConditional`: "write rejected" (#4649) | yes |
- * | field `requiredWhen`, `readonlyWhen`   | `rule-validator.ts`: refuses the write (ADR-0137 D2)         | yes |
- * | option `visibleWhen`                   | `evaluateOptionVisibility`: refuses a write picking it (ADR-0137 D2, #22402) | yes |
- * | hook `condition`                       | `hook-wrappers.ts`: aborts the operation (#4775)             | yes |
- * | field `expression` (formula)           | reads null                                                   | no — the warning's text is true |
- * | flow start / edge / `decision` condition | the run fails; the write that fired it lands (`'run-fails'`) | no — not a write gate |
- * | field `visibleWhen` / `settledWhen`, `conditionalFormatting`, field group `visibleWhen`, action `visible` / `disabled` / `pressed`, app landing `visible` | evaluated by the renderer: shows, hides or styles, never refuses a write | no |
- * | sharing rule `condition`               | compiled to a query filter, not evaluated as CEL per row     | no |
- *
- * RLS / permission-set row predicates never reach this validator: they are
- * judged by their own enforceability gates and compiled to a filter too.
- */
-const FAIL_CLOSED = 'fail-closed' as const;
 
 type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen';
 
@@ -2438,11 +2464,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      */
     extraRoots?: readonly string[],
     /**
-     * [#29904] {@link FAIL_CLOSED} where this site's runtime refuses the write
-     * (or aborts the operation) when the predicate faults. Absent everywhere
-     * else; see the constant for the ledger of which sites pass it.
+     * [#29904, #29926] What this site's runtime does when the predicate
+     * faults, from {@link faultOutcomeOf} — never spelled at a call site.
+     * Absent where the ledger declares none.
      */
-    faultOutcome?: typeof FAIL_CLOSED,
+    faultOutcome?: ExprFaultOutcome,
   ): void => {
     if (raw == null) return;
     // Absent unless this is a served-row site on an object that declares a
@@ -2734,6 +2760,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      *    trigger isolates the write that fired it.
      */
     const nullGuardObject = resolveFlowTriggerKind(flow) === 'record_change' ? objectName : undefined;
+    // [#29926] The ledger's flow row: `run-fails` on a record-triggered flow,
+    // for both verdicts; nothing declared on any other flow.
+    const flowFaultOutcome = faultOutcomeOf({ kind: 'flow condition', recordTriggered: nullGuardObject !== undefined });
     const nullGuardBare = new Set<string>();
     if (nullGuardObject && rootScope.provable) {
       for (const name of nullableIndex.get(nullGuardObject) ?? []) {
@@ -2746,7 +2775,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       : new Set<string>();
     const checkFlowNullGuards = (where: string, raw: unknown, afterStart: boolean): void => {
       if (!nullGuardObject) return;
-      checkNullGuards(where, where, raw, nullGuardObject, 'run-fails', {
+      checkNullGuards(where, where, raw, nullGuardObject, flowFaultOutcome, {
         bareFields: nullGuardBare,
         ...(afterStart ? { presumed: nullGuardPresumed } : {}),
       });
@@ -2867,13 +2896,16 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         nodeSlotKeys.set(nodeCondWhere, 'config.condition');
         if (!checkStructuralCondition(nodeCondWhere, cfg.condition).refused) {
           const from = issues.length;
-          check(nodeCondWhere, cfg.condition, objectName);
+          // [#29926] The outcome only on the trigger gate: on any other node the
+          // key is inert (see the null-guard call below), so nothing fails there.
+          const isTriggerGate = node.type === 'start' && graph.path.length === 0;
+          check(nodeCondWhere, cfg.condition, objectName, undefined, undefined, undefined, undefined, undefined, isTriggerGate ? flowFaultOutcome : undefined);
           warnShadowedFieldReads(nodeCondWhere, cfg.condition);
           refuseUnboundRoots(nodeCondWhere, cfg.condition, from, 'predicate');
           // [#29026] The start node's is the trigger gate; on any other node
           // the key is inert (`flow-inert-node-condition` says so) and judging
           // it would only add a second finding about a predicate nothing runs.
-          if (node.type === 'start' && graph.path.length === 0) checkFlowNullGuards(nodeCondWhere, cfg.condition, false);
+          if (isTriggerGate) checkFlowNullGuards(nodeCondWhere, cfg.condition, false);
         }
 
         // Descriptor-declared expression slots (#4027). Before this, the traversal
@@ -3099,7 +3131,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         const first = issues.length;
         if (!checkStructuralCondition(edgeCondWhere, edge.condition).refused) {
           const from = issues.length;
-          check(edgeCondWhere, edge.condition, objectName);
+          check(edgeCondWhere, edge.condition, objectName, undefined, undefined, undefined, undefined, undefined, flowFaultOutcome);
           warnShadowedFieldReads(edgeCondWhere, edge.condition);
           refuseUnboundRoots(edgeCondWhere, edge.condition, from, 'predicate');
           checkFlowNullGuards(edgeCondWhere, edge.condition, true);
@@ -3134,6 +3166,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // position, so the door's findings and their order are the build's.
     for (const rule of recordsOf(validations)) {
       const where = `object '${objectName}' · validation '${(rule.name as string) ?? '?'}'`;
+      // [#29926] One outcome for every predicate the rule carries: a nested
+      // branch is governed by the top-level rule's severity at runtime.
+      const ruleOutcome = faultOutcomeOf({ kind: 'validation rule', severity: rule.severity });
       // [#27643] Every finding below also carries the judged slot's key path
       // (`objects[0].validations[1].condition`), indexed over the lists the
       // author wrote, in the spelling a flow edge's findings use (#26858), so
@@ -3157,10 +3192,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // (#22042), and on a formula field's `expression` (`judgeFieldFormula`,
       // #24197), and NOWHERE else.
       let first = issues.length;
-      check(where, rule.condition, objectName, 'record', undefined, true, undefined, undefined, FAIL_CLOSED);
+      check(where, rule.condition, objectName, 'record', undefined, true, undefined, undefined, ruleOutcome);
       atSlot('condition', first);
       first = issues.length;
-      check(`${where} when`, (rule as AnyRec).when, objectName, 'record', undefined, true, undefined, undefined, FAIL_CLOSED);
+      check(`${where} when`, (rule as AnyRec).when, objectName, 'record', undefined, true, undefined, undefined, ruleOutcome);
       atSlot('when', first);
       const predicates = rulePredicates(rule, '');
       // [#22042] The same verdict one level down, and every level below it: a
@@ -3177,7 +3212,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const p of predicates) {
         if (p.depth === 0) continue;
         first = issues.length;
-        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true, undefined, undefined, FAIL_CLOSED);
+        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true, undefined, undefined, ruleOutcome);
         atSlot(p.key, first);
       }
       // [#24720] The rule's root verdict, over every predicate it carries,
@@ -3201,7 +3236,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // `then`/`otherwise` branches included.
       for (const p of predicates) {
         first = issues.length;
-        checkNullGuards(`object '${objectName}' · ${p.label}`, p.label, p.raw, objectName);
+        checkNullGuards(`object '${objectName}' · ${p.label}`, p.label, p.raw, objectName, ruleOutcome);
         atSlot(p.key, first);
       }
     }
@@ -3403,7 +3438,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         const verdict = fieldRuleRootVerdict(key, raw);
         // [#29904] Only the two slots the server judges a write by fail closed
         // (ADR-0137 D2); `visibleWhen` / `settledWhen` are display only.
-        const writeGate = key === 'requiredWhen' || key === 'readonlyWhen' ? FAIL_CLOSED : undefined;
+        const writeGate = key === 'requiredWhen' || key === 'readonlyWhen' ? faultOutcomeOf({ kind: 'field write rule' }) : undefined;
         check(where, raw, objectName, 'record', verdict !== null, undefined, undefined, undefined, writeGate);
         if (verdict) {
           issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
@@ -3480,7 +3515,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         const optionWhere = `object '${objectName}' · field '${fname}' option ${label} visibleWhen`;
         // [#29904] Fail-closed on the write path (ADR-0137 D2, #22402): a fault
         // refuses every write that picks this option.
-        check(optionWhere, opt.visibleWhen, objectName, 'record', undefined, undefined, undefined, undefined, FAIL_CLOSED);
+        check(optionWhere, opt.visibleWhen, objectName, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'option visibleWhen' }));
         // [#22157] After `check`, before the traversal refusal: every root this
         // verdict judges is declared in the strict env, so `check` never
         // reports a bare reference to it and the two stay disjoint.
@@ -3735,7 +3770,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   for (const hook of objectWrite ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
     if (typeof hook.object === 'string') {
-      check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, FAIL_CLOSED);
+      check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       // #4763 — the third instance the issue found lived on exactly this path.
       checkNullGuards(
         `hook '${hookName}' (${hook.object}) condition`,
@@ -3768,7 +3803,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const kept: ExprIssue[] = [];
     for (const target of targets) {
       const mark = issues.length;
-      check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record', undefined, undefined, undefined, undefined, FAIL_CLOSED);
+      check(`hook '${hookName}' (${target}) condition`, hook.condition, target, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       checkNullGuards(
         `hook '${hookName}' (${target}) condition`,
         `hook '${hookName}' condition`,
