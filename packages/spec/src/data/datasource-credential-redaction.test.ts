@@ -306,6 +306,42 @@ describe('the datasource read rewrites a URL\'s userinfo password exactly where 
     expect(redactUrlPassword(url)).toBe(url);
   });
 
+  // [stored, served]: every ASCII tab, LF and CR is deleted before the URL is
+  // judged, as a URL parser deletes them; the password is removed at the
+  // matching offsets of the authored string, and every other character —
+  // the deleted ones outside the password included — is served as stored.
+  const CLEANED: Array<[string, string]> = [
+    [`postgre${TAB}sql://svc:hunter2@db:5432/app`, `postgre${TAB}sql://svc@db:5432/app`],
+    [`postgresql:/${LF}/svc:hunter2@db:5432/app`, `postgresql:/${LF}/svc@db:5432/app`],
+    [`postgresql://s${CR}vc:hun${TAB}ter2@db:5432/app`, `postgresql://s${CR}vc@db:5432/app`],
+  ];
+
+  it.each(CLEANED)('%j is served as %j, which the write door accepts', (stored, served) => {
+    expect(urlUserinfoPassword(stored), 'the write door refuses the stored URL').toBeDefined();
+    expect(redactUrlPassword(stored)).toBe(served);
+    expect(urlUserinfoPassword(served), 'the served URL passes the write door').toBeUndefined();
+    expect(urlUserinfoUsername(served), 'the username is kept').toBe(urlUserinfoUsername(stored));
+  });
+
+  it('a credential query parameter whose name holds a tab or newline is removed whole, the rest of the query as stored', () => {
+    for (const char of [TAB, LF, CR]) {
+      const stored = `postgresql://svc@db:5432/app?sslmode=require&pass${char}word=hunter2&connect_timeout=10`;
+      expect(urlCredentialQueryParams(stored, CREDENTIAL_URL_QUERY_PARAM_NAMES)).toEqual(['password']);
+      const served = redactUrlCredentials(stored);
+      expect(served).toBe('postgresql://svc@db:5432/app?sslmode=require&connect_timeout=10');
+      expect(urlCredentialQueryParams(served, CREDENTIAL_URL_QUERY_PARAM_NAMES)).toEqual([]);
+    }
+  });
+
+  it.each([
+    `postgre${TAB}sql://svc@db:5432/app`,
+    `postgresql://svc:${TAB}@db:5432/app?ssl${LF}mode=require`,
+  ])('CONTROL: %j holds no credential once cleaned and keeps its query', (url) => {
+    expect(urlUserinfoPassword(url)).toBeUndefined();
+    expect(urlCredentialQueryParams(url, CREDENTIAL_URL_QUERY_PARAM_NAMES)).toEqual([]);
+    expect(redactUrlCredentialQueryParams(url)).toBe(url);
+  });
+
   it('redactDatasourceConfig serves a stored URL behind surrounding whitespace with its password removed, naming `url`', () => {
     const { config, redactedKeys } = redactDatasourceConfig('mysql', { url: ' mysql://svc:hunter2@db:3306/app' });
     expect(config).toEqual({ url: ' mysql://svc@db:3306/app' });

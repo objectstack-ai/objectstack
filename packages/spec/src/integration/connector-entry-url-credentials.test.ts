@@ -321,3 +321,76 @@ describe('a URL is judged after trimming surrounding whitespace; a credential qu
     });
   });
 });
+
+// The same rule, as a URL parser cleans a string: it also deletes every ASCII
+// tab, LF and CR anywhere in it, so a value is judged with them deleted. And
+// one userinfo grammar serves both doors: an authority starts at `scheme://`
+// or a scheme-relative `//`.
+describe('a URL is judged as a URL parser cleans it: tab and newline characters deleted, and one userinfo grammar at both doors', () => {
+  const TAB = String.fromCharCode(0x09);
+  const LF = String.fromCharCode(0x0a);
+  const CR = String.fromCharCode(0x0d);
+  const CLEAN = 'https://api.vendor.example.com/v1';
+  const withNote = (note: string) => ({ ...rest(CLEAN), providerConfig: { baseUrl: CLEAN, note } });
+
+  describe('REFUSED, located at the string', () => {
+    it.each([
+      ['a credential query parameter whose name holds a tab', rest(`${CLEAN}?page=2&api${TAB}_key=${PLACEHOLDER}`), 'providerConfig.baseUrl'],
+      ['a credential query parameter whose name holds a newline, in a string that is not a URL', withNote(`see ?to${LF}ken=${PLACEHOLDER}`), 'providerConfig.note'],
+      ['a userinfo behind a scheme that holds a tab', rest(`ht${TAB}tps://u:${PLACEHOLDER}@api.vendor.example.com/v1`), 'providerConfig.baseUrl'],
+      ['a userinfo behind a `//` that holds a carriage return', rest(`https:/${CR}/${PLACEHOLDER}@api.vendor.example.com/v1`), 'providerConfig.baseUrl'],
+      ['a userinfo in a scheme-relative authority', rest(`//u:${PLACEHOLDER}@api.vendor.example.com/v1`), 'providerConfig.baseUrl'],
+      ['a userinfo in a scheme-relative authority, in a string that is not the base URL', withNote(`//${PLACEHOLDER}@hooks.vendor.example.com`), 'providerConfig.note'],
+    ] as const)('%s', (_label, entry, at) => {
+      const { located, messages } = refusals(entry);
+      expect(located).toEqual([['custom', at]]);
+      expect(messages[0]).toContain(`\`${at}\``);
+      expect(messages[0]).toContain('auth: { type, credentialRef }');
+      expect(messages[0]).not.toContain(PLACEHOLDER);
+    });
+  });
+
+  describe('CONTROL: a value holding no credential part once cleaned is accepted', () => {
+    it.each([
+      ['an ordinary query parameter whose name holds a tab', rest(`${CLEAN}?reg${TAB}ion=eu`)],
+      ['a credential query parameter whose value is only tab and newline characters', rest(`${CLEAN}?token=${TAB}${LF}`)],
+      ['a scheme that holds a tab, with no userinfo', rest(`ht${TAB}tps://api.vendor.example.com/v1`)],
+      ['a scheme-relative authority with no userinfo', rest('//api.vendor.example.com/v1')],
+      ['an `@` in the path of a scheme-relative string', rest('//api.vendor.example.com/v1/users/@me')],
+    ] as const)('%s', (_label, entry) => accepts(entry));
+  });
+
+  describe('the read rewrites exactly what the write refuses, at the matching position of the authored string', () => {
+    it.each([
+      [`${CLEAN}?page=2&api${TAB}_key=${PLACEHOLDER}`, `${CLEAN}?page=2`],
+      [`ht${TAB}tps://u:${PLACEHOLDER}@api.vendor.example.com/v1`, `ht${TAB}tps://api.vendor.example.com/v1`],
+      [`https:/${CR}/${PLACEHOLDER}@api.vendor.example.com/v1`, `https:/${CR}/api.vendor.example.com/v1`],
+      [`//u:${PLACEHOLDER}@api.vendor.example.com/v1`, '//api.vendor.example.com/v1'],
+      [` //u:${PLACEHOLDER}@api.vendor.example.com/v1?to${LF}ken=${PLACEHOLDER}&page=2`, ' //api.vendor.example.com/v1?page=2'],
+      [`https://u${TAB}:${PLACEHOLDER}@api.vendor.example.com/v1`, CLEAN],
+    ] as const)('%j is served as %j', (stored, servedUrl) => {
+      const entry = rest(stored);
+      expect(refusals(entry).located).toEqual([['custom', 'providerConfig.baseUrl']]);
+      const { item: served, redactedKeys } = redactConnectorItem(entry);
+      expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+      expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe(servedUrl);
+      accepts(served);
+    });
+
+    it.each([
+      `${CLEAN}?reg${TAB}ion=eu`,
+      `${CLEAN}?token=${TAB}`,
+      `${CLEAN}?api${TAB}_key=${PLACEHOLDER}`,
+      `ht${TAB}tps://${PLACEHOLDER}@api.vendor.example.com/v1`,
+      '//api.vendor.example.com/v1',
+      `//u:${PLACEHOLDER}@api.vendor.example.com/v1`,
+      `see ?to${CR}ken=${PLACEHOLDER}`,
+    ])('refused ⇔ rewritten: %j', (value) => {
+      for (const entry of [rest(value), withNote(value)]) {
+        const refused = !DeclarativeConnectorEntrySchema.safeParse(entry).success;
+        const rewritten = redactConnectorItem(entry as Record<string, unknown>).redactedKeys.length > 0;
+        expect(refused, 'refused ⇔ rewritten').toBe(rewritten);
+      }
+    });
+  });
+});
