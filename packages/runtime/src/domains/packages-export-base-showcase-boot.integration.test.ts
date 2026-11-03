@@ -17,9 +17,13 @@
  * So the base's slot of the name holds the override alone, and the export's
  * "never an override of THIS package" filter (#29563) left nothing in it.
  * Measured on a real showcase boot at b391feb1: dashboards 3 → 2, reports
- * 4 → 3, views 36 → 36.
+ * 4 → 3, views 36 → 36. #29640 (7dae3b3c) took the dashboard and report copy
+ * out of the bare slot; on a real showcase boot at 7dae3b3c a published page,
+ * app, dataset, doc or book override still dropped the item (pages 29 → 28,
+ * apps 1 → 0, datasets 4 → 3, docs 8 → 7, books 1 → 0).
  *
- * Per type (view, dashboard, report), over the real door
+ * Per type (view, dashboard, report, and the five types #29640 left in the
+ * registry's bare slot: page, app, dataset, doc, book), over the real door
  * (`HttpDispatcher.handlePackages`), the real protocol, the real `ObjectQL`
  * engine on a SQLite file and the real `MetadataManager`:
  *
@@ -27,9 +31,11 @@
  *    the base's export before it, so the item is present and equal, and no
  *    item in it carries an `overrides` block;
  *  - the same holds on a restart over the same database;
- *  - the pair's export carries the overriding item with its `overrides` block;
- *  - CONTROL: the effective read of the base's name serves the override, so
- *    the base export's answer is the export's own.
+ *  - the pair's export carries the overriding item with its `overrides` block
+ *    (view, dashboard, report; see `pairServed`);
+ *  - CONTROL: the pair's override row is published, and for view, dashboard
+ *    and report the effective read of the base's name serves it, so the base
+ *    export's answer is the export's own.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -93,10 +99,37 @@ const reports = () => [
     report('showcase_task_overview', 'Task Overview'),
 ];
 
+/**
+ * The base's collections the metadata service holds besides its views, as the
+ * artifact door files them: plural collection → metadata type. Every one is a
+ * type a `.custom` pair can publish an override of.
+ */
+const SERVICE_COLLECTIONS = {
+    apps: 'app',
+    pages: 'page',
+    datasets: 'dataset',
+    dashboards: 'dashboard',
+    reports: 'report',
+    docs: 'doc',
+    books: 'book',
+} as const;
+
+/**
+ * `pairServed`: whether the pair's export and the effective read serve the
+ * override. For the five types #29640 left in the bare slot neither does on
+ * this boot shape (the pair's per-package layer lists none of them, and the
+ * effective read serves the base's document; #29613), so only the base's half
+ * is pinned for them.
+ */
 const TYPES = [
-    { type: 'view', plural: 'viewItems', name: VIEW },
-    { type: 'dashboard', plural: 'dashboards', name: DASHBOARD },
-    { type: 'report', plural: 'reports', name: REPORT },
+    { type: 'view', plural: 'viewItems', name: VIEW, pairServed: true },
+    { type: 'dashboard', plural: 'dashboards', name: DASHBOARD, pairServed: true },
+    { type: 'report', plural: 'reports', name: REPORT, pairServed: true },
+    { type: 'page', plural: 'pages', name: 'showcase_start_here', pairServed: false },
+    { type: 'app', plural: 'apps', name: 'showcase_app', pairServed: false },
+    { type: 'dataset', plural: 'datasets', name: 'showcase_task_metrics', pairServed: false },
+    { type: 'doc', plural: 'docs', name: 'showcase_index', pairServed: false },
+    { type: 'book', plural: 'books', name: 'showcase_manual', pairServed: false },
 ] as const;
 
 /** The base's body, as the showcase's `defineStack` carries it: one fresh copy per reader. */
@@ -122,9 +155,19 @@ function baseBody(): Record<string, any> {
             dimensions: [{ name: 'status', label: 'Status', field: 'status', type: 'string' }],
             measures: [{ name: 'task_count', label: 'Tasks', aggregate: 'count' }],
         }],
+        apps: [{ name: 'showcase_app', label: 'Showcase', navigation: [] }],
+        pages: [
+            { name: 'showcase_capability_map', label: 'Capability Map', type: 'app', regions: [] },
+            { name: 'showcase_start_here', label: 'Start Here', type: 'app', regions: [] },
+        ],
         views: [viewContainer()],
         dashboards: dashboards(),
         reports: reports(),
+        docs: [
+            { name: 'showcase_docs_guide', label: 'Docs Guide', content: '# Docs guide' },
+            { name: 'showcase_index', label: 'Showcase', content: '# Showcase' },
+        ],
+        books: [{ name: 'showcase_manual', label: 'Showcase Manual', groups: [] }],
     };
 }
 
@@ -145,8 +188,9 @@ async function metadataServiceOf(): Promise<MetadataManager> {
             await manager.register('view', view.name, stamp(view as any), { notify: false });
         }
     }
-    for (const dashboard of body.dashboards) await manager.register('dashboard', dashboard.name, stamp(dashboard), { notify: false });
-    for (const item of body.reports) await manager.register('report', item.name, stamp(item), { notify: false });
+    for (const [plural, type] of Object.entries(SERVICE_COLLECTIONS)) {
+        for (const item of body[plural]) await manager.register(type, item.name, stamp(item), { notify: false });
+    }
     return manager;
 }
 
@@ -211,6 +255,10 @@ async function boot(dir: string, { installPair }: { installPair: boolean }) {
 
     return {
         protocol,
+        /** The pair's active (published) rows of `(type, name)`, read off the store. */
+        async publishedRows(type: string, name: string): Promise<unknown[]> {
+            return await driver.find('sys_metadata', { where: { type, name, package_id: PAIR, state: 'active' } } as any) as unknown[];
+        },
         async exported(id: string): Promise<Record<string, any>> {
             const res = await dispatcher.handlePackages(`/${encodeURIComponent(id)}/export`, 'GET', undefined, {}, CALLER);
             expect(res.response?.status, JSON.stringify(res.response?.body)).toBe(200);
@@ -236,7 +284,7 @@ const overridingItems = (manifest: Record<string, any>): string[] => Object.entr
         .map((item) => `${plural}/${item.name}`));
 
 describe('[#29649] GET /packages/<base>/export carries the base unchanged on a showcase-shaped boot', () => {
-    for (const { type, plural, name } of TYPES) {
+    for (const { type, plural, name, pairServed } of TYPES) {
         it(`${type}: the base's export is byte-identical with the override published, and after a restart`, async () => {
             const dir = mkdtempSync(join(tmpdir(), 'os-29649-db-'));
             cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
@@ -248,18 +296,24 @@ describe('[#29649] GET /packages/<base>/export carries the base unchanged on a s
 
             await door.override(type, name, { ...shipped[0], label: OVERRIDE_LABEL, overrides: { ...DECLARATION } });
 
-            // CONTROL: the effective read of the base's name serves the published override.
-            const effective: any = await door.protocol.getMetaItem({ type, name, packageId: BASE });
-            expect(effective?.item?.label, `the effective ${type} read`).toBe(OVERRIDE_LABEL);
+            // CONTROL: the override is published, and, where the protocol serves
+            // it, the effective read of the base's name serves it.
+            expect(await door.publishedRows(type, name), `the pair's published ${type} row`).toHaveLength(1);
+            if (pairServed) {
+                const effective: any = await door.protocol.getMetaItem({ type, name, packageId: BASE });
+                expect(effective?.item?.label, `the effective ${type} read`).toBe(OVERRIDE_LABEL);
+            }
 
             const after = await door.exported(BASE);
             expect(itemsOf(after, plural, name), `the base's ${type} with the override live`).toEqual(shipped);
             expect(overridingItems(after), `the base's export carries no override`).toEqual([]);
             expect(JSON.stringify(after), `the base's whole export with the ${type} override live`).toBe(JSON.stringify(before));
 
-            const pair = itemsOf(await door.exported(PAIR), plural, name);
-            expect(pair.map((item) => item.label), `the pair's ${type} export`).toEqual([OVERRIDE_LABEL]);
-            expect(pair[0].overrides).toEqual(DECLARATION);
+            if (pairServed) {
+                const pair = itemsOf(await door.exported(PAIR), plural, name);
+                expect(pair.map((item) => item.label), `the pair's ${type} export`).toEqual([OVERRIDE_LABEL]);
+                expect(pair[0].overrides).toEqual(DECLARATION);
+            }
 
             // A restart over the same database: the published row is hydrated from storage.
             const restarted = await boot(dir, { installPair: false });

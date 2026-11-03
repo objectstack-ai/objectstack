@@ -3465,7 +3465,9 @@ context: HttpProtocolContext,
         // `(name, package)` slot, so the copy wearing the base's envelope takes
         // the base's slot and the base's own item is not listed at all.
         // Measured on a real showcase boot: a published dashboard or report
-        // override left the base's export without the item. The package's own
+        // override left the base's export without the item, and after #29640
+        // took those two out of the bare slot, a page, app, dataset, doc or
+        // book override still did (#29613 holds them). The package's own
         // document is its code artifact, read prefer-local from the registry
         // (`getArtifactItem` with the package's id: the composite slot
         // `registerApp` filled, which the bare-slot copy never reaches), the
