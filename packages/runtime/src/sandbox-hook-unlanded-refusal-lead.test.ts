@@ -36,7 +36,10 @@
  * - CONTROL a body that catches the refusal and throws its own error speaks
  *   for itself, and leaves the runner as a `SandboxError` exactly as before;
  * - CONTROL a body that rewrites the refusal's message before re-throwing it
- *   is a speaker too.
+ *   is a speaker too;
+ * - an ACTION body that lets the same refusal leave now hands back the
+ *   engine's error too, and the action door's answer does not move: `500
+ *   INTERNAL_ERROR`, the delete's own sentence, `success: false`.
  *
  * The rig is `action-delete-cascade-summary-rollback.test.ts`'s: a real
  * `ObjectQL` over `SqlDriver` on better-sqlite3, which rolls back for real, and
@@ -48,7 +51,9 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { hookBodyRunnerFactory } from './sandbox/body-runner.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { HttpDispatcher } from './http-dispatcher.js';
+import { actionBodyRunnerFactory, hookBodyRunnerFactory } from './sandbox/body-runner.js';
 import { QuickJSScriptRunner, SandboxError } from './sandbox/quickjs-runner.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -61,6 +66,9 @@ const FINDER = 'hfinder';
 
 const text = (name: string) => ({ name, type: 'text' as const, label: name });
 const id = { name: 'id', type: 'text' as const, primaryKey: true, label: 'ID' };
+
+/** Deletes the account; its cascade is stopped by the first line's refused roll-up. */
+const PURGE = `await ctx.api.object('${ACCOUNT}').delete({ where: { id: 'a1' } });`;
 
 const OBJECTS = [
     { name: ACCOUNT, label: 'Account', fields: { id, name: text('name') } },
@@ -80,12 +88,13 @@ const OBJECTS = [
             bucket: { name: 'bucket', type: 'lookup' as const, reference: BUCKET, label: 'Bucket' },
         },
     },
-    { name: CASE, label: 'Case', fields: { id, name: text('name'), mode: text('mode') } },
+    {
+        name: CASE, label: 'Case', fields: { id, name: text('name'), mode: text('mode') },
+        actions: [{ name: 'purge', label: 'Purge', type: 'script', body: { language: 'js', capabilities: ['api.read', 'api.write'], source: `${PURGE} return { purged: true };` } }],
+    },
     { name: FINDER, label: 'Finder', fields: { id, name: text('name') } },
 ];
 
-/** Deletes the account; its cascade is stopped by the first line's refused roll-up. */
-const PURGE = `await ctx.api.object('${ACCOUNT}').delete({ where: { id: 'a1' } });`;
 const WRITE_CAPS = ['api.read', 'api.write'];
 
 /** A sandboxed hook on `hcase`, active only for records whose `mode` names it. */
@@ -103,6 +112,7 @@ const HOOKS = [
 ];
 
 let engine: ObjectQL;
+let dispatcher: HttpDispatcher;
 let errorLog: ReturnType<typeof vi.spyOn>;
 
 beforeAll(async () => {
@@ -123,6 +133,14 @@ beforeAll(async () => {
     }
     engine.setDefaultBodyRunner(hookBodyRunnerFactory(new QuickJSScriptRunner({ hookTimeoutMs: 10_000 }), { ql: engine, appId: 'hcase_app' }));
     bindHooksToEngine(engine, HOOKS as any, { packageId: TEST_PACKAGE_ID });
+    const purge = (OBJECTS.find((o) => o.name === CASE) as any).actions[0];
+    (engine as any).registerAction(CASE, 'purge', actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql: engine, appId: 'hcase_app' })({ ...purge, object: CASE }));
+    const protocol = new ObjectStackProtocolImplementation(engine as any);
+    const services: Record<string, unknown> = { objectql: engine, data: engine, protocol };
+    const get = (n: string) => services[n] ?? null;
+    const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) };
+    dispatcher = new HttpDispatcher(kernel);
+    (dispatcher as any).timedResolveExecutionContext = async () => ({ userId: 'u_member', isSystem: false });
 }, 60_000);
 
 afterAll(async () => {
@@ -188,6 +206,20 @@ describe('[#29527] CONTROL a body that speaks for itself keeps the relay it had'
         expect(err).toBeInstanceOf(SandboxError);
         expect(err.message).toContain('Purge refused: ');
         expect(err.message).not.toContain(`The insert of "${CASE}"`);
+        await expectNothingPurged();
+    });
+});
+
+describe('[#29527] the action door\'s answer does not move for an action body that lets the refusal leave', () => {
+    it('500 INTERNAL_ERROR, the delete\'s own sentence, success false, nothing deleted', async () => {
+        const path = `/actions/${CASE}/purge`;
+        const request = new Request(`http://localhost/api/v1${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        const res: any = await dispatcher.dispatch('POST', path, {}, {}, { request } as any, '/api/v1');
+        const response = res.response as { status: number; body: any };
+        expect(response.status, JSON.stringify(response.body)).toBe(500);
+        expect(response.body?.success, JSON.stringify(response.body)).toBe(false);
+        expect(response.body?.error?.code, JSON.stringify(response.body)).toBe('INTERNAL_ERROR');
+        expect(response.body?.error?.message).toContain(`The delete of "${ACCOUNT}" did not complete`);
         await expectNothingPurged();
     });
 });
