@@ -3312,6 +3312,8 @@ const ja = {
     appNothingAvailableGrantDescription: "このアプリには、お使いのアカウントで開けるページがありません。設定でアクセス権を付与できます。",
     appNoReadableObjectDescription: "お使いのアカウントでは、このアプリのレコードをまだ読み取れません。管理者に権限セットの割り当てを依頼してください。",
     appNoReadableObjectGrantDescription: "お使いのアカウントでは、このアプリのレコードをまだ読み取れません。設定でアクセス権を付与できます。",
+    appOpensFromMenu: "{{app}} はメニューから使います",
+    appOpensFromMenuDescription: "このアプリには専用のページがありません。メニューの項目を選んで、リンクを開くか操作を実行してください。",
     openSetup: "設定を開く",
     createFirstApp: "最初のアプリを作成",
     systemSettings: "システム設定",

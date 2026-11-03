@@ -207,6 +207,18 @@ export const FLOW_CLONE_NOTICE =
     'The copy is switched off and does not run until you switch it on, '
     + 'and it still uses the same subflows, actions and objects as the original.';
 
+/**
+ * The stable code naming {@link FLOW_CLONE_NOTICE}, served beside it as
+ * `data.noticeCode` (`CloneFlowResponseSchema`, #29758).
+ *
+ * [#29727] A console shows the notice in its own language by mapping this code
+ * to its own translated sentence, and falls back to `notice` verbatim for a
+ * code it does not know. The code names the SENTENCE, so it changes only when
+ * the sentence's meaning does; `notice` stays the English fallback, unchanged.
+ * It lives beside the sentence so the two are edited together.
+ */
+export const FLOW_CLONE_NOTICE_CODE = 'FLOW_CLONE_DISABLED_COPY' as const;
+
 /** ADR-0112 envelope for the same-name refusal: a status AND a code. */
 export const FLOW_CLONE_NAME_TAKEN_STATUS = 409;
 

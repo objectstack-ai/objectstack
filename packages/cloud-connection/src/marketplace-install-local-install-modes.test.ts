@@ -389,6 +389,37 @@ describe('install-local — the `unmanaged` branch is the import, and nothing of
         expect(h.logger.warn.mock.calls.map((call: any[]) => String(call[0])).join('\n')).toContain('SQLITE_ERROR');
     });
 
+    // A 4xx refusal either carries its reason in the body, or writes the log
+    // line the body points at. Each throw below resolves to a 4xx through a
+    // declaration other than a numeric `status`, so its message is withheld.
+    it.each([
+        ['`statusCode` 409', Object.assign(new Error('Record is locked by approval apv_7'), { statusCode: 409, code: 'RECORD_LOCKED' })],
+        ['the validation shape (no status)', Object.assign(new Error('Validation failed: crm_lead.plan is required'), {
+            code: 'VALIDATION_FAILED',
+            fields: [{ field: 'plan', code: 'required', message: 'plan is required' }],
+        })],
+    ])('a 4xx refusal declared by %s: the body carries its reason, or the log line it points at is written', async (_label, thrown) => {
+        const h = await mount(dir, { importer: async () => { throw thrown; } });
+        const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged' });
+        expect(res.status, JSON.stringify(res.payload)).toBeGreaterThanOrEqual(400);
+        expect(res.status).toBeLessThan(500);
+        const warned = h.logger.warn.mock.calls.map((call: any[]) => String(call[0])).join('\n');
+        if (res.payload.error.message.includes('the reason is in the server log')) {
+            expect(warned).toContain(thrown.message);
+        } else {
+            expect(res.payload.error.message).toContain(thrown.message);
+        }
+    });
+
+    it('a 4xx refusal whose reason reaches the body writes no log line', async () => {
+        const refusal = Object.assign(new Error("Package 'com.example.crm' already has a writable copy."), { status: 409, code: 'RESOURCE_CONFLICT' });
+        const h = await mount(dir, { importer: async () => { throw refusal; } });
+        const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged' });
+        expect(res.status).toBe(409);
+        expect(res.payload.error.message).toBe(refusal.message);
+        expect(h.logger.warn.mock.calls.map((call: any[]) => String(call[0])).join('\n')).not.toContain(refusal.message);
+    });
+
     it('a runtime whose protocol has no copy-once import answers 503 SERVICE_UNAVAILABLE — never a managed install instead', async () => {
         const h = await mount(dir, { importer: null });
         const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged' });

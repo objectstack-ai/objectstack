@@ -166,6 +166,10 @@ import {
     PackageInstallRequestSchema,
     PublishPackageDraftsRequestSchema,
 } from '@objectstack/spec/api';
+// [#28640 ruling ③A] The export names each connector map the served read
+// withheld: the declaration of that list, and the redactor that decided it.
+import { PackageExportManifestSchema, type PackageExportManifest } from '@objectstack/spec/api';
+import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -221,7 +225,7 @@ import {
  * handle took any spelling at all.
  */
 export type PackagesDomainProtocol =
-    Partial<Pick<MetadataProtocol, 'getMetaItem' | 'getMetaItems' | 'saveMetaItem'>>
+    Partial<Pick<MetadataProtocol, 'getMetaItem' | 'getMetaItems' | 'getMetaTypes' | 'saveMetaItem'>>
     & Partial<Pick<PackageProtocol, 'installPackage'>>
     & {
         /** Declared by the producer (`@objectstack/metadata-protocol`), #9960. */
@@ -243,6 +247,12 @@ export type PackagesDomainProtocol =
          * producer's own signature as above.
          */
         getMetaItemsPerPackage?: ObjectStackProtocolImplementation['getMetaItemsPerPackage'];
+        /**
+         * [#28640 ruling ③A] The by-name execution read the export asks for a
+         * DECISION only (which connector maps the served read withheld), typed
+         * from the producer's own signature.
+         */
+        getMetaItemForExecution?: ObjectStackProtocolImplementation['getMetaItemForExecution'];
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         publishPackageDrafts?(request: any): Promise<any>;
         discardPackageDrafts?(request: any): Promise<any>;
@@ -3441,6 +3451,69 @@ function ownDocumentsOf(items: any[], type: string, packageId: string, registry:
     return out;
 }
 
+/**
+ * [#29760] Whether this runtime serves metadata type `type` (the canonical
+ * singular): whether its live type vocabulary lists it under either spelling
+ * (`getMetaTypes`, the one accessor that answers "which types exist here" for
+ * the `/meta` listing too; each listed name folded through
+ * `PLURAL_TO_SINGULAR`, as its other callers fold it). The question
+ * {@link assemblePackageManifest} asks only after a per-type read threw, to
+ * tell the one throw it may skip, a type this runtime does not serve, from a
+ * failed read of a type it does.
+ *
+ * Fail closed: a protocol that brings no `getMetaTypes`, or whose vocabulary
+ * cannot be read, has not shown the type unknown, so the type counts as served
+ * and its failed read refuses the export. ⛔ The listing's own failure is not
+ * reported: the refusal carries the read's failure, which is the one asked
+ * about.
+ */
+async function runtimeServesMetadataType(protocol: PackagesDomainProtocol, type: string): Promise<boolean> {
+    if (typeof protocol.getMetaTypes !== 'function') return true;
+    let types: unknown;
+    try {
+        types = (await protocol.getMetaTypes())?.types;
+    } catch {
+        return true;
+    }
+    if (!Array.isArray(types)) return true;
+    // The listing spells each type as its source stores it, singular or
+    // plural; folded to the singular the export loop asks with.
+    return types.some((listed) => typeof listed === 'string' && (PLURAL_TO_SINGULAR[listed] ?? listed) === type);
+}
+
+/**
+ * [#29760] The refusal of a package export one of whose per-type reads failed,
+ * for a type this runtime serves ({@link runtimeServesMetadataType}). The
+ * export is the package's whole content or no answer (the exit right, and the
+ * whole-or-absent rule of `PackageExportBundleSchema`, whose entries this
+ * function's caller produces): an export without the type's collection reads
+ * complete, and a reinstall from it lands without the type, telling nobody.
+ *
+ * The route's refusal family is kept, not a new code minted: the read's own
+ * declared `status` / `statusCode` and string `code` ride on unchanged (a `503`
+ * stays a `503`), so the door's `errorFromThrown(e, 500)` answers what it
+ * answered for the read's throw everywhere else, and an undeclared throw is
+ * its `500`. The sentence names the package and the type, and quotes the
+ * read's own message only where ADR-0112's disclosure rule lets a caught
+ * sentence be quoted ({@link clientFacingFailureText}); the read's error stays
+ * on `cause` for the server-side record.
+ */
+function packageExportTypeReadRefusal(packageId: string, type: string, cause: unknown): Error {
+    const quoted = clientFacingFailureText(cause, '');
+    const err: Error & { status?: number; code?: string; cause?: unknown } = new Error(
+        `Reading the '${type}' items of package '${packageId}' failed, so its export is refused `
+        + `rather than answered without them${quoted ? `: ${quoted}` : '.'}`,
+    );
+    err.cause = cause;
+    const thrown = cause as { status?: unknown; statusCode?: unknown; code?: unknown } | null | undefined;
+    const status = typeof thrown?.status === 'number' ? thrown.status
+        : typeof thrown?.statusCode === 'number' ? thrown.statusCode
+        : undefined;
+    if (status !== undefined) err.status = status;
+    if (typeof thrown?.code === 'string' && thrown.code !== '') err.code = thrown.code;
+    return err;
+}
+
 async function assemblePackageManifest(
 deps: DomainHandlerDeps,
 packageId: string,
@@ -3505,9 +3578,13 @@ context: HttpProtocolContext,
                 ? await protocol.getMetaItemsPerPackage({ type: singular, packageId })
                 : await protocol.getMetaItems({ type: singular, packageId });
             items = Array.isArray(res?.items) ? res.items : [];
-        } catch {
-            // Unknown/unsupported type for this runtime — skip.
-            continue;
+        } catch (e) {
+            // [#29760] Only a type this runtime does not serve is skipped. A
+            // failed read of a type it serves refuses the export, naming the
+            // package and the type: an export without that collection reads
+            // complete and is not (see {@link packageExportTypeReadRefusal}).
+            if (!(await runtimeServesMetadataType(protocol, singular))) continue;
+            throw packageExportTypeReadRefusal(packageId, singular, e);
         }
         // [#29563, ADR-0146 D8 item 3] …and, from that layer, never an item
         // that declares it overrides THIS package: that is the pair's
@@ -3592,7 +3669,69 @@ context: HttpProtocolContext,
     if (namespace !== undefined && namespace !== null) manifest.namespace = namespace;
     const dependencies = pkg?.manifest?.dependencies;
     if (dependencies !== undefined && dependencies !== null) manifest.dependencies = { ...dependencies };
+    // [#28640 ruling ③A] Every connector map the served read withheld whole,
+    // named so an import can tell an incomplete map from one never written.
+    // Omitted, not emptied, when nothing was withheld.
+    const withheldMaps = await withheldConnectorMaps(protocol, packageId, manifest.connectors);
+    if (withheldMaps.length > 0) manifest.withheldMaps = withheldMaps;
     return manifest;
+}
+
+/** One entry of {@link PackageExportManifestSchema}'s `withheldMaps`. */
+type WithheldMap = NonNullable<PackageExportManifest['withheldMaps']>[number];
+
+/**
+ * [#28640 ruling ③A] The `withheldMaps` of an export: each header or
+ * environment-variable map of an exported connector that the served read
+ * withheld whole, as `{ type: 'connector', name, path }`, in the order the
+ * connectors are exported and, within one, the order the declaration lists
+ * the positions.
+ *
+ * The export writes SERVED items, so a withheld map is simply absent from the
+ * item, and an absence there cannot be told from a map never written. So the
+ * verdict is read where the redaction is decided: each exported connector's
+ * stored body, read on the protocol's by-name EXECUTION face
+ * (`getMetaItemForExecution`), is handed to the same `connector` redactor the
+ * served read ran, and every position it reports withheld that the
+ * declaration names is listed. Only that decision leaves this function, never
+ * a byte of the stored body: a position, and no header or variable name.
+ *
+ * A connector cannot be replaced by a declared override (`connector` is not an
+ * overridable type, ADR-0146 D2), so the by-name read under the package's id
+ * reads the item the per-package list served.
+ *
+ * ⛔ No verdict is guessed. A protocol without the execution face, or an
+ * exported connector the face answers no body for, is a failure: an export
+ * that writes this key promises that its absence means nothing was withheld.
+ */
+async function withheldConnectorMaps(
+    protocol: Pick<PackagesDomainProtocol, 'getMetaItemForExecution'>,
+    packageId: string,
+    connectors: unknown,
+): Promise<WithheldMap[]> {
+    if (!Array.isArray(connectors) || connectors.length === 0) return [];
+    const redact = getMetadataTypeRedactor('connector');
+    if (!redact) {
+        throw new Error(`[packages] export of '${packageId}': no 'connector' redactor is registered, so the export cannot name the connector maps the served read withheld.`);
+    }
+    if (typeof protocol.getMetaItemForExecution !== 'function') {
+        throw new Error(`[packages] export of '${packageId}': the metadata protocol has no execution read (getMetaItemForExecution), so the export cannot name the connector maps the served read withheld.`);
+    }
+    const positions: readonly WithheldMap['path'][] = PackageExportManifestSchema.shape.withheldMaps.unwrap().element.shape.path.options;
+    const withheld: WithheldMap[] = [];
+    for (const connector of connectors) {
+        const name = (connector as { name?: unknown } | null)?.name;
+        if (typeof name !== 'string') continue;
+        const stored = (await protocol.getMetaItemForExecution({ type: 'connector', name, packageId }))?.item;
+        if (!stored || typeof stored !== 'object') {
+            throw new Error(`[packages] export of '${packageId}': the execution read answered no body for connector '${name}', so the export cannot say whether its maps were withheld.`);
+        }
+        const { redactedKeys } = redact(stored as Record<string, unknown>);
+        for (const path of positions) {
+            if (redactedKeys.includes(path)) withheld.push({ type: 'connector', name, path });
+        }
+    }
+    return withheld;
 }
 
 /**

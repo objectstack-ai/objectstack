@@ -11,6 +11,10 @@
  *      the read recovered.
  *   2. The standalone `managerOf` (no `TeamGraphService` wired) caught any
  *      error from its `sys_user` read to `null`. It caches nothing.
+ *   3. [#29792] `TeamGraphService.managerOf` — the wired limb, and the
+ *      `manager` arm of `expandPrincipal` — caught any error from its own
+ *      `sys_user` read to `null` and cached that `null` under `org::userId`
+ *      for the pass, so the manager stayed missing after the read recovered.
  *
  * Absence is the one failure that IS an answer — the object is not
  * registered, or its table was never created — judged by `isObjectAbsentError`
@@ -26,7 +30,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysBusinessUnit, SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
-import { TeamGraphService } from './team-graph.js';
+import { TeamGraphService, expandPrincipal } from './team-graph.js';
 
 const ORG = 'org_head';
 const UNIT = 'bu_sales';
@@ -39,7 +43,7 @@ interface Rig {
   engine: ObjectQL;
   driver: SqlDriver;
   /** Fail the next `times` reads of `object`; every other read runs as before. */
-  failReads: (object: 'sys_business_unit' | 'sys_user', times?: number) => void;
+  failReads: (object: 'sys_business_unit' | 'sys_user' | 'sys_member', times?: number) => void;
 }
 
 const engines: ObjectQL[] = [];
@@ -106,6 +110,12 @@ async function boot(opts: { omit?: string[] } = {}): Promise<Rig> {
 
 const graph = (rig: Rig, extra: { teamGraph?: TeamGraphService } = {}) =>
   new BusinessUnitGraphService({ engine: rig.engine as never, organizationId: ORG, ...extra });
+
+const team = (rig: Rig) => new TeamGraphService({ engine: rig.engine as never, organizationId: ORG });
+
+/** An answer or a refusal, as one comparable value. */
+const settled = (p: Promise<unknown>) =>
+  p.then((value) => ({ value }), (err: unknown) => ({ refused: err instanceof Error ? err.message : String(err) }));
 
 describe('[#29713] headOf: a failed unit read refuses, and nothing is cached for it', () => {
   it('control — a healthy read answers the head, and a unit with no head answers null', async () => {
@@ -187,22 +197,76 @@ describe('[#29713] standalone managerOf: a failed user read refuses', () => {
   });
 });
 
-describe('[#29713] CONTROL — the wired TeamGraphService limb is unchanged', () => {
+describe('[#29713] CONTROL — the wired limb answers what TeamGraphService.managerOf answers', () => {
   it('a wired managerOf answers exactly what TeamGraphService.managerOf answers, on a healthy and on a failed read', async () => {
     const rig = await boot();
-    const team = new TeamGraphService({ engine: rig.engine as never, organizationId: ORG });
-    const g = graph(rig, { teamGraph: team });
+    const g = graph(rig, { teamGraph: team(rig) });
 
     expect(await g.managerOf(ALICE, ORG)).toBe(BOB);
     expect(await g.managerOf(ALICE, ORG)).toBe(await new TeamGraphService({ engine: rig.engine as never }).managerOf(ALICE, ORG));
 
-    // TeamGraphService's own failure posture, not this card's: it is passed
-    // through as it stands, and this card changes nothing on that limb.
+    // The wired limb passes TeamGraphService's answer through, its refusal
+    // included: the two outcomes are equal, whatever that outcome is.
     rig.failReads('sys_user');
-    const failed = graph(rig, { teamGraph: new TeamGraphService({ engine: rig.engine as never, organizationId: ORG }) });
-    expect(await failed.managerOf(ALICE, ORG)).toBeNull();
-    expect(await failed.managerOf(ALICE, ORG)).toBe(
-      await new TeamGraphService({ engine: rig.engine as never, organizationId: ORG }).managerOf(ALICE, ORG),
+    const failed = graph(rig, { teamGraph: team(rig) });
+    expect(await settled(failed.managerOf(ALICE, ORG))).toEqual(await settled(team(rig).managerOf(ALICE, ORG)));
+  });
+});
+
+describe('[#29792] TeamGraphService.managerOf: a failed user read refuses, and nothing is cached for it', () => {
+  it('control — a healthy read answers the manager, and a user with none answers null', async () => {
+    const t = team(await boot());
+
+    expect(await t.managerOf(ALICE, ORG)).toBe(BOB);
+    expect(await t.managerOf(BOB, ORG)).toBeNull();
+  });
+
+  it('⛔ a failed read refuses — it never answers an invented null', async () => {
+    const rig = await boot();
+    rig.failReads('sys_user');
+
+    const refusal = team(rig).managerOf(ALICE, ORG);
+    await expect(refusal).rejects.toThrow(/\[sharing\] the manager of user 'usr_alice' could not be read: SQLITE_IOERR/);
+    await expect(refusal).rejects.toMatchObject({ cause: { code: 'SQLITE_IOERR' } });
+  });
+
+  it('⛔ a failed read is not cached: the next read on the same pass answers the real manager', async () => {
+    const rig = await boot();
+    rig.failReads('sys_user', 1);
+    const t = team(rig);
+
+    await expect(t.managerOf(ALICE, ORG)).rejects.toThrow(/could not be read/);
+    expect(await t.managerOf(ALICE, ORG)).toBe(BOB);
+  });
+
+  it('⛔ expandPrincipal\'s manager arm refuses with it, rather than answering nobody', async () => {
+    const rig = await boot();
+    const principal = { type: 'manager', value: 'owner_id', record: { owner_id: ALICE } };
+
+    expect(await expandPrincipal(principal, { team: team(rig), organizationId: ORG })).toEqual([BOB]);
+    rig.failReads('sys_user');
+    await expect(expandPrincipal(principal, { team: team(rig), organizationId: ORG })).rejects.toThrow(
+      /the manager of user 'usr_alice' could not be read/,
     );
+  });
+
+  it('absence — a composition that never registers sys_user has no manager on file: null', async () => {
+    const t = team(await boot({ omit: ['sys_user'] }));
+
+    expect(await t.managerOf(ALICE, ORG)).toBeNull();
+  });
+
+  it('absence — a stack whose sys_user table was never created has no manager on file: null', async () => {
+    const rig = await boot();
+    await (rig.driver as any).knex.schema.dropTable('sys_user');
+
+    expect(await team(rig).managerOf(ALICE, ORG)).toBeNull();
+  });
+
+  it('control — the organization screen stays fail-open: an unreadable sys_member keeps the manager', async () => {
+    const rig = await boot();
+    rig.failReads('sys_member');
+
+    expect(await team(rig).managerOf(ALICE, ORG)).toBe(BOB);
   });
 });

@@ -31,12 +31,15 @@
 - 分诊定级轮读车道 `Suggested-grade:` 行:是输入不是定级,确认或改判,不采纳给理由。
 - 分类动作每张三选一,外加一个修复通道;裁定写方向、给六态之一。
 - 停 `pm:blocked` 同笔在卡正文写行首 `Blocked-by: #N`(issue/PR 号;full-run 卡写评论),散文不算。
+- 日对账 fire 读 `check-half-states` H14,在飞卡亦然:NOT carrying ⇒ `label-write.mjs --add pm:blocking`;
+- stale/UNJUDGED 行手核跨仓依赖后 `--remove pm:blocking`,留则写明理由;增删卡号进轮次记录。
 - 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,无可问之事;⛔ 工具/门禁修复不由此进。
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
 - 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢复核轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
+- 先例已定新键/值/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
 - 决策卡速读居四棱块之上、同题,用业务语言先讲事情与选项,末句只问一字:A/B/C 或是否。
 - 首行写立卡门类别 ①–④;四类定义、⛔ 清单、四答、理由判据与配额见 `filing-gate.md`。

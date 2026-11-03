@@ -44,7 +44,7 @@
 - 移卡入队者→车道:p0/p1 `Blocked-by` 关闭 `Notify: unblocked`;记裁决席→被改席 `Notify: ruling`。
 - 席→兄弟席或他车道:认领文件面相交或须先落 `Notify: serial`,先落者落地 `Notify: landed`。
 - 上下线→兄弟席与分诊 `Notify: seat-online`、`Notify: seat-offline`;清单变→兄弟席 `Notify: split`。
-- 发现者→`security#1`:中继草稿公告建成即 `Notify: security`,只带不透明编号。
+- 持发现的席→`security#1`:草稿公告建成或误公开卡挂标即 `Notify: security`,只带编号。
 - ⛔ 不敲:回执、重发、催(逾期归升级);收方订阅 PR 已载者;问维护者走决策卡。
 - 安全发现只敲上一键,⛔ 不带机制、路径或对象名;余照 `security-findings.md`。
 - 每席每轮 ≤5 条,p0 豁免,超额归下轮,计入写节奏;全拼 `record-recognisers.mjs --mailbox-keys`。

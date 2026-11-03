@@ -4031,6 +4031,22 @@ const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
 };
 
 /**
+ * Every locale the built-in system-field labels above carry a row for, `en`
+ * included — derived from the table, never listed by hand.
+ *
+ * These are locales a `/meta` read translates an injected column's label into
+ * with NO bundle registered for them at all: the request's `Accept-Language`
+ * is matched against this table directly (`builtinSystemFieldLabel`). So a
+ * write door that must recognise a served label coming back as a translation
+ * — and keep it out of the stored document, where it would read as the
+ * author's own field — has to try these locales as well as the bundle's own
+ * (`@objectstack/metadata-protocol`'s save door does).
+ */
+export const BUILTIN_SYSTEM_FIELD_LABEL_LOCALES: readonly string[] = Object.freeze([
+  ...new Set(Object.values(SYSTEM_FIELD_LABELS).flatMap((entry) => Object.keys(entry))),
+]);
+
+/**
  * Fallback label for a platform-injected system field, honouring the same
  * locale-matching rules as bundle lookup (exact → case-insensitive → base
  * language → variant). Applied only when the field still carries its injected

@@ -26,7 +26,11 @@
  *  - a walled tenant admin sees Customize disabled, and nothing is asked;
  *  - a refused save and a refused publish read as the server sent them;
  *  - CONTROLS: the base's flow with no override offers no Restore; a
- *    writable package's flow keeps Delete flow and its definition switch.
+ *    writable package's flow keeps Delete flow and its definition switch;
+ *  - objectstack#29691: a customized flow (unlocked, or a published
+ *    override) has the header say where it is saved ("Saved to HotCRM’s
+ *    customizations"); the base's flow before Customize, and a writable
+ *    package's flow, say nothing of the kind.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -282,12 +286,25 @@ async function openMenu(): Promise<void> {
   await screen.findByTestId('auto-item-new-similar');
 }
 
+/**
+ * objectstack#29692 — Restore is asked from the override mark's popover, and
+ * confirmed in the same dialog the flow's menu opened before.
+ */
+async function openRestorePopover(): Promise<HTMLElement> {
+  fireEvent.click(await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 }));
+  return screen.findByTestId('studio-override-popover');
+}
+
 /** The one switch drawn in the header is the ledger's: no definition switch beside it. */
 async function expectLedgerSwitchAlone(): Promise<void> {
   const ledger = await within(header()).findByTestId('auto-ledger-switch', undefined, { timeout: 8000 });
   expect(ledger).toHaveAttribute('aria-checked', 'true');
   expect(within(header()).getAllByRole('switch')).toEqual([ledger]);
-  expect(header()).not.toHaveTextContent(t('engine.studio.auto.enabled', 'en'));
+  // The definition switch's own mark is its enable/disable title. Its word is
+  // no longer one: since objectstack#29729 a switched-on flow reads "Switched
+  // on" in the Status pill and on the ledger switch too (one word per state).
+  const definitionTitle = t('engine.studio.auto.disableTitle', 'en');
+  expect([...header().querySelectorAll('[title]')].some((el) => el.getAttribute('title')?.includes(definitionTitle))).toBe(false);
 }
 
 describe('Customize a read-only base’s flow into its pair (objectstack#28570)', () => {
@@ -327,7 +344,13 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     // The badge reads the declaration the pair's draft now serves.
     const chip = await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
     expect(chip).toHaveTextContent(tFormat('engine.studio.customize.overrides', 'en', { package: 'HotCRM' }));
-    expect(chip).toHaveAttribute('title', tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }));
+    // objectstack#29692 — pressed, the mark says the version it was taken from.
+    fireEvent.click(chip);
+    expect(await screen.findByTestId('studio-override-popover-facts')).toHaveTextContent(
+      tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }),
+    );
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('studio-override-popover')).toBeNull());
     await expectLedgerSwitchAlone();
 
     // A later edit asks the door no more, and is pinned to the version it was answered.
@@ -350,10 +373,14 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await expectLedgerSwitchAlone();
 
     // The layered envelope says `deletable: false`; the declared row decides.
+    const popover = await openRestorePopover();
+    expect(within(popover).getByTestId('studio-override-restore')).toBeEnabled();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('studio-override-popover')).toBeNull());
+    // Delete flow stays a writable package's own; Restore is the mark's, not the menu's (objectstack#29692).
     await openMenu();
-    expect(screen.getByTestId('studio-restore-original')).not.toHaveAttribute('data-disabled');
-    // Delete flow stays a writable package's own.
     expect(screen.queryByTestId('auto-item-delete')).toBeNull();
+    expect(screen.queryByTestId('studio-restore-original')).toBeNull();
 
     // Its editors are open: an edit is saved into the pair, keeping the declaration.
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
@@ -371,10 +398,16 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     mount({ listedPair: PAIR });
     await openFlow(/^Notify owner and manager v2$/);
 
-    await openMenu();
-    fireEvent.click(screen.getByTestId('studio-restore-original'));
+    // objectstack#29692 — the dialog names the flow as its rail row does.
+    const railText = within(screen.getByTestId('studio-rail-automations'))
+      .getByRole('button', { name: /^Notify owner/ })
+      // The row's label, without the switch reading the row prints after it.
+      .querySelector('.flex-1')
+      ?.textContent?.trim();
+    expect(railText).toBe('Notify owner');
+    fireEvent.click(within(await openRestorePopover()).getByTestId('studio-override-restore'));
     const dialog = await screen.findByTestId('studio-restore-original-dialog');
-    const vars = { item: 'Notify owner', package: 'HotCRM' };
+    const vars = { item: railText!, package: 'HotCRM' };
     expect(dialog).toHaveTextContent(tFormat('engine.studio.customize.restoreConfirm', 'en', vars));
     expect(dialog).toHaveTextContent(tFormat('engine.studio.customize.restoreFlowBody', 'en', vars));
     expect(dialog).toHaveTextContent(t('engine.studio.customize.restoreDraft', 'en'));
@@ -465,5 +498,41 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await openMenu();
     expect(screen.getByTestId('auto-item-delete')).toBeInTheDocument();
     expect(screen.queryByTestId('studio-restore-original')).toBeNull();
+  });
+});
+
+describe('the flow header says where a customized flow is saved (objectstack#29691)', () => {
+  const SAVED_TO = 'Saved to HotCRM’s customizations';
+  const savedTo = () => within(header()).queryByTestId('auto-flow-saved-to');
+
+  it('Customize unlocks the flow, and the header says it is saved to the base’s customizations', async () => {
+    mount();
+    await openFlow();
+    expect(savedTo()).toBeNull();
+    await customize();
+    await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    expect(savedTo()!.closest('[data-slot="item-note"]')).not.toBeNull();
+  });
+
+  it('a published override says it on open', async () => {
+    srv.pairActive = { ...strip(BASE_FLOW), label: 'Notify owner and manager', overrides: DECLARATION };
+    srv.pairExists = true;
+    mount({ listedPair: PAIR });
+    await openFlow(/^Notify owner and manager$/);
+    await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+  });
+
+  it('CONTROL: the base’s flow before Customize says nothing of the kind', async () => {
+    mount({ listedPair: PAIR });
+    await openFlow();
+    await within(header()).findByTestId('studio-customize', undefined, { timeout: 8000 });
+    expect(savedTo()).toBeNull();
+    expect(header().querySelector('[data-slot="item-note"]')).toBeNull();
+  });
+
+  it('CONTROL: a writable package’s flow says nothing of the kind', async () => {
+    mount({ readOnly: false });
+    await openFlow();
+    expect(savedTo()).toBeNull();
   });
 });
