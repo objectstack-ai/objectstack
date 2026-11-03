@@ -22,6 +22,7 @@
  * | security-cbp-ambiguous-relation(error)  | #14747 order-dependent master; runtime refusal since #23100 |
  * | security-modify-all-delete-withheld(error) | #25575 Modify All includes delete — UNPARSED intakes only, see the arm |
  * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): a caller-keyed update policy on a detail admits nobody the master gate refuses — unless it keys `owner_id` and the detail opted in (#26591: the opt-in is prescribed only there) |
+ * | security-superuser-field-mask-inert (warning) | ADR-0066 D2 ⑧ as amended (ruling 6573563853, letter A): a set's View All / Modify All on an object votes on every field of it, so its own `readable: false` (or, under Modify All, its edit lock) on that object binds none of its holders |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -267,6 +268,36 @@ export function isSystemObject(obj: AnyRec): boolean {
 }
 
 /** snake_case identifier contains the reserved token `role`/`roles`. */
+/**
+ * [ADR-0066 D2 / ①] Does `set` hold the super-user ("View/Modify All Data")
+ * bypass on `objectName`? A verbatim copy of `holdsSuperuserBypass` in
+ * `@objectstack/core` (`security/effective-object-permissions.ts`), the ONE
+ * reading the runtime's row bypass and both field merges ask. Copied, not
+ * imported, because this package depends on `@objectstack/spec` alone;
+ * `packages/cli/test/superuser-bypass-mirror-parity.test.ts` runs both over
+ * one case matrix, so a change to either reds it until the other follows.
+ *
+ * The set's own entry for the object answers when it has one; otherwise its
+ * `'*'` wildcard does (a lookup, never a merge).
+ *
+ *  - `view`   — `viewAllRecords` OR `modifyAllRecords` (Modify All implies View All);
+ *  - `modify` — `modifyAllRecords` only: View All never widens a write.
+ */
+export function holdsSuperuserBypass(
+  set: { objects?: Record<string, unknown> | null } | null | undefined,
+  objectName: string,
+  bit: 'view' | 'modify',
+): boolean {
+  const objects = set?.objects;
+  if (!objects || typeof objects !== 'object') return false;
+  const op = (objects[objectName] || objects['*']) as
+    | { viewAllRecords?: unknown; modifyAllRecords?: unknown }
+    | null
+    | undefined;
+  if (!op || typeof op !== 'object') return false;
+  return bit === 'modify' ? Boolean(op.modifyAllRecords) : Boolean(op.viewAllRecords || op.modifyAllRecords);
+}
+
 function identifierHasRoleToken(name: unknown): boolean {
   if (typeof name !== 'string') return false;
   return name
@@ -1172,6 +1203,56 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           `Point the key at a field "${flsObject}" declares` +
           (nearest ? ` ('${flsObject}.${nearest}' is the nearest)` : '') +
           `, or delete the entry if the field is gone`,
+      });
+    }
+
+    // [ADR-0066 D2 ⑧ as amended — ruling of record 6573563853, letter A] A
+    // field mask this set's OWN super-user bit unbinds. A set holding View All
+    // or Modify All on an object votes on every field of it in both field
+    // merges (`superuserFieldVote`, `@objectstack/core`): View All votes
+    // `readable: true`, Modify All votes `readable: true` and `editable: true`.
+    // So beside View All a `readable: false` hides nothing from the set's
+    // holders, and beside Modify All neither does it nor an edit lock; View
+    // All beside an edit lock is NOT reported, because View All never widens a
+    // write and the lock still binds.
+    //
+    // `warning`, never `error`: the ruling made the pair legal, it only does
+    // not do what it reads as. The bypass is read by `holdsSuperuserBypass`
+    // below, the runtime's one reading copied verbatim (this package depends
+    // on spec alone); `packages/cli/test/superuser-bypass-mirror-parity.test.ts`
+    // holds the copy equal to core's. The entry's bits are read as parsing
+    // writes them (an omitted `readable` is `true`, an omitted `editable` is
+    // `false`), which is what both merges then read, so a raw set and its
+    // parse answer the same. One set at a
+    // time: another set's bypass unmasks a holder of both, but no author wrote
+    // an inert entry there.
+    for (const [flsKey, flsEntry] of Object.entries(flsMap)) {
+      if (!flsEntry || typeof flsEntry !== 'object') continue;
+      const dot = flsKey.indexOf('.');
+      if (dot <= 0) continue; // unqualified, judged above; both merges skip it too
+      const flsObject = flsKey.slice(0, dot);
+      const mask = flsEntry as AnyRec;
+      const readMasked = mask.readable === false;
+      const editLocked = mask.editable !== true;
+      const modifyAll = holdsSuperuserBypass(ps, flsObject, 'modify');
+      const viewAll = modifyAll || holdsSuperuserBypass(ps, flsObject, 'view');
+      const inertBits = [readMasked && viewAll ? 'readable: false' : '', editLocked && modifyAll ? 'the edit lock' : '']
+        .filter(Boolean);
+      if (inertBits.length === 0) continue;
+      const binds = inertBits.length > 1 ? 'bind' : 'binds';
+      const bit = modifyAll ? 'modifyAllRecords' : 'viewAllRecords';
+      const via = objectsMap[flsObject] ? `objects.${flsObject}` : `objects['*']`;
+      findings.push({
+        severity: 'warning',
+        rule: SECURITY_SUPERUSER_FIELD_MASK_INERT,
+        where: `permission set "${psName}"`,
+        path: `${psPath}.fields["${flsKey}"]`,
+        message:
+          `${bit} on ${via} votes on every field of "${flsObject}", so ${inertBits.join(' and ')} ` +
+          `on '${flsKey}' ${binds} none of this set's holders`,
+        hint:
+          `Remove ${bit} from ${via} and reach the rows with readScope/writeScope or a row-level policy, ` +
+          `or delete the entry if the bypass is meant`,
       });
     }
 

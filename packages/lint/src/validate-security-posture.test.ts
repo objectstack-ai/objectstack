@@ -1802,6 +1802,28 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'ObjectPermissionSchema',
     keys: () => shapeKeysOf(ObjectPermissionSchema),
   },
+  // [#29544] The super-user bypass mirror (`holdsSuperuserBypass`, verbatim
+  // from `@objectstack/core`): the set it is asked about, and the one
+  // object-permission entry its lookup lands on.
+  {
+    receiver: 'set',
+    expected: ['objects'],
+    declaredBy: 'PermissionSetSchema',
+    keys: () => Object.keys(PermissionSetSchema.shape),
+  },
+  {
+    receiver: 'op',
+    expected: ['modifyAllRecords', 'viewAllRecords'],
+    declaredBy: 'ObjectPermissionSchema',
+    keys: () => shapeKeysOf(ObjectPermissionSchema),
+  },
+  // [#29544] One field-permission entry, read by the inert-mask arm.
+  {
+    receiver: 'mask',
+    expected: ['editable', 'readable'],
+    declaredBy: 'PermissionSetSchema.fields{}',
+    keys: () => shapeKeysOf(PermissionSetSchema.shape.fields),
+  },
   // [#25575] One object-permission entry, read by the Modify All delete arm.
   {
     receiver: 'grant',
@@ -1942,6 +1964,8 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'predicate', // a policy's `using` / `check` text, a string — `.trim`.
       // #27472: `externalOwnershipGap`'s answer — `.column`, a field of that helper's own return value.
       'ownershipGap',
+      // #29544: the inert-mask arm's list of unbound bits — `.filter` / `.join` / `.length`, JS methods.
+      'inertBits',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -2057,6 +2081,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_SUPERUSER_FIELD_MASK_INERT,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -2083,6 +2108,16 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
   {
     label: 'modify-all-delete-withheld',
     stack: { permissions: [{ name: 'ps', label: 'PS', objects: { item: { allowEdit: true, allowDelete: false, modifyAllRecords: true } } }] },
+  },
+  {
+    label: 'superuser-field-mask-inert',
+    stack: {
+      permissions: [{
+        name: 'ps', label: 'PS',
+        objects: { deal: { allowRead: true, viewAllRecords: true } },
+        fields: { 'deal.amount': { readable: false, editable: false } },
+      }],
+    },
   },
   {
     label: 'anchor-high-privilege',
@@ -2215,7 +2250,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 17 since #25575: allowDelete: false beside modifyAllRecords: true.
     // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
     // 19 since #26591: the same rule id, for a policy keyed only on a column the opt-in does not admit.
-    expect(pushedRuleIds()).toHaveLength(19);
+    // 20 since #29544: a field mask its own set's View All / Modify All makes inert.
+    expect(pushedRuleIds()).toHaveLength(20);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

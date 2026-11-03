@@ -889,6 +889,30 @@ const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
+  rule: 'security-superuser-field-mask-inert',
+  covers: 'why a field mask beside View All or Modify All hides nothing',
+  paragraphs: [
+    '`viewAllRecords` (View All) and `modifyAllRecords` (Modify All) are the super-user bypass on an object. ' +
+      'A set that holds one votes on every field of that object when the field permissions are merged: View ' +
+      'All votes `readable: true`, Modify All votes `readable: true` and `editable: true` (ADR-0066 D2 as ' +
+      'amended). The merge is a union, so a `readable: false` the same set declares on that object hides the ' +
+      'field from none of the set\'s holders, and under Modify All its edit lock (`editable: false`, or ' +
+      '`editable` omitted, which parses to false) holds none of them back either. The stored set still reads ' +
+      'as masked, which is why an author or a reviewer takes the field to be protected.',
+    'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
+      'otherwise its `\'*\'` entry, as a lookup and never a merge. View All beside an edit lock is not ' +
+      'reported, because View All never widens a write, so that lock still binds. Only the set that declares ' +
+      'the entry is judged: a holder of two sets is unmasked by the other set\'s bypass too, but no author ' +
+      'wrote an inert entry there.',
+    'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
+      'is meant. If the field must stay hidden or read-only, remove the bypass bit from the object entry and ' +
+      'reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
+      '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. If the bypass is ' +
+      'meant, delete the field entry, which never took effect.',
+  ],
+};
+
 const SECURITY_OWD_ALIAS_EXPLANATION: RuleExplanation = {
   rule: 'security-owd-alias',
   covers: 'which sharing values are retired or misplaced',
@@ -5534,6 +5558,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
+  [SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION.rule]: SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
   [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
   [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,
