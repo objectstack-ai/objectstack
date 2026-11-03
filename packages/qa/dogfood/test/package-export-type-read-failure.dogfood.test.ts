@@ -23,7 +23,11 @@
 //      `503 SERVICE_UNAVAILABLE`, naming the package and `dashboard`, and
 //      serves no manifest;
 //   3. CONTROL: the read restored, the export answers 200 with the dashboards
-//      again (the failure was the read's, not the boot's).
+//      again (the failure was the read's, not the boot's);
+//   4. a type this runtime does not serve is still skipped: `rag_pipeline` is
+//      an exportable collection the showcase's live type vocabulary
+//      (`getMetaTypes`) does not list, and its read failing leaves the export
+//      200 with the same collections.
 //
 // The fault is injected on the protocol's own overlay read
 // (`readActiveOverlayRows`, which the moved list body reaches through the
@@ -36,6 +40,8 @@ import { bootShowcase } from './showcase-boot.js';
 
 const SHOWCASE = 'com.example.showcase';
 const FAILING = 'dashboard';
+/** An exportable type the showcase's live vocabulary does not list (asserted below, not assumed). */
+const UNSERVED = 'rag_pipeline';
 
 type Answer = { status: number; body: any };
 
@@ -48,7 +54,10 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
   let before: Answer;
   let failed: Answer;
   let after: Answer;
+  let unserved: Answer;
+  let liveTypes: string[] = [];
   let overlayReadsRefused = 0;
+  let unservedReadsRefused = 0;
 
   beforeAll(async () => {
     const stack = await bootShowcase();
@@ -58,15 +67,19 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
 
       const protocol = stack.kernel.getService('protocol') as {
         readActiveOverlayRows(request: { type: string }): Promise<unknown>;
+        getMetaTypes(): Promise<{ types: string[] }>;
       };
+      liveTypes = (await protocol.getMetaTypes()).types;
       const original = protocol.readActiveOverlayRows;
-      protocol.readActiveOverlayRows = async function (this: unknown, request: { type: string }) {
-        if (request.type === FAILING) {
-          overlayReadsRefused += 1;
-          throw new Error(`dogfood: the ${FAILING} overlay rows could not be read`);
-        }
-        return original.call(protocol, request);
-      };
+      const failing = (type: string, onRefuse: () => void) =>
+        async function (this: unknown, request: { type: string }) {
+          if (request.type === type) {
+            onRefuse();
+            throw new Error(`dogfood: the ${type} overlay rows could not be read`);
+          }
+          return original.call(protocol, request);
+        };
+      protocol.readActiveOverlayRows = failing(FAILING, () => { overlayReadsRefused += 1; });
       try {
         failed = await call(stack, token, 'GET', `/packages/${SHOWCASE}/export`);
       } finally {
@@ -74,6 +87,13 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
       }
 
       after = await call(stack, token, 'GET', `/packages/${SHOWCASE}/export`);
+
+      protocol.readActiveOverlayRows = failing(UNSERVED, () => { unservedReadsRefused += 1; });
+      try {
+        unserved = await call(stack, token, 'GET', `/packages/${SHOWCASE}/export`);
+      } finally {
+        protocol.readActiveOverlayRows = original;
+      }
     } finally {
       await stack.stop();
     }
@@ -102,5 +122,18 @@ describe('dogfood: a package export refuses when the read of a type the runtime 
     expect(after.status, JSON.stringify(after.body)).toBe(200);
     expect((after.body?.data?.dashboards ?? []).map((d: any) => d.name))
       .toEqual((before.body?.data?.dashboards ?? []).map((d: any) => d.name));
+  });
+
+  it('a type this runtime does not serve is still skipped: its failed read leaves the export 200, the same collections', () => {
+    // The precondition, measured on this boot: the type is exportable and the
+    // live vocabulary does not list it. Registering it makes this case a
+    // served type, whose failed read refuses (the case above).
+    expect(liveTypes).toContain(FAILING);
+    expect(liveTypes).not.toContain(UNSERVED);
+    expect(unservedReadsRefused).toBeGreaterThan(0);
+    expect(unserved.status, JSON.stringify(unserved.body)).toBe(200);
+    const collections = (answer: Answer) =>
+      Object.keys(answer.body?.data ?? {}).filter((k) => Array.isArray(answer.body.data[k])).sort();
+    expect(collections(unserved)).toEqual(collections(before));
   });
 });
