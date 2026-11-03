@@ -328,6 +328,25 @@ describe('one word per state, the second pass (objectstack#29729)', () => {
     expect((CONSOLE_EN as any).packagedAutomation.off).toBe('Off');
   });
 
+  // The switch-off confirm, its toasts and the cell all name one state: a
+  // user who switches an action off must not read 关闭 in the dialog, 已关闭
+  // in the toast and 已停用 in the column.
+  it.each(Object.keys((CONSOLE_ZH as any).packagedAutomation))(
+    "Setup's packaged actions zh row %s: no 开启 / 关闭",
+    (key) => {
+      expect((CONSOLE_ZH as any).packagedAutomation[key]).not.toMatch(/开启|关闭/u);
+    },
+  );
+
+  it("Setup's packaged actions: the confirm, the toasts and the cell share 启用 / 停用", () => {
+    const zh = (CONSOLE_ZH as any).packagedAutomation;
+    expect(zh.switchedOn).toBe('「{{label}}」已启用。');
+    expect(zh.switchedOff).toBe('「{{label}}」已在本部署中停用。');
+    expect(zh.actionOffTitle).toBe('停用「{{label}}」？');
+    expect(zh.actionOffBody).toMatch(/^在重新启用之前/u);
+    expect(zh.actionOffConfirm).toBe('停用');
+  });
+
   const CUSTOMIZE_ACT = [
     'engine.studio.customize.action',
     'engine.studio.customize.actionTitle',
