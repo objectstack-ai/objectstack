@@ -235,6 +235,7 @@ export type { SourceStyleFinding, SourceStyleSeverity } from './validate-page-so
 
 export {
   validateRecordTitle,
+  validateTitleFormatRetired,
   TITLE_FORMAT_RETIRED,
   TITLE_UNRESOLVABLE,
 } from './validate-record-title.js';

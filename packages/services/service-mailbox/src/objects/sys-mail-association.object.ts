@@ -32,7 +32,6 @@ export const SysMailAssociation = ObjectSchema.create({
   description: 'Links a mirrored inbound message to a record it belongs to',
   displayNameField: 'matched_address',
   nameField: 'matched_address', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{matched_address}',
   highlightFields: ['mail_message_id', 'object_name', 'record_id', 'matched_address'],
 
   fields: {

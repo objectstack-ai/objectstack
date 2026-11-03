@@ -125,7 +125,7 @@ import {
   validateFlowTriggerReadiness,
 } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
-import { validateRecordTitle } from './validate-record-title.js';
+import { validateRecordTitle, validateTitleFormatRetired } from './validate-record-title.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
@@ -1548,9 +1548,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['flow'],
     run: (stack) => validateApprovalApprovers(stack),
   },
-  // ADR-0079 — `titleFormat` is retired in favour of `nameField`, and an object
-  // with no resolvable title ships records with no meaningful name. Advisory:
-  // auto-provision and the `Record #<id>` floor keep it from ever being fatal.
+  // ADR-0079 — `titleFormat` is retired in favour of `nameField`, and the
+  // ruling of record on #29007 (6574393684, letter B) refuses it: an object
+  // definition that declares one is refused at the metadata save gate and by
+  // `os validate`. `gating` because a declared template titles nothing — the
+  // explicit or stamped `nameField` outranks it — so a save that accepts it is
+  // a silent no-op. The schema still parses the key, so a stored object that
+  // carries it keeps loading; the runtime gate charges a finding on the
+  // written item to the write itself (`runtime-gate.ts`, "Re-saving a row is
+  // writing it"), so the row is refused when it is next saved, and a draft
+  // save passes until it is published (#4463 D1). Pre-parse: the predicate
+  // reads one authored key, and the finding must survive an unrelated schema
+  // error elsewhere in the stack.
+  {
+    name: 'validateTitleFormatRetired',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-record-title.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) => validateTitleFormatRetired(stack),
+  },
+  // ADR-0079 — an object with no resolvable title ships records with no
+  // meaningful name. Advisory: auto-provision and the `Record #<id>` floor
+  // keep it from ever being fatal.
   {
     name: 'validateRecordTitle',
     tier: 'advisory',
@@ -1981,11 +2003,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-flow-region-shape.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'Not yet on the runtime publish gate: whether a flow write whose region the engine refuses is refused at '
-      + 'publish is the server lane\'s open question for the metadata write path, decided there; this entry '
-      + 'brings the three authoring commands to the engine\'s registration verdict.',
+    // [#29233] Runtime publish gate (#4463): a flow whose region the engine
+    // refuses to register can only ever publish as a flow that never runs, so
+    // the draft read and every publish door refuse it here, through this one
+    // row, rather than through a gate-local copy of the same judgement.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
     run: (stack) => validateFlowRegionShape(stack),
   },
   // The same predicate over a declarative connector's four header/env maps

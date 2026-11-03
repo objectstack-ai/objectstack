@@ -151,11 +151,14 @@ jobs:
           # also reaches cancel, re-run, delete, cache and artifact endpoints; the op table has no
           # row for any of them, and `validate.mjs --self-test` pins that none is reachable.
           permission-actions: ${{ steps.validate.outputs.permission_actions }}
-          # THREE consumers, one at a time: the advisory rows — `advisory_report` (one private report),
-          # `advisory_collaborators_add` and `advisory_state` (one advisory's PATCH). Minted ONLY for a
-          # stroke carrying one of them, which travels alone, the same way as `permission-actions`: the
-          # validator writes `permission_repository_advisories=write` for it and an EMPTY value for every
-          # other stroke. Measured 2026-11-02 with this action and a control token minted without the grant
+          # FOUR write consumers, one at a time: the advisory rows — `advisory_report` (one private report),
+          # `advisory_create` (one draft advisory), `advisory_collaborators_add` and `advisory_state` (one
+          # advisory's PATCH). Minted ONLY for a stroke carrying one of them, which travels alone, the same
+          # way as `permission-actions`: the validator writes `permission_repository_advisories=write` for it
+          # and an EMPTY value for every other stroke. Separately, `advisory_read` (one advisory's GET, also
+          # alone) gets a READ-ONLY mint through this same input: the validator writes
+          # `permission_repository_advisories=read` for its stroke, never `write`. Measured 2026-11-02 with
+          # this action and a control token minted without the grant
           # (run 41415522766): the narrowed mint succeeds, and the grant opens an advisory's read and PATCH.
           # ⚠️ EXPECTED: such a run warns "Unexpected input(s) 'permission-repository-advisories'", because
           # the action's `action.yml` does not declare the input; its `lib/get-permissions-from-inputs.js`

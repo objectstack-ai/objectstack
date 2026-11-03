@@ -146,7 +146,6 @@ const en = {
   actions: {
     decisionOutput: {
       help: 'Handed to the flow as a decision output.',
-      helpMultiValue: 'Handed to the flow as a decision output. Comma-separate multiple values.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -1862,7 +1861,6 @@ const en = {
     undo: 'Undo',
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
-    versionHistory: 'Version history',
   },
   dashboard: {
     total: 'Total',

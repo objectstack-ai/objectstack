@@ -1719,14 +1719,16 @@ export const FieldSchema = lazySchema(() => {
     + 'refused at parse.'
   ),
   // #29171 (director ruling 6574398310, letter B): `referenceNameVisible`.
-  // Its read and expand branch is the server lane's follow-up card and its
-  // text-only rendering the ui lane's; both are filed once this key lands.
+  // Served by objectql's `$expand` (#29460, `engine-reference-name-visible.ts`);
+  // its text-only rendering is the ui lane's card (#29462).
   /**
    * Declared name exposure for a relationship whose target the reader may not
-   * be able to read. DECLARED AHEAD OF ITS PRODUCER (ADR-0049): no runtime
-   * read or `$expand` serves the name yet, so setting the key changes no read
-   * today; the describe carries the `[PLANNED — not yet served]` marker until
-   * the server lane's read and expand branch lands and drops it.
+   * be able to read. SERVED on the expanded read (ADR-0049: declared =
+   * served): `$expand` on the field answers a target the reader is refused —
+   * by the object's read gate or its row scope — as
+   * `{ id, name, readRefused: true }`, per element on a `multiple: true`
+   * field. An unexpanded read answers the stored id, as it does for every
+   * reader (ADR-0104 D1).
    *
    * Declared per referencing field by the application author, never on the
    * target object: the application decides whose names its own pages reveal.
@@ -1739,21 +1741,31 @@ export const FieldSchema = lazySchema(() => {
    * name as text with no link to the target record. A principal who can read
    * the target is served exactly what it is served without the key.
    *
+   * The key lifts the RECORD-level refusal only. A field-level rule on the
+   * name field itself still holds: when the reader's field-level security
+   * keeps that field from it, the field declares a `maskingRule`, or it is a
+   * formula reading through another reference, the name served is the
+   * ADR-0079 floor (`Record #` and the id).
+   *
    * Absent or `false` keeps the restricted-reference posture: a lookup whose
    * target the reader cannot read shows no name. Valid on `lookup` and on
    * `user` (the `sys_user` reference, which the same key covers); refused at
    * parse on every other type (this schema's superRefine), `false` included.
    */
   referenceNameVisible: z.boolean().optional().describe(
-    '[PLANNED — not yet served] Declared name exposure (`lookup` and `user` fields only). TRUE declares '
-    + 'that a principal who can read the record carrying this field may see the referenced record\'s '
-    + 'display name (the target object\'s `nameField` value) and id even when that principal cannot read '
-    + 'the referenced record. Nothing else of the target: `$expand` on this field returns the same name '
-    + 'and id only, the field\'s `displayField` does not widen it, and the name renders as text with no '
-    + 'link to the target. Absent or false keeps the restricted-reference posture for a target the reader '
-    + 'cannot read. Declared on the referencing field only; there is no target-object switch. Refused on '
-    + 'any other type. Declared ahead of its producer (ADR-0049): no runtime serves the name yet, so '
-    + 'setting it changes no read today.'
+    'Declared name exposure (`lookup` and `user` fields only). TRUE declares that a principal who can '
+    + 'read the record carrying this field may see the referenced record\'s display name (the target '
+    + 'object\'s `nameField` value) and id even when that principal cannot read the referenced record. '
+    + 'Served on `$expand`: a target the reader is refused (the object\'s read gate or its row scope) '
+    + 'answers `{ id, name, readRefused: true }`, per element on a multi-value field; an unexpanded read '
+    + 'answers the stored id, as for every reader. Nothing else of the target: `$expand` on this field '
+    + 'returns the same name and id only, the field\'s `displayField` does not widen it, and the name '
+    + 'renders as text with no link to the target. A field-level rule on the name field still holds: '
+    + 'when the reader may not read that field, it is masked, or it is a formula reading through another '
+    + 'reference, the name is the `Record #` floor with the id. A principal who can read the target is '
+    + 'served exactly what it is served without the key. Absent or false keeps the restricted-reference '
+    + 'posture for a target the reader cannot read. Declared on the referencing field only; there is no '
+    + 'target-object switch. Refused on any other type.'
   ),
   /**
    * Inbound mail association — `email` fields only (#22870; ruling

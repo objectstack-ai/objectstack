@@ -344,6 +344,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.lookup.searchHostFields': '搜索本对象的字段…',
   'designer.field.lookup.pageSize': '选择器分页大小',
   'designer.field.lookup.allowCreate': '允许快速创建',
+  'designer.field.lookup.referenceNameVisible': '不可读时显示名称',
+  'designer.field.lookup.referenceNameVisible.help': '允许此记录的读者看到被引用记录的名称（纯文本，不带链接），即使其无权打开该记录。该记录的其他内容一律不显示；名称字段上的字段级规则仍然生效（此时名称显示为 Record # 加 id）。未设置：此类引用显示为「受限记录」。',
   'designer.field.relatedList.heading': '父记录上的关联列表',
   'designer.field.relatedList.shown': '显示',
   'designer.field.relatedList.hidden': '不显示',
@@ -3218,6 +3220,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.col.label': '标签',
   'engine.list.col.source': '来源',
   'engine.list.col.object': '对象',
+  // objectstack#29569 — an object_extension lists by the object it extends.
+  'engine.list.col.extend': '对象',
   'engine.list.col.type': '类型',
   'engine.list.col.description': '描述',
   'engine.list.col.sharedWith': '共享给',

@@ -54,7 +54,7 @@ import { createConsoleServerActionHandler } from '../utils/consoleServerAction.j
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
-import { resolveHostAppSegment } from '../utils/appRoute.js';
+import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
@@ -1041,13 +1041,23 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // overrides, not by the host route, so it never reads the segment. On the
   // record route itself `requestedPageName` is undefined and the lookup is the
   // object's default record page, exactly as before.
+  //
+  // The app the record opens in picks its own record page first
+  // (`PageSchema.apps`, maintainer ruling A on objectstack#28979): the
+  // route's `:appName` segment is resolved to its app and the app's NAME is
+  // what the assignment compares, never the segment itself, which carries the
+  // package id when the app has one (`appRouteSegment`). Where a package ships
+  // two apps, the package id resolves to the first (`matchAppBySegment`), so
+  // the second app's scoped page opens under its name segment only. A record
+  // drawer reads the same segment: it is opened inside the host route's app.
   const requestedPageName = embedded ? undefined : params.pageName;
+  const { pages: metadataPages, apps: metadataApps } = useMetadata();
+  const routeAppName = matchAppBySegment(metadataApps, appName)?.name;
   const {
     page: resolvedPage,
     slots: resolvedSlots,
     loading: pageAssignmentLoading,
-  } = usePageAssignment(objectName, requestedPageName ? { pageName: requestedPageName } : undefined);
-  const metadataPages = useMetadata().pages;
+  } = usePageAssignment(objectName, requestedPageName ? { pageName: requestedPageName } : { app: routeAppName });
   const namedPageState: 'none' | 'pending' | 'accepted' | 'refused' = useMemo(() => {
     if (!requestedPageName) return 'none';
     if (pageAssignmentLoading) return 'pending';
@@ -1594,7 +1604,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // (objectui#13433). Only the route's app: outside an app route it is
   // undefined and the form keeps the app-less route.
   const { currentAppName } = useNavigationContext();
-  const metadataApps = useMetadata().apps;
   const hostAppSegment = appName ?? resolveHostAppSegment(metadataApps, currentAppName);
 
   const navigateHandler = useCallback((url: string, options?: { external?: boolean; newTab?: boolean }) => {

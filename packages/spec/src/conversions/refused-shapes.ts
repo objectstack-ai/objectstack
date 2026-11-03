@@ -46,7 +46,9 @@
  *   judge of the object refinement ({@link duplicateActionNames}), and the
  *   one-key-per-global-filter judge of the dashboard refinement
  *   ({@link duplicateGlobalFilterNames}), and its reserved-`dateRange` judge
- *   ({@link reservedDateRangeGlobalFilters}). A site is listed here exactly
+ *   ({@link reservedDateRangeGlobalFilters}), and the `fieldPatches` key
+ *   grammar of `ObjectExtensionSchema`'s own parse
+ *   ({@link refusedFieldPatchKeys}). A site is listed here exactly
  *   when that door refuses it. One door lives outside this package: the
  *   page/view `visibleWhen` rule in `@objectstack/lint` judges a `has()`
  *   argument on the engine's AST, which this package cannot parse, so its
@@ -70,6 +72,7 @@ import {
 } from '../data/controlled-by-parent-master.js';
 import { duplicateActionNames } from '../data/duplicate-action-names.js';
 import { externalBindingDatasourceRefusal } from '../data/external-binding-datasource.js';
+import { ObjectExtensionSchema } from '../data/object.zod.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
 import {
   duplicateGlobalFilterNames,
@@ -615,6 +618,53 @@ const dashboardReservedDateRangeGlobalFilter: RefusedStoredShape = {
   },
 };
 
+// ── #29554: an object extension whose `fieldPatches` key cannot be a field name (the #29366 refusal) ──
+
+/**
+ * The `fieldPatches` keys `ObjectExtensionSchema` refuses as no field name:
+ * each `invalid_key` issue the extension's own parse locates at
+ * `fieldPatches.KEY`, with that issue's message. The parse is the door's own,
+ * the one the save door and the sync that registers stored extensions run, so
+ * a key is listed here exactly when that parse refuses it as a key.
+ */
+function refusedFieldPatchKeys(extension: Dict): Array<{ key: string; message: string }> {
+  if (!isDict(extension.fieldPatches)) return [];
+  const parsed = ObjectExtensionSchema.safeParse(extension);
+  if (parsed.success) return [];
+  const refused: Array<{ key: string; message: string }> = [];
+  for (const issue of parsed.error.issues) {
+    if (issue.code !== 'invalid_key' || issue.path.length !== 2 || issue.path[0] !== 'fieldPatches') continue;
+    const key = issue.path[1];
+    if (typeof key === 'string') refused.push({ key, message: issue.message });
+  }
+  return refused;
+}
+
+const objectExtensionFieldPatchKeyGrammar: RefusedStoredShape = {
+  id: 'object-extension-field-patch-key-grammar-refused',
+  toMajor: 18,
+  surface: 'objectExtensions[].fieldPatches — a key outside the snake_case grammar of an object\'s `fields` keys',
+  detect(stack, report) {
+    mapCollection(stack, 'objectExtensions', (extension, path) => {
+      const target = typeof extension.extend === 'string' ? `\`${extension.extend}\`` : 'its target';
+      for (const { key, message } of refusedFieldPatchKeys(extension)) {
+        report({
+          path: `${path}.fieldPatches.${key}`,
+          from: JSON.stringify({ [key]: (extension.fieldPatches as Dict)[key] }),
+          reason: `The extension of ${target} keys a field patch by \`${key}\`. `
+            + 'No lossless rewrite: re-spelling the key (lower-casing it, turning `-` or a space into `_`) can land '
+            + 'on a different field or on none, so which field the patch meant is the author\'s to name. Left as '
+            + 'stored, the row no longer parses: the sync that registers stored extensions names it '
+            + '(INVALID_METADATA) and registers none of it, its `fields` included, and its next save is refused '
+            + 'until the key is renamed to the field it meant. '
+            + message,
+        });
+      }
+      return extension;
+    });
+  },
+};
+
 /**
  * Every refused stored shape, in report order. A new entry is a reviewed edit:
  * `refused-shapes.test.ts` pins each one.
@@ -629,6 +679,7 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
   objectDuplicateActionName,
   dashboardDuplicateGlobalFilterName,
   dashboardReservedDateRangeGlobalFilter,
+  objectExtensionFieldPatchKeyGrammar,
 ];
 
 /**

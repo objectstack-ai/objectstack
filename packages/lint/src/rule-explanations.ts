@@ -3039,8 +3039,12 @@ const TITLE_FORMAT_RETIRED_EXPLANATION: RuleExplanation = {
       'write; point `nameField` at it. A formula with `returnType: \'text\'` is title-eligible too and ' +
       'stays legal for a title shown for display only: its value is computed on read and stored nowhere, ' +
       'so a sort by it is refused, search never reaches it, and an import cannot match a lookup cell ' +
-      'against it. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
-    'A warning, not an error: the schema still parses the key, so existing metadata keeps loading.',
+      'against it. Then drop `titleFormat`: an object definition that declares it is refused at the ' +
+      'metadata save gate (an active save, a draft promotion, a restore) and by `os validate`, ' +
+      '`os build` and `os lint`.',
+    'An error, not a warning, though the schema still parses the key: a stored object that carries it ' +
+      'keeps loading and reading, and is refused only when it is next saved or validated. A draft ' +
+      'save passes; its publish is refused.',
   ],
 };
 
@@ -4863,10 +4867,20 @@ const CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       'literal moves by shape: an `Authorization` bearer value to `auth: { type: \'bearer\', credentialRef }`, ' +
       'a key header to `{ type: \'api-key\', headerName, credentialRef }`, a Basic pair to ' +
       '`{ type: \'basic\', username, credentialRef }`.',
-    'A stdio MCP server takes no `auth`: the provider folds a resolved credential into an http ' +
-      'transport\'s headers only, and a stdio server\'s credentials ride `transport.env`. So the env ' +
-      'finding names `auth.credentialRef` with its condition, an http transport, and promises nothing ' +
-      'for stdio. The connector guide is content/docs/automation/connectors.mdx.',
+    'A stdio MCP server takes the same `auth`, and `providerConfig.transport.credentialEnv` names the ' +
+      'environment variable the `mcp` provider hands the resolved credential to the server in, so an env ' +
+      'literal moves to `auth: { type: \'bearer\', credentialRef }` plus `credentialEnv: \'VARIABLE_NAME\'`, ' +
+      'and the env entry is dropped. Without `credentialEnv` a stdio transport does not apply `auth` at ' +
+      'all, so the env finding names both keys. The connector guide is content/docs/automation/connectors.mdx.',
+    // Both route findings are held to the rule by its test.
+    'Two more findings sit on that route. A stdio `mcp` entry that declares a `bearer`, `api-key` or `basic` ' +
+      '`auth` and no `credentialEnv` is reported at `auth`: the reference is still resolved, and a missing one ' +
+      'still degrades the instance, but the provider hands the credential to a stdio server only in the variable ' +
+      '`credentialEnv` names, so without it the credential reaches nothing and nothing else says so. Add the key, ' +
+      'or drop `auth` when the server takes no credential. And `credentialEnv` holds a variable name that is ' +
+      'served on every metadata read, so a value there that reads as a credential (it opens with an auth scheme, ' +
+      'or carries a run of 16 or more letters and digits that switches between the two at least four times, as a ' +
+      'generated token does) is reported at that key. A conventional name such as `REPO_MCP_TOKEN` never draws.',
     'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
       'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
       '`token` can hold something that is not a secret, and a false positive costs a line of ' +

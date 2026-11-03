@@ -570,6 +570,8 @@
     "OperatorMapping": "api/OperatorMapping",
     "OperatorMappingSchema": "api/OperatorMapping",
     "PackageApiErrorCode": "api/PackageApiErrorCode",
+    "PackageExportBundle": "api/PackageExportBundle",
+    "PackageExportBundleSchema": "api/PackageExportBundle",
     "PackageExportManifest": "api/PackageExportManifest",
     "PackageExportManifestSchema": "api/PackageExportManifest",
     "PackageInstallBody": "api/PackageInstallBody",

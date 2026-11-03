@@ -10,10 +10,11 @@
  * or false keeps the restricted-reference posture. The key lives on the
  * referencing field only: the ruling refuses a target-object switch.
  *
- * Declared ahead of its producer (ADR-0049): no read or `$expand` serves the
- * name yet, so the describe opens with the `[PLANNED — not yet served]`
- * marker, which the liveness ledger reads as `planned`. The server lane's read
- * and expand branch drops the marker and flips the pin in section 3.
+ * Served on `$expand` (ADR-0049: declared = served): objectql answers a
+ * refused target as `{ id, name, readRefused: true }`. The server change that
+ * served it dropped the describe's `[PLANNED — not yet served]` marker and
+ * flipped the pin in section 3; the liveness ledger's row cites the runtime
+ * and its real-driver test.
  *
  * The accepted types are HARDCODED below on purpose (not read off the schema),
  * so these pins are an independent measurement rather than a tautology.
@@ -154,10 +155,10 @@ describe('referenceNameVisible is refused off lookup and user', () => {
 });
 
 // =========================================================================
-// 3. Declared ahead of its producer — the marker, and the projection
+// 3. Served — no planned marker, and the projection
 // =========================================================================
 
-describe('the JSON-schema projection of FieldSchema carries referenceNameVisible as planned', () => {
+describe('the JSON-schema projection of FieldSchema carries referenceNameVisible as served', () => {
   const js = z.toJSONSchema(FieldSchema as unknown as z.ZodType, {
     unrepresentable: 'any',
     io: 'input',
@@ -170,11 +171,11 @@ describe('the JSON-schema projection of FieldSchema carries referenceNameVisible
     expect(js.required ?? []).not.toContain(KEY);
   });
 
-  it('opens its description with the planned marker and names ADR-0049, until the server branch lands', () => {
-    // The server lane's read and expand branch drops the marker and flips
-    // this pin in the same change (ADR-0049: declared != served).
-    expect(prop!.description).toMatch(/^\[PLANNED — not yet served\] /);
-    expect(prop!.description).toContain('ADR-0049');
+  it('carries no planned marker now that $expand serves it, and names the served value', () => {
+    // The server change that serves the key dropped the marker and flipped
+    // this pin (ADR-0049: declared = served).
+    expect(prop!.description).not.toMatch(/\[PLANNED/);
+    expect(prop!.description).toContain('`{ id, name, readRefused: true }`');
     expect(prop!.description).not.toMatch(/#\d{3,}/);
   });
 

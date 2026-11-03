@@ -21,7 +21,7 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // writer-local re-derivation here was rejected by name (Option B): it would be
 // a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
-import { isMissingTableError, keysetWalk, strandedDecisionFailure } from '@objectstack/types';
+import { isObjectAbsentError, keysetWalk, strandedDecisionFailure } from '@objectstack/types';
 // [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
 // both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
 // `BUILTIN_IDENTITY_PLATFORM_ADMIN` went with the platform arm's name read and
@@ -1119,29 +1119,13 @@ const OOO_MAX_CHAIN = 8;
 const MEMBER_SCREEN_READ_LIMIT = 50000;
 
 /**
- * [#29362] Rows per page of the membership-tier read
- * ({@link ApprovalService.expandMembershipTierUsers}) — the bound the read
- * always carried, so a tier held by fewer people issues the one read it always
- * did, and a tier held by more is read in further pages rather than cut.
+ * [#29362, #29503] Rows per page of the directory holder reads
+ * ({@link ApprovalService.readHoldersToCompletion}: the membership tier, the
+ * position assignments, the team members, the business-unit members) — the bound each read always
+ * carried, so a group held by fewer people issues the one read it always did,
+ * and one held by more is read in further pages rather than cut.
  */
-const MEMBER_TIER_PAGE_ROWS = 10000;
-
-/**
- * [#29362] Did a `sys_member` read fail because this stack has no membership
- * object at all — the one failure whose empty answer is the truth? Two
- * spellings of the same absence, each attributed to `sys_member` so a failure
- * about another object is not evidence about this one: the driver's
- * missing-table refusal (the shared `isMissingTableError`, the table
- * registered but never created), and the engine's `OBJECT_NOT_FOUND` (a
- * composition that never registers the object, refused before any driver is
- * asked — the reading `sys-metadata-repository.ts` gives its own history
- * object). Anything else is an outage and stays loud.
- */
-function membershipObjectAbsent(err: unknown): boolean {
-  if (isMissingTableError(err, 'sys_member')) return true;
-  const refused = err as { code?: unknown; object?: unknown } | null | undefined;
-  return refused?.code === 'OBJECT_NOT_FOUND' && refused.object === 'sys_member';
-}
+const HOLDER_PAGE_ROWS = 10000;
 
 /**
  * Approver types resolved by QUERYING a graph rather than by taking `value`
@@ -1342,6 +1326,24 @@ function isBlankDecisionOutput(value: unknown): boolean {
   if (Array.isArray(value)) return value.filter(v => v !== null && v !== undefined && String(v).trim() !== '').length === 0;
   return false;
 }
+
+/** The organization a `sys_team` row names, or `''` when it carries none (or there is no row). */
+function teamOrganizationOf(row: any): string {
+  return row?.organization_id ? String(row.organization_id) : '';
+}
+
+/**
+ * What one value of each picker kind of decision output is (#28658): the
+ * thing the picker commits, and the thing an `expression` approver with the
+ * matching `resolveAs` reads downstream. `text` is absent: free text has no
+ * resolver, so only its shape (`multiple`) is judged.
+ */
+const DECISION_OUTPUT_VALUE_NOUN: Readonly<Record<string, string>> = {
+  user: 'user id',
+  department: 'department id',
+  team: 'team id',
+  position: 'position machine name',
+};
 
 function rowFromRequest(row: any): ApprovalRequestRow {
   // Display labels by the ONE chain (`display-labels.ts`, #23889) the open
@@ -2693,12 +2695,7 @@ export class ApprovalService implements IApprovalService {
         // this is, and carry the error, so an operator does not go staffing a
         // position whose holders simply could not be read. The try above also
         // wraps the cross-org read filter (`bounded`), so the line names both.
-        this.logger?.warn?.(
-          `[approvals] approver '${type}:${a.value}' could not be expanded — a directory or read-filter lookup failed, so the `
-          + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
-          + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
-          { type, value: a.value, organizationId: organizationId ?? null, error: directoryFailure },
-        );
+        this.warnExpansionFailed(type, a.value, organizationId, directoryFailure);
       } else {
         this.logger?.warn?.(
           `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot names no one, so no one is `
@@ -2713,6 +2710,32 @@ export class ApprovalService implements IApprovalService {
     // phantom slot the existence check above exists to keep off the slate.
     if (type === 'user') return [];
     return [`${type}:${a.value}`];
+  }
+
+  /**
+   * [#29362, #29606] The one warning an approver slot logs when its expansion
+   * FAILED — a directory or read-filter lookup threw — rather than came back
+   * empty: the slot falls back to its literal, and the line carries the error.
+   * Shared by the static graph types ({@link resolveApproverSpec}) and an
+   * `expression` approver's `resolveAs` values ({@link resolveExpressionApprovers},
+   * which passes its source as `expression`), so the two cannot drift.
+   */
+  private warnExpansionFailed(
+    type: string,
+    value: unknown,
+    organizationId: string | null | undefined,
+    error: string,
+    expression?: string,
+  ): void {
+    this.logger?.warn?.(
+      `[approvals] approver '${type}:${value}' could not be expanded — a directory or read-filter lookup failed, so the `
+      + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
+      + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
+      {
+        type, value, organizationId: organizationId ?? null, error,
+        ...(expression === undefined ? {} : { expression }),
+      },
+    );
   }
 
   /**
@@ -2857,6 +2880,11 @@ export class ApprovalService implements IApprovalService {
         }
       } catch (err: any) {
         if (String(err?.message ?? '').startsWith('VALIDATION_FAILED')) throw err;
+        // [#29606] The literal slot below is the same fallback the static graph
+        // types take, and it says why exactly as they do: a failed read is not
+        // an unstaffed value, so an operator is pointed at the read rather than
+        // at staffing it.
+        this.warnExpansionFailed(resolveAs, key, organizationId, err instanceof Error ? err.message : String(err), source);
         users = [];
       }
       if (crossOrg && users.length) {
@@ -2917,16 +2945,12 @@ export class ApprovalService implements IApprovalService {
   private async expandTeamUsers(teamId: string, organizationId?: string | null): Promise<string[]> {
     if (!teamId) return [];
     if (await this.teamIsProvablyOutsideOrg(teamId, organizationId)) return [];
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_team_member', {
-        where: { team_id: teamId },
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      } as any);
-    } catch { rows = []; }
-    const users = Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // [#29503] Every member, read to completion — or a refusal that
+    // {@link resolveApproverSpec}'s directory catch reports as a failed read,
+    // never "expanded to nobody". A stack with no `sys_team_member` has none.
+    const users = await this.readHoldersToCompletion(
+      'sys_team_member', { team_id: teamId }, `the members of team '${teamId}'`,
+    );
     // #10547: the TEAM proved its tenancy above; its members have not proved
     // theirs, and `sys_team_member` holds no fact that could. One read.
     return await this.dropMembersProvablyOutsideOrg(teamId, users, organizationId);
@@ -2965,20 +2989,11 @@ export class ApprovalService implements IApprovalService {
     // No organization on the request ⇒ nothing to screen against, and no read.
     // The ordinary single-organization / embedded stack costs nothing here.
     if (!requestOrg) return false;
-    let rows: any[] = [];
+    let row: any;
     try {
-      // No `as any` on this options bag — #4918's ratchet grandfathers this
-      // file for its EXISTING erasures only, and a NEW one must carry the
-      // declared type. `ApprovalEngine.find` already accepts it as written.
-      rows = await this.engine.find('sys_team', {
-        where: { id: teamId },
-        fields: ['id', 'organization_id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
+      row = await this.readTeamRow(teamId);
     } catch { return false; } // team unreadable — see the fail-open note above
-    const row: any = Array.isArray(rows) ? rows[0] : null;
-    const teamOrg = row?.organization_id ? String(row.organization_id) : '';
+    const teamOrg = teamOrganizationOf(row);
     if (!teamOrg) return false;                  // no tenancy fact on this team
     if (teamOrg === requestOrg) return false;    // it is this org's team — route as before
     this.logger?.warn?.(
@@ -2990,6 +3005,25 @@ export class ApprovalService implements IApprovalService {
       { teamId, teamOrganizationId: teamOrg, requestOrganizationId: requestOrg },
     );
     return true;
+  }
+
+  /**
+   * The `sys_team` row `teamId` names, or `null` when none does. The one read
+   * behind {@link teamIsProvablyOutsideOrg} and the check a `team` decision
+   * output's value passes (#28658). A failed read throws: each caller decides
+   * what an unreadable directory means.
+   */
+  private async readTeamRow(teamId: string): Promise<any | null> {
+    // No `as any` on this options bag — #4918's ratchet grandfathers this
+    // file for its EXISTING erasures only, and a NEW one must carry the
+    // declared type. `ApprovalEngine.find` already accepts it as written.
+    const rows = await this.engine.find('sys_team', {
+      where: { id: teamId },
+      fields: ['id', 'organization_id'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    return Array.isArray(rows) && rows[0] ? rows[0] : null;
   }
 
   /**
@@ -3182,14 +3216,7 @@ export class ApprovalService implements IApprovalService {
     if (!businessUnitId) return [];
     // Seed sanity check: skip if dept doesn't exist or is inactive within tenant.
     try {
-      const seed = await this.engine.find('sys_business_unit', {
-        where: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
-        fields: ['id', 'active'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      } as any);
-      const seedRow: any = Array.isArray(seed) ? seed[0] : null;
-      if (!seedRow || seedRow.active === false) return [];
+      if (!(await this.businessUnitIsLive(businessUnitId, organizationId))) return [];
     } catch { return []; }
 
     const seen = new Set<string>([businessUnitId]);
@@ -3209,20 +3236,39 @@ export class ApprovalService implements IApprovalService {
         if (kid && !seen.has(kid)) { seen.add(kid); queue.push(kid); }
       }
     }
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_business_unit_member', {
-        // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
-        // on purpose and is not {@link businessUnitOrgScope}. The units above
-        // proved their tenancy; these rows have not, and the
-        // shared seeded unit id is exactly where other tenants' rows sit.
-        where: this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      } as any);
-    } catch { rows = []; }
-    return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // [#29606] Every member of the subtree, read to completion — or a refusal
+    // that {@link resolveApproverSpec}'s directory catch reports as a failed
+    // read, never "expanded to nobody". It read once at a 10,000-row bound and
+    // answered `[]` on any failure: past the bound the slate silently lost the
+    // rest, and a failed read logged as an unstaffed unit. A stack with no
+    // `sys_business_unit_member` has no members.
+    return this.readHoldersToCompletion(
+      'sys_business_unit_member',
+      // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
+      // on purpose and is not {@link businessUnitOrgScope}. The units above
+      // proved their tenancy; these rows have not, and the
+      // shared seeded unit id is exactly where other tenants' rows sit.
+      this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
+      `the members of business unit '${businessUnitId}' and its descendant units`
+        + `${organizationId ? ` in organization '${organizationId}'` : ''}`,
+    );
+  }
+
+  /**
+   * Does `businessUnitId` name an active department of `organizationId`'s
+   * directory? The seed check of {@link expandBusinessUnitUsers}, and the
+   * check a `department` decision output's value passes (#28658). A failed
+   * read throws: each caller decides what an unreadable directory means.
+   */
+  private async businessUnitIsLive(businessUnitId: string, organizationId?: string | null): Promise<boolean> {
+    const seed = await this.engine.find('sys_business_unit', {
+      where: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
+      fields: ['id', 'active'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const seedRow: any = Array.isArray(seed) ? seed[0] : null;
+    return !!seedRow && seedRow.active !== false;
   }
 
   /**
@@ -3303,18 +3349,16 @@ export class ApprovalService implements IApprovalService {
    */
   private async expandPositionUsers(positionName: string, organizationId?: string | null): Promise<string[]> {
     if (!positionName) return [];
-    const users = new Set<string>();
-    const filter: any = { position: positionName };
+    const filter: Record<string, unknown> = { position: positionName };
     if (organizationId) filter.organization_id = organizationId;
-    try {
-      const rows = await this.engine.find('sys_user_position', {
-        filter, fields: ['user_id'], limit: 10000, context: SYSTEM_CTX,
-      } as any);
-      for (const r of (rows ?? []) as any[]) {
-        const uid = String(r.user_id ?? '');
-        if (uid) users.add(uid);
-      }
-    } catch { /* table may not exist on minimal stacks — union source below still applies */ }
+    // [#29503] Every assignment, read to completion — or a refusal, never the
+    // tier limb below alone (a shrunk slate that looks complete). A stack with
+    // no `sys_user_position` has no assignment holders; the union source below
+    // still applies.
+    const users = new Set<string>(await this.readHoldersToCompletion(
+      'sys_user_position', filter,
+      `the assignments of position '${positionName}'${organizationId ? ` in organization '${organizationId}'` : ''}`,
+    ));
     // ADR-0057 D4 transition source: pre-migration stacks still carry the
     // position name in better-auth's `sys_member.role` column, so the same
     // lookup serves a position name here and a membership tier for
@@ -3402,7 +3446,7 @@ export class ApprovalService implements IApprovalService {
    * change here changes position routing too.
    *
    * [#29362] Read to COMPLETION, or refused — never a shortened or an invented
-   * empty slate. Pages of {@link MEMBER_TIER_PAGE_ROWS} through the platform's
+   * empty slate. Pages of {@link HOLDER_PAGE_ROWS} through the platform's
    * one keyset walk (`keysetWalk`, `@objectstack/types`), ordered by `id`, so a
    * tier held past the bound routes to every holder rather than the first
    * 10,000 rows. A read that fails, or a walk that cannot vouch for completion
@@ -3414,17 +3458,40 @@ export class ApprovalService implements IApprovalService {
    * nobody", indistinguishable from a tier no one holds. A membership object
    * that does not exist is the one failure that IS an answer (a stack that never
    * materialises `sys_member` has no tier holders) and keeps answering `[]`;
-   * see {@link membershipObjectAbsent}.
+   * see {@link readHoldersToCompletion}.
    */
   private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
     if (!tier) return [];
     const filter: Record<string, unknown> = { role: tier };
     if (organizationId) filter.organization_id = organizationId;
-    const scope = `the holders of membership tier '${tier}'${organizationId ? ` in organization '${organizationId}'` : ''}`;
+    return this.readHoldersToCompletion(
+      'sys_member', filter,
+      `the holders of membership tier '${tier}'${organizationId ? ` in organization '${organizationId}'` : ''}`,
+    );
+  }
+
+  /**
+   * [#29362, #29503] The `user_id`s of every `object` row matching `where`,
+   * read to COMPLETION — or a refusal, never a shortened or an invented empty
+   * slate. The one read behind the membership tier, the position assignments,
+   * the team members and the business-unit members (#29606).
+   *
+   * Pages of {@link HOLDER_PAGE_ROWS} through the platform's one keyset walk
+   * (`keysetWalk`, `@objectstack/types`), ordered by `id`, so a group held past
+   * the bound routes to every holder rather than the first 10,000 rows. A read
+   * that fails, or a walk that cannot vouch for completion (a row without an
+   * `id`, a page that did not honour the cursor), THROWS:
+   * {@link resolveApproverSpec}'s directory catch then lets the slot fall back
+   * to its literal and says the read failed. An object that does not exist on
+   * this stack is the one failure that IS an answer (no holders through it) and
+   * answers `[]` — `isObjectAbsentError` (`@objectstack/types`) decides that,
+   * attributed to `object`, so an absence of another object is still loud.
+   */
+  private async readHoldersToCompletion(object: string, where: Record<string, unknown>, scope: string): Promise<string[]> {
     const users = new Set<string>();
     const walk = keysetWalk<Record<string, unknown>>(
-      (page) => this.engine.find('sys_member', { ...page, fields: ['id', 'user_id'], context: SYSTEM_CTX }),
-      { where: filter, pageSize: MEMBER_TIER_PAGE_ROWS },
+      (page) => this.engine.find(object, { ...page, fields: ['id', 'user_id'], context: SYSTEM_CTX }),
+      { where, pageSize: HOLDER_PAGE_ROWS },
     );
     try {
       for await (const page of walk.pages()) {
@@ -3434,7 +3501,7 @@ export class ApprovalService implements IApprovalService {
         }
       }
     } catch (err) {
-      if (membershipObjectAbsent(err)) return [];
+      if (isObjectAbsentError(err, object)) return [];
       throw Object.assign(new Error(
         `[approvals] ${scope} could not be read: ${err instanceof Error ? err.message : String(err)}. `
         + 'Routing to a shortened slate would leave holders unasked, so the expansion refuses instead.',
@@ -4531,6 +4598,131 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * [#28658, ruling 6566731522 letter A] Judge each admitted decision output
+   * against its declaration, and throw ONE `VALIDATION_FAILED` naming every
+   * `outputs.KEY` that does not match. Called before any write.
+   *
+   *  - A blank value is `required`'s question, not this one's: an omitted
+   *    optional output stays omitted.
+   *  - `multiple: true` takes a list and only a list, with no entry twice;
+   *    `multiple` absent or false takes one value. This holds for every
+   *    declaration, `text` (the default, and every bare-key declaration)
+   *    included: the ruling's sentence on `multiple` names no kind.
+   *  - `text` is judged on that shape only; its values are free.
+   *  - A picker's values must resolve, through the lookup the matching `expression`
+   *    approver's `resolveAs` expands it with
+   *    ({@link decisionOutputValueRefusal}).
+   */
+  private async assertDecisionOutputsMatchDeclarations(
+    outputs: Record<string, unknown>,
+    defs: ReturnType<typeof normalizeDecisionOutputs>,
+    organizationId: string | null,
+  ): Promise<void> {
+    const problems: string[] = [];
+    for (const def of defs) {
+      const kind = def.type ?? 'text';
+      // `undefined` for `text`: its shape is judged, its values are not.
+      const noun: string | undefined = DECISION_OUTPUT_VALUE_NOUN[kind];
+      if (!Object.prototype.hasOwnProperty.call(outputs, def.key)) continue;
+      const value = outputs[def.key];
+      if (isBlankDecisionOutput(value)) continue;
+      const path = `\`outputs.${def.key}\``;
+      const what = noun ?? 'value';
+      if (def.multiple === true && !Array.isArray(value)) {
+        problems.push(`${path} takes a list of ${what}s (it is declared \`multiple: true\`), not a single value`);
+        continue;
+      }
+      if (def.multiple !== true && Array.isArray(value)) {
+        problems.push(`${path} takes one ${what} (it is not declared \`multiple: true\`), not a list`);
+        continue;
+      }
+      const values: unknown[] = Array.isArray(value) ? value : [value];
+      if (!noun) {
+        // Free text: one entry twice is the same answer given twice.
+        const seenText = new Set<string>();
+        const repeatedText = new Set<string>();
+        for (const v of values) {
+          const spelled = typeof v === 'string' ? `'${v}'` : JSON.stringify(v);
+          (seenText.has(spelled) ? repeatedText : seenText).add(spelled);
+        }
+        if (repeatedText.size) problems.push(`${path} lists ${[...repeatedText].join(', ')} more than once`);
+        continue;
+      }
+      if (values.some(v => typeof v !== 'string' || v.trim() === '')) {
+        problems.push(`${path} must hold ${def.multiple === true ? `${noun}s` : `a ${noun}`} as text`);
+        continue;
+      }
+      const seen = new Set<string>();
+      const repeated = new Set<string>();
+      for (const v of values as string[]) (seen.has(v) ? repeated : seen).add(v);
+      if (repeated.size) {
+        problems.push(`${path} lists ${[...repeated].map(v => `'${v}'`).join(', ')} more than once`);
+        continue;
+      }
+      for (const v of seen) {
+        const why = await this.decisionOutputValueRefusal(kind, v, organizationId);
+        if (why) problems.push(`${path}: '${v}' ${why}`);
+      }
+    }
+    if (!problems.length) return;
+    throw new Error(
+      `VALIDATION_FAILED: ${problems.join('; ')}. Nothing was recorded and the request is still pending — `
+      + `decide again with values the step declares.`,
+    );
+  }
+
+  /**
+   * Why one value of a picker decision output resolves to nothing — the clause
+   * a refusal carries — or `undefined` when it resolves. Each kind asks the
+   * lookup an `expression` approver with the same `resolveAs` asks, in the
+   * request's organization:
+   *
+   *  - `user`: a record id an account carries — {@link reassignTargetRefusal}
+   *    asked with no organization, as a `user` approver asks it. A slot
+   *    address (`kind:value`) or an email is not a record id.
+   *  - `department`: an active department of the organization —
+   *    {@link businessUnitIsLive}, the seed check of the department expansion.
+   *  - `team`: a `sys_team` row ({@link readTeamRow}) not owned by another
+   *    organization.
+   *  - `position`: a machine name someone in the organization holds —
+   *    {@link expandPositionUsers}, which matches `sys_user_position.position`
+   *    by name. A `sys_position` id names no holder there, so it is refused.
+   *
+   * A failed read proves nothing, so it answers `undefined`, as every
+   * resolution in this file reads one.
+   */
+  private async decisionOutputValueRefusal(
+    kind: string,
+    value: string,
+    organizationId: string | null,
+  ): Promise<string | undefined> {
+    try {
+      if (kind === 'user') {
+        if (value.includes(':') || value.includes('@')) return 'is not a user id';
+        return (await this.reassignTargetRefusal(value, null)) === undefined ? undefined : 'names no user';
+      }
+      if (kind === 'department') {
+        return (await this.businessUnitIsLive(value, organizationId))
+          ? undefined : 'names no active department in this request\'s organization';
+      }
+      if (kind === 'team') {
+        const row = await this.readTeamRow(value);
+        if (!row) return 'names no team';
+        const teamOrg = teamOrganizationOf(row);
+        return organizationId && teamOrg && teamOrg !== String(organizationId)
+          ? 'is a team of another organization' : undefined;
+      }
+      if (kind === 'position') {
+        return (await this.expandPositionUsers(value, organizationId)).length
+          ? undefined : 'is not a position anyone holds in this request\'s organization (a position is named by its machine name)';
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  /**
    * Record a decision on a node-driven request. Honours the node's `behavior`
    * (#3266): `first_response` finalizes on the first approval; `unanimous`,
    * `quorum`, and `per_group` hold the request open until their tally is met
@@ -4636,8 +4828,8 @@ export class ApprovalService implements IApprovalService {
       acceptedOutputs = { ...input.outputs };
     }
 
-    // objectui#2955: `required` outputs. Unlike `type`/`multiple` — which only
-    // shape the input widget — this one is a runtime contract: the flow must
+    // objectui#2955: `required` outputs. A runtime contract, like `type` and
+    // `multiple` below: the flow must
     // never resume past this node with a required key missing, because that is
     // precisely what a downstream `expression` approver reads. Before this,
     // an author's only backstop was `onEmptyApprovers` (the next node opens,
@@ -4663,6 +4855,15 @@ export class ApprovalService implements IApprovalService {
           + `request — open the approval and fill them in before approving.`,
         );
       }
+    }
+
+    // [#28658, ruling 6566731522 letter A] Each admitted output is judged
+    // against its declaration's `type` and `multiple`, before any write, so a
+    // value the next step cannot use is refused here and not at the step that
+    // reads it. On a reject too: the outputs ride the reject's resume and the
+    // `__decisionOutputs` snapshot just as they ride an approve's.
+    if (acceptedOutputs) {
+      await this.assertDecisionOutputsMatchDeclarations(acceptedOutputs, declaredDefs, org);
     }
 
     // The run behind this request must still be resumable before ANY of it is

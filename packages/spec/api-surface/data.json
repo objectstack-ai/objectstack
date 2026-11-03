@@ -934,6 +934,7 @@
     "isInlineRowFormOffered (function)",
     "isKnownFilterToken (function)",
     "isLegacyApiMethod (function)",
+    "isListComparandOperator (function)",
     "isMaskedOnReadFieldType (function)",
     "isMultiValueField (function)",
     "isNowDefaultToken (function)",

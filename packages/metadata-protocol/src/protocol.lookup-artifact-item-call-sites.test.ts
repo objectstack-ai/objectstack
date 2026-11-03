@@ -71,6 +71,9 @@ const BINDINGS_FILE = 'protocol-package-bindings.ts';
 const BINDINGS = readFileSync(fileURLToPath(new URL(`./${BINDINGS_FILE}`, import.meta.url)), 'utf8');
 /** [#25467 E2 cut 1a] The module the list read's body (`readFlattenedMetaItems`) moved to. */
 const LIST_READS_FILE = 'protocol-meta-list-reads.ts';
+/** [#25467 E2 cut 1b] The modules the item read's body (`readMetaItem`) and the layered read's body (`getMetaItemLayered`) moved to. */
+const ITEM_READS_FILE = 'protocol-meta-item-reads.ts';
+const LAYERED_READS_FILE = 'protocol-meta-layered-reads.ts';
 
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
 const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(|^ {4}(static) \{$/;
@@ -121,15 +124,15 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: 'the definition itself: the class member\'s declared signature (its body delegates to the seam function below)' },
     { file: SEAM_FILE, member: 'lookupArtifactItem', args: 'this: Pick<ArtifactLookupHost, \'engine\'>, type: string, name: string, currentPackageId?: string, member?: string', noPackage: false, disposition: 'definition',
         why: '[#25467 cut 15] the definition\'s body, the function the class member delegates to' },
-    { member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
+    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
         why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule); [#23074] at the served item\'s own bundle member' },
     { file: LIST_READS_FILE, member: 'readFlattenedMetaItems', args: 'request.type, itemName, itemPackageId, bundleMemberOf(request.type, it)', noPackage: true, disposition: 'served-package envelope',
         why: 'the list\'s envelope: each item\'s own package, the rule the by-name read shares; [#23074] at each item\'s own bundle member' },
-    { member: 'readMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
+    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the shipped-flow arm: the served body IS this artifact, and the envelope is looked up at its own package' },
-    { member: 'readMetaItem', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
+    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
         why: '[#22877] a bundled type\'s addressed member (the selector\'s, else the canonical one) when no stored row of it exists: the served body IS this artifact, and the envelope is looked up at its own package' },
-    { member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
+    { file: LAYERED_READS_FILE, member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
         why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer; [#26699] at the addressed member (the selector\'s, else the canonical one)' },
     { member: 'packagedArtifactBase', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'the packaged base the translators compare a served body against: nothing of it is grafted onto the body' },
@@ -230,7 +233,11 @@ describe('[#22024] every lookupArtifactItem( in protocol.ts has a recorded dispo
         // imports that definition rather than carrying a copy of its own.
         expect(BINDINGS).toMatch(/\nfunction envelopePackageId\(requestedPackageId: string \| undefined, served: unknown\): string \| undefined \{/);
         expect(SOURCE).not.toMatch(/\nfunction envelopePackageId\(/);
-        expect(SOURCE).toMatch(/\nimport \{[^}]*\benvelopePackageId,[^}]*\} from '\.\/protocol-package-bindings\.js';/);
+        // [#25467 E2 cut 1b] The item read's body moved too, so neither door stands in
+        // protocol.ts any more: its module imports the same one definition.
+        const itemReads = MODULE_SOURCES.get(ITEM_READS_FILE)!;
+        expect(itemReads).not.toMatch(/\nfunction envelopePackageId\(/);
+        expect(itemReads).toMatch(/\nimport \{[^}]*\benvelopePackageId,[^}]*\} from '\.\/protocol-package-bindings\.js';/);
         // [#25467 E2 cut 1a] The list read's body moved: its envelope line is read
         // where it now stands, and that module imports the same one definition.
         const listReads = MODULE_SOURCES.get(LIST_READS_FILE)!;

@@ -301,7 +301,7 @@ describe('[ADR-0010 · ADR-0130 D4] a `packages[]` stack\'s residual is judged o
     defineStack({ manifest: manifest(ORDERS, { type: 'module' }) } as never),
   ], { manifest: 'preserve' }) as unknown as Record<string, unknown> & { manifest: { id: string } };
 
-  it.each([['data'], ['datasets'], ['jobs']] as const)(
+  it.each([['data'], ['jobs']] as const)(
     'a top-level `%s` item no body declares is filed by no boot door as a residual, so its stamp is not judged at the build door either',
     (key) => {
       const { item, context } = JUDGED_FIXTURES[key];
@@ -310,6 +310,12 @@ describe('[ADR-0010 · ADR-0130 D4] a `packages[]` stack\'s residual is judged o
       expect(ObjectStackDefinitionSchema.safeParse(artifact).success).toBe(true);
     },
   );
+
+  it('a residual dataset IS filed under the artifact\'s id (the residual rule walks `datasets`), so its stamp is judged', () => {
+    const { item } = JUDGED_FIXTURES.datasets;
+    expect(stampIssues({ ...artifactOf(), datasets: [{ ...item, _packageId: OTHER }] }).map(([path]) => path))
+      .toEqual(['datasets.0._packageId']);
+  });
 
   it('CONTROL: a residual picklist IS filed under the artifact\'s id (the metadata door registers it), so its stamp is still judged', () => {
     const { item } = JUDGED_FIXTURES.picklists;

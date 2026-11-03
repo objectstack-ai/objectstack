@@ -416,6 +416,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.lookup.searchHostFields': "Search this object's fields…",
   'designer.field.lookup.pageSize': 'Picker page size',
   'designer.field.lookup.allowCreate': 'Allow quick-create',
+  'designer.field.lookup.referenceNameVisible': 'Show Name When Unreadable',
+  'designer.field.lookup.referenceNameVisible.help': "Lets a reader of this record see the referenced record's name, as plain text with no link, even when they may not open that record. Nothing else of it is shown, and a field-level rule on the name still holds (the name then reads Record # and the id). Unset: such a reference shows as a restricted record.",
   'designer.field.relatedList.heading': 'Related list on the parent record',
   'designer.field.relatedList.shown': 'Show',
   'designer.field.relatedList.hidden': 'Don\'t show',
@@ -3620,6 +3622,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.list.col.label': 'Label',
   'engine.list.col.source': 'Source',
   'engine.list.col.object': 'Object',
+  // objectstack#29569 — an object_extension lists by the object it extends.
+  'engine.list.col.extend': 'Object',
   'engine.list.col.type': 'Type',
   'engine.list.col.description': 'Description',
   'engine.list.col.sharedWith': 'Shared with',

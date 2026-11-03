@@ -66,6 +66,11 @@ export * from './unique-violation.js';
 // so adopting the predicate adds no edge. `@objectstack/metadata/errors` still
 // re-exports `isMissingTableError` for its published consumers.
 export * from './driver-error-classification.js';
+// [#29503] The one "did this read fail because the object does not exist?"
+// predicate: the missing-table refusal above or the engine's `OBJECT_NOT_FOUND`,
+// each attributed to the object read. The sharing and approvals recipient reads
+// answer "no holders" for that and refuse every other failure.
+export * from './object-absence.js';
 // [#21385, maintainer ruling 2026-10-02 letter A] THE driver-fault redaction:
 // the one cut that keeps a statement's bound values and inlined literals out of
 // every log face and out of the error that leaves the engine. Moved here from

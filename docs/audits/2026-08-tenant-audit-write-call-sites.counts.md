@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 255 |
+| Write call sites | 256 |
 | Object name statically decidable | 177 |
-| Object name chosen at run time | 78 |
+| Object name chosen at run time | 79 |
 | Against a tenancy-enabled object | 176 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 196 |
+| Threading a tenant context | 197 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 145 |
+| Threading a decidably elevated context | 146 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-31 at `d06a02507`.
+Measured on 2026-11-02 at `ac273cf07`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 830 |
-| engine-shaped types recognised | 96 |
-| declared objects in the registry | 124 |
-| same-named calls subtracted as non-engine | 214 |
+| tracked non-test sources scanned | 852 |
+| engine-shaped types recognised | 99 |
+| declared objects in the registry | 125 |
+| same-named calls subtracted as non-engine | 227 |
 
 ## Every site
 
@@ -166,6 +166,7 @@ Measured on 2026-10-31 at `d06a02507`.
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/personal-view-routes.ts` | `delete` | `PERSONAL_VIEW_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |

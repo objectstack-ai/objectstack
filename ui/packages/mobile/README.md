@@ -330,15 +330,23 @@ shell; the bridge contract is owned by the mobile app (`docs/HYBRID-SHELL.md`,
   change, and the shell's cancelable `objectstack-native:navigate` window event moves
   the router (in-app paths only) instead of reloading the page. Outside the shell it
   installs nothing.
+- The same hook answers the shell's `objectstack-native:connectionRemoved` window
+  event (`NATIVE_CONNECTION_REMOVED_EVENT`), sent when the user removes this
+  connection in the shell: it calls `event.waitUntil()` with the promise its optional
+  `onConnectionRemoved` returns (unregister the device's push token under the page's
+  own session), or with one already resolved when the option is omitted.
 - `ready()` means "the page has painted its own UI", which may be a loading fallback,
   such as an auth guard's spinner while the session is read. The shell lifts its
   loading cover on it, so the cover hands over to that spinner instead of staying up
   through the session round-trip.
-- `nativeGetPushToken`, `nativeHaptic`, `nativeOpenExternal`, `nativeNavigate` and
-  `nativeResetServer` check `has(capability)` and that the method exists before
-  calling. They never throw: each resolves `{ status: 'unavailable' }` without the
-  capability, `{ status: 'ok', value }` on success, or
-  `{ status: 'failed', code, message }` when the shell refuses the call.
+- `nativeGetPushToken`, `nativeHaptic`, `nativeOpenExternal`, `nativeNavigate`,
+  `nativeResetServer` and `nativeShowConnectionSwitcher` check `has(capability)` and
+  that the method exists before calling. They never throw: each resolves
+  `{ status: 'unavailable' }` without the capability, `{ status: 'ok', value }` on
+  success, or `{ status: 'failed', code, message }` when the shell refuses the call.
+- `nativeHostCan(host, method)` is that same check, for a control that picks its
+  native or web path before it renders (the header's organization button opens the
+  shell's switcher this way).
 
 ```tsx
 import { nativeHaptic } from '@object-ui/mobile';

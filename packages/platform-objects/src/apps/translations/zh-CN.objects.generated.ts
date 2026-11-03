@@ -1414,6 +1414,38 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_personal_view: {
+    label: "个人视图",
+    pluralLabel: "个人视图",
+    description: "读者自己命名的列表视图（我的视图），仅本人可见。",
+    fields: {
+      id: {
+        label: "个人视图 ID"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      },
+      user_id: {
+        label: "所有者",
+        help: "此视图所属的用户。只有该用户可以读取或修改它。"
+      },
+      object_name: {
+        label: "对象",
+        help: "此视图列出的对象（其机器名）。"
+      },
+      label: {
+        label: "名称",
+        help: "所有者为此视图起的名字。"
+      },
+      config: {
+        label: "视图配置",
+        help: "列表配置，采用 spec 的 ListView 结构。每次保存都会校验。"
+      }
+    }
+  },
   sys_oauth_application: {
     label: "OAuth 应用",
     pluralLabel: "OAuth 应用",

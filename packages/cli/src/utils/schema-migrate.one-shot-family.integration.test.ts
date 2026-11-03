@@ -65,6 +65,7 @@ import MigrateApply from '../commands/migrate/apply.js';
 import MigrateAuditKeyMaterial from '../commands/migrate/audit-key-material.js';
 import MigrateAuditMailBodies from '../commands/migrate/audit-mail-bodies.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
+import MigrateBlankSingleValues from '../commands/migrate/blank-single-values.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
@@ -188,6 +189,11 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateActivityChangedFields),
     noWrite: [{ label: 'migrate activity-changed-fields', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate activity-changed-fields --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/blank-single-values.ts': {
+    run: invoke(MigrateBlankSingleValues),
+    noWrite: [{ label: 'migrate blank-single-values', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate blank-single-values --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/comment-parent-pair.ts': {
     run: invoke(MigrateCommentParentPair),

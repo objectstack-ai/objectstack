@@ -37,9 +37,10 @@ export const SysVerification = ObjectSchema.create({
   // pointer declared, the registry's designate-only pass stamped
   // `nameField: 'id'` (the first title-eligible field), so a renderer honouring
   // ADR-0079's order (an explicit `nameField` wins over `titleFormat`) drew the
-  // raw id as the record page's H1. `titleFormat` stays for renderers that
-  // still read it first; `identity-display-title.test.ts` holds the two to the
-  // same text.
+  // raw id as the record page's H1. The retired `titleFormat` template beside
+  // it is gone (refused at save and by `os validate`);
+  // `identity-display-title.test.ts` holds the formula to the text that
+  // template drew.
   //
   // [#21197] The title is a FIXED label, and neither it nor the highlights may
   // name `identifier` or `value`. Both columns are `internal` (below), and the
@@ -50,7 +51,6 @@ export const SysVerification = ObjectSchema.create({
   // own name rather than a value.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: 'Verification',
   highlightFields: ['expires_at', 'created_at'],
   
   // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: the one policy
@@ -76,7 +76,7 @@ export const SysVerification = ObjectSchema.create({
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
     // read and has no stored column. [#21197] A fixed label: see the note on
-    // `titleFormat` for why it reads no column.
+    // `nameField` for why it reads no column.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',

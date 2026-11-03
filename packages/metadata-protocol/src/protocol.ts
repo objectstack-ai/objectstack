@@ -68,11 +68,6 @@ import {
     // it prints it at.
     findUndeclarableFieldType,
     isObjectFieldTypeRefused,
-    // [#21059] The tenant marker the hydrator writes on every stored row it
-    // registers (ADR-0010 `_provenance: 'org'`) — read by
-    // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
-    // fallback so a hydrated row is never answered as the code layer.
-    isTenantAuthored,
     // [ADR-0131 D6/D7] A legacy organization's rows, off the physical column,
     // on a database the ceremony has not migrated — see migrateStoredMetadata.
     readLegacyOrganizationRows,
@@ -106,10 +101,9 @@ import { ImportUnmanagedPackageRequestSchema } from '@objectstack/spec/api';
 import { planUnmanagedImport, unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
-// [#24395] The save's authoring surface, and the draft row's per-key
-// provenance read back for the strict draft read.
+// [#24395] The save's authoring surface.
 import { MetadataAuthoringSurfaceSchema } from '@objectstack/spec/api';
-import { authoringClientOf, storedDraftChanges } from './draft-changes.js';
+import { authoringClientOf } from './draft-changes.js';
 import {
     parseFilterAST,
     isFilterAST,
@@ -191,11 +185,7 @@ import { REFERENCE_SITES } from './reference-sites.js';
 // module still has (#3950), so it is removed rather than parked.
 import {
     computeMetadataDiagnostics,
-    computeViewReferenceDiagnostics,
-    decorateMetadataItem,
     type MetadataDiagnostics,
-    withFormLayoutWarnings,
-    withPublishVerdict,
 } from './metadata-diagnostics.js';
 // [#8154] The per-type read-path redaction seam. `decorateMetadataItem` already
 // composes `redactMetadataItem` (see its ordering note), which covers the
@@ -346,6 +336,7 @@ import {
 import {
     carryForwardRedactedCredentials,
     credentialChannelFor,
+    droppedWithheldKeyNotices,
     restoredCredentialPathsFor,
     storedBodyForCarryForward,
 } from './protocol-credential-carry-forward.js';
@@ -497,9 +488,6 @@ export {
 } from './protocol-meta-type-schema.js';
 import {
     isItemOfDisabledPackage,
-    isObjectOfDisabledPackage,
-    noPendingDraftError,
-    objectPackageDisabledError,
     packagelessPublishNoDraftRefusal,
     permissionSetOwnerBindingRefusal,
     protectionBlockRefusal,
@@ -545,7 +533,7 @@ export {
 import {
     boundPackageOf,
     bundleMemberOf,
-    envelopePackageId,
+    declinesBorrowedEnvelope,
     isShippedViewItem,
     mergeArtifactProtection,
     stateTenantAuthorship,
@@ -723,6 +711,9 @@ import {
     getMetaItemsPerPackage,
     readFlattenedMetaItems,
 } from './protocol-meta-list-reads.js';
+// [#25467 E2 cut 1b] The metadata item reads and the layered reads.
+import { getMetaItem, getMetaItemForExecution, readMetaItem } from './protocol-meta-item-reads.js';
+import { getMetaItemLayered, packagelessLayeredReadRefusal } from './protocol-meta-layered-reads.js';
 
 /**
  * [#4435/#5138] The 404 a single-record operation answers when the id names no
@@ -1277,31 +1268,53 @@ export class ObjectStackProtocolImplementation implements
             convertStoredItem: (...a) => protocol.convertStoredItem(...a),
             declinesStoredRow: (...a) => protocol.declinesStoredRow(...a),
             disabledActionsOf: (...a) => protocol.disabledActionsOf(...a),
+            draftPublishVerdict: (...a) => protocol.draftPublishVerdict(...a),
             get engine() { return protocol.engine; },
             get environmentId() { return protocol.environmentId; },
             expandStoredViewContainers: (...a) => protocol.expandStoredViewContainers(...a),
             findEnvironmentRows: (...a) => protocol.findEnvironmentRows(...a),
+            findPairAddedMemberRow: (...a) => protocol.findPairAddedMemberRow(...a),
+            findServedOverlayRow: (...a) => protocol.findServedOverlayRow(...a),
             flowRegistrationsOf: (...a) => protocol.flowRegistrationsOf(...a),
             foldObjectExtendersFromRegistry: (...a) => protocol.foldObjectExtendersFromRegistry(...a),
             get getServicesRegistry() { return protocol.getServicesRegistry; },
             governServedObject: (...a) => protocol.governServedObject(...a),
             hydrateOverlayIntoRegistry: (...a) => protocol.hydrateOverlayIntoRegistry(...a),
+            isArtifactBacked: (...a) => protocol.isArtifactBacked(...a),
             isStoredEntryOfDeclinedName: (...a) => protocol.isStoredEntryOfDeclinedName(...a),
+            isStoredFlowEntryOfShippedName: (...a) => protocol.isStoredFlowEntryOfShippedName(...a),
             isUnservedSealedOverlay: (...a) => protocol.isUnservedSealedOverlay(...a),
             isWritablePackage: (...a) => protocol.isWritablePackage(...a),
             lookupArtifactItem: (...a) => protocol.lookupArtifactItem(...a),
             namesWithOwnStoredRow: (...a) => protocol.namesWithOwnStoredRow(...a),
+            overlayLockLayerAt: (...a) => protocol.overlayLockLayerAt(...a),
             overrideWriteVerdict: (...a) => protocol.overrideWriteVerdict(...a),
             packagedArtifactOwner: (...a) => protocol.packagedArtifactOwner(...a),
             packagedBaseRefusal: (...a) => protocol.packagedBaseRefusal(...a),
+            packagelessAddress: (...a) => protocol.packagelessAddress(...a),
+            packagelessReadAddress: (...a) => protocol.packagelessReadAddress(...a),
             readActiveOverlayRows: (...a) => protocol.readActiveOverlayRows(...a),
             readFlattenedMetaItems: (...a) => protocol.readFlattenedMetaItems(...a),
+            readItemActiveRows: (...a) => protocol.readItemActiveRows(...a),
+            readItemFromMetadataService: (...a) => protocol.readItemFromMetadataService(...a),
+            readMetaItemFace: (...a) => protocol.readMetaItemFace(...a),
+            readVersionToken: (...a) => protocol.readVersionToken(...a),
+            registryMemberServedAt: (...a) => protocol.registryMemberServedAt(...a),
+            resolveAppPackageIdKey: (...a) => protocol.resolveAppPackageIdKey(...a),
+            resolveCascadeDeleteObjects: (...a) => protocol.resolveCascadeDeleteObjects(...a),
+            resolveDisabledActionsReader: (...a) => protocol.resolveDisabledActionsReader(...a),
+            resolveFlowRegistrationReader: (...a) => protocol.resolveFlowRegistrationReader(...a),
+            resolveRowlessExpandedView: (...a) => protocol.resolveRowlessExpandedView(...a),
+            resolveWritePackageScope: (...a) => protocol.resolveWritePackageScope(...a),
             rethrowUnlessMetadataStoreUnprovisioned: (...a) => protocol.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            servedLockState: (...a) => protocol.servedLockState(...a),
             shippedArtifactsOf: (...a) => protocol.shippedArtifactsOf(...a),
             shippingPackagesOf: (...a) => protocol.shippingPackagesOf(...a),
             shipsBundleName: (...a) => protocol.shipsBundleName(...a),
             storedFlowBindingAgrees: (...a) => protocol.storedFlowBindingAgrees(...a),
             storedOverlayEntries: (...a) => protocol.storedOverlayEntries(...a),
+            strictDraftReadAddress: (...a) => protocol.strictDraftReadAddress(...a),
+            throwMetadataServiceUnavailable: (...a) => protocol.throwMetadataServiceUnavailable(...a),
             uninstalledNamedBaseRefusal: (...a) => protocol.uninstalledNamedBaseRefusal(...a),
         }));
     }
@@ -3778,8 +3791,10 @@ export class ObjectStackProtocolImplementation implements
         item: any;
         /** [#22877] The bundle member the save addresses (its body's). */
         member?: string;
-    }): Promise<any> {
+    }): Promise<{ item: any; dropped: string[] }> {
         // [#25467 cut 9] The body moved to `protocol-credential-carry-forward.ts` (see `CredentialCarryForwardHost`).
+        // [#28640 ②B] It answers the grafted body and the stored positions the
+        // save drops (the redactor's `notCarriedForwardKeys`), never re-grafted.
         const host: ThisParameterType<typeof carryForwardRedactedCredentials> = {
             storedBodyForCarryForward: (...a) => this.storedBodyForCarryForward(...a),
         };
@@ -4578,9 +4593,8 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
     }) {
-        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. Folded
-        // HERE, at each face's boundary, as {@link getMetaItems} folds.
-        return this.readMetaItemFace(canonicalizeMetaRequestType(request), 'served');
+        // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
+        return getMetaItem(protocolHost(this), request);
     }
 
     /**
@@ -4614,8 +4628,8 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
     }) {
-        // The same #4432 fold {@link getMetaItem} applies, for the same reason.
-        return this.readMetaItemFace(canonicalizeMetaRequestType(request), 'execution');
+        // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
+        return getMetaItemForExecution(protocolHost(this), request);
     }
 
     /**
@@ -4663,685 +4677,8 @@ export class ObjectStackProtocolImplementation implements
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
     }, opts: { face?: 'served' | 'execution' } = {}) {
-        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
-        request = canonicalizeMetaRequestType(request);
-        // [#23183] ADR-0048 §3.1: the app read keyed by PACKAGE ID, resolved
-        // ONCE, here, to the package's one app read by its own name in that
-        // package, so every step below (the stored row, the lock, the version
-        // token) reads the app exactly as its by-name read does. See
-        // {@link resolveAppPackageIdKey}.
-        request = await this.resolveAppPackageIdKey(request);
-        // [#22877] Ruling 6116165299 (Q2 i): ONE member of a bundled type is
-        // addressed by name, the selector's or else the canonical one. Every
-        // layer below answers that member or nothing — the stored row, the
-        // code layer's member and the registry's.
-        const member = resolveBundleMemberSelector(request.type, request.member);
-        const wantedMember = bundleMemberDiscriminator(request.type, member);
-        const isWantedMember = (candidate: unknown): boolean =>
-            wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
-        let item: unknown;
-        // [ADR-0131 D6] Environment → code: the environment's stored row,
-        // else the code packages' definition. No organization's row is read —
-        // a legacy organization-scoped row is refused at boot
-        // (the v18 boot refusal, ADR-0131 D10 item 5) and never served.
-        // Studio's editor opens a draft buffer with `state: 'draft'`;
-        // runtime loaders omit it and get the live published row.
-        const readState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
-        // [#24535] The serving decorations at this read's exits are the ONE
-        // thing the two API faces do not share. The served face (and an
-        // authoring caller) decorates as before; the execution face hands the
-        // governed item back as resolved ({@link getMetaItemForExecution}).
-        // Every read of `execution` below is one of those exits.
-        const execution = opts.face === 'execution';
-        const serveItem = <T>(resolved: T): T => (execution ? resolved : decorateMetadataItem(request.type, resolved));
-        // [#29196] A served VIEW's `_diagnostics` also carries the lint's
-        // `form-field-unknown` warnings ({@link withFormLayoutWarnings}), judged
-        // against the object the registry serves for each name the view spells.
-        // Applied at every served exit of this read, the draft ones included; a
-        // warning, so `valid` is left as the schema answered it. The execution
-        // face serves no `_diagnostics`.
-        const serveFormLayout = <T>(served: T): Promise<T> => (execution
-            ? Promise.resolve(served)
-            : withFormLayoutWarnings(request.type, served, (name) => this.engine?.registry?.getObject?.(name)));
-        // [#26707] A served DRAFT is decorated as above and then told what its
-        // publish would refuse: the runtime gate's verdict on the stored draft
-        // body ({@link draftPublishVerdict}), folded into `_diagnostics`
-        // ({@link withPublishVerdict}). Judged on the row as stored — the body
-        // the promotion judges — never on the governed, converted or redacted
-        // copy this read serves. The execution face serves no `_diagnostics`.
-        const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
-            const served = await serveFormLayout(serveItem(resolved));
-            if (execution || !served || typeof served !== 'object') return served;
-            const issues = await this.draftPublishVerdict({
-                type: request.type,
-                name: request.name,
-                body: storedRowDocument(row),
-                packageId: row.package_id ?? null,
-            });
-            const before = (served as { _diagnostics?: MetadataDiagnostics })._diagnostics;
-            const after = withPublishVerdict(request.type, request.name, before, issues);
-            return after === before ? served : { ...served, _diagnostics: after };
-        };
-        // ── [#20946, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
-        //
-        // `flow` is Regime C: the packaged base is locked, "⛔ Never silent
-        // override, never an overlay read path". Since #20913 the flattened view
-        // ({@link readFlattenedMetaItems}, both faces) serves a flow name the
-        // loader's set holds from the loader's own entries alone, with two
-        // predicates. This read applies the SAME two, and ⛔ no third precedence
-        // path of its own:
-        //  • the stored-row half, {@link isShippedFlowName}, judged by NAME —
-        //    step 1 below does not adopt the stored row of such a name, whatever
-        //    its package binding or the stamps its own body carries;
-        //  • the registry half, {@link isStoredFlowEntryOfShippedName} — step 3
-        //    does not serve the registry's bare copy of that row (the hydrated
-        //    tenant row `getItem` answers first); the loader's entry is served.
-        // Adopted, the row was served with the artifact's protection envelope
-        // grafted over it (the merge at the end of this method): a stored body
-        // answered as the package's definition by name, while the list answered
-        // the loader's body for the same name.
-        //
-        // Scoped to the ACTIVE read. A draft is answered as a draft (the strict
-        // `state: 'draft'` read and the `previewDrafts` arm), never under the
-        // artifact's envelope, and the list's own preview arm is equally
-        // unfiltered. Organization-scoped rows never reach this read
-        // (ADR-0131 D6). What becomes of the stored rows themselves (keep, refuse, migrate) is
-        // not decided here.
-        //
-        // ── [#21922, ADR-0062 D4, ADR-0126 §3] A code-defined DATASOURCE name ──
-        //
-        // The stored-row half covers a second name class, through the same
-        // predicate ({@link declinesStoredRow}): a datasource name the host
-        // registers from code ({@link isDeclaredCodeDatasource}). "Code wins on
-        // collision": its code definition is the MetadataService's in-memory
-        // registration, which step 2 serves, and a stored row under the name is
-        // residue, never a layer of it. Adopted, the row was served here while
-        // the list, the admin door and the boot restore all served the code
-        // definition. This read needs no registry half for it: step 2 answers
-        // before step 3's bare registry slot, which is where a hydrated copy of
-        // the row sits. The row is still FOUND (`storedRowServed` below), so the
-        // `/meta` DELETE that removes it as repair stays `deletable`. A draft
-        // is answered as a draft, as above.
-        const storedRowDeclined = readState === 'active' && this.declinesStoredRow(request.type, request.name);
-
-        // [#23291, ADR-0048 §3.3, ADR-0070 TL;DR 1] The package whose stored
-        // content a read that names no package serves: the address a save or
-        // a delete naming none writes ({@link packagelessAddress}), read from
-        // the item's ACTIVE rows at both states, as the draft save inherits
-        // its package from them (#11087). For an item bound to exactly one
-        // package, the read then serves what the read naming that package
-        // serves (its own row, else the package-less one); otherwise any row,
-        // the best-effort first match ADR-0048 §3.3 states.
-        //
-        // Before, it took the first row of any package. A save naming the
-        // package beside the item's package-unbound row mints the package's
-        // row and leaves the unbound one stored first, so this read kept
-        // serving the unbound body while the package-less save wrote the
-        // package's row, the package-less delete removed it, the list served
-        // it, and this read's own `version` named it (#23165). The package-less
-        // row is not converted or removed: ADR-0070 keeps it as a read-side
-        // detail and a migration source, and it still stands in for every
-        // package with no row of its own (ADR-0048 prefer-local).
-        //
-        // Content only: the lock is selected from the item's rows at the
-        // address the `_lock` gate judges a package-less save at, below.
-        //
-        // [#23715, ADR-0048, ADR-0070 TL;DR 1] The strict draft read that names
-        // no package takes its content from the draft its `version` names
-        // ({@link strictDraftReadAddress}), the address the draft save, the
-        // per-item publish and the draft discard naming none act on. The
-        // active rows above say nothing about an item never published into a
-        // package, so with drafts `[package-unbound, Q]` this read served the
-        // first draft row the store returned under the package-unbound
-        // draft's token, and a save pinned to that token wrote a row other
-        // than the one read (#8907). The draft-overlay preview below shares
-        // the address: it serves the draft the strict read serves.
-        const draftContentAddress = !request.packageId && (readState === 'draft' || request.previewDrafts)
-            ? await this.strictDraftReadAddress(request.type, request.name, member)
-            : undefined;
-        // [#24371] The item's ACTIVE rows, both spellings, read ONCE
-        // ({@link readItemActiveRows}): the package-less binding, the served
-        // row and the lock below each select from them by the `where` it would
-        // have sent the store. They were five serial reads of the same rows,
-        // on every `/data` request. [#10757 leg 6] On the API faces (served and,
-        // [#24535], execution) the read goes through the overlay cache; an
-        // authoring read is never kept.
-        let activeRows: StoredOverlayRow[] | undefined;
-        if (readState === 'active') {
-            try {
-                activeRows = await this.readItemActiveRows(request.type, request.name, opts.face !== undefined);
-            } catch (error) {
-                // [#5532] Only an unprovisioned store holds no row; any other
-                // failure is a read that did not happen, never "no row".
-                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-                activeRows = [];
-            }
-        }
-        // The package-less binding ({@link packagelessReadAddress}'s), selected
-        // from those rows; the `version` below ({@link readVersionToken})
-        // takes the same binding instead of reading it again.
-        const packagelessAddressed = readState === 'active' && !request.packageId
-            ? await this.packagelessAddress(
-                PLURAL_TO_SINGULAR[request.type] ?? request.type, request.name, member, 'active', activeRows,
-            )
-            : undefined;
-        const packagelessBinding = packagelessAddressed?.packageId;
-        // [#28238] The content, though, is {@link packagelessContentPackage}'s:
-        // the code package that ships the name is a candidate too, so a row
-        // another package stored under the name is not served for it.
-        const contentPackageId = request.packageId || (packagelessAddressed
-            ? packagelessContentPackage(packagelessAddressed, this.shippedArtifactsOf(request.type, request.name))
-            : undefined);
-
-        // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
-        // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
-        // fall back to the active read below. This differs from the strict
-        // `state:'draft'` mode, which 404s (`no_draft`) when no draft exists — the
-        // render path must degrade to the published value, not error. The draft
-        // item is tagged `_draft:true` so the UI can badge it.
-        if (request.previewDrafts && readState !== 'draft') {
-            try {
-                // [#21716] The served-row resolution, on the draft partition
-                // (ADR-0048 prefer-local, parity with the row read below) — see
-                // {@link findServedOverlayRow}.
-                // [#28409] A preview serves the package's name, so the
-                // pending edit of its declared override is a candidate
-                // ({@link servedOverlayRowCandidates}' `servedOverride`), as
-                // in the list's draft-preview merge.
-                const servedDraft = await this.findServedOverlayRow({
-                    type: request.type,
-                    name: request.name,
-                    state: 'draft',
-                    ...(draftContentAddress
-                        ? { packageId: draftContentAddress.packageId }
-                        : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
-                    ...memberOption(member),
-                    servedOverride: true,
-                });
-                let draftRec = servedDraft?.row;
-                // [#23715] Two or more packages and no package-unbound draft:
-                // the best-effort first match, as the strict read below.
-                if (!draftRec && draftContentAddress?.bestEffort) {
-                    draftRec = (await this.findServedOverlayRow({
-                        type: request.type, name: request.name, state: 'draft', ...memberOption(member),
-                    }))?.row;
-                }
-                if (draftRec) {
-                    const draftItem = this.convertStoredItem(
-                        String(draftRec.type ?? request.type),
-                        typeof draftRec.metadata === 'string'
-                            ? JSON.parse(draftRec.metadata)
-                            : draftRec.metadata,
-                    ) as any;
-                    let previewed = draftItem;
-                    if (previewed && typeof previewed === 'object') {
-                        const recPkg = (draftRec as { package_id?: string | null }).package_id ?? undefined;
-                        // [#28409] A declared override's draft previews as the
-                        // overridden package's item, as its active row serves.
-                        if (servedDraft?.overrideOf !== undefined && servedDraft.row === draftRec) {
-                            previewed = { ...previewed, _packageId: servedDraft.overrideOf };
-                        } else previewed = withRowBinding(previewed, recPkg); // [#28673] the column's package
-                        (previewed as any)._draft = true;
-                    }
-                    return {
-                        type: request.type,
-                        name: request.name,
-                        item: await serveDraft(this.governServedObject(request.type, previewed), draftRec),
-                    };
-                }
-            } catch (error) {
-                // [#5532] Falling through to the active read here would answer
-                // "there is no draft for this item" from a read that never
-                // reached the table the drafts live in.
-                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-            }
-        }
-
-        // 1. Customization overlay lookup (sys_metadata): the environment's
-        //    row (ADR-0131 D6/D7: {@link findEnvironmentRow}) before falling
-        //    through to the in-memory registry / MetadataService.
-        //    ADR-0048 prefer-local (a package id prefers that
-        //    package's row, then the package-less one, mirroring
-        //    `SchemaRegistry.getItem(type, name, pkg)`). [#21716] The ONE
-        //    served-row resolution — see {@link findServedOverlayRow}. It
-        //    decides the CONTENT only; the lock is selected below from this
-        //    read's address ([#21761]).
-        // [#21899] Whether a stored row was found — the fact the origin-gated
-        // repair's `deletable` reads ({@link servedLockState}).
-        let storedRowServed = false;
-        // [#24395] The served draft row's per-key provenance — read off the
-        // row this read serves, so it can never describe another body.
-        let draftChanges: ReturnType<typeof storedDraftChanges>;
-        // [#26707] The draft row this read serves, for its publish verdict.
-        let servedDraftRow: { metadata?: unknown; package_id?: string | null } | undefined;
-        try {
-            // [#28409, ADR-0146 D8 item 2] The active read serves the
-            // package's name, so its declared override is the first candidate
-            // ({@link servedOverlayRowCandidates}' `servedOverride`). The
-            // strict draft read answers the address a draft save writes, never
-            // the pair's: it asks without it.
-            const served = await this.findServedOverlayRow({
-                type: request.type,
-                name: request.name,
-                state: readState,
-                ...(readState === 'draft' && draftContentAddress
-                    ? { packageId: draftContentAddress.packageId }
-                    : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
-                ...memberOption(member),
-                ...(readState === 'active' ? { servedOverride: true } : {}),
-            }, activeRows);
-            let record = served?.row;
-            // [#28802, #28390 ruling A] A member of a bundle the address's
-            // package ships and does not ship at that member: the pair's own
-            // added member is the address's, served from the pair's row under
-            // the pair's binding (a dependent's member never is).
-            if (!record && readState === 'active' && wantedMember !== undefined && typeof contentPackageId === 'string') {
-                record = await this.findPairAddedMemberRow(request.type, request.name, contentPackageId, member, wantedMember, activeRows);
-            }
-            // [#23715] Two or more packages and no package-unbound draft: the
-            // best-effort first match ADR-0048 §3.3 states, as before, served
-            // with `version: null` (no row at the address the save naming none
-            // resolves, and that save is refused there).
-            if (!record && readState === 'draft' && draftContentAddress?.bestEffort) {
-                record = (await this.findServedOverlayRow({
-                    type: request.type,
-                    name: request.name,
-                    state: readState,
-                    ...memberOption(member),
-                }))?.row;
-            }
-            storedRowServed = record !== undefined && record !== null;
-            // [#20946, #21922] The stored-row half — see `storedRowDeclined` above.
-            // [#28412, ADR-0146 D9 item 1] Judged again on the row itself when
-            // the name declines: a shipped flow name's declared override, the
-            // row {@link findServedOverlayRow} serves first, is the packaged
-            // flow, served as the list's slot serves it ({@link declinesStoredRow}).
-            if (record && !(storedRowDeclined && this.declinesStoredRow(request.type, request.name, record as ServedOverrideRow))) {
-                item = this.convertStoredItem(
-                    String(record.type ?? request.type),
-                    storedRowDocument(record),
-                );
-                // Surface the persisted software-package binding (parity with
-                // the list path in getMetaItems) so provenance/UI can read it.
-                const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-                if (served?.overrideOf !== undefined && served.row === record && item && typeof item === 'object') {
-                    // [#28409] A declared override is served as the package's
-                    // item it overrides, as the list's slot serves it: under
-                    // that package's provenance, so the envelope below is the
-                    // overridden package's artifact's ({@link envelopePackageId}).
-                    item = { ...(item as Record<string, unknown>), _packageId: served.overrideOf };
-                } else {
-                    // [#28673] The column's package, and only the column's ({@link withRowBinding}).
-                    item = withRowBinding(item, recPkg);
-                }
-                if (readState === 'draft') {
-                    draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
-                    servedDraftRow = record as { metadata?: unknown; package_id?: string | null };
-                }
-            }
-        } catch (error) {
-            // [#5532] THE site this issue was raised on. Falling through to the
-            // registry / MetadataService with `item` still `undefined` is what
-            // let a storage outage arrive at the client as `not found` (active
-            // read) or `NO_DRAFT` (draft read) — both of them claims about
-            // authorship, made from a read that never happened.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-
-        // Draft reads stop here — they intentionally do NOT fall through
-        // to the runtime registry / MetadataService (which only know
-        // about published values). When the draft row is missing we
-        // throw `no_draft` (HTTP 404) so the REST contract is identical
-        // to `POST /publish` on an empty slot: clients use a single
-        // status code to decide "no pending edit" without sniffing
-        // envelope shape. See ADR-0005 §draft-lifecycle.
-        if (readState === 'draft') {
-            if (item === undefined) throw noPendingDraftError(request.type, request.name);
-            const governedDraft = this.governServedObject(request.type, item);
-            return {
-                type: request.type,
-                name: request.name,
-                item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : await serveFormLayout(serveItem(governedDraft)),
-                // [#22114] The draft row's version token — the one a draft save
-                // (`?mode=draft`) at this address accepts as `If-Match`.
-                // [#22877] The member's own row's, as a save of that member's
-                // body addresses it.
-                version: await this.readVersionToken({ ...request, member }, 'draft'),
-                // [#24395] `GetMetaItemResponseSchema.draftChanges`: present
-                // only when the draft row's saves recorded at least one entry
-                // — ⛔ never `[]` for a row that recorded none.
-                ...(draftChanges ? { draftChanges } : {}),
-            };
-        }
-
-        // [#21761] The item-lock resolution's `overlay` layer, selected from
-        // this read's ADDRESS ({@link overlayLockLayerAt}) by the selection
-        // the `_lock` gate makes: the strictest lock among the item's stored
-        // rows in scope, whichever package each is bound to. Not the row served
-        // above, which is the address's preferred CONTENT (ADR-0048), and read
-        // whether or not that row is adopted (a shipped flow name, #20946, and a
-        // code-defined datasource name, #21922, do not serve their stored row,
-        // and the gate binds it all the same).
-        let overlayLockLayer: unknown;
-        try {
-            overlayLockLayer = await this.overlayLockLayerAt({
-                type: request.type,
-                name: request.name,
-                packageId: request.packageId,
-            }, { otherSpelling: true }, activeRows);
-        } catch (error) {
-            // [#5532] The same rule as the row read above: a lock read that did
-            // not happen is not an unlocked item.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-
-        // [#8027] An OBJECT's overlay row is a BASE LAYER, not a resolved
-        // schema. ADR-0029 D9.2 defines the resolution as `overlay ?? own` with
-        // the `extend` contributors folded ON — which is what
-        // `SchemaRegistry.resolveObject` does for an overlay it knows about, and
-        // what step 2 below already does (#7556) for the MetadataService copy.
-        // Step 1 was the one adopter that served its layer verbatim, so a single
-        // customisation row — an admin renaming the object's label in Studio —
-        // silently dropped every extension-contributed field from this read, and
-        // therefore from every writable form derived from it, while the data API
-        // kept accepting and persisting those same fields.
-        //
-        // Placed AFTER the draft return on purpose: a draft is a pending edit of
-        // the base layer, and folding it would show an author extension fields
-        // inside the document they are editing and about to PUT back. Drafts were
-        // never folded (before #7556 nothing was), so this leaves that asymmetry
-        // exactly where it already was rather than widening this fix into it.
-        //
-        // No-op for every type but `object`, for an object nothing extends, and
-        // for an item with no overlay row (`item` is still undefined here, and
-        // step 2 / step 3 fold their own sources).
-        if (item !== undefined) {
-            item = this.foldObjectExtendersFromRegistry(request.type, request.name, item);
-        }
-
-        // 1b. [#21442] A view name with no stored row of its own that a stored
-        //     view container in this caller's scope EXPANDS — the item the
-        //     object door (`GET /meta/view?object=`) lists under this name,
-        //     resolved by {@link resolveRowlessExpandedView} through the list
-        //     read's own selection and expansion. Placed before steps 2 and 3
-        //     because the list read's expansion wins over the MetadataService
-        //     and registry items of the same name too; there, a name a package
-        //     ships (`<object>.default` under a tenant overlay of that package's
-        //     container) answered the packaged row while the list served the
-        //     expansion, and on an unscoped kernel a hydrated registry copy
-        //     answered only for an environment-wide container. ⛔ No
-        //     kernel-specific branch: every kernel answers here.
-        if (item === undefined) {
-            const expanded = await this.resolveRowlessExpandedView(request);
-            if (expanded !== undefined) item = expanded.item;
-        }
-
-        // 2. MetadataService (runtime-registered items: HMR-updated view/page/
-        //    dashboard/agent/tool, plus FilesystemLoader-sourced items). This
-        //    is consulted BEFORE the in-memory SchemaRegistry because the
-        //    registry is a boot-time cache populated by `loadMetadataFromService`
-        //    and is NOT invalidated on `MetadataManager.register()` (which is
-        //    how the CLI dev watcher pushes recompiled metadata into the
-        //    running server). Without this ordering, edits to `*.view.ts`
-        //    source files appear to take effect (MetadataManager learns the
-        //    new value) but reads continue to return the stale registry copy.
-        // [#5840] `serviceDegraded` survives past the registry step below on
-        // purpose — see the branch that reads it after step 3 for why the
-        // verdict cannot be acted on here.
-        let serviceDegraded: { degraded: boolean; errors: string[] } | undefined;
-        if (item === undefined) {
-            try {
-                // Threads the caller's package id (ADR-0048) so a single-item
-                // fetch is package-scoped: when two installed packages ship the
-                // same type/name, the facade prefers the requester's own item.
-                const fromService = await this.readItemFromMetadataService(
-                    request.type,
-                    request.name,
-                    request.packageId,
-                );
-                if (fromService.data !== undefined && fromService.data !== null) {
-                    // [#22877] …when it is the member this read addresses. The
-                    // service keys a type's items by name alone, so for a
-                    // bundle it holds whichever member it registered last, and
-                    // that one answered every member's read.
-                    // [#7556] A layer, not a resolved schema — see
-                    // {@link foldObjectExtendersFromRegistry}. No-op for every
-                    // type but `object`, and for an object nothing extends.
-                    if (isWantedMember(fromService.data)) {
-                        item = this.foldObjectExtendersFromRegistry(
-                            request.type, request.name, fromService.data,
-                        );
-                    }
-                } else if (fromService.degraded) {
-                    serviceDegraded = fromService;
-                }
-            } catch {
-                // MetadataService not available — fall through
-            }
-        }
-
-        // 3. In-memory SchemaRegistry (artifact-loaded out-of-box values, and
-        //    items that bypass MetadataService — e.g. some object-schema
-        //    extension chains registered by AppPlugin directly).
-        //    Both control-plane (unscoped) and project kernels consult the
-        //    registry. The previous guard that skipped the registry for
-        //    project kernels was meant to prevent cross-project leakage at
-        //    the LIST level — but for a single-item lookup the kernel's own
-        //    `engine.registry` is project-local (each ObjectQL instance has
-        //    its own SchemaRegistry), so reading from it is safe and
-        //    necessary. Without this, project-kernel callers of
-        //    `GET /api/v1/meta/object/<name>` 404 even though the object is
-        //    registered and visible via the list endpoint.
-        // [#22877] A bundled type's name addresses ONE member (ruling A, Q2 i):
-        // the selector's, else the CANONICAL one. Step 1 read only that
-        // member's stored row; when there is none, the member is the code
-        // layer's — the artifact that ships it — and then the registry's, asked
-        // for that member. The registry's bare-name read answers the canonical
-        // member wherever it sits (its own [#22877] note), and still answers a
-        // bundle that ships no canonical member at all; a named member that no
-        // layer holds answers nothing, so the door answers it as absent.
-        if (item === undefined && wantedMember !== undefined) {
-            const artifact = this.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
-            if (artifact !== undefined && isWantedMember(artifact)) item = artifact;
-        }
-        if (item === undefined) {
-            item = this.engine.registry.getItem(request.type, request.name, request.packageId, member);
-            if (item === undefined) {
-                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId, member);
-            }
-            // [#22877] A registry that does not narrow by member (a host
-            // double, an older registry) can answer another member of the
-            // bundle for a named one; that answer is not this member.
-            if (member !== undefined && item !== undefined && !isWantedMember(item)) item = undefined;
-            // [#20946] The registry half — see `storedRowDeclined` above.
-            // `getItem` answers the bare slot first, and for a shipped flow name
-            // that slot holds the hydrated stored row, which is not one of the
-            // loader's entries; the loader's entry is the one the list serves.
-            // [#21922] Flow-only: a code-defined datasource's definition is not
-            // in the registry, and step 2 has already served it.
-            if (this.isStoredFlowEntryOfShippedName(request.type, item)) {
-                item = this.lookupArtifactItem(request.type, request.name, request.packageId);
-            }
-            // [#28802, #28390 ruling A] A bundle member on a base's address
-            // (the package named, else the one whose content a read naming
-            // none serves) is one that address serves: the registry's last
-            // tier, the first composite match across packages (ADR-0048 §3.3),
-            // no longer answers a dependent's member under the base's name.
-            const memberAddress = request.packageId || (typeof contentPackageId === 'string' ? contentPackageId : undefined);
-            if (item !== undefined && wantedMember !== undefined && memberAddress !== undefined) {
-                item = this.registryMemberServedAt(request.type, request.name, memberAddress, item, member);
-            }
-        }
-
-        // [#5840] The MetadataService half of the #5532 rule, and the last
-        // moment it can be applied. The cached-read wrapper below this method
-        // documents its 404 as "reaching here now means a real miss —
-        // `getMetaItem` throws 503 rather than answering `undefined` when the
-        // store could not be read". That was true of the overlay read only: a
-        // metadata database the LOADERS could not reach was warn-logged inside
-        // `MetadataManager` and arrived at step 2 as a plain `undefined`, so
-        // the outage was served as `404 RESOURCE_NOT_FOUND` — a claim about
-        // what the author declared, made from a read that never happened.
-        //
-        // Deliberately narrow, and deliberately after step 3: a registry hit is
-        // a real declaration, so the answer contains no false claim and is
-        // served exactly as before (possibly staler than the service copy — the
-        // pre-existing ordering trade-off, not this issue's). Only when the
-        // WHOLE chain resolved nothing does the degraded read change anything,
-        // because only then would this method answer "no such item".
-        if (item === undefined && serviceDegraded?.degraded) {
-            this.throwMetadataServiceUnavailable(serviceDegraded.errors);
-        }
-
-        // Merge registered navigation contributions into a served app
-        // (ADR-0029 D7) — parity with the getMetaItems list path so a
-        // single-app fetch (GET /meta/app/<name>) also sees the contributed
-        // menu entries, not just the empty group-anchor shell.
-        if ((request.type === 'app' || request.type === 'apps') && item) {
-            item = this.engine.registry.applyNavContributions(item);
-        }
-
-        // ADR-0010 §3.3 — artifact-level protection (lock/packageId) always
-        // wins over any overlay row. The metadata service may return a
-        // persisted overlay copy that pre-dates the artifact's `_lock`
-        // declaration; we must consult the in-memory artifact registry
-        // directly and let its protection envelope override.
-        // ADR-0048 — scope the artifact lookup to the requested package so a
-        // same-name collision grafts the OWNING package's provenance envelope
-        // (`_packageId`), not whichever package registered first.
-        // [#22024] …and, naming no package, to the package of the item served
-        // above ({@link envelopePackageId}, the list's own rule), so the answer
-        // wears the envelope of the package whose row, expansion or item it
-        // serves. Before, a read naming no package took the first-registered
-        // package's envelope, so a name two packages ship answered one
-        // package's stored copy under the other package's `_packageId`.
-        // [#23074] …and at the served item's own bundle member, whose artifact
-        // alone may lend it an envelope ({@link mergeArtifactProtection}): a
-        // member the package does not ship is served as the environment's own.
-        const artifactItem = this.lookupArtifactItem(
-            request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item),
-        );
-        // [#21738] The lock is the one item-lock resolution's, over the layers
-        // this read resolved from its address: [#21803] every installed
-        // package that ships the name ({@link artifactLockLayerAt}), never the
-        // one artifact the content above came from, and [#21761] the rows in
-        // scope.
-        const itemLock = resolveItemLock({
-            artifact: this.artifactLockLayerAt({
-                type: request.type,
-                name: request.name,
-                packageId: request.packageId,
-            }),
-            overlay: overlayLockLayer,
-        });
-        // [#21761, #21803] …and the body carries that answer's lock family, so
-        // it states the lock the envelope below reports. [#24535] On the
-        // execution face `decorated` is that governed body undecorated.
-        let decorated = serveItem(
-            this.governServedObject(
-                request.type,
-                mergeArtifactProtection(request.type, item, artifactItem, itemLock),
-            ),
-        );
-        // ADR-0047 — list views additionally get reference-integrity
-        // diagnostics (userFilters/tabs fields must exist on the source
-        // object, kanban groupBy must be select-like). Zod cannot see
-        // across documents; merge the cross-document errors into the
-        // same `_diagnostics` envelope. Defensive: a failed lookup must
-        // never break a read. [#24535] Served only: a serving decoration.
-        if (!execution && (request.type === 'view' || request.type === 'views') && decorated && typeof decorated === 'object') {
-            try {
-                const viewDoc = decorated as Record<string, any>;
-                const sourceObject = viewDoc?.object
-                    ?? viewDoc?.data?.object
-                    ?? viewDoc?.objectName
-                    ?? viewDoc?.list?.data?.object;
-                const objectDef = typeof sourceObject === 'string'
-                    ? this.engine.registry.getObject(sourceObject)
-                    : undefined;
-                if (objectDef) {
-                    const refs = computeViewReferenceDiagnostics(viewDoc, objectDef as any);
-                    if (!refs.valid) {
-                        const prior = viewDoc._diagnostics;
-                        decorated = {
-                            ...viewDoc,
-                            _diagnostics: {
-                                valid: false,
-                                errors: [
-                                    ...(prior && prior.valid === false && Array.isArray(prior.errors) ? prior.errors : []),
-                                    ...(refs.errors ?? []),
-                                ],
-                            },
-                        } as typeof decorated;
-                    }
-                }
-            } catch { /* reference diagnostics are best-effort */ }
-        }
-        // [#29196] …and the lint's form-layout warnings, after the reference
-        // merge above (which rebuilds `_diagnostics` from its errors alone).
-        decorated = await serveFormLayout(decorated);
-        // ADR-0010 — surface lock/provenance flags so Studio can render
-        // the correct affordances without a second round trip. [#21670] They
-        // report the write doors' verdicts — see {@link servedLockState}.
-        // [#21738] The lock is the one item-lock resolution's (above), over the
-        // layers this read resolved — never the served document's `_lock`.
-        const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        const lockState = this.servedLockState(
-            request.type, request.name, decorated, artifactBacked, itemLock, storedRowServed,
-        );
-        // [#23316] Beside `lock`, never inside `item`: the automation engine's
-        // verdict on this flow ({@link resolveFlowRegistrationReader}), for an
-        // item this read serves. The draft returns above carry none — a
-        // pending body is not what the engine holds. [#24535] Served only, as
-        // the list's `registrations` are: the execution face carries none.
-        const readRegistration = !execution && decorated !== undefined && decorated !== null
-            ? this.resolveFlowRegistrationReader(request.type)
-            : undefined;
-        // [#27842] …and, on an `object` read, the names in `item.actions` the
-        // activation ledger switches off ({@link resolveDisabledActionsReader}),
-        // beside the item on the same terms: served face only, none on the
-        // draft returns above, `item` untouched.
-        const readDisabledActions = !execution && decorated !== undefined && decorated !== null
-            ? this.resolveDisabledActionsReader(request.type)
-            : undefined;
-        // [#28001] …and the objects a delete of one of its records can cascade
-        // into ({@link resolveCascadeDeleteObjects}), on the same terms.
-        const cascadeDeleteObjects = !execution && decorated !== undefined && decorated !== null
-            ? this.resolveCascadeDeleteObjects(request.type, request.name)
-            : undefined;
-        return {
-            type: request.type,
-            name: request.name,
-            item: decorated,
-            lock: lockState.lock,
-            ...(lockState.lockReason !== undefined ? { lockReason: lockState.lockReason } : {}),
-            ...(lockState.lockSource !== undefined ? { lockSource: lockState.lockSource } : {}),
-            ...(lockState.lockDocsUrl !== undefined ? { lockDocsUrl: lockState.lockDocsUrl } : {}),
-            ...(lockState.provenance !== undefined ? { provenance: lockState.provenance } : {}),
-            ...(lockState.packageId !== undefined ? { packageId: lockState.packageId } : {}),
-            ...(lockState.packageVersion !== undefined ? { packageVersion: lockState.packageVersion } : {}),
-            editable: lockState.editable,
-            deletable: lockState.deletable,
-            resettable: lockState.resettable,
-            // [#22114] The active row's version token ({@link readVersionToken}).
-            // No row was found at any candidate this read consults — which
-            // include the save's own address — so `null` needs no second read.
-            // ABSENT on a `previewDrafts` read: it serves a pending draft where
-            // one exists and the active item where none does, so no single
-            // lifecycle's token describes it, and it is a render path — an
-            // editor reads `state: 'draft'` or the plain read.
-            ...(request.previewDrafts
-                ? {}
-                : {
-                    version: storedRowServed
-                        ? await this.readVersionToken({ ...request, member }, 'active', packagelessBinding)
-                        : null,
-                }),
-            ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
-            ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
-            ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
-        };
+        // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
+        return readMetaItem(protocolHost(this), request, opts);
     }
 
     /**
@@ -5375,12 +4712,8 @@ export class ObjectStackProtocolImplementation implements
         /** The bundle member the layered read addresses ({@link resolveBundleMemberSelector}); omitted, the canonical one. */
         member?: string;
     }): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
-        const { type, name } = canonicalizeMetaRequestType(request);
-        const member = resolveBundleMemberSelector(type, request.member);
-        const address = await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
-        return address.candidates.length > 1
-            ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
-            : undefined;
+        // [#25467 E1] The body moved to `protocol-meta-layered-reads.ts`; it reaches this class through `protocol-host.ts`.
+        return packagelessLayeredReadRefusal(protocolHost(this), request);
     }
 
     /**
@@ -5472,459 +4805,8 @@ export class ObjectStackProtocolImplementation implements
         deletable: boolean;
         resettable: boolean;
     }> {
-        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The
-        // three-layer diagnostic must answer for ONE namespace, or `code` and
-        // `overlay` can be read from two.
-        request = canonicalizeMetaRequestType(request);
-        // [#7557, #24097] A by-name API face of its own (`?layers=true`), which
-        // reads its layers without going through {@link getMetaItem}, so it
-        // refuses a disabled package's object itself: one answer per door.
-        if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
-            throw objectPackageDisabledError(request.name);
-        }
-        // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
-        // option-A ruling on #26649: ONE member of a bundled type, the
-        // selector's or else the canonical one, read exactly as
-        // {@link getMetaItem} reads it. Every layer below is that member's or
-        // nothing — the code layer's service copy, artifact and registry entry,
-        // and the stored row — so a named member nothing holds answers no
-        // layer, which the door answers as an absent item, ⛔ never with the
-        // canonical member's layers.
-        const member = resolveBundleMemberSelector(request.type, request.member);
-        const wantedMember = bundleMemberDiscriminator(request.type, member);
-        const isWantedMember = (candidate: unknown): boolean =>
-            wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
-
-        // [ADR-0131 D6] Environment → code: the overlay layer is the
-        // environment's stored row; no organization's row is read.
-
-        // ── code layer: MetadataService.get + registry, BYPASSING overlay ──
-        let code: unknown | null = null;
-        let codeDegraded: { degraded: boolean; errors: string[] } | undefined;
-        try {
-            // ADR-0048 — package-scope the code layer so a same-name
-            // collision resolves to the requested package's artifact.
-            const fromService = await this.readItemFromMetadataService(
-                request.type,
-                request.name,
-                request.packageId,
-            );
-            if (fromService.data !== undefined && fromService.data !== null) {
-                // [#26699] …when it is the member this read addresses, as in
-                // {@link getMetaItem}: the service keys a type's items by name
-                // alone, so for a bundle it holds whichever member it
-                // registered last. Another member's copy is no layer of this
-                // one; the artifact and registry lookups below ask for it.
-                // [#7556] The CODE layer of an object is D9.6's "owner's
-                // declaration with its extenders folded on", so the
-                // MetadataService copy is its base, not the layer itself.
-                // `effective` is `overlay ?? code`, so an object with no
-                // overlay row — the ordinary shape — is corrected by this
-                // single fold on both layers the diagnostic reports.
-                if (isWantedMember(fromService.data)) {
-                    code = this.foldObjectExtendersFromRegistry(
-                        request.type, request.name, fromService.data,
-                    );
-                }
-            } else if (fromService.degraded) {
-                // [#5840] Kept, not swallowed — acted on after the registry
-                // fallback below, which may still produce a real code layer.
-                codeDegraded = fromService;
-            }
-        } catch {
-            // ignore
-        }
-        if (code === null) {
-            // Prefer the artifact-only lookup so an overlay row hydrated
-            // into the registry's plain key can't masquerade as the "code
-            // default" layer; fall back to getItem for runtime-only items.
-            //
-            // [#21059] …and "runtime-only" is held to what it says. The plain
-            // key is one slot for two populations: an item registered at
-            // runtime with no package, and a stored row the hydrator put there
-            // ({@link hydrateOverlayIntoRegistry}, the boot `object` limb of
-            // {@link loadMetaFromDb}). For a name no package ships the
-            // artifact lookup misses, so `getItem` answered the hydrated row
-            // and the code layer became the stored body — but only once a
-            // hydration had run, so the same read answered `code: null` before
-            // it. The spec's layer 1 is "`null` when no artifact ships this
-            // item (it exists only as an overlay)", and #5707 / #5840 allow a
-            // layer only from a read that happened: a stored row is the overlay
-            // read below, never an artifact read.
-            //
-            // The discriminator is the tenant marker the hydrator ALREADY
-            // writes on every row it registers — ADR-0010 `_provenance: 'org'`,
-            // read through {@link isTenantAuthored}. ⛔ No new marker. A body
-            // that carries package-provenance stamps under a name no package
-            // ships is the same row: the hydrator restates its authorship over
-            // whatever its bytes claim, and a stamp is not an artifact read, so
-            // the envelope's provenance fields below read this item's code
-            // layer as `null` too (triage's ruling, overturnable by the
-            // maintainer); its lock reads no code layer at all ([#21738], the
-            // item-lock resolution below). A
-            // runtime-registered item with no package carries no tenant marker
-            // and keeps its code layer.
-            //
-            //
-            // [#26699] Each lookup is asked for the addressed member, exactly
-            // as {@link getMetaItem}'s are: the artifact at the member (the
-            // canonical one when none was named), and the registry for the
-            // member named. The registry's bare-name read still answers a
-            // bundle that ships no canonical member; a registry that does not
-            // narrow by member can answer another one for a NAMED member, and
-            // that answer is not this member's layer.
-            const runtimeOnly = (item: unknown): unknown =>
-                item !== undefined && isTenantAuthored(item) ? undefined : item;
-            const namedMemberOnly = (item: unknown): unknown =>
-                member !== undefined && item !== undefined && !isWantedMember(item) ? undefined : item;
-            const artifact = this.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
-            let regItem = (artifact !== undefined && isWantedMember(artifact) ? artifact : undefined)
-                ?? namedMemberOnly(runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId, member)));
-            if (regItem === undefined) {
-                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) regItem = namedMemberOnly(runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId, member)));
-            }
-            if (regItem !== undefined) code = regItem;
-        }
-
-        // [#5840] The code half of the rule #5707 wrote for the overlay half,
-        // eleven lines below. `code: null` is not a shrug — this method states
-        // it positively ("no packaged/code-layer definition exists"), and the
-        // response then DERIVES from it: `effective` and the envelope's
-        // provenance fields. (It used to derive the lock too, from
-        // `code ?? overlay`, so an item whose code layer declared `_lock:
-        // 'full'` was rendered `editable: true, deletable: true` when the read
-        // that would have found that lock failed. [#21738] The lock is now the
-        // item-lock resolution's, over the registry's artifact lookup, which
-        // this read cannot lose.) An availability failure stated as an
-        // authorship fact is precisely what ADR-0110 D3 forbids, and the
-        // overlay half of this very method already refuses to do it — the two
-        // halves were asymmetric only because the loader failure was invisible
-        // on this side.
-        //
-        // Same narrow shape as the overlay half: the benign "nothing there"
-        // still returns `code: null` normally (a clean miss is not degraded),
-        // and a registry hit above is a real code layer, so this fires only
-        // when the null would otherwise be an unfounded authorship claim.
-        if (code === null && codeDegraded?.degraded) {
-            this.throwMetadataServiceUnavailable(codeDegraded.errors);
-        }
-
-        // ── overlay layer: the environment's sys_metadata row (ADR-0131 D6) ──
-        let overlay: unknown | null = null;
-        let overlayScope: 'env' | null = null;
-        // [#28412] The stored row `overlay` was read from, when the served-row
-        // resolution read one: what {@link declinesStoredRow} judges a shipped
-        // flow name's declared override on.
-        let overlayRow: ServedOverrideRow | undefined;
-        // [#21761] The `overlay` layer of the one item-lock resolution below,
-        // selected from this read's address as in {@link getMetaItem}: the
-        // strictest lock among the item's stored rows in scope, never only the
-        // row this layer reports.
-        let overlayLockLayer: unknown;
-        // [#23291] Naming no package, the overlay comes from the address
-        // {@link getMetaItem} serves its content from
-        // ({@link packagelessReadAddress}), so `effective` is what that read
-        // returns and `/published` serves the same document. Content only: the
-        // lock stays at the request's address, as the `_lock` gate judges it.
-        // Asked outside the `try` below: its own failed read already answers
-        // the #5532 envelope, with the driver's error as `cause`.
-        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name, member);
-        try {
-            // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
-            // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
-            // [#26699] At the addressed member, as that read asks it.
-            // [#28409, ADR-0146 D8 item 2] …with the package's declared
-            // override first, as {@link getMetaItem} serves it: `overlay` is
-            // then the `.custom` item, `code` the base's document and
-            // `effective` the override (the base's document stays reachable
-            // here, ADR-0146 "Decided here" item 5).
-            let served: { row: any; overrideOf?: string } | undefined = await this.findServedOverlayRow({
-                type: request.type,
-                name: request.name,
-                state: 'active',
-                ...(contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
-                ...memberOption(member),
-                servedOverride: true,
-            });
-            // [#28830, #28390 ruling A] The pair's own added member is the
-            // overlay on the base's address, as the by-name read serves it
-            // ({@link findPairAddedMemberRow}); another package's never is.
-            if (!served && wantedMember !== undefined && typeof contentPackageId === 'string') {
-                const row = await this.findPairAddedMemberRow(request.type, request.name, contentPackageId, member, wantedMember);
-                if (row) served = { row };
-            }
-            overlayLockLayer = await this.overlayLockLayerAt({
-                type: request.type,
-                name: request.name,
-                packageId: request.packageId,
-            }, { otherSpelling: true });
-            if (served) {
-                const rec = served.row;
-                overlayRow = rec as ServedOverrideRow;
-                overlay = this.convertStoredItem(
-                    String(rec.type ?? request.type),
-                    storedRowDocument(rec),
-                );
-                overlayScope = 'env';
-            }
-        } catch (error) {
-            // [#5707] The same rule as the four overlay reads in
-            // `getMetaItems` / `getMetaItem` (#5532), on the one overlay read
-            // PR #5705 deliberately did not reach.
-            //
-            // Swallowing here does not answer 404 — it answers something this
-            // method states positively in THREE fields at once: `overlay: null`
-            // ("nothing was ever customised"), `overlayScope: null` ("no row
-            // is stored"), and `effective = code` ("what runs today is the
-            // packaged artifact, verbatim"). The whole point of the layered
-            // read is to show an author what they changed; during an outage it
-            // told them they had changed nothing, which is the #5532 error —
-            // an availability failure reported as an authorship fact — landing
-            // in the diff view instead of on a 404.
-            //
-            // The benign case is unchanged and is why this is not a bare
-            // rethrow: an unprovisioned `sys_metadata` genuinely holds no
-            // overlay row, so `overlay: null` / `effective = code` IS the truth
-            // and first boot still renders the code layer.
-            // See {@link rethrowUnlessMetadataStoreUnprovisioned}.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-
-        // ── [#21442] A row-less name a stored view container expands ──
-        //
-        // No row of this name was read above. When a stored view container in
-        // this caller's scope expands the name ({@link resolveRowlessExpandedView},
-        // the list read's own selection and expansion), `effective` is the
-        // expanded item — what {@link getMetaItem} answers for the name — and
-        // the layers say where it came from in the fields that already say it:
-        // `overlay` is the container's own stored row, the one stored layer
-        // behind this name (its `name` is the container's, its `_packageId` the
-        // package its row is bound to), and `overlayScope` `'env'`. `code` keeps its own read: the item a package ships
-        // under this name (a tenant overlay of that package's container), else
-        // `null`.
-        let expandedFrom: RowlessExpandedView | undefined;
-        if (overlay === null) {
-            expandedFrom = await this.resolveRowlessExpandedView(request);
-            if (expandedFrom !== undefined) {
-                overlay = expandedFrom.container.data;
-                overlayScope = 'env';
-            }
-        }
-
-        // ── [#28409, ADR-0146 D8; N-09 rider gap 3] An ORPHANED row of the name ──
-        //
-        // Nothing stored is served at the address of a name its package X
-        // ships (`code` is X's document), and yet a row of the name is stored in X's pair
-        // (`<X>.custom`) without the override declaration, or in a package
-        // that depends on X (X is in its manifest's dependency closure,
-        // {@link resolveWritePackageScope}). The shape a base upgrade leaves:
-        // the dependent or the pair saved the name before a later version of
-        // X shipped it. Since the effective read serves X's document under
-        // X's name (D8 item 1), that row is no longer served there, and the
-        // env-wide list lists the name once, as X's. It is still the
-        // package's own item, under its own address. The layered read of X's
-        // name REPORTS it, so it is never silently dropped: `overlay` holds
-        // the row as stored, a shadowed layer beside the effective one, as for
-        // a shipped flow name's stored row (#21002), and `effective` stays the
-        // code layer the by-name read serves. The flags below are the address's
-        // as before: the orphan is not this address's row.
-        //
-        // A row of a package outside X's closure is not an orphan of X's name:
-        // it is that package's own item (ADR-0048 §3.3), and not reported here.
-        // With several such rows, the pair's is reported, else the first
-        // package's in id order.
-        let orphaned = false;
-        if (overlay === null && code !== null && typeof contentPackageId === 'string' && contentPackageId !== '') {
-            const base = contentPackageId;
-            let rows: readonly StoredOverlayRow[] = [];
-            try {
-                rows = await this.readItemActiveRows(request.type, request.name);
-            } catch (error) {
-                // [#5707] The same rule as the overlay read above: a read that
-                // did not happen is not an item with no orphan.
-                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-            }
-            const memberWhere = overlayMemberWhere(request.type, member);
-            const boundTo = (row: StoredOverlayRow): string | undefined => boundPackageOf(row.package_id);
-            const orphan = rows
-                .filter((row) => rowMatchesOverlayWhere(row, memberWhere))
-                .filter((row) => {
-                    const owner = boundTo(row);
-                    if (owner === undefined || owner === base) return false;
-                    if (isServedOverrideRowOf(row, base)) return false;
-                    const pair = customizationPackageId(base);
-                    if (pair.ok && pair.value === owner) return true;
-                    return this.resolveWritePackageScope(owner)?.dependencies.includes(base) === true;
-                })
-                .sort((a, b) => {
-                    const pair = customizationPackageId(base);
-                    const rank = (row: StoredOverlayRow) => (pair.ok && boundTo(row) === pair.value ? 0 : 1);
-                    return rank(a) - rank(b) || String(boundTo(a)).localeCompare(String(boundTo(b)));
-                })[0];
-            if (orphan !== undefined) {
-                overlay = this.convertStoredItem(
-                    String((orphan as { type?: unknown }).type ?? request.type),
-                    storedRowDocument(orphan),
-                );
-                overlayScope = 'env';
-                orphaned = true;
-            }
-        }
-
-        // [#4513] `effective` is documented above as "what `getMetaItem` would
-        // return", and the response's `_diagnostics` is computed from it — so it
-        // carries the same audit-family governance that read now applies, or the
-        // sentence stops being true the moment the overlay declares a writable
-        // `created_at`. `code` and `overlay` are deliberately left RAW: they are
-        // the diagnostic's whole point (what the package shipped vs what was
-        // customised), and a Studio diff showing `code`'s declaration next to
-        // `effective`'s governed value is the platform override made visible,
-        // not a defect.
-        // [#8027] …and `effective` is "what `getMetaItem` would return", so when
-        // the overlay wins it is that read's BASE LAYER, resolved the same way:
-        // D9.2's base-plus-extenders. Without this the single `?layers=true`
-        // response contradicted itself — `code` carried the extension fields
-        // (#7556 folds it) and `effective` did not, with the `overlay` layer
-        // showing a customisation that explained none of the difference.
-        //
-        // ⛔ The fold lands on the EFFECTIVE base only. `overlay` stays the row
-        // the tenant actually stored: a code-declared extension is not a tenant
-        // customisation, and #7556 drew that boundary deliberately (the same
-        // reason `governServedItem` is called here and never on `overlay`).
-        //
-        // ── [#21002, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
-        //
-        // `flow` is Regime C: the packaged base is locked, "⛔ Never silent
-        // override, never an overlay read path". For a flow name the loader's
-        // set holds, the flattened view (#20913) and {@link getMetaItem}
-        // (#20946) serve the loader's body, and a stored row of that name is
-        // neither merged into the package's slot nor lets it stand in for it.
-        // `effective` is "what `getMetaItem` would return", so for such a name
-        // it is the CODE layer, decided by the SAME stored-row predicate,
-        // {@link isShippedFlowName}, judged by NAME — ⛔ no fourth precedence
-        // path of this method's own. Overlay-wins here served the stored body
-        // as the effective layer while the lock and provenance flags (resolved
-        // from `code` first, below) named the package.
-        //
-        // The stored row is still REPORTED: `overlay` / `overlayScope` keep the
-        // row as stored, a shadowed layer of its own scope beside the effective
-        // one, never the effective layer itself. The code layer needs no
-        // registry-half call ({@link isStoredFlowEntryOfShippedName}): it reads
-        // the loader's set (`lookupArtifactItem`, blind to tenant-authored rows)
-        // before the registry's bare slot, and a shipped name is by definition
-        // one that set holds. Every other type, and a flow name no managed
-        // package ships, keeps overlay-wins. What becomes of the stored rows
-        // themselves (keep, refuse, migrate) is not decided here.
-        //
-        // [#21922] The same holds for a code-defined DATASOURCE name, through
-        // the one predicate both name classes share ({@link declinesStoredRow}):
-        // `getMetaItem` serves the MetadataService's code definition, so that is
-        // `effective` here (the code layer above reads the MetadataService
-        // first), and the stored row stays reported in `overlay` — the residue
-        // the `/meta` DELETE removes as repair.
-        //
-        // [#21442] A name a stored container expands (above) takes the expanded
-        // item as its effective layer: the container row in `overlay` is the
-        // layer it derives from, not the value the by-name read serves.
-        // [#28409] …and an orphaned row (above) is a shadowed layer of the
-        // same kind: `effective` is the code layer the by-name read serves.
-        const effectiveBase: unknown | null = expandedFrom !== undefined
-            ? expandedFrom.item
-            : overlay !== null && !orphaned && !this.declinesStoredRow(request.type, request.name, overlayRow)
-                ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
-                : code;
-        // [#21738] The lock is the one item-lock resolution's — the
-        // `getMetaItem` call over [#21803] every installed package that ships
-        // the name ({@link artifactLockLayerAt}) and [#21761] the rows in
-        // scope for its address — never `code ?? overlay`, which took the code
-        // layer's (absent) lock over a stored row's `_lock`. A row-less name a
-        // stored container expands contributes no `overlay` layer: the
-        // container's row is not this name's row, and the `_lock` gate does not
-        // read it. The provenance fields still come from the layer the
-        // response reports first.
-        const itemLock = resolveItemLock({
-            artifact: this.artifactLockLayerAt({
-                type: request.type,
-                name: request.name,
-                packageId: request.packageId,
-            }),
-            overlay: overlayLockLayer,
-        });
-        // [#21761, #21803] `effective` is what {@link getMetaItem} would
-        // return, and that read's body carries the resolution's lock family
-        // (the binding row's or the binding package's, which need not be the
-        // layer `effective` was taken from). So this one does too. `code` and
-        // `overlay` stay the layers as shipped and as stored.
-        const effective: unknown | null = withItemLockFamily(
-            this.governServedObject(request.type, effectiveBase),
-            itemLock,
-        );
-
-        const _diagnostics =
-            effective !== null && effective !== undefined
-                ? computeMetadataDiagnostics(request.type, effective)
-                : undefined;
-
-        // ADR-0010 — surface lock/provenance flags so the Studio editor
-        // can render the correct affordances without a second round trip.
-        const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        // [#21670] …joined with the locked-packaged-base verdict the write
-        // doors answer — the same derivation `getMetaItem` publishes.
-        const lockState = this.servedLockState(
-            request.type, request.name, code ?? overlay ?? {}, artifactBacked, itemLock,
-            overlay !== null && overlay !== undefined && !orphaned,
-        );
-
-        // [#8154] The per-type credential redaction, on the ONE read exit
-        // `decorateMetadataItem` does not reach — this method never calls it
-        // (it computes `_diagnostics` directly, above) and serves its three
-        // layers raw. Measured on `origin/main` before this change: a legacy
-        // `datasource` row came back with `config.password` in cleartext in
-        // BOTH `overlay` and `effective`, so a hook that covered only the
-        // decorated exits would have left this door open while the report said
-        // "the read path is closed" — the exact shape this card exists to end.
-        //
-        // ⚠️ ALL THREE LAYERS, `code` and `overlay` included, and that is a
-        // reading of ANOTHER lane's ruling rather than an inference from this
-        // one. #7556 keeps `code` / `overlay` deliberately RAW — ungoverned,
-        // uninjected, unfolded — so that a Studio diff shows what the tenant
-        // actually customised and nothing else. That reason does not extend to
-        // credentials, and redacting the key on BOTH sides leaves the diff
-        // itself unchanged: the key is absent from both layers, so "what was
-        // customised" reads exactly as before. Stated here, and in the PR body,
-        // so `domain:engine-core` / `domain:spec` reviewers can contest it
-        // rather than discover it. ⛔ It is NOT a licence to fold, govern or
-        // inject on these layers — redaction subtracts, and only a credential.
-        //
-        // Placed AFTER `_diagnostics` and AFTER `servedLockState`, both of
-        // which must read the raw bodies: the diagnostics ordering is the
-        // migration-inventory badge (see `decorateMetadataItem`), and a lock
-        // resolved from a redacted body would be a lock resolved from a
-        // document this method is not serving.
-        const servedCode = redactMetadataItem(request.type, code);
-        const servedOverlay = redactMetadataItem(request.type, overlay);
-        const servedEffective = redactMetadataItem(request.type, effective);
-
-        return {
-            type: request.type,
-            name: request.name,
-            code: servedCode,
-            overlay: servedOverlay,
-            overlayScope,
-            effective: servedEffective,
-            ...(_diagnostics ? { _diagnostics } : {}),
-            lock: lockState.lock,
-            ...(lockState.lockReason !== undefined ? { lockReason: lockState.lockReason } : {}),
-            ...(lockState.lockSource !== undefined ? { lockSource: lockState.lockSource } : {}),
-            ...(lockState.lockDocsUrl !== undefined ? { lockDocsUrl: lockState.lockDocsUrl } : {}),
-            ...(lockState.provenance !== undefined ? { provenance: lockState.provenance } : {}),
-            ...(lockState.packageId !== undefined ? { packageId: lockState.packageId } : {}),
-            ...(lockState.packageVersion !== undefined ? { packageVersion: lockState.packageVersion } : {}),
-            editable: lockState.editable,
-            deletable: lockState.deletable,
-            resettable: lockState.resettable,
-        };
+        // [#25467 E1] The body moved to `protocol-meta-layered-reads.ts`; it reaches this class through `protocol-host.ts`.
+        return getMetaItemLayered(protocolHost(this), request);
     }
 
     /**
@@ -11939,15 +10821,38 @@ export class ObjectStackProtocolImplementation implements
      * it registered nothing on a save then ([#23298]: a kernel that hydrates
      * its own store now registers a save as its boot does, by this rule).
      *
-     * ⛔ `view` only, judged on the canonical type. Every other type registers
-     * as before: a row bound to one package, of a name two packages ship, holds
-     * the bare entry with its own body and its own package's envelope (#4624,
-     * ADR-0048, pinned in `objectql`'s `protocol-boot-hydration-scoped.test.ts`).
+     * ⛔ This rule is `view` only, judged on the canonical type. Every other type
+     * registers as before, save the borrowed-envelope rule below: a row bound
+     * to one package, of a name two packages ship, holds the bare entry with
+     * its own body and its own package's envelope (#4624, ADR-0048, pinned in
+     * `objectql`'s `protocol-boot-hydration-scoped.test.ts`).
      * Registry readers that name no package read those entries (the declared
      * security-metadata bootstraps, the action router, the picklist read), and
      * which body they should see for such a name is not ruled here. A
      * package-less view row, and a view row of a name only its own package
      * ships or no package ships, register as before too.
+     *
+     * ## [#29600] …and a dashboard, report or email-template row never wears another package's envelope
+     *
+     * A row of these three types bound to a package that ships no artifact of
+     * its name (or bundle member), under a name another package ships, is not
+     * registered either ({@link declinesBorrowedEnvelope}). The artifact lookup
+     * falls back to the package that ships the name, so the bare entry wore
+     * THAT package's envelope (`_packageId`, `_provenance: 'package'`) and the
+     * per-package layer listed it as that package's own item: after a `.custom`
+     * pair published its declared override of a base's dashboard, the base's
+     * layer (and with it the base's export) carried two items of the name.
+     * Every protocol read of these types answers such a row from the row
+     * itself — the by-name read, the effective list, the layered read and the
+     * pair's per-package layer — so they served the same body before and
+     * after, measured for each reader. What changes is the registry-direct
+     * read of the name, which answers the shipping package's own item.
+     *
+     * ⛔ Those three types only. A row of a package that ships its own artifact
+     * of the name keeps its bare entry (#4624). `page`, `app`, `dataset`, `doc`
+     * and `book` still register: their reads serve a pair's override from the
+     * bare entry, so it can go only once they serve it from the row. `flow`
+     * registers with no artifact envelope (below).
      *
      * ## [#23233] The entry carries the row's package binding
      *
@@ -12103,6 +11008,12 @@ export class ObjectStackProtocolImplementation implements
         const artifact = this.lookupArtifactItem(
             type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data),
         );
+        // [#29600] See the header: a dashboard, report or email-template row
+        // bound to a package that ships no artifact of its name, under a name
+        // another package ships, is not registered under the bare name, where
+        // it would wear that other package's envelope. Its reads answer it from
+        // its row. ⛔ Those three types only.
+        if (declinesBorrowedEnvelope(canonicalType, options.packageId, artifact)) return true;
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
         // `sys_metadata` write and is therefore tenant-authored by definition
@@ -12940,7 +11851,9 @@ export class ObjectStackProtocolImplementation implements
      *     ships, is not re-registered here: under the bare name it would
      *     answer every package's read of the name. The walk stops there, as
      *     for any baseline found. ⛔ View only, as at the hydration: every
-     *     other type re-registers as before.
+     *     other type re-registers as before. [#29600] The hydration's
+     *     borrowed-envelope rule has no twin here: this limb registers the
+     *     baseline's own body and grafts no artifact envelope onto it.
      *  3. [#5079] When NEITHER layer has anything, the deleted row was the
      *     whole item — so the plain-key entry is retired too
      *     ({@link SchemaRegistry.removeOverlayEntry}).
@@ -16091,7 +15004,13 @@ export class ObjectStackProtocolImplementation implements
         // lands (`restoredCredentialPathsFor`, the same plan over the same
         // stored body), never what it restores — so a rule reads a withheld
         // credential as present without any gate handling it.
-        request.item = await this.carryForwardRedactedCredentials({
+        //
+        // [#28640 ②B] …except the positions the type's redactor marks withheld
+        // AND not carried forward (a connector's undeclared `auth` keys, which
+        // no door accepts and nothing reads): those are never re-grafted, so
+        // this save drops them from the row at rest, and the answer names each
+        // one on `advisories` (`droppedWithheldKeyNotices`) — loud, never silent.
+        const carried = await this.carryForwardRedactedCredentials({
             type: singularTypeForRepo,
             repo,
             ref,
@@ -16100,6 +15019,11 @@ export class ObjectStackProtocolImplementation implements
             item: request.item,
             member: itemDiscriminator(singularTypeForRepo, request.item),
         });
+        request.item = carried.item;
+        const saveNotices = [
+            ...runtimeAdvisories,
+            ...droppedWithheldKeyNotices({ type: singularTypeForRepo, name: request.name, dropped: carried.dropped }),
+        ];
         // [#20790] …and then OUT of the body: a type with a write-only
         // credential channel (`flow`, registered by the automation plugin)
         // stores every explicit credential there and persists the body without
@@ -16220,7 +15144,11 @@ export class ObjectStackProtocolImplementation implements
                 // bypass) and that door does NOT carry this field yet — its own
                 // response contract only just landed as #7294. The asymmetry is
                 // deliberate and stated in the changeset.
-                ...(runtimeAdvisories.length > 0 ? { advisories: runtimeAdvisories } : {}),
+                //
+                // [#28640 ②B] The save's own notices ride the same key: a stored
+                // position the carry-forward dropped is named here, after the
+                // gate's findings, and the key is still omitted when both are empty.
+                ...(saveNotices.length > 0 ? { advisories: saveNotices } : {}),
                 // #5745 — the literal union, not `string`. An object-literal
                 // property widens a two-literal ternary to `string`, which made
                 // this method fail to satisfy `MetadataProtocol.saveMetaItem`
@@ -21010,6 +19938,15 @@ export class ObjectStackProtocolImplementation implements
      * performs its promise exactly, and the removal is the one action that
      * reduces the residue. The measurement and the refuse-vs-decline reasoning
      * are stated at the gate itself.
+     *
+     * [#29390, ADR-0146 D1, D11] The restore limb asks the #28905 close
+     * ({@link namedBaseOverlayWriteRefusal}) on the binding it writes, as
+     * {@link rollbackMetaItem} does: an item whose restore would land in a row
+     * bound to the read-only base itself — a commit the base recorded before
+     * the write naming it closed — goes into `failed[]` (`NOT_OVERRIDABLE`, the
+     * rollback sentence naming the base's `.custom` pair) with nothing written,
+     * and {@link rollbackToPackageCommit} reports it per item and continues.
+     * The soft-remove limb stays open: removing such a row writes nothing.
      */
     async revertCommit(request: {
         commitId: string;
@@ -21363,6 +20300,20 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, member);
+                    // [#29390, ADR-0146 D1, D11] A restore writes the row this
+                    // binding names, so a restore into a row bound to the
+                    // read-only base itself (a commit recorded before #28905
+                    // closed the write naming the base) is refused exactly as
+                    // {@link rollbackMetaItem} refuses it, on the same key and
+                    // with the same sentence ({@link namedBaseOverlayWriteRefusal}),
+                    // into `failed[]` with nothing written. The commit's other
+                    // items still revert. The soft-remove limb above stays open:
+                    // removing a row bound to the base writes nothing.
+                    const namedBase = this.namedBaseOverlayWriteRefusal(
+                        { type: PLURAL_TO_SINGULAR[it.type] ?? it.type, name: it.name, packageId: restorePackageId, ...memberOption(member) },
+                        'rollback',
+                    );
+                    if (namedBase) throw namedBase;
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',

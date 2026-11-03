@@ -83,6 +83,7 @@
     "@object-ui/fields": "workspace:*",
     "@object-ui/i18n": "workspace:*",
     "@object-ui/layout": "workspace:*",
+    "@object-ui/mobile": "workspace:*",
     "@object-ui/permissions": "workspace:*",
     "@object-ui/plugin-editor": "workspace:*",
     "@object-ui/providers": "workspace:*",

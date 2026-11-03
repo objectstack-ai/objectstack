@@ -148,6 +148,10 @@ import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredRef
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
+// [#29460] A `referenceNameVisible` reference's refused targets served by name
+// and id on the expanded read; the method of the same name below hands the body
+// the members it reads (`ReferenceNameVisibleHost`).
+import { serveReferenceNames } from './engine-reference-name-visible.js';
 // [#25522 cut 12] The driver options every driver call receives, and the tenancy
 // posture and Layer 0 verdict they are scoped by; the methods of the same names
 // below hand each body the members it reads (`DriverOptionsHost`).
@@ -386,7 +390,10 @@ import {
   PLATFORM_PROVISIONED_COLUMNS,
   declaredColumnSet,
   rowsWithDeclaredColumnsOnly,
+  rowsWithSelectedColumnsAnswered,
+  selectedStoredColumns,
   withDeclaredColumnsOnly,
+  withSelectedColumnsAnswered,
 } from './declared-read-columns.js';
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
 // [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
@@ -13828,9 +13835,69 @@ export class ObjectQL implements IObjectQLEngine {
           error: (e as Error).message,
         });
       }
+
+      // [#29460] `referenceNameVisible` (ruling 6574398310, letter B): the ids
+      // the caller's own expansion above left bare are asked whether the
+      // caller was REFUSED them, and a refused target is served by its name
+      // and id only. Every other value keeps the answer the loop gave it. See
+      // {@link serveReferenceNames}.
+      if ((fieldDef as { referenceNameVisible?: unknown }).referenceNameVisible === true) {
+        await this.serveReferenceNames(objectName, records, fieldName, referenceObject, execCtx);
+      }
     }
 
     return records;
+  }
+
+  /**
+   * [#29460] Serve `FieldSchema.referenceNameVisible` on an expanded read
+   * (director ruling 6574398310, letter B). Runs from
+   * {@link expandRelatedRecords} for a field declaring the key, after the
+   * caller's own expansion of it, and rewrites only the ids that expansion
+   * left bare.
+   *
+   * For each such id it asks, as the caller and with none of the caller's
+   * `$expand` nesting, whether the caller may read it (the security service's
+   * object-level admission, then an id-only read for the row scope). A refused
+   * id whose record exists in the caller's tenant becomes
+   * `{ id, name, readRefused: true }`: `name` is ADR-0079's display name,
+   * read by the engine under the tenant-kept elevation from exactly `id` and
+   * the resolved name field, with the floor `Record #<id>` when field-level
+   * security keeps that field from the caller. A readable target keeps its
+   * expansion, an id the caller's own nested filter left bare stays bare, an
+   * id no record has stays bare. `multiple: true` is judged per element.
+   *
+   * ⛔ Never served on an unexpanded read: ADR-0104 D1's stored form is the
+   * bare id for every caller. ⛔ The caller's projection, filter, order and
+   * nested expand never reach the elevated read, and the field's
+   * `displayField` does not choose its column.
+   */
+  private async serveReferenceNames(
+    objectName: string,
+    records: any[],
+    fieldName: string,
+    referenceObject: string,
+    execCtx?: ExecutionContext,
+  ): Promise<void> {
+    // The body lives in `engine-reference-name-visible.ts` (see `ReferenceNameVisibleHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof serveReferenceNames> = {
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+      find: (...a) => this.find(...a),
+      resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
+      formulaReadsReference: (name, def, fields) => {
+        try {
+          const entry = formulaPlanEntry(name, def, fields);
+          return entry.hops !== undefined || entry.hopConflict !== undefined;
+        } catch {
+          // An expression the planner cannot compile is not served by name.
+          return true;
+        }
+      },
+    };
+    return serveReferenceNames.call(host, objectName, records, fieldName, referenceObject, execCtx);
   }
 
   /**
@@ -14638,6 +14705,13 @@ export class ObjectQL implements IObjectQLEngine {
           // declared record. See `declared-read-columns.ts`.
           if (Array.isArray(result)) {
             result = rowsWithDeclaredColumnsOnly(result, declaredColumnSet(_findSchema));
+            // [#29408] …and answered on every stored declared column the read
+            // SELECTED: one the driver returned no key for (a driver that
+            // stores only written columns) is `null`, as driver-sql's column
+            // answers — the row's persisted state is in hand. Unselected,
+            // formula and FLS-refused columns stay absent; see
+            // `selectedStoredColumns`.
+            result = rowsWithSelectedColumnsAnswered(result, selectedStoredColumns(_findSchema, driverAst?.fields));
           }
 
           // Post-process: evaluate formula virtual fields against the raw rows.
@@ -14938,6 +15012,8 @@ export class ObjectQL implements IObjectQLEngine {
       // [#21571] Same default projection as `find`, same position: the
       // declared field set, applied to the row as the driver returned it.
       result = withDeclaredColumnsOnly(result, declaredColumnSet(_findOneSchema));
+      // [#29408] Same answer on the selected stored columns as `find`.
+      result = withSelectedColumnsAnswered(result, selectedStoredColumns(_findOneSchema, driverAst?.fields));
 
       // Post-process: evaluate formula virtual fields against the raw row
       // ([#20082] with the caller's permission map when a formula calls `can`).

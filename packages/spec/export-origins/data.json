@@ -920,6 +920,7 @@
     "isInlineRowFormOffered": "src/data/inline-grid-columns.ts#isInlineRowFormOffered (function)",
     "isKnownFilterToken": "src/data/context-tokens.zod.ts#isKnownFilterToken (function)",
     "isLegacyApiMethod": "src/data/api-derivation.ts#isLegacyApiMethod (function)",
+    "isListComparandOperator": "src/data/filter-comparand-operators.ts#isListComparandOperator (function)",
     "isMaskedOnReadFieldType": "src/data/masked-field-types.ts#isMaskedOnReadFieldType (function)",
     "isMultiValueField": "src/data/field-value.zod.ts#isMultiValueField (function)",
     "isNowDefaultToken": "src/data/default-value-tokens.ts#isNowDefaultToken (function)",

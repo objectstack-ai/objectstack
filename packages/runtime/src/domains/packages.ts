@@ -511,9 +511,12 @@ function requireCommitTrailReadCapability(deps: DomainHandlerDeps, context: Http
  * [ADR-0131 D6] For the same reason it no longer names the ADR-0005
  * organization overlay, its remedy after that: the per-organization overlay
  * axis is retired, and a write naming an organization answers `403
- * NOT_OVERRIDABLE`. What a managed package provides is customised BESIDE it,
- * as environment-level state, and the two doors name that remedy in one
- * clause ({@link CUSTOMISE_BESIDE_REMEDY}).
+ * NOT_OVERRIDABLE`. Its remedy after THAT — save an item under its own name,
+ * as environment-level state — is retired too: ADR-0146 D11 closed the
+ * package-less write onto a packaged item (`403 NOT_OVERRIDABLE`, naming the
+ * base's pair). What a read-only package ships is customized in its paired
+ * `<id>.custom` package (ADR-0146 D2/D3), and the two doors name that route
+ * in one clause ({@link customizeInPairRemedy}).
  *
  * ⛔ Deliberately NOT caller-sensitive — there is no `isSystem` bypass, unlike
  * {@link requireManageMetadata}. Read-only is a property of the PACKAGE. Engine
@@ -603,22 +606,54 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
 }
 
 /**
- * [ADR-0131 D6] The customisation remedy both read-only refusals below name
- * ({@link requireWritablePackage}, {@link requireDuplicableSource}), in one
- * spelling. A managed package's items are sealed, and what a customer changes
- * lives beside them as environment-level state: a save under an item's own
- * name is an environment overlay on a type whose registry entry takes one
- * (`allowEnvironmentOverlay`) unless the package's lock refuses it — that save
- * is refused `ITEM_LOCKED`, naming the lock and its reason (ADR-0010 §3.3) —
- * and on every other type the save door's own refusal names the route that
- * type has: a flow's clone and switch, an action's switch, a permission set's
- * clone, else the source. The sentence names that door rather than a list of
- * types, so it cannot drift from the regime table the door reads.
+ * [ADR-0146 D2/D3/D11] The customization remedy both read-only refusals below
+ * name ({@link requireWritablePackage}, {@link requireDuplicableSource}), in
+ * one spelling. A managed package's items are sealed, and what a customer
+ * changes is an item of the package's paired `<id>.custom`: the ensure door
+ * (`POST /api/v1/packages/:id/ensure-customization`, the pair's one creation
+ * path) answers the pair, and a save naming it (`?package=<id>.custom`) lands
+ * there — a new item under its own name, or, declaring `overrides: { package,
+ * basedOn }`, the replacement of an item the package ships, served at that
+ * item's name. The sentence spells the pair, the route and the declaration
+ * exactly as the save door's own close does (`packagelessOverlayWriteRefusal`,
+ * `@objectstack/metadata-protocol`), so a caller sent here reads the fix that
+ * door would name.
+ *
+ * It replaces the ADR-0131 D6 remedy — "save an item under its own name", an
+ * environment-level overlay — which ADR-0146 D11 closed: that package-less
+ * save onto a packaged item answers `403 NOT_OVERRIDABLE`, naming the pair. A
+ * refusal that prescribes a dead end is worse than one that prescribes
+ * nothing (the #14451 lesson above).
+ *
+ * What the route does NOT promise, measured on the real routes before this
+ * sentence was written, and named so the sentence promises no more:
+ *   - a type that takes no declared override (`action` until ADR-0146 D9's
+ *     conditions land, the security catalog's `permission` / `position` /
+ *     `capability`, the code-only types) is refused at the save door naming
+ *     the route that type has ("new similar", the switch), and a locked item
+ *     `ITEM_LOCKED` naming the lock (ADR-0010 §3.3);
+ *   - a package the ensure door cannot pair — no namespace, a pair namespace
+ *     another package owns, a version that is not SemVer — is refused there,
+ *     naming why (ADR-0146 D3).
+ * Both refusals name their own reason, so the sentence names the door rather
+ * than a list of types or package shapes that could drift from them.
+ *
+ * An id the pairing rule derives no pair for (`customizationPackageId`,
+ * `@objectstack/spec/kernel`) gets the sentence without a pair id: the ensure
+ * door answers that id with the reason it has none.
  */
-const CUSTOMISE_BESIDE_REMEDY =
-    'customise what this package provides beside it, as environment-level state (ADR-0131 D6): save an item '
-    + 'under its own name — that overlays it where the item\'s type takes an environment overlay and the package\'s '
-    + 'lock does not refuse it, and is otherwise refused naming the route that type has, or the lock.';
+function customizeInPairRemedy(id: string): string {
+    const ensure = `POST /api/v1/packages/${id}/ensure-customization`;
+    const pair = customizationPackageId(id);
+    if (!pair.ok) {
+        return `customize what it ships in its paired customization package (ADR-0146 D3): ${ensure} answers `
+            + 'that package, or why this one has none.';
+    }
+    return `customize what it ships in its paired package '${pair.value}' (ADR-0146 D3): ensure it with ${ensure}, `
+        + `then save the item there (?package=${pair.value}), declaring overrides: { package: '${id}', basedOn } `
+        + `to replace an item '${id}' ships. A type that takes no override, or a locked item, is refused naming its `
+        + 'route or the lock; a package that cannot have a pair is refused at that door, naming why.';
+}
 
 function requireWritablePackage(
     deps: DomainHandlerDeps,
@@ -634,7 +669,7 @@ function requireWritablePackage(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
             + `the deployment, not over this API — ${action} a package you own, or `
-            + CUSTOMISE_BESIDE_REMEDY,
+            + customizeInPairRemedy(id),
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
@@ -765,8 +800,8 @@ function isDisableablePackage(engine: unknown, id: string | undefined): boolean 
  * packages — a NEW decision, and one the ADR itself still lists as open
  * ("should customising a code item also fork it into a writable base?
  * *Leaning: keep overlay for surgical tweaks*"). Two built answers exist
- * instead (ADR-0131 D6): customising BESIDE the package, as environment-level
- * state ({@link CUSTOMISE_BESIDE_REMEDY}), and, for an editable copy of the
+ * instead: customizing in the package's paired `<id>.custom` (ADR-0146 D2/D3,
+ * {@link customizeInPairRemedy}), and, for an editable copy of the
  * whole package, its `unmanaged` install, which the install door judges (the
  * package must permit it, and the copy cannot sit beside a managed install of
  * the same package). So the honest behaviour of an unbuilt gesture is to say
@@ -780,7 +815,7 @@ function isDisableablePackage(engine: unknown, id: string | undefined): boolean 
  * a lie by implicature here: nothing is being written to the source, and its
  * remedy ("use a writable package") reads as *make the source writable*, which
  * is neither possible nor the point. `DUPLICATE_SOURCE_NOT_A_BASE` names the
- * one thing the caller can act on — pick a base, customise beside the package,
+ * one thing the caller can act on — pick a base, customize in its pair,
  * or install it unmanaged where it permits that.
  *
  * ⛔ Deliberately NOT a check on emptiness. A WRITABLE base holding no active
@@ -815,7 +850,7 @@ function requireDuplicableSource(
             + `(provided by code or an installed app), and duplicate clones a writable base's `
             + `stored metadata rows. A code package's metadata is delivered as code, so there are `
             + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
-            + `Duplicate a base you own, or ${CUSTOMISE_BESIDE_REMEDY} `
+            + `Duplicate a base you own, or ${customizeInPairRemedy(id)} `
             + `For an editable copy of the whole package, install it unmanaged instead `
             + `(installMode 'unmanaged'), where its manifest's installModes permits that.`,
             422,
@@ -3296,6 +3331,17 @@ function readBaseContributions(
         || a.packageId.localeCompare(b.packageId));
 }
 
+/**
+ * [#29563] Whether an item declares that it overrides `packageId`
+ * (`overrides.package`, ADR-0146 D2). A package's own document never does: the
+ * declaration names the base an item of the base's `.custom` pair replaces.
+ */
+function declaresOverrideOf(item: unknown, packageId: string): boolean {
+    const overrides = (item as { overrides?: unknown } | null | undefined)?.overrides;
+    return typeof overrides === 'object' && overrides !== null
+        && (overrides as { package?: unknown }).package === packageId;
+}
+
 async function assemblePackageManifest(
 deps: DomainHandlerDeps,
 packageId: string,
@@ -3342,6 +3388,7 @@ context: HttpProtocolContext,
 
     const manifest: Record<string, any> = {};
     let total = 0;
+    const perPackageLayer = typeof protocol.getMetaItemsPerPackage === 'function';
     for (const plural of [...exportPluralKeys, EXTENSIONS_KEY]) {
         const singular = singularOf(plural);
         let items: any[] = [];
@@ -3363,6 +3410,17 @@ context: HttpProtocolContext,
             // Unknown/unsupported type for this runtime — skip.
             continue;
         }
+        // [#29563, ADR-0146 D8 item 3] …and, from that layer, never an item
+        // that declares it overrides THIS package: that is the pair's
+        // override, not one of the package's own documents. The layer can list
+        // one under the base: a published `.custom` row is registered in the
+        // registry's bare slot wearing the base's envelope (`_packageId` = the
+        // base's), and for every type but `view` (#22057) that copy is listed
+        // beside the base's own item. Measured for `dashboard` and `report`:
+        // the base's export carried both, the second with the edited label and
+        // the `overrides` block. A protocol with no per-package layer is read
+        // as before.
+        if (perPackageLayer) items = items.filter((it) => !declaresOverrideOf(it, packageId));
         if (items.length === 0) continue;
         // [#5320] `views` is partitioned rather than dumped: the registry's
         // ADR-0017 dual-read returns the container AND its expanded per-view
@@ -3408,6 +3466,17 @@ context: HttpProtocolContext,
     if (pkg?.manifest?.label ?? pkg?.label) {
         manifest.label = pkg?.manifest?.label ?? pkg?.label;
     }
+    // [#29617, ADR-0141 D5 / ADR-0146 D2] The two install-manifest keys an
+    // install of this export decides by, read off the registry row's manifest
+    // as it declares them (`PackageExportManifestSchema.namespace` /
+    // `.dependencies`): without `namespace` the install door derives one from
+    // the id (a `.custom` pair lands under `custom`), and without
+    // `dependencies` a pair loses the edge to its base that orders its install
+    // and admits its overrides. Absent on the row ⇒ absent here.
+    const namespace = pkg?.manifest?.namespace;
+    if (namespace !== undefined && namespace !== null) manifest.namespace = namespace;
+    const dependencies = pkg?.manifest?.dependencies;
+    if (dependencies !== undefined && dependencies !== null) manifest.dependencies = { ...dependencies };
     return manifest;
 }
 

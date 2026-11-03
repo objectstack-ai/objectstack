@@ -129,7 +129,6 @@ const de = {
   actions: {
     decisionOutput: {
       help: 'Wird dem Flow als Entscheidungsausgabe übergeben.',
-      helpMultiValue: 'Wird dem Flow als Entscheidungsausgabe übergeben. Mehrere Werte durch Komma trennen.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
@@ -1136,7 +1135,6 @@ const de = {
     undo: "Rückgängig",
     redo: "Wiederholen",
     canvasMinimap: "Minikarte der Arbeitsfläche",
-    versionHistory: "Versionsverlauf",
   },
   detail: {
     editInlineHint: "Zum Bearbeiten doppelklicken",
