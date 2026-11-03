@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackAdapter } from './index';
+import { answerObjectViewRead } from './objectViewRoute.test-support';
 
 /**
  * View metadata cache keys — invalidation matches the read keys (objectui#3778).
@@ -63,6 +64,7 @@ interface Harness {
   getItems: ReturnType<typeof vi.fn>;
   saveItem: ReturnType<typeof vi.fn>;
   deleteItem: ReturnType<typeof vi.fn>;
+  fetchImpl: ReturnType<typeof vi.fn>;
 }
 
 /**
@@ -83,6 +85,10 @@ function makeDS(opts: {
   const cacheReads: string[] = [];
 
   const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // objectstack#29550: the one-object view read, served from `opts.items`
+    // the way the server serves it.
+    const objectRead = await answerObjectViewRead(input, async () => ({ items: opts.items ?? [] }));
+    if (objectRead) return objectRead;
     const url = String(input);
     const json = (body: unknown, status = 200) =>
       new Response(JSON.stringify(body), {
@@ -127,6 +133,9 @@ function makeDS(opts: {
       invalidated.push(key);
     },
     getCachedSync: () => undefined,
+    // objectstack#29550: no whole view list is ever on the wire here.
+    peekInflight: () => undefined,
+    droppedAt: () => 0,
     getStats: () => ({}),
   };
 
@@ -143,9 +152,10 @@ function makeDS(opts: {
         return { item: opts.published ?? { name: 'v1', object: 'account' } };
       }),
     },
+    getLocale: () => undefined,
   };
 
-  return { ds, invalidated, cacheReads, getItems, saveItem, deleteItem };
+  return { ds, invalidated, cacheReads, getItems, saveItem, deleteItem, fetchImpl };
 }
 
 /** A published read that 404s, decorated the way the SDK client decorates. */
@@ -163,29 +173,35 @@ const VIEW = {
 
 describe('view metadata cache — invalidation names only keys with readers (#3778)', () => {
   it('listViews reads the stored list:view while one is held, else the transport, and no other key (objectui#13057)', async () => {
-    const { ds, getItems, cacheReads } = makeDS({ items: [VIEW] });
+    const { ds, getItems, cacheReads, fetchImpl } = makeDS({ items: [VIEW] });
     const probed: string[] = [];
     const cache: { held?: unknown } = {};
     ds.metadataCache.getCachedSync = (key: string) => {
       probed.push(key);
       return cache.held;
     };
+    const objectReads = () =>
+      fetchImpl.mock.calls.filter(([u]: any[]) => String(u).includes('/meta/view?object=account')).length;
 
-    // Nothing held: each call goes to the transport. Storing the answer is
-    // the real client's (its `getItems` wrap); this stand-in client has none.
+    // Nothing held: each call goes to the transport, the one-object read
+    // (objectstack#29550), never the whole list. (This stand-in's `get` always
+    // misses, so the one-object answer is asked each time.)
     await ds.listViews('account');
     await ds.listViews('account');
-    expect(getItems).toHaveBeenCalledTimes(2);
-    expect(getItems).toHaveBeenCalledWith('view');
+    expect(objectReads()).toBe(2);
+    expect(getItems).not.toHaveBeenCalled();
 
     // A list held under `list:view` answers the read: no third round trip.
     cache.held = { items: [VIEW] };
     const views = await ds.listViews('account');
     expect(views.map((v: any) => v.name)).toEqual(['account.all']);
-    expect(getItems).toHaveBeenCalledTimes(2);
+    expect(objectReads()).toBe(2);
+    expect(getItems).not.toHaveBeenCalled();
 
-    // The one key it consults is the list; no per-object key is read.
-    expect(cacheReads).toEqual([]);
+    // The keys it consults are the list and, while none is held, the
+    // one-object answer's key, which names the list's last invalidation: every
+    // path that drops `list:view` retires it (objectstack#29550).
+    expect(cacheReads).toEqual(['list:view@0?object=account', 'list:view@0?object=account']);
     expect(probed).toEqual(['list:view', 'list:view', 'list:view']);
   });
 
@@ -198,7 +214,9 @@ describe('view metadata cache — invalidation names only keys with readers (#37
 
     await ds.listViewOverrides('account');
 
-    expect(cacheReads).toEqual(['view-overrides:account']);
+    // objectstack#29550: under it, the one-object answer's key, which every
+    // invalidation of `list:view` retires.
+    expect(cacheReads).toEqual(['view-overrides:account', 'list:view@0?object=account']);
   });
 
   it('createView invalidates the per-view key and the override map (#4363)', async () => {

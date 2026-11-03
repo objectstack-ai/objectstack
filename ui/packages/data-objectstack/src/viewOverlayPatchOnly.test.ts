@@ -50,6 +50,7 @@ import {
   VIEW_OVERLAY_OWNED_KEYS,
   narrowPersonalizationOverlay,
 } from './index';
+import { answerObjectViewRead } from './objectViewRoute.test-support';
 
 /** A stub metadata store keyed the way `sys_metadata` is: `type` + `name`. */
 function makeMetaStore() {
@@ -79,15 +80,17 @@ function makeMetaStore() {
 function makeDS(meta: any) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    // objectstack#29550: the one-object view read answers from the same rows.
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta };
+  ds.client = { meta, getLocale: () => undefined };
   return ds;
 }
 
@@ -212,7 +215,9 @@ describe('narrowPersonalizationOverlay — the round trip it is defined against'
 
     // The row the retired `updateViewConfig` (objectui#12504) stored for this
     // write: the body, with `object`, `name` and the marker stamped on it.
-    rows.set('view::crm_lead.default', { ...FAT_WRITE, object: 'crm_lead', _isOverride: true });
+    // objectstack#29550: with the `viewKind` the platform inherits for it from
+    // the registry entry it shadows (#7741/#2555).
+    rows.set('view::crm_lead.default', { ...FAT_WRITE, object: 'crm_lead', viewKind: 'list', _isOverride: true });
 
     const stored = (await ds.listViewOverrides('crm_lead'))['crm_lead.default'];
     // The document readers still get the document — this is the boundary, and
