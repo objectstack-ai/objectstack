@@ -1121,6 +1121,10 @@ const de = {
       pin: "Anheften: diese Ansicht standardmäßig öffnen",
       unpin: "Lösen: die Liste öffnet wieder ihre Standardansicht",
       inMenu: "Bereits im Menü",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "Meine Ansichten",
+      saveAsMyView: "Als meine Ansicht speichern",
+      myViewName: "Name der Ansicht",
     },
     dragToReorder: "Zum Neuanordnen ziehen",
     defaultView: "Standardansicht",

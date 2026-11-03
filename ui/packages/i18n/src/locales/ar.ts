@@ -1242,6 +1242,10 @@ const ar = {
       pin: "تثبيت: فتح هذا العرض افتراضيًا",
       unpin: "إلغاء التثبيت: تفتح القائمة عرضها الافتراضي مجددًا",
       inMenu: "موجود بالفعل في القائمة",
+      // objectstack#29635 — the reader's own views (My views).
+      myViews: "طرق العرض الخاصة بي",
+      saveAsMyView: "حفظ كطريقة عرض خاصة بي",
+      myViewName: "اسم طريقة العرض",
     },
     dragToReorder: "اسحب لإعادة الترتيب",
     defaultView: "العرض الافتراضي",
