@@ -249,6 +249,58 @@ describe('[#28149] the default target: the copy lands in <base>.custom, switched
     }, 60_000);
 });
 
+describe('[#29650, ADR-0146 D2/D4] New similar while the source\'s override is live', () => {
+    /**
+     * Customize the base's flow the way Studio does: ensure the pair, save the
+     * pair's item under the base's name DECLARING the override, and arm it in
+     * place of the base (ADR-0146 D9 item 1), so the engine's map holds the
+     * override's body for the name, which is what `getFlow` answers the door.
+     */
+    async function customize(rig: Awaited<ReturnType<typeof boot>>) {
+        const override = {
+            ...flowOf(SOURCE),
+            label: 'Lead follow-up (customized)',
+            description: 'Edited in Studio after Customize.',
+            overrides: { package: BASE.id, basedOn: BASE.version },
+        };
+        await rig.protocol.ensureCustomizationPackage({ basePackageId: BASE.id });
+        await rig.protocol.saveMetaItem({ type: 'flow', name: SOURCE, item: override, packageId: PAIR } as any);
+        rig.flows.set(SOURCE, override);
+        return override;
+    }
+
+    it('the copy is the pair\'s own item: 200, no `overrides` block, stored in the pair', async () => {
+        const rig = await boot();
+        const override = await customize(rig);
+        // The override really is live and stored, so this measures a strip, not an absence.
+        expect((await rig.rows(SOURCE)).map((r) => [r.package_id, r.item.overrides])).toEqual([[PAIR, override.overrides]]);
+
+        const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(PAIR);
+        expect(answer.data.flow).not.toHaveProperty('overrides');
+        const copyRows = await rig.rows('acme_lead_followup');
+        expect(copyRows.map((r) => r.package_id)).toEqual([PAIR]);
+        expect(copyRows[0].item).not.toHaveProperty('overrides');
+        expect(rig.flows.get('acme_lead_followup')).not.toHaveProperty('overrides');
+        expect(answer.data.flow.status).toBe(FLOW_CLONE_STATUS);
+    }, 60_000);
+
+    it('copies what the source serves: the override\'s definition, and the override stays as it was', async () => {
+        const rig = await boot();
+        const override = await customize(rig);
+
+        const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.flow.description).toBe(override.description);
+        // The override is untouched: still the one row in the pair, still declaring.
+        expect((await rig.rows(SOURCE)).map((r) => [r.package_id, r.item.overrides])).toEqual([[PAIR, override.overrides]]);
+        expect(rig.flows.get(SOURCE)).toEqual(override);
+    }, 60_000);
+});
+
 describe('[#28149] an explicit target: `package`', () => {
     it('a writable package that depends on the base takes the copy', async () => {
         const rig = await boot();
