@@ -62,7 +62,7 @@
  */
 
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
-import { filterSubtreeProvenanceOf, resolveDriverId } from '@objectstack/spec/data';
+import { EXTERNAL_ROW_CAP_CEILING, filterSubtreeProvenanceOf, resolveDriverId } from '@objectstack/spec/data';
 import { applyDriverQueryInMemory, assertDriverWhereEvaluableInMemory } from './driver-query-in-memory.js';
 import { declaredFieldClasses, declaredJsonStoredFields } from './having-filter.js';
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
@@ -197,9 +197,33 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
     });
   };
 
+  /**
+   * [#29762] The cap this read applies. A written `external.rowCap` the engine
+   * cannot honour as written (above `EXTERNAL_ROW_CAP_CEILING`, or not a whole
+   * number from 1 — a def that reached the engine without the spec's parse) is
+   * read through {@link resolveExternalRowCap} AND said so in the server log,
+   * once per value written to this datasource, so an operator sees why the cap
+   * in force is not the one they set.
+   */
+  let warnedRowCap: { written: unknown } | undefined;
+  const capInForce = (): number => {
+    const written = host.rowCap?.();
+    const cap = resolveExternalRowCap(written);
+    if (written !== undefined && written !== cap && !(warnedRowCap && Object.is(warnedRowCap.written, written))) {
+      warnedRowCap = { written };
+      host.logger.warn(
+        `[ObjectQL] datasource '${host.datasource}' sets external.rowCap to ${JSON.stringify(written) ?? String(written)}, `
+        + `which the engine cannot honour as written (a whole number from 1 to ${EXTERNAL_ROW_CAP_CEILING}); `
+        + `reads use a cap of ${cap}`,
+        { datasource: host.datasource, rowCapWritten: written, rowCapUsed: cap },
+      );
+    }
+    return cap;
+  };
+
   const readCapped = async (object: string, query: DriverQuery | undefined, options: unknown) => {
     assertDriverWhereEvaluableInMemory(query?.where);
-    const cap = resolveExternalRowCap(host.rowCap?.());
+    const cap = capInForce();
     const routed = (query as { object?: unknown } | undefined)?.object;
     const sent = {
       ...(routed !== undefined ? { object: routed } : {}),

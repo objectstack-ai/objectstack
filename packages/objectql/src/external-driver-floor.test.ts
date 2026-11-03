@@ -288,6 +288,21 @@ describe('[#29762] the datasource\'s external.rowCap', () => {
     }
   });
 
+  it('a written value the engine cannot honour is logged once per value, naming the datasource, the value and the cap used', async () => {
+    const run = async (rowCap: unknown) => {
+      const { engine } = makeEngine({ rows: leaves(3), rowCap });
+      const warned: Array<Record<string, unknown> | undefined> = [];
+      (engine as unknown as { logger: { warn: (m: string, meta?: Record<string, unknown>) => void } }).logger.warn =
+        (_m, meta) => { if (meta && 'rowCapWritten' in meta) warned.push(meta); };
+      for (let i = 0; i < 3; i++) await engine.count('tree_node');
+      return warned;
+    };
+    expect(await run(50_000)).toEqual([{ datasource: 'tree', rowCapWritten: 50_000, rowCapUsed: EXTERNAL_ROW_CAP_CEILING }]);
+    expect(await run('5000')).toEqual([{ datasource: 'tree', rowCapWritten: '5000', rowCapUsed: EXTERNAL_ROW_CAP }]);
+    expect(await run(5000)).toEqual([]);
+    expect(await run(undefined)).toEqual([]);
+  });
+
   it('at the ceiling the refusal offers no higher cap', async () => {
     const err = new ExternalRowCapExceededError('tree', 'tree_node', EXTERNAL_ROW_CAP_CEILING);
     expect(err.message).not.toContain('external.rowCap');
