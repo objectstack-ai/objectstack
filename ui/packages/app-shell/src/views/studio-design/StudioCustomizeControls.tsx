@@ -60,6 +60,7 @@ import { Layers, Pencil, RotateCcw } from 'lucide-react';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import { STUDIO_FOLD_LABEL } from './studio-tokens.js';
+import { useStudioFoldedMenuClose } from './StudioItemHeader.js';
 import { readFields, writeFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
 
 /**
@@ -283,7 +284,10 @@ export function StudioCustomizeButton({
  * Folded into the header's ⋯ menu (objectstack#29693), the mark is a control
  * inside a menu item: its own click does not reach the item (one press, one
  * toggle), and the item activates it by `data-studio-chip-control` when it
- * is chosen by the keys (`StudioItemHeaderFoldedItems`).
+ * is chosen by the keys (`StudioItemHeaderFoldedItems`). The popover is a
+ * child of that item in React's tree, so what happens in it never reaches
+ * the item: a pointer moving over it would focus the item (and the focus
+ * leaving the popover closes it), a click or Enter would choose the item.
  */
 export function StudioOverrideChip({
   baseLabel,
@@ -300,6 +304,9 @@ export function StudioOverrideChip({
   restoreDisabled?: boolean;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
+  // Folded into the header's ⋯ menu, Restore closes that menu too: the dialog it opens replaces both.
+  const closeMenu = useStudioFoldedMenuClose();
+  const keepInside = (event: React.SyntheticEvent) => event.stopPropagation();
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -307,14 +314,25 @@ export function StudioOverrideChip({
           type="button"
           data-testid="studio-override-chip"
           data-studio-chip-control=""
-          onClick={(event) => event.stopPropagation()}
+          onClick={keepInside}
+          // Open, a pointer over the mark does not move the focus to an enclosing menu item.
+          onPointerMove={open ? keepInside : undefined}
           className="inline-flex h-[22px] shrink-0 items-center gap-1 rounded-[5px] bg-sky-500/10 px-2 text-[11px] font-medium text-sky-700 hover:bg-sky-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-sky-500/20 dark:text-sky-300"
         >
           <Layers className="h-3 w-3 shrink-0" aria-hidden="true" />
           {tFormat('engine.studio.customize.overrides', locale, { package: baseLabel })}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 p-3 text-xs" data-testid="studio-override-popover">
+      <PopoverContent
+        align="start"
+        className="w-72 p-3 text-xs"
+        data-testid="studio-override-popover"
+        onClick={keepInside}
+        onPointerDown={keepInside}
+        onPointerUp={keepInside}
+        onPointerMove={keepInside}
+        onKeyDown={keepInside}
+      >
         <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
           <Layers className="h-3.5 w-3.5 shrink-0 text-sky-700 dark:text-sky-300" aria-hidden="true" />
           {tFormat('engine.studio.customize.overrides', locale, { package: baseLabel })}
@@ -329,6 +347,7 @@ export function StudioOverrideChip({
             disabled={restoreDisabled}
             onClick={() => {
               setOpen(false);
+              closeMenu?.();
               onRestore();
             }}
             className={cn(

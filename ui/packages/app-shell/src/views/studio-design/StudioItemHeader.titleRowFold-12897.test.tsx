@@ -483,11 +483,32 @@ describe('the override mark folded into the ⋯ menu (objectstack#29692)', () =>
     expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
-  it('Restore in the popover asks the host once and closes the popover', () => {
+  it('Restore in the popover asks the host once and closes the popover and the menu with it', () => {
     const { chip, onRestore } = foldedMark();
     fireEvent.click(chip);
     fireEvent.click(screen.getByTestId('studio-override-restore'));
     expect(onRestore).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('studio-override-popover')).toBeNull();
+    // The confirmation replaces both: no menu is left open (hidden) behind it to take the next Enter.
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('a pointer moving over the open popover and pressing in it neither focuses the menu entry nor closes the popover', () => {
+    const { entry, chip, onRestore } = foldedMark();
+    fireEvent.click(chip);
+    const popover = screen.getByTestId('studio-override-popover');
+    const facts = within(popover).getByTestId('studio-override-popover-facts');
+    // Over the mark, then into the popover: the entry would take the focus from it on a pointer move.
+    fireEvent.pointerMove(chip, { pointerType: 'mouse' });
+    fireEvent.pointerMove(facts, { pointerType: 'mouse' });
+    fireEvent.pointerDown(facts, { button: 0, pointerType: 'mouse' });
+    fireEvent.pointerUp(facts, { button: 0, pointerType: 'mouse' });
+    fireEvent.click(facts);
+    fireEvent.keyDown(facts, { key: 'Enter' });
+    expect(document.activeElement).not.toBe(entry);
+    expect(chip).toHaveAttribute('data-state', 'open');
+    expect(screen.getAllByTestId('studio-override-popover')).toHaveLength(1);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(onRestore).not.toHaveBeenCalled();
   });
 });
