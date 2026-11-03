@@ -14,7 +14,8 @@
  * Create-mode niceties:
  *   • `name` is editable only while creating (it's the immutable PK once
  *     saved) and auto-derives a snake_case slug from the label until the
- *     author edits it directly — mirroring the protocol create form.
+ *     author edits it directly — mirroring the protocol create form; a
+ *     Chinese label derives through its pinyin (`romanizeHan`).
  *
  * All edits flow through `onPatch` as shallow draft patches.
  */
@@ -25,6 +26,7 @@ import { InspectorShell, InspectorTextField } from './_shared.js';
 import { Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import { toFieldNameLoose } from '../previews/object-fields-io.js';
 import { slugify } from '../createDerive.js';
+import { romanizeHan, useHanRomanizer } from '../romanizeHan.js';
 import { t } from '../i18n.js';
 import { IconPickerWidget } from '../widgets.js';
 
@@ -47,14 +49,27 @@ export function ObjectDefaultInspector({
   // reset whenever the host remounted this panel (a Properties → Source →
   // Properties round trip does), and the next label keystroke then replaced
   // the name the author had typed.
-  const nameFollowsLabel = createMode && (str('name') === '' || str('name') === slugify(str('label')));
+  const deriveName = (label: string) => slugify(romanizeHan(label));
+  const nameFollowsLabel = createMode && (str('name') === '' || str('name') === deriveName(str('label')));
   const iconFieldId = React.useId();
 
   const setLabel = (v: string) => {
     const patch: Record<string, unknown> = { label: v || undefined };
-    if (nameFollowsLabel) patch.name = slugify(v);
+    if (nameFollowsLabel) patch.name = deriveName(v);
     onPatch(patch);
   };
+
+  // A Chinese label typed before the pinyin dictionary landed left the name
+  // empty; once it lands (`romanizerVersion` moves), an empty name that still
+  // follows the label takes the derived one. A no-op on every other render.
+  const romanizerVersion = useHanRomanizer(str('label'));
+  const labelNow = str('label');
+  const nameNow = str('name');
+  React.useEffect(() => {
+    if (!createMode || readOnly || nameNow !== '' || !labelNow) return;
+    const derived = slugify(romanizeHan(labelNow));
+    if (derived) onPatch({ name: derived });
+  }, [createMode, readOnly, labelNow, nameNow, onPatch, romanizerVersion]);
   const setName = (v: string) => {
     onPatch({ name: toFieldNameLoose(v) });
   };

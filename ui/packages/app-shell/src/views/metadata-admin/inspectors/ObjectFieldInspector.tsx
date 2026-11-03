@@ -112,6 +112,7 @@ import {
   type FieldsView,
   type FieldEntry,
 } from '../previews/object-fields-io.js';
+import { romanizeHan, useHanRomanizer } from '../romanizeHan.js';
 import {
   FIELD_TYPE_META,
   type FieldTypeId,
@@ -794,6 +795,10 @@ export function ObjectFieldInspector({
   const name = String(selection.id);
   const idx = indexOfField(view, name);
   const entry = idx >= 0 ? view.entries[idx] : null;
+  // A Chinese Label derives the API name through its pinyin (`romanizeHan`);
+  // the dictionary starts loading as soon as the Label holds a Chinese
+  // character, so the keystrokes after it derive.
+  useHanRomanizer(typeof entry?.def.label === 'string' ? entry.def.label : '');
   // The formula editor's field picker lists siblings by the label every other
   // surface shows them with (the same resolver as `LabelTranslationHint`).
   const { fieldLabel } = useSafeFieldLabel();
@@ -1159,8 +1164,11 @@ export function ObjectFieldInspector({
   // toFieldNameLoose (prefix-stable, unlike slugify which trims trailing
   // underscores and would fight mid-word typing) — while the name is still
   // an auto-generated default and the user hasn't customised it. Mirrors the
-  // object/app Name behaviour. toFieldNameLoose returns '' for non-Latin
-  // labels, in which case the unique default name is kept. Pure — the
+  // object/app Name behaviour. A Chinese label derives through its pinyin
+  // (`romanizeHan`: `客户等级` → `kehu_dengji`); toFieldNameLoose returns ''
+  // for a label that still yields nothing (a Japanese one, or a Chinese one
+  // before the dictionary has landed), in which case the unique default name
+  // is kept. Pure — the
   // caller applies the label and (if any) the derived name in one write,
   // since two separate writeView() calls from the same stale `entry` closure
   // would have the second clobber the first.
@@ -1183,7 +1191,7 @@ export function ObjectFieldInspector({
       // that scheme too, or a type-typed rename right after add never derives.
       /^field_\d+$/.test(entry.name);
     if (!isAutoName) return null;
-    const derived = toFieldNameLoose(label);
+    const derived = toFieldNameLoose(romanizeHan(label));
     if (!derived || derived === entry.name) return null;
     if (view.entries.some((e, i) => i !== idx && e.name === derived)) return null;
     return derived;
@@ -2092,12 +2100,35 @@ function OptionsEditor({
     commit(next);
   };
   // Only a row this editor added derives its value from its label: renaming an
-  // authored option must never change the value its records store.
+  // authored option must never change the value its records store. A Chinese
+  // label derives through its pinyin (`romanizeHan`: `高优先级` →
+  // `gao_youxianji`), the same rule as every Studio create door; without it the
+  // value stayed '' and the row was silently never saved.
+  const deriveValue = (label: string) => toFieldNameOrEmpty(romanizeHan(label));
   const updateLabel = (i: number, label: string) => {
     const row = rows[i];
     if (row?.kind !== 'option') return;
-    update(i, row.derive ? { label, value: toFieldNameOrEmpty(label) } : { label });
+    update(i, row.derive ? { label, value: deriveValue(label) } : { label });
   };
+  // A Chinese label typed before the pinyin dictionary landed left its row's
+  // value empty; once it lands, each such row still deriving takes its value.
+  const romanizerVersion = useHanRomanizer(
+    ...rows.flatMap((r) => (r.kind === 'option' && r.derive ? [r.option.label] : [])),
+  );
+  const romanizerSeen = React.useRef(romanizerVersion);
+  React.useEffect(() => {
+    if (romanizerSeen.current === romanizerVersion) return;
+    romanizerSeen.current = romanizerVersion;
+    let changed = false;
+    const next = rows.map((r) => {
+      if (r.kind !== 'option' || !r.derive || r.option.value !== '' || !r.option.label) return r;
+      const value = deriveValue(r.option.label);
+      if (!value) return r;
+      changed = true;
+      return { ...r, option: { ...r.option, value } };
+    });
+    if (changed) commit(next);
+  });
   const updateValue = (i: number, value: string) => {
     const next = [...rows];
     const row = next[i];
