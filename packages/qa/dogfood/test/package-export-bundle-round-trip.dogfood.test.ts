@@ -25,18 +25,20 @@
 //      order, with the same namespace, dependencies, and the same item names
 //      and counts per collection.
 //
-// [#29903] …and the pair's object extension travels once: the pair publishes an
-// extension of the base's object (a `__c` field and a relabelled base field).
-// The base's entry carries the object as the base declares it, the pair's
-// entry carries the extension as its `objectExtensions`, and on the target the
-// served object has the field once, from the pair, with the pair's label.
-//
 // [#29871] A second describe pins the bundle's "enabled or not" for a
 // DISABLED package: a runtime-authored package (`POST /packages`, an object
 // drafted into it and published) is disabled before the export; the bundle
 // and its per-package export still carry the object, and a fresh runtime that
 // installs the entry serves it (`GET /meta/object/<name>` 200), where before
 // the entry was an empty package and the object came back 404.
+//
+// [#29903] A third describe pins that the pair's object extension travels
+// once: the pair publishes an extension of the base's object (a `__c` field and
+// a relabelled base field). The base's bundle entry carries the object as the
+// base declares it and the pair's entry carries the extension as its
+// `objectExtensions`, so the field is declared once in the bundle; a fresh
+// runtime that installs both entries serves the object with the field and the
+// pair's label, and the base's own export there carries neither.
 //
 // Boots fixture stacks of its own (the install-local plugin mounted on both),
 // so it stays out of `SHARED_SHOWCASE`. Every credential below is an
@@ -62,10 +64,6 @@ const OBJECT = 'exportbase_account';
 const DASHBOARD = 'exportbase_pulse';
 const EDITED = 'Pulse (customized)';
 const CONNECTOR = 'exportbase_erp';
-/** [#29903] The pair's extension of the base's object, as Studio's Customize writes it. */
-const REGION = 'region__c';
-const TITLE_EDITED = 'Title (customized)';
-const EXTENSION = { extend: OBJECT, fields: { [REGION]: { type: 'text', label: 'Region' } }, fieldPatches: { title: { label: TITLE_EDITED } } };
 /** The reference the connector names, and the fake secret it resolves to on the source runtime. */
 const CREDENTIAL_REF = 'EXPORTBASE_ERP_TOKEN';
 const SECRET = 'TEST_PLACEHOLDER_EXPORT_BUNDLE_SECRET';
@@ -166,9 +164,7 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
       await ensurePair(source, token, BASE);
       answers.saved = await call(source, token, 'PUT', inPair(`/meta/dashboard/${DASHBOARD}?mode=draft`, BASE),
         declaredOverride({ name: DASHBOARD, label: EDITED, columns: 12, widgets: [] }, BASE, '1.0.0'));
-      answers.extended = await call(source, token, 'PUT', inPair(`/meta/object_extension/${OBJECT}?mode=draft`, BASE), EXTENSION);
       answers.published = await call(source, token, 'POST', `/packages/${PAIR}/publish-drafts`, {});
-      answers.sourceServed = await call(source, token, 'GET', `/meta/object/${OBJECT}`);
       const res = await source.apiAs(token, 'GET', '/packages/export');
       sourceText = await res.text();
       answers.sourceExport = { status: res.status, body: JSON.parse(sourceText) };
@@ -187,7 +183,6 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
       for (const entry of sourceBundle?.packages ?? []) {
         installs.push({ id: entry.id, answer: await call(target, token, 'POST', ROUTE, { manifest: entry }) });
       }
-      answers.targetServed = await call(target, token, 'GET', `/meta/object/${OBJECT}`);
       answers.targetExport = await call(target, token, 'GET', '/packages/export');
       targetBundle = answers.targetExport.body?.data;
     } finally {
@@ -202,7 +197,7 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
   });
 
   it('source: the three packages install and the pair\'s override publishes (preconditions)', () => {
-    for (const key of ['base', 'ext', 'saved', 'extended', 'published'] as const) {
+    for (const key of ['base', 'ext', 'saved', 'published'] as const) {
       expect(answers[key]?.status, `${key}: ${JSON.stringify(answers[key]?.body)}`).toBe(200);
     }
   });
@@ -220,23 +215,6 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
     expect((pair?.dashboards ?? []).map((d: any) => [d.name, d.label, d.overrides?.package])).toEqual([[DASHBOARD, EDITED, BASE]]);
     const base = sourceBundle.packages.find((p: any) => p.id === BASE);
     expect((base?.dashboards ?? []).map((d: any) => [d.name, d.label])).toEqual([[DASHBOARD, 'Pulse']]);
-  });
-
-  it('[#29903] source: the base\'s entry carries its object without the pair\'s extension, the pair\'s entry carries the extension', () => {
-    // CONTROL: the served object folds the extension in.
-    const served = answers.sourceServed.body?.data?.item ?? answers.sourceServed.body?.data;
-    expect(answers.sourceServed.status, JSON.stringify(answers.sourceServed.body)).toBe(200);
-    expect(Object.keys(served?.fields ?? {})).toContain(REGION);
-    expect(served?.fields?.title?.label).toBe(TITLE_EDITED);
-
-    const base = sourceBundle.packages.find((p: any) => p.id === BASE);
-    const object = (base?.objects ?? []).find((o: any) => o?.name === OBJECT);
-    expect(Object.keys(object?.fields ?? {}), JSON.stringify(object)).not.toContain(REGION);
-    expect(object?.fields?.title?.label).toBe('Title');
-    expect(base?.objectExtensions).toBeUndefined();
-    const pair = sourceBundle.packages.find((p: any) => p.id === PAIR);
-    expect(pair?.objects).toBeUndefined();
-    expect(pair?.objectExtensions).toEqual([EXTENSION]);
   });
 
   it('source: the connector travels with its `credentialRef`, and the secret it resolves to appears nowhere', () => {
@@ -263,18 +241,6 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
     expect(targetBundle.packages.map(inventory)).toEqual(sourceBundle.packages.map(inventory));
     const pair = targetBundle.packages.find((p: any) => p.id === PAIR);
     expect((pair?.dashboards ?? []).map((d: any) => [d.name, d.label, d.overrides?.package])).toEqual([[DASHBOARD, EDITED, BASE]]);
-  });
-
-  it('[#29903] target: the field is declared once, by the pair, and the served object carries it with the pair\'s label', () => {
-    expect(answers.targetServed.status, JSON.stringify(answers.targetServed.body)).toBe(200);
-    const served = answers.targetServed.body?.data?.item ?? answers.targetServed.body?.data;
-    expect(Object.keys(served?.fields ?? {})).toContain(REGION);
-    expect(served?.fields?.title?.label).toBe(TITLE_EDITED);
-    const declaring = (targetBundle?.packages ?? []).flatMap((p: any) => [
-      ...(p.objects ?? []).filter((o: any) => o?.fields?.[REGION]).map(() => `${p.id}:objects`),
-      ...(p.objectExtensions ?? []).filter((e: any) => e?.fields?.[REGION]).map(() => `${p.id}:objectExtensions`),
-    ]);
-    expect(declaring).toEqual([`${PAIR}:objectExtensions`]);
   });
 });
 
@@ -362,5 +328,111 @@ describe('dogfood: a disabled package exports its items, and a fresh runtime tha
     expect(answers.installed.status, JSON.stringify(answers.installed.body)).toBe(200);
     expect(answers.installed.body?.data?.manifestId).toBe(OFF);
     expect(answers.targetServed.status, JSON.stringify(answers.targetServed.body)).toBe(200);
+  });
+});
+
+const XBASE = 'com.dogfood.exportxbase';
+const XPAIR = pairOf(XBASE);
+const XOBJECT = 'exportxbase_account';
+const REGION = 'region__c';
+const TITLE_EDITED = 'Title (customized)';
+/** The pair's extension of the base's object, as Studio's Customize writes it. */
+const EXTENSION = { extend: XOBJECT, fields: { [REGION]: { type: 'text', label: 'Region' } }, fieldPatches: { title: { label: TITLE_EDITED } } };
+
+describe('[#29903] dogfood: the pair\'s object extension travels in the pair\'s entry only, and installs once', () => {
+  const dirs: string[] = [];
+  const answers: Record<string, Answer> = {};
+  let bundle: any;
+
+  beforeAll(async () => {
+    const sourceDir = mkdtempSync(join(tmpdir(), 'dogfood-export-extension-source-'));
+    dirs.push(sourceDir);
+    const source = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: sourceDir })],
+    });
+    try {
+      const token = await source.signIn();
+      answers.base = await call(source, token, 'POST', ROUTE, {
+        manifest: {
+          id: XBASE, namespace: 'exportxbase', name: 'Export extension base', version: '1.0.0', type: 'app',
+          objects: [{ name: XOBJECT, label: 'Account', fields: { title: { type: 'text', label: 'Title' } } }],
+        },
+      });
+      answers.baseBefore = await call(source, token, 'GET', `/packages/${XBASE}/export`);
+      await ensurePair(source, token, XBASE);
+      answers.extended = await call(source, token, 'PUT', inPair(`/meta/object_extension/${XOBJECT}?mode=draft`, XBASE), EXTENSION);
+      answers.published = await call(source, token, 'POST', `/packages/${XPAIR}/publish-drafts`, {});
+      answers.sourceServed = await call(source, token, 'GET', `/meta/object/${XOBJECT}`);
+      answers.baseAfter = await call(source, token, 'GET', `/packages/${XBASE}/export`);
+      answers.bundle = await call(source, token, 'GET', '/packages/export');
+      bundle = answers.bundle.body?.data;
+    } finally {
+      await source.stop();
+    }
+
+    const targetDir = mkdtempSync(join(tmpdir(), 'dogfood-export-extension-target-'));
+    dirs.push(targetDir);
+    const target = await bootShowcase({
+      extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: targetDir })],
+    });
+    try {
+      const token = await target.signIn();
+      for (const entry of bundle?.packages ?? []) {
+        answers[`install:${entry.id}`] = await call(target, token, 'POST', ROUTE, { manifest: entry });
+      }
+      answers.targetServed = await call(target, token, 'GET', `/meta/object/${XOBJECT}`);
+      answers.targetBase = await call(target, token, 'GET', `/packages/${XBASE}/export`);
+    } finally {
+      await target.stop();
+    }
+  }, 900_000);
+
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const servedObject = (answer: Answer) => answer.body?.item ?? answer.body?.data?.item;
+  const exportedObject = (manifest: any) => (manifest?.objects ?? []).find((o: any) => o?.name === XOBJECT);
+
+  it('source: the base installs and the pair\'s extension publishes, and the served object folds it in (preconditions)', () => {
+    for (const key of ['base', 'baseBefore', 'extended', 'published', 'sourceServed', 'baseAfter', 'bundle'] as const) {
+      expect(answers[key]?.status, `${key}: ${JSON.stringify(answers[key]?.body)}`).toBe(200);
+    }
+    const served = servedObject(answers.sourceServed);
+    expect(Object.keys(served?.fields ?? {}), JSON.stringify(answers.sourceServed.body).slice(0, 400)).toContain(REGION);
+    expect(served?.fields?.title?.label).toBe(TITLE_EDITED);
+  });
+
+  it('source: the base\'s export is unchanged by the extension, and the field is declared once in the bundle, by the pair', () => {
+    expect(answers.baseAfter.body?.data).toEqual(answers.baseBefore.body?.data);
+    const object = exportedObject(answers.baseAfter.body?.data);
+    expect(Object.keys(object?.fields ?? {}), JSON.stringify(object)).not.toContain(REGION);
+    expect(object?.fields?.title?.label).toBe('Title');
+
+    expect(PackageExportBundleSchema.safeParse(bundle).success).toBe(true);
+    expect(ids(bundle)).toEqual([XBASE, XPAIR]);
+    const base = bundle.packages.find((p: any) => p.id === XBASE);
+    expect(base).toEqual(answers.baseBefore.body?.data);
+    const pair = bundle.packages.find((p: any) => p.id === XPAIR);
+    expect(pair?.objectExtensions).toEqual([EXTENSION]);
+    const declaring = bundle.packages.flatMap((p: any) => [
+      ...(p.objects ?? []).filter((o: any) => o?.fields?.[REGION]).map(() => `${p.id}:objects`),
+      ...(p.objectExtensions ?? []).filter((e: any) => e?.fields?.[REGION]).map(() => `${p.id}:objectExtensions`),
+    ]);
+    expect(declaring).toEqual([`${XPAIR}:objectExtensions`]);
+  });
+
+  it('target: both entries install, the object is served with the field and the pair\'s label, and the base exports without them', () => {
+    for (const id of [XBASE, XPAIR]) {
+      expect(answers[`install:${id}`]?.status, `${id}: ${JSON.stringify(answers[`install:${id}`]?.body)}`).toBe(200);
+    }
+    expect(answers.targetServed.status, JSON.stringify(answers.targetServed.body)).toBe(200);
+    const served = servedObject(answers.targetServed);
+    expect(Object.keys(served?.fields ?? {})).toContain(REGION);
+    expect(served?.fields?.title?.label).toBe(TITLE_EDITED);
+    expect(answers.targetBase.status).toBe(200);
+    const object = exportedObject(answers.targetBase.body?.data);
+    expect(Object.keys(object?.fields ?? {}), JSON.stringify(object)).not.toContain(REGION);
+    expect(object?.fields?.title?.label).toBe('Title');
   });
 });
