@@ -94,7 +94,12 @@
  * rather than only in an ADR.
  */
 
-import { getMetadataTypeRedactor, METADATA_READ_DECORATIONS, MetadataProtectionFields } from '@objectstack/spec/kernel';
+import {
+    getMetadataTypeRedactor,
+    METADATA_READ_DECORATIONS,
+    MetadataProtectionFields,
+    OverrideDeclarationFields,
+} from '@objectstack/spec/kernel';
 
 /**
  * The deployment status a clone is created with: switched OFF.
@@ -155,11 +160,22 @@ export const FLOW_CLONE_MUTATED_FIELDS = ['name', 'label', 'status'] as const;
  * row stored before that refusal still carries it — `FlowSchema` declares the
  * key, so the parse keeps it — and a copy that kept it would be refused over a
  * block the admin never sent. Dropping it changes no verdict: it never bound.
+ *
+ * [ADR-0146 D2/D4] The override declaration (`OverrideDeclarationFields`, the
+ * spread `FlowSchema` itself carries) is dropped too, derived the same way.
+ * With a live override the source is the pair's item under the base's name
+ * declaring `overrides: { package, basedOn }`, and that is the body the engine
+ * holds for the name. A declaration names the base item it replaces BY NAME,
+ * so under the copy's new name it would declare an override of a flow the
+ * base does not ship, and the save gate refuses it (`403 NOT_OVERRIDABLE`).
+ * New similar writes the pair's own item: it copies what the source serves
+ * (the override's definition) and overrides nothing.
  */
 export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
     ...METADATA_READ_DECORATIONS,
     ...Object.keys(MetadataProtectionFields),
     'protection',
+    ...Object.keys(OverrideDeclarationFields),
 ]);
 
 /**
