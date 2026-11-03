@@ -10,7 +10,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
 const CREATE_LOADING = 'environment-create-cta-loading';
-const LOCKED_MARK = 'environment-development-locked';
+/** The retired plan-locked development mark's test id — it must never render. */
+const RETIRED_LOCKED_MARK = 'environment-development-locked';
 
 vi.mock('@object-ui/react', async (importActual) => ({
   ...(await importActual<any>()),
@@ -56,95 +57,43 @@ const UNRESOLVED: EnvironmentEntitlementsState = {
   ready: false, hasProductionEnv: false, source: 'unknown',
 };
 
+const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list_toolbar'] };
+
 describe('EnvironmentListToolbar', () => {
   it('no production env → "Set up your production environment" (primary)', () => {
     renderToolbar(<EnvironmentListToolbar actions={[CREATE]} entitlements={st({ hasProductionEnv: false })} />);
     const btn = screen.getByText('Set up your production environment');
     expect(btn).toBeTruthy();
     expect(btn.getAttribute('data-variant')).toBe('primary');
-    expect(screen.queryByTestId(LOCKED_MARK)).toBeNull();
+    expect(screen.queryByTestId(RETIRED_LOCKED_MARK)).toBeNull();
   });
 
-  it('has prod + dev allowed (paid) → "Add development environment"', () => {
-    renderToolbar(<EnvironmentListToolbar actions={[CREATE]} entitlements={st({ canCreateDevelopmentEnv: true })} />);
-    expect(screen.getByText('Add development environment')).toBeTruthy();
-    expect(screen.queryByTestId(LOCKED_MARK)).toBeNull();
-  });
-
-});
-
-/**
- * objectui#12190 — the maintainer's rule is that no primary button opens a
- * paywall dialog (objectstack-ai/cloud#2775). A plan-locked org gets an
- * outline, locked mark that LINKS to the summary's `upgradeUrl`; nothing on
- * this toolbar opens a dialog, from a click or from the deep link below.
- */
-describe('EnvironmentListToolbar — plan-locked: a locked mark, no paywall dialog (objectui#12190)', () => {
-  const LOCKED = st({ canCreateDevelopmentEnv: false, plan: 'free' });
-
-  it('draws the locked mark as a link to upgradeUrl, and no button of any kind', () => {
-    renderToolbar(<EnvironmentListToolbar actions={[CREATE]} entitlements={LOCKED} />);
-    const mark = screen.getByTestId(LOCKED_MARK);
-    expect(mark.tagName).toBe('A');
-    expect(mark.getAttribute('href')).toBe('/settings/billing');
-    // Same-origin relative URL (no control-plane origin configured): same tab.
-    expect(mark.getAttribute('target')).toBeNull();
-    expect(mark.textContent).toBe('Development environments · Team plan and up');
-    // The lock icon.
-    expect(mark.querySelector('svg')).not.toBeNull();
-    // No primary button stands in for create, and the create action itself is
-    // NOT rendered as a bar button (no POST-then-403).
-    expect(screen.queryByRole('button')).toBeNull();
+  it('has production env → the create action is withheld: no button, no bar, no text', () => {
+    const { container } = renderToolbar(<EnvironmentListToolbar actions={[CREATE]} entitlements={st({})} />);
     expect(screen.queryByTestId('action-bar')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
     expect(screen.queryByText('Create Environment')).toBeNull();
-    // Clicking it is plain navigation: the toolbar has no prop or handler
-    // through which to ask for a dialog, and none renders.
-    mark.addEventListener('click', (e) => e.preventDefault());
-    fireEvent.click(mark);
-    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(container.textContent).toBe('');
   });
 
-  it('other toolbar actions still render through the bar beside the mark', () => {
-    const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list_toolbar'] };
-    renderToolbar(<EnvironmentListToolbar actions={[CREATE, REFRESH]} entitlements={LOCKED} />);
+  it('has production env → other toolbar actions still render through the bar', () => {
+    renderToolbar(<EnvironmentListToolbar actions={[CREATE, REFRESH]} entitlements={st({})} />);
     expect(screen.getByText('Refresh')).toBeTruthy();
-    expect(screen.getByTestId(LOCKED_MARK)).toBeTruthy();
     expect(screen.queryByText('Create Environment')).toBeNull();
-  });
-
-  it('an absolute upgradeUrl is linked verbatim and opens in a new tab', () => {
-    const url = 'https://cloud.example.com/_console/apps/cloud_control/page/pricing';
-    renderToolbar(
-      <EnvironmentListToolbar actions={[CREATE]} entitlements={st({ canCreateDevelopmentEnv: false, upgradeUrl: url })} />,
-    );
-    const mark = screen.getByTestId(LOCKED_MARK);
-    expect(mark.getAttribute('href')).toBe(url);
-    expect(mark.getAttribute('target')).toBe('_blank');
-    expect(mark.getAttribute('rel')).toBe('noopener noreferrer');
-  });
-
-  it('zh: the mark reads the ruled tier label', async () => {
-    render(
-      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
-        <EnvironmentListToolbar actions={[CREATE]} entitlements={LOCKED} />
-      </I18nProvider>,
-    );
-    await waitFor(() => expect(screen.getByTestId(LOCKED_MARK).textContent).toBe('开发环境 · 团队版起'));
+    expect(screen.queryByText('Set up your production environment')).toBeNull();
   });
 });
 
 /**
- * objectui#12983 — ruling B on objectstack-ai/cloud#2917: the development
- * upsell reaches only whoever can upgrade. The control plane trims the summary
- * by role: `plan`, `seatCount`, `upgradeUrl` and `contactSalesUrl` are sent
- * only to a viewer who manages the organization. A summary without
- * `upgradeUrl` is therefore a plain member's, and that viewer cannot upgrade,
- * so the locked mark is not drawn for them. Nothing else on the toolbar
- * changes for anyone.
+ * objectstack-ai/cloud#3487, ruling D: each organization has exactly one
+ * environment, its production environment, and the development type is
+ * retired. No state this toolbar can be handed draws a development door —
+ * not the "Add development environment" button and not the plan-locked
+ * "Development environments · Team plan and up" mark — for any plan, any
+ * signal source, or any viewer role.
  */
-describe('EnvironmentListToolbar — the locked mark reaches only a viewer who can upgrade (objectui#12983)', () => {
-  const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list_toolbar'] };
-
+describe('EnvironmentListToolbar — no development-environment door renders (cloud#3487 D)', () => {
   /** A manager's summary: the role-gated fields are present. */
   const manager = (o: Partial<EnvironmentEntitlementsState>) =>
     st({ plan: 'free', upgradeUrl: '/settings/billing', contactSalesUrl: 'mailto:sales@example.com', ...o });
@@ -152,76 +101,50 @@ describe('EnvironmentListToolbar — the locked mark reaches only a viewer who c
   const member = (o: Partial<EnvironmentEntitlementsState>) =>
     st({ ...o, plan: undefined, upgradeUrl: undefined, contactSalesUrl: undefined });
 
-  /** Renders one toolbar, reads what it drew, and unmounts it. */
-  const drawn = (actions: object[], entitlements: EnvironmentEntitlementsState) => {
-    const { container, unmount } = renderToolbar(<EnvironmentListToolbar actions={actions} entitlements={entitlements} />);
-    const bar = screen.queryByTestId('action-bar');
-    const mark = screen.queryByTestId(LOCKED_MARK);
-    const out = {
-      bar: bar ? bar.outerHTML : null,
-      mark: mark ? { tag: mark.tagName, href: mark.getAttribute('href'), text: mark.textContent } : null,
-      text: container.textContent,
-    };
-    unmount();
-    return out;
-  };
+  const STATES: ReadonlyArray<readonly [string, EnvironmentEntitlementsState | null]> = [
+    ['still resolving', null],
+    ['settled with no signal', UNRESOLVED],
+    ['no production env, summary, manager', manager({ hasProductionEnv: false })],
+    ['no production env, summary, member', member({ hasProductionEnv: false })],
+    ['no production env, rows', st({ hasProductionEnv: false, source: 'derived', upgradeUrl: undefined })],
+    ['production env, free plan, manager', manager({ plan: 'free' })],
+    ['production env, team plan, manager', manager({ plan: 'team' })],
+    ['production env, member', member({})],
+    ['production env, rows', st({ source: 'derived', upgradeUrl: undefined })],
+  ];
 
-  const FREE = { canCreateDevelopmentEnv: false } as const;
-
-  it('free plan: a manager sees the mark, linked; a member sees no mark', () => {
-    expect(drawn([CREATE], manager(FREE)).mark).toEqual({
-      tag: 'A',
-      href: '/settings/billing',
-      text: 'Development environments · Team plan and up',
-    });
-
-    const asMember = drawn([CREATE], member(FREE));
-    expect(asMember.mark).toBeNull();
-    // Nothing else stands in for the create action either: no bar, no
-    // metadata label, no text of any kind.
-    expect(asMember.bar).toBeNull();
-    expect(asMember.text).toBe('');
+  it.each(STATES)('%s: no development door, in en', (_name, entitlements) => {
+    const { container } = renderToolbar(
+      <EnvironmentListToolbar actions={[CREATE, REFRESH]} entitlements={entitlements} />,
+    );
+    expect(container.textContent ?? '').not.toMatch(/development/i);
+    expect(screen.queryByTestId(RETIRED_LOCKED_MARK)).toBeNull();
+    expect(screen.queryByText('Add development environment')).toBeNull();
   });
 
-  it('free plan, member: no link and no button of any kind is drawn', () => {
-    renderToolbar(<EnvironmentListToolbar actions={[CREATE]} entitlements={member(FREE)} />);
-    expect(screen.queryByRole('link')).toBeNull();
-    expect(screen.queryByRole('button')).toBeNull();
-    expect(screen.queryByText('Create Environment')).toBeNull();
-  });
-
-  it('free plan: the other toolbar actions render the same for a manager and a member', () => {
-    const asManager = drawn([CREATE, REFRESH], manager(FREE));
-    const asMember = drawn([CREATE, REFRESH], member(FREE));
-    expect(asManager.bar).not.toBeNull();
-    expect(asMember.bar).toBe(asManager.bar);
-    expect(asMember.bar).toContain('Refresh');
-    expect(asMember.bar).not.toContain('Create Environment');
-    expect(asManager.mark).not.toBeNull();
-    expect(asMember.mark).toBeNull();
-  });
-
-  it.each([
-    ['paid plan, development allowed', { canCreateDevelopmentEnv: true, plan: 'team' }, 'Add development environment'],
-    ['development capacity unknown', { canCreateDevelopmentEnv: undefined }, 'Add development environment'],
-    ['no production environment yet', { hasProductionEnv: false }, 'Set up your production environment'],
-  ] as const)('%s: the create action renders the same for a member as for a manager', (_state, o, label) => {
-    const asManager = drawn([CREATE, REFRESH], manager(o));
-    const asMember = drawn([CREATE, REFRESH], member(o));
-    expect(asManager.bar).toContain(label);
-    expect(asMember.bar).toBe(asManager.bar);
-    expect(asMember.mark).toBeNull();
-    expect(asManager.mark).toBeNull();
-  });
-
-  it('zh, paid plan: a member still gets the add-development create action', async () => {
-    render(
+  it.each(STATES)('%s: no development door, in zh', async (_name, entitlements) => {
+    const { container } = render(
       <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
-        <EnvironmentListToolbar actions={[CREATE]} entitlements={member({ canCreateDevelopmentEnv: true })} />
+        <EnvironmentListToolbar actions={[CREATE, REFRESH]} entitlements={entitlements} />
       </I18nProvider>,
     );
-    await waitFor(() => expect(screen.getByText('新建开发环境')).toBeTruthy());
-    expect(screen.queryByTestId(LOCKED_MARK)).toBeNull();
+    // Wait for the zh pack: the non-create action renders in every state.
+    await waitFor(() => expect(screen.getByText('Refresh')).toBeTruthy());
+    expect(container.textContent ?? '').not.toContain('开发环境');
+    expect(screen.queryByTestId(RETIRED_LOCKED_MARK)).toBeNull();
+  });
+
+  it('a member and a manager of the same organization see the same toolbar', () => {
+    const drawn = (entitlements: EnvironmentEntitlementsState) => {
+      const { container, unmount } = renderToolbar(
+        <EnvironmentListToolbar actions={[CREATE, REFRESH]} entitlements={entitlements} />,
+      );
+      const html = container.innerHTML;
+      unmount();
+      return html;
+    };
+    expect(drawn(member({}))).toBe(drawn(manager({})));
+    expect(drawn(member({ hasProductionEnv: false }))).toBe(drawn(manager({ hasProductionEnv: false })));
   });
 });
 
@@ -239,7 +162,7 @@ describe('EnvironmentListToolbar — loading state (objectui#3482)', () => {
     expect(screen.queryByText('Create Environment')).toBeNull();
     // …and no state-aware label is guessed at either — the bar isn't rendered.
     expect(screen.queryByTestId('action-bar')).toBeNull();
-    expect(screen.queryByTestId(LOCKED_MARK)).toBeNull();
+    expect(screen.queryByTestId(RETIRED_LOCKED_MARK)).toBeNull();
   });
 
   it('non-create toolbar actions still render while resolving (they never re-label)', () => {
@@ -266,7 +189,7 @@ describe('EnvironmentListToolbar — loading state (objectui#3482)', () => {
     renderToolbar(<EnvironmentListToolbar actions={[CREATE]} entitlements={UNRESOLVED} />);
     expect(screen.getByText('Create Environment')).toBeTruthy();
     expect(screen.queryByTestId(CREATE_LOADING)).toBeNull();
-    expect(screen.queryByTestId(LOCKED_MARK)).toBeNull();
+    expect(screen.queryByTestId(RETIRED_LOCKED_MARK)).toBeNull();
   });
 
   it('resolving → resolved: the metadata label never appears in any render output', () => {
@@ -312,37 +235,18 @@ describe('EnvironmentListToolbar — ?runAction=create_environment deep link (#8
     });
   });
 
-  it('upgrade state: the deep link is consumed and opens nothing (objectui#12190)', async () => {
+  it('production env exists: the deep link is consumed and runs nothing', async () => {
+    // The org already owns its one environment, so the answer to "create" is
+    // that nothing is left to create; the one-shot intent is spent on that
+    // answer rather than left armed.
     withRunActionParam();
-    renderToolbar(<EnvironmentListToolbar actions={[CREATE]} entitlements={st({ canCreateDevelopmentEnv: false, plan: 'free' })} />);
-    // Consumed exactly as before: the one-shot intent is spent on the mark,
-    // which is the page's whole answer to "create" in this state.
+    renderToolbar(<EnvironmentListToolbar actions={[CREATE]} entitlements={st({})} />);
     await vi.waitFor(() => {
       expect(new URL(window.location.href).searchParams.get('runAction')).toBeNull();
     });
     expect(screen.queryByRole('alertdialog')).toBeNull();
-    expect(screen.getByTestId(LOCKED_MARK)).toBeTruthy();
+    expect(screen.queryByTestId(RETIRED_LOCKED_MARK)).toBeNull();
     // Nothing is auto-triggered either: no bar, so no autoTrigger action.
-    expect(screen.queryByTestId('action-bar')).toBeNull();
-  });
-
-  it('upgrade state, plain member: the deep link is consumed as before, and nothing is drawn (objectui#12983)', async () => {
-    // Arming is unchanged by objectui#12983: it keys on the create action and
-    // the resolved state, never on `upgradeUrl`. The member's answer to
-    // "create" is that no development environment can be made here, and no
-    // upsell is drawn for a viewer who cannot upgrade.
-    withRunActionParam();
-    renderToolbar(
-      <EnvironmentListToolbar
-        actions={[CREATE]}
-        entitlements={st({ canCreateDevelopmentEnv: false, plan: undefined, upgradeUrl: undefined })}
-      />,
-    );
-    await vi.waitFor(() => {
-      expect(new URL(window.location.href).searchParams.get('runAction')).toBeNull();
-    });
-    expect(screen.queryByRole('alertdialog')).toBeNull();
-    expect(screen.queryByTestId(LOCKED_MARK)).toBeNull();
     expect(screen.queryByTestId('action-bar')).toBeNull();
   });
 });

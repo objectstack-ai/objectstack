@@ -3981,25 +3981,12 @@ const ja = {
     buyCredits: "クレジットパックを購入",
     upgradePlan: "プランをアップグレード",
   },
-  planTier: {
-    teamAndUp: "Team プラン以上",
-  },
   environment: {
     setUpProduction: "本番環境をセットアップ",
-    addDevelopment: "開発環境を追加",
-    developmentLocked: "開発環境 · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "本番環境はすでに作成済みです",
       productionLimitBody: "各組織に含まれる本番環境は 1 つだけです。もう 1 つ必要な場合は別の組織を作成するか、エンタープライズ契約についてお問い合わせください。",
-      planLockedTitle: "開発環境は有料機能です",
-      planLockedBody: "{{plan}}には本番環境が 1 つ含まれます。アップグレードすると開発環境を追加できます（開発環境で構築し、本番環境に公開します）。",
-      limitTitle: "開発環境の上限に達しました",
-      limitBody: "上限は AI シート数に応じて増えます。AI シートを追加するか、使用していない開発環境をアーカイブして空きを作ってください。",
-      limitBodyWithCount: "開発環境を {{used}}/{{limit}} 使用中です。上限は AI シート数に応じて増えます。AI シートを追加するか、使用していない開発環境をアーカイブしてください。",
-      freePlan: "無料プラン",
-      namedPlan: "{{plan}} プラン",
-      upgradeCta: "プランをアップグレード",
       contactSalesCta: "営業に問い合わせる",
     },
   },

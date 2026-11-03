@@ -4057,25 +4057,12 @@ const pt = {
     buyCredits: "Comprar um pacote de créditos",
     upgradePlan: "Fazer upgrade do plano",
   },
-  planTier: {
-    teamAndUp: "A partir do plano Team",
-  },
   environment: {
     setUpProduction: "Configure seu ambiente de produção",
-    addDevelopment: "Adicionar ambiente de desenvolvimento",
-    developmentLocked: "Ambientes de desenvolvimento · {{tier}}",
-    // Plan/capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog) — cloud#959.
     entitlement: {
       productionLimitTitle: "Você já tem seu ambiente de produção",
       productionLimitBody: "Cada organização inclui exatamente um ambiente de produção. Crie uma organização separada para ter outro, ou fale conosco sobre um acordo Enterprise.",
-      planLockedTitle: "Ambientes de desenvolvimento são um recurso pago",
-      planLockedBody: "Seu {{plan}} inclui um ambiente de produção. Faça upgrade para adicionar ambientes de desenvolvimento — construa em desenvolvimento e depois publique em produção.",
-      limitTitle: "Limite de ambientes de desenvolvimento atingido",
-      limitBody: "A capacidade cresce com os assentos de IA. Adicione um assento de IA, ou arquive um ambiente de desenvolvimento sem uso para liberar espaço.",
-      limitBodyWithCount: "Você está usando {{used}} de {{limit}} ambientes de desenvolvimento. A capacidade cresce com os assentos de IA — adicione um assento de IA, ou arquive um ambiente de desenvolvimento sem uso.",
-      freePlan: "plano gratuito",
-      namedPlan: "plano {{plan}}",
-      upgradeCta: "Fazer upgrade do plano",
       contactSalesCta: "Falar com vendas",
     },
   },
