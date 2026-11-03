@@ -142,7 +142,8 @@ import { type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '
 // (curated entry, unchanged).
 import { type FormFieldInput } from '@objectstack/spec/ui';
 export type { FormFieldInput };
-import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
+import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage, type TranslationBundle } from '@objectstack/spec/system';
+import { restoreTranslatedEchoes, TRANSLATED_ECHO_NOTICE_ID } from './protocol-translated-echo.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
     resolveLockState,
@@ -3744,6 +3745,84 @@ export class ObjectStackProtocolImplementation implements
             stripMaterializedFromRegistry: (...a) => this.stripMaterializedFromRegistry(...a),
         };
         return (stripServedObjectColumns<T>).call(host, type, item);
+    }
+
+    /**
+     * [#29673] The refusal `registerObject` would throw for this object body,
+     * registered as the write-through registers it
+     * ({@link applyObjectRegistryMutation}: `_provenance: 'org'`, the layer's
+     * package and kind) — asked of the registry's own doors
+     * (`SchemaRegistry.objectRegistrationRefusal`), so a door that makes the
+     * body live refuses it before the row is written instead of meeting the
+     * throw after. `null` when the registry would take it, when the layer is a
+     * D9.9 `mismatch` (that refusal is the caller's own, asked first), and on
+     * a registry that cannot answer the question (a partial double).
+     */
+    private objectRegistrationRefusal(
+        body: unknown,
+        layer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']>,
+    ): Error | null {
+        if (layer.kind === 'mismatch') return null;
+        const registry = this.engine?.registry as { objectRegistrationRefusal?: (...args: unknown[]) => Error | null } | undefined;
+        if (typeof registry?.objectRegistrationRefusal !== 'function') return null;
+        if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+        return registry.objectRegistrationRefusal(
+            { ...(body as Record<string, unknown>), _provenance: 'org' },
+            layer.packageId,
+            layer.kind,
+        );
+    }
+
+    /**
+     * [#29673] The write-path inverse of the `/meta` read's translation, for an
+     * `object` body: every label the read served translated is put back to its
+     * source text before anything judges or stores the body
+     * ({@link restoreTranslatedEchoes}, whose module header is the contract).
+     *
+     * The source is the row this save overwrites, read as the credential
+     * carry-forward reads it ({@link storedBodyForCarryForward}: the row at the
+     * save's own state, the active row a first draft overlays, else the code
+     * layer), plus the platform's definition of each injected column. The
+     * locales are the bundle's and the built-in system-field table's — every
+     * locale a read could have answered in.
+     *
+     * Every save is asked, the stored-row migration included
+     * (`source: 'migrate-stored'`): it re-saves a row through this door, which
+     * is how a row a zh-CN session already stored is repaired. Any other
+     * type's body is returned as it came. No `try`/`catch`: a failed stored-row
+     * read fails the save rather than storing a body this door could not judge.
+     */
+    private async restoreTranslatedObjectEchoes(request: SaveMetaItemRequest): Promise<SaveMetaItemRequest['item']> {
+        if (canonicalMetaType(request.type) !== 'object') return request.item;
+        if (!request.item || typeof request.item !== 'object' || Array.isArray(request.item)) return request.item;
+        const repo = this.getOverlayRepo();
+        const source = await this.storedBodyForCarryForward({
+            type: 'object',
+            repo,
+            ref: { type: 'object', name: request.name, org: 'env' } as Parameters<SysMetadataRepository['get']>[0],
+            state: request.mode === 'draft' ? 'draft' : 'active',
+            packageId: request.packageId ?? null,
+        });
+        return restoreTranslatedEchoes(request.item, { source, bundle: this.registeredTranslationBundle() }).item;
+    }
+
+    /**
+     * [#29673] The registered i18n service's catalog as a `TranslationBundle`
+     * (`locale -> data`), or `undefined` when no service or no locale is
+     * registered — the bundle the `/meta` read exits translate with
+     * (`translationBundleOf` in `@objectstack/rest`, built the same way).
+     */
+    private registeredTranslationBundle(): TranslationBundle | undefined {
+        const service: any = this.getServicesRegistry?.().get('i18n');
+        if (!service || typeof service.getLocales !== 'function' || typeof service.getTranslations !== 'function') {
+            return undefined;
+        }
+        const bundle: Record<string, any> = {};
+        for (const locale of service.getLocales() as string[]) {
+            const data = service.getTranslations(locale);
+            if (data && typeof data === 'object') bundle[locale] = data;
+        }
+        return Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined;
     }
 
     /**
@@ -13608,6 +13687,15 @@ export class ObjectStackProtocolImplementation implements
         // schema gate, the authoring gate and the persisted body all still see
         // one document. See {@link stripServedSystemColumns} for why this is a
         // separate strip from the decoration list and not another entry in it.
+        //
+        // [#29673] …and, one beat BEFORE that strip, the read's TRANSLATION
+        // taken back off: a label the `/meta` read served in the caller's
+        // language (an injected column's through the built-in table, a field's
+        // through the catalog) is stored as its source text, never as the
+        // document. Before the strip, so an injected column that came back
+        // translated is the platform's own definition again and comes off with
+        // the rest. See {@link restoreTranslatedObjectEchoes}.
+        request.item = await this.restoreTranslatedObjectEchoes(request);
         request.item = this.stripServedObjectColumns(request.type, request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
@@ -13935,6 +14023,17 @@ export class ObjectStackProtocolImplementation implements
                     { mode, storedPackages, namedNoPackage, strandedDrafts },
                 );
             }
+            // [#29673] …and the registry's own refusal of the BODY, at the
+            // producer for the same reason: a body `registerObject` refuses
+            // was stored, answered `200`, and logged a `console.warn` at the
+            // write-through — and a draft of it published as "published" and
+            // never reached the data plane. Asked in both modes, as the D9.9
+            // refusal above is (#23712: a draft no publish can serve is a
+            // refusal now, not later). The body is the one this save stores:
+            // the read's translation and injected columns already came off it
+            // above. See {@link objectRegistrationRefusal}.
+            const registration = this.objectRegistrationRefusal(request.item, layer);
+            if (registration) throw registration;
         }
 
         // [#24547 · ADR-0129 D2] THE NAMESPACE-PREFIX RULE, on the door that
@@ -15639,7 +15738,28 @@ export class ObjectStackProtocolImplementation implements
                 : this.convertStoredItemDetailed(
                     singular, body, undefined, await this.storedRowKnownDatasources(singular, body),
                 );
-            const changed = flowResult ? item !== body : notices.length > 0;
+            // [#29673] …and, for an `object` row, the save door's translated-echo
+            // restoration ({@link restoreTranslatedObjectEchoes}), asked of the
+            // row against itself and the platform's injected columns: a row a
+            // zh-CN Studio session stored before that door existed carries an
+            // injected column's TRANSLATED label as an author's field (a `queue`
+            // the registry refuses, so the object never registers and a restart
+            // does not recover it). Each slot is a notice, and the re-save below
+            // goes through the door that puts it back and strips the column.
+            const echoNotices: StoredMigrationNotice[] = singular === 'object' && !flowResult
+                ? restoreTranslatedEchoes(item, { source: item, bundle: this.registeredTranslationBundle() })
+                    .restored.map((slot) => ({
+                        conversionId: TRANSLATED_ECHO_NOTICE_ID,
+                        surface: 'object.field.label',
+                        from: slot.from,
+                        to: slot.to ?? '',
+                        path: slot.path,
+                        message: 'the stored text is the /meta read\'s translation of its source, stored as the '
+                            + 'document by an edit that echoed a translated read; the re-save stores the source '
+                            + 'text, and an injected column that is the platform\'s own again comes off the row',
+                    }))
+                : [];
+            const changed = flowResult ? item !== body : notices.length > 0 || echoNotices.length > 0;
             // [#17321] A site the chain left as stored — no lossless rewrite
             // exists for it (ADR-0087 D3: a structured TODO, never silence) —
             // rides on the row whatever its outcome, and is what keeps a row
@@ -15675,14 +15795,17 @@ export class ObjectStackProtocolImplementation implements
                 });
                 continue;
             }
-            const flattened: StoredMigrationNotice[] = notices.map((n) => ({
-                conversionId: n.conversionId,
-                surface: n.surface,
-                from: n.from,
-                to: n.to,
-                path: n.path,
-                message: n.message,
-            }));
+            const flattened: StoredMigrationNotice[] = [
+                ...notices.map((n) => ({
+                    conversionId: n.conversionId,
+                    surface: n.surface,
+                    from: n.from,
+                    to: n.to,
+                    path: n.path,
+                    message: n.message,
+                })),
+                ...echoNotices,
+            ];
 
             if (!apply) {
                 record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'pending' });
@@ -16374,7 +16497,19 @@ export class ObjectStackProtocolImplementation implements
                     },
                 );
             }
+            // [#29673] …and the registry's refusal of the body this promotion
+            // makes live, on the same row and for the D9.9 refusal's reason:
+            // the write-through runs after the row is active, where a refusal
+            // is only a `console.warn`, so a publish answered `published` for
+            // an object that never registered (a zh-CN Studio's echoed `queue`
+            // column, measured). Asked here, before `repo.promoteDraft`
+            // writes, the per-item publish answers the registry's own envelope
+            // and a batch publish aborts on it into `failed[]` as on the
+            // refusals below (ADR-0067 D2). See {@link objectRegistrationRefusal}.
+            const registration = this.objectRegistrationRefusal(draftForGate.body, layer);
+            if (registration) throw registration;
         }
+
         // [#24547 · ADR-0129 D2] …and the namespace-prefix rule, the third
         // door's turn: the per-item publish (`POST /meta/object/:name/publish`)
         // made an object `active` under a namespaced package although its name
