@@ -389,7 +389,7 @@ describe('mobile sign-in hand-off (one-time token)', () => {
     expect(result.error!.issues[0].code).toBe('unrecognized_keys');
   });
 
-  it('refuses the plain method, a malformed challenge and a missing challenge', () => {
+  it('refuses the plain method, a malformed challenge, a missing challenge and an empty redirect_uri', () => {
     const base = { redirect_uri: 'com.example.app://cb', code_challenge: challenge };
     const plain = OneTimeTokenHandoffQuerySchema.safeParse({ ...base, code_challenge_method: 'plain' });
     expect(plain.success).toBe(false);
@@ -399,6 +399,9 @@ describe('mobile sign-in hand-off (one-time token)', () => {
     expect(short.error!.issues[0].path).toEqual(['code_challenge']);
     const padded = OneTimeTokenHandoffQuerySchema.safeParse({ ...base, code_challenge: `${challenge.slice(1)}=` });
     expect(padded.success).toBe(false);
+    const emptyUri = OneTimeTokenHandoffQuerySchema.safeParse({ ...base, redirect_uri: '' });
+    expect(emptyUri.success).toBe(false);
+    expect(emptyUri.error!.issues[0].path).toEqual(['redirect_uri']);
     const missing = OneTimeTokenHandoffQuerySchema.safeParse({ redirect_uri: base.redirect_uri });
     expect(missing.success).toBe(false);
     expect(missing.error!.issues[0].path).toEqual(['code_challenge']);

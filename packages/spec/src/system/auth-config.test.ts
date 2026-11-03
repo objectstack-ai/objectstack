@@ -162,6 +162,7 @@ describe('AuthConfigSchema', () => {
     ['an uppercase scheme', 'Com.Example.App'],
     ['an empty label', 'com..app'],
     ['a trailing dot', 'com.example.'],
+    ['a leading dot', '.com.example'],
   ])('refuses %s in trustedAppSchemes (%s), never dropping or rewriting it', (_label, scheme) => {
     expect(TrustedAppSchemeSchema.safeParse(scheme).success).toBe(false);
     const result = AuthConfigSchema.safeParse({ trustedAppSchemes: ['com.example.app', scheme] });

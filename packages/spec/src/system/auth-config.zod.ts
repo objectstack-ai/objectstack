@@ -547,7 +547,9 @@ export const AdvancedAuthConfigSchema = lazySchema(() => z.object({
  * (`GET /api/v1/auth/one-time-token/handoff`, see `OneTimeTokenHandoffQuerySchema`).
  *
  * Strict, never normalised: a lowercase RFC 3986 scheme written bare (no `:` or
- * `://` suffix) that contains at least one dot. The dot is RFC 8252 section 7.1's
+ * `://` suffix) made of two or more non-empty labels joined by single dots, the
+ * first starting with a letter (so `com..app`, `.com.app` and `com.example.` are
+ * refused). The dot is RFC 8252 section 7.1's
  * rule that a private-use scheme be a reverse domain name the app's owner
  * controls (`com.example.app`), which is also what keeps two apps on one device
  * from claiming the same scheme and intercepting the token. The rule refuses, by
@@ -558,10 +560,11 @@ export const AdvancedAuthConfigSchema = lazySchema(() => z.object({
 export const TrustedAppSchemeSchema = lazySchema(() => z.string().regex(/^[a-z][a-z0-9+-]*(\.[a-z0-9+-]+)+$/, {
   message:
     'An app scheme is a lowercase reverse-domain URI scheme written bare, e.g. "com.example.app": '
-    + 'no ":" or "://" suffix, no uppercase, and at least one dot (RFC 8252 section 7.1). '
+    + 'no ":" or "://" suffix, no uppercase, and two or more non-empty labels joined by single dots, '
+    + 'the first starting with a letter (RFC 8252 section 7.1). '
     + 'http, https and other web schemes are never app schemes.',
 }).describe(
-  'A registered native-app URI scheme: lowercase, reverse-domain with at least one dot, written bare (e.g. com.example.app)',
+  'A registered native-app URI scheme: lowercase, reverse-domain (two or more non-empty labels joined by single dots, the first starting with a letter), written bare (e.g. com.example.app)',
 ));
 
 export const AuthConfigSchema = lazySchema(() => z.object({

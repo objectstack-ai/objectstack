@@ -438,8 +438,8 @@ export type DeviceTokenResponse = z.input<typeof DeviceTokenResponseSchema>;
  * The parameter names are the OAuth 2.0 / RFC 7636 wire names, kept verbatim.
  */
 export const OneTimeTokenHandoffQuerySchema = lazySchema(() => z.object({
-  redirect_uri: z.string().describe(
-    'Where to send the token: a URI whose scheme is registered in AuthConfig.trustedAppSchemes '
+  redirect_uri: z.string().min(1).describe(
+    'Where to send the token: an absolute URI whose scheme is registered in AuthConfig.trustedAppSchemes '
     + '(e.g. com.example.app://auth/callback); any other scheme is refused with 400 and no redirect',
   ),
   code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/).describe(
