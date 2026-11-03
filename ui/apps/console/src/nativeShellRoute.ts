@@ -37,16 +37,19 @@ type HostApps = Parameters<typeof resolveHostAppSegment>[0];
  * The path the native navigate listener moves the router to, or `null` to stay
  * where the person is.
  *
- * `hostHint` is the app the person is in or last had open: the shell's
- * published `currentAppName`, else the `:appName` of the current URL, the same
- * hint every inbox door passes. `apps` is whatever app list is in reach; the
- * listener renders outside every `MetadataProvider`, so there it is the empty
- * list, and `resolveHostAppSegment` then answers the hint itself (its step 3).
+ * `hostHint` is the app the person is in: the `:appName` of the current
+ * `/apps/:appName/*` URL, already the segment its route is addressed by.
+ * `apps` is whatever app list is in reach; the listener renders outside every
+ * `MetadataProvider`, so there it is the empty list, and
+ * `resolveHostAppSegment` then answers the hint itself (its step 3).
  *
- * - No hint: the route as given. Nothing in reach can name the default app
- *   (that needs the app list), so the route goes to the router unchanged and
- *   the unmatched-route guard, which waits for the list, hosts it there. A
- *   Console route (`/apps/…`, `/home`, …) simply matches its own route.
+ * - No hint (Home, a cold start): the route as given. Naming the app then
+ *   takes the app list: the default app, or the shell's `currentAppName`,
+ *   which is an app NAME that only the list turns into its route segment
+ *   (measured: hosted under the name, the app route re-addresses the page
+ *   several times before it settles). So the route goes to the router
+ *   unchanged and the unmatched-route guard, which waits for the list, hosts
+ *   it. A Console route (`/apps/…`, `/home`, …) simply matches its own route.
  * - A hint: `resolveNotificationTarget(route, segment)`. A `route` answer is
  *   the path; `null` (no url) and `external` (a scheme or `//host`) are
  *   `null`, so nothing moves. Neither is reachable through the listener: the

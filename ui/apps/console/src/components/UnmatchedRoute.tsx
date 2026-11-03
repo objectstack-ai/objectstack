@@ -19,10 +19,11 @@
  * apps, else the first active app. That needs the app list, so the hop runs
  * under `ProtectedRoute` (`requireOrganization={false}`, like `/`, because it
  * only redirects; the destination's route owns the organization gate) and
- * waits for the list. A signed-out visitor goes to the login page first and
- * comes back to the same path. An app list that did not load is no answer to
- * host under; that case keeps the old redirect to `/`, whose landing resolver
- * owns the retry.
+ * waits until the list has settled (`isAppListConclusive`, the landing
+ * route's own reading). A signed-out visitor goes to the login page first and
+ * comes back to the same path. An app list that failed to load is no answer
+ * to host under; that case keeps the old redirect to `/`, whose landing
+ * resolver owns the retry.
  */
 import { useLocation } from 'react-router-dom';
 import {
@@ -53,8 +54,12 @@ function HostAppRelativeRedirect() {
   const location = useLocation();
   const { apps, loading, getTypeStatus } = useMetadata();
   const { currentAppName } = useNavigationContext();
-  if (loading) return <LoadingFallback />;
-  if (!isAppListConclusive(getTypeStatus?.('app'))) return <RedirectWithSplash to="/" replace />;
+  // The list is the answer only once it settled: a session-cached list keeps
+  // `loading` false while its re-read is still in flight (status `loading`),
+  // and hosting under it then could name an app the re-read drops.
+  const status = getTypeStatus?.('app');
+  if (status === 'error') return <RedirectWithSplash to="/" replace />;
+  if (loading || !isAppListConclusive(status)) return <LoadingFallback />;
   const target = resolveNotificationTarget(
     `${location.pathname}${location.search}${location.hash}`,
     resolveHostAppSegment(apps, currentAppName),

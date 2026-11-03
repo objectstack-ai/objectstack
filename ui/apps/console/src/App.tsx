@@ -38,7 +38,6 @@ import {
   DefaultSettingsPage,
   DefaultAcceptInvitationPage,
   useMetadata,
-  useNavigationContext,
 } from '@object-ui/app-shell';
 
 import { AppContent, ConsolePermissionsRequest, ConsolePermissionsScope } from './AppContent';
@@ -154,18 +153,20 @@ const BASENAME = resolveBasename();
  *
  * The shell's route is a push route, the notification's `actionUrl`, and is
  * never navigated verbatim (objectstack#29750): it is hosted the way the inbox
- * hosts that link, under the app the person is in or last had open
- * (`nativeShellRouteTarget`). With no such app (a cold start), the route goes
- * to the router as given and the catch-all's `UnmatchedRoute` hosts it under
- * the default app once the app list is loaded.
+ * hosts that link (`nativeShellRouteTarget`). Inside an app it goes under the
+ * app the URL names. Anywhere else (Home, a cold start) the route goes to the
+ * router as given, and the catch-all's `UnmatchedRoute` hosts it once the app
+ * list is loaded: under the app the person last had open while it is still
+ * active, else the first active app. The shell's published `currentAppName` is
+ * left to that guard because it is an app NAME, and only the app list turns a
+ * name into the address its route uses.
  */
 function NativeShellRouting() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { currentAppName } = useNavigationContext();
   // Outside every `MetadataProvider`, so the empty list; see `nativeShellRouteTarget`.
   const { apps } = useMetadata();
-  const hostHint = currentAppName ?? matchPath('/apps/:appName/*', location.pathname)?.params.appName;
+  const hostHint = matchPath('/apps/:appName/*', location.pathname)?.params.appName;
   const navigateShellRoute = useCallback(
     (route: string) => {
       const path = nativeShellRouteTarget(route, hostHint, apps);

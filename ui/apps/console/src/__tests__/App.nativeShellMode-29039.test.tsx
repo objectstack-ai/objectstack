@@ -241,14 +241,21 @@ describe('a push route from the shell is hosted the way the inbox hosts it', () 
       .toBe('/apps/crm/opportunity/123?tab=activity#notes');
   });
 
-  it('the app the shell last published wins over the URL, as for the inbox bell', async () => {
+  it('away from an app, the catch-all hosts it under the app the person last had open', async () => {
+    // `currentAppName` is an app NAME; the catch-all turns it into the app's
+    // route segment with the app list, which the listener does not have.
     installBridge();
     shellState.currentAppName = 'sales';
+    shellState.apps = [{ name: 'crm', active: true }, { name: 'sales', active: true, _packageId: 'com.acme.sales' }];
+    shellState.appStatus = 'ready';
     window.history.pushState({}, '', '/home');
     render(<App />);
     await screen.findByTestId('home-page');
-    dispatchNavigate('/opportunity/123');
-    expect(window.location.pathname).toBe('/apps/sales/opportunity/123');
+    const event = dispatchNavigate('/opportunity/123');
+    expect(event.defaultPrevented).toBe(true);
+    expect(window.location.pathname).toBe('/opportunity/123');
+    expect((await screen.findByTestId('redirect-with-splash')).getAttribute('data-to'))
+      .toBe('/apps/com.acme.sales/opportunity/123');
   });
 
   it('a Console route under /apps passes through unchanged', async () => {
@@ -306,6 +313,17 @@ describe('the catch-all hosts an app-relative first URL under an app', () => {
 
   it('waits for the app list before it answers', async () => {
     shellState.loading = true;
+    window.history.pushState({}, '', '/opportunity/123');
+    render(<App />);
+    expect(await screen.findByTestId('loading-fallback')).toBeInTheDocument();
+    expect(screen.queryByTestId('redirect-with-splash')).toBeNull();
+  });
+
+  it('waits while a session-cached app list is still being re-read', async () => {
+    // Measured live: the provider stops `loading` on the cached list while
+    // the app type's own status still reads `loading`.
+    shellState.apps = [{ name: 'crm', active: true }];
+    shellState.appStatus = 'loading';
     window.history.pushState({}, '', '/opportunity/123');
     render(<App />);
     expect(await screen.findByTestId('loading-fallback')).toBeInTheDocument();
