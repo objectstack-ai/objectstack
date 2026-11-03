@@ -166,8 +166,16 @@ test('a read-only base is customized, restored and extended through Studio, and 
         if (r.request().method() === 'DELETE' && r.url().includes(`/api/v1/meta/view/${VIEW}`)) deletes.push(`${r.status()} ${r.url()}`);
       };
       page.on('response', onResponse);
-      await page.getByTestId('if-item-more').click();
-      await page.getByTestId('studio-restore-original').click();
+      // objectstack#29692 — Restore is on the override chip's popover: the chip in
+      // the row, or in the item's ⋯ menu while the header is folded.
+      const rowChip = page.getByTestId('if-item-header').getByTestId('studio-override-chip');
+      if (await rowChip.isVisible()) {
+        await rowChip.click();
+      } else {
+        await page.getByTestId('if-item-more').click();
+        await page.getByTestId('studio-item-header-folded-chips').getByTestId('studio-override-chip').click();
+      }
+      await page.getByTestId('studio-override-popover').getByTestId('studio-override-restore').click();
       await page.getByTestId('studio-restore-original-confirm').click();
       await expect(page.getByTestId('studio-customize')).toBeVisible();
       await expect.poll(() => deletes.length).toBe(2);
