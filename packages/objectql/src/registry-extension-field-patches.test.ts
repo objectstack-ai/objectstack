@@ -405,3 +405,50 @@ describe('ADR-0146 D10 — the manifest loop carries fieldPatches onto the exten
     expect(served.options[0]).toEqual({ value: 'tech', label: 'Technology' });
   });
 });
+
+describe('#29903 — a read can leave one package\'s extensions out of the fold', () => {
+  const PAIR_PKG = `${OWNER_PKG}.custom`;
+  /** The vendor's object, a third package's patch, and the pair's field plus its patch. */
+  function extended(): SchemaRegistry {
+    const reg = withVendor();
+    extend(reg, { name: { label: 'Account name' } });
+    reg.registerObject({
+      name: OBJ,
+      fields: { region__c: { name: 'region__c', type: 'text', label: 'Region' } },
+      fieldPatches: { industry: { label: 'Sector (customized)' } },
+    } as any, PAIR_PKG, undefined, 'extend', 300);
+    return reg;
+  }
+  const shape = (body: any) => ({
+    region: !!body?.fields?.region__c,
+    industry: body?.fields?.industry?.label,
+    name: body?.fields?.name?.label,
+  });
+  const listed = (reg: SchemaRegistry, options?: { withoutExtensionsOf?: string }) =>
+    (reg.listItems<any>('object', OWNER_PKG, options)).find((o) => o?.name === OBJ);
+
+  it('the listed object without the pair\'s extension is the object as no pair had extended it', () => {
+    const reg = extended();
+    expect(shape(listed(reg, { withoutExtensionsOf: PAIR_PKG }))).toEqual({ region: false, industry: 'Industry', name: 'Account name' });
+    expect(listed(reg, { withoutExtensionsOf: PAIR_PKG })?._packageId).toBe(OWNER_PKG);
+    // CONTROL: every other read of the object still folds the pair in.
+    expect(shape(listed(reg))).toEqual({ region: true, industry: 'Sector (customized)', name: 'Account name' });
+    expect(shape(reg.getObject(OBJ))).toEqual({ region: true, industry: 'Sector (customized)', name: 'Account name' });
+    // A package that extends nothing changes nothing: the cached merged object.
+    expect(listed(reg, { withoutExtensionsOf: 'com.nobody' })).toBe(reg.getObject(OBJ));
+  });
+
+  it('leaving the pair out is the answer a registry with no pair gives, byte for byte', () => {
+    const reg = withVendor();
+    extend(reg, { name: { label: 'Account name' } });
+    expect(JSON.stringify(listed(extended(), { withoutExtensionsOf: PAIR_PKG }))).toBe(JSON.stringify(listed(reg)));
+  });
+
+  it('the fold onto a stored body leaves the pair\'s extension out the same way', () => {
+    const reg = extended();
+    expect(shape(reg.foldObjectExtendersOnto(OBJ, vendorAccount(), { withoutExtensionsOf: PAIR_PKG })))
+      .toEqual({ region: false, industry: 'Industry', name: 'Account name' });
+    expect(shape(reg.foldObjectExtendersOnto(OBJ, vendorAccount())))
+      .toEqual({ region: true, industry: 'Sector (customized)', name: 'Account name' });
+  });
+});

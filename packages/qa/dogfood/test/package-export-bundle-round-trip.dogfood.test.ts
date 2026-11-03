@@ -25,6 +25,12 @@
 //      order, with the same namespace, dependencies, and the same item names
 //      and counts per collection.
 //
+// [#29903] …and the pair's object extension travels once: the pair publishes an
+// extension of the base's object (a `__c` field and a relabelled base field).
+// The base's entry carries the object as the base declares it, the pair's
+// entry carries the extension as its `objectExtensions`, and on the target the
+// served object has the field once, from the pair, with the pair's label.
+//
 // [#29871] A second describe pins the bundle's "enabled or not" for a
 // DISABLED package: a runtime-authored package (`POST /packages`, an object
 // drafted into it and published) is disabled before the export; the bundle
@@ -56,6 +62,10 @@ const OBJECT = 'exportbase_account';
 const DASHBOARD = 'exportbase_pulse';
 const EDITED = 'Pulse (customized)';
 const CONNECTOR = 'exportbase_erp';
+/** [#29903] The pair's extension of the base's object, as Studio's Customize writes it. */
+const REGION = 'region__c';
+const TITLE_EDITED = 'Title (customized)';
+const EXTENSION = { extend: OBJECT, fields: { [REGION]: { type: 'text', label: 'Region' } }, fieldPatches: { title: { label: TITLE_EDITED } } };
 /** The reference the connector names, and the fake secret it resolves to on the source runtime. */
 const CREDENTIAL_REF = 'EXPORTBASE_ERP_TOKEN';
 const SECRET = 'TEST_PLACEHOLDER_EXPORT_BUNDLE_SECRET';
@@ -156,7 +166,9 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
       await ensurePair(source, token, BASE);
       answers.saved = await call(source, token, 'PUT', inPair(`/meta/dashboard/${DASHBOARD}?mode=draft`, BASE),
         declaredOverride({ name: DASHBOARD, label: EDITED, columns: 12, widgets: [] }, BASE, '1.0.0'));
+      answers.extended = await call(source, token, 'PUT', inPair(`/meta/object_extension/${OBJECT}?mode=draft`, BASE), EXTENSION);
       answers.published = await call(source, token, 'POST', `/packages/${PAIR}/publish-drafts`, {});
+      answers.sourceServed = await call(source, token, 'GET', `/meta/object/${OBJECT}`);
       const res = await source.apiAs(token, 'GET', '/packages/export');
       sourceText = await res.text();
       answers.sourceExport = { status: res.status, body: JSON.parse(sourceText) };
@@ -175,6 +187,7 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
       for (const entry of sourceBundle?.packages ?? []) {
         installs.push({ id: entry.id, answer: await call(target, token, 'POST', ROUTE, { manifest: entry }) });
       }
+      answers.targetServed = await call(target, token, 'GET', `/meta/object/${OBJECT}`);
       answers.targetExport = await call(target, token, 'GET', '/packages/export');
       targetBundle = answers.targetExport.body?.data;
     } finally {
@@ -189,7 +202,7 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
   });
 
   it('source: the three packages install and the pair\'s override publishes (preconditions)', () => {
-    for (const key of ['base', 'ext', 'saved', 'published'] as const) {
+    for (const key of ['base', 'ext', 'saved', 'extended', 'published'] as const) {
       expect(answers[key]?.status, `${key}: ${JSON.stringify(answers[key]?.body)}`).toBe(200);
     }
   });
@@ -207,6 +220,23 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
     expect((pair?.dashboards ?? []).map((d: any) => [d.name, d.label, d.overrides?.package])).toEqual([[DASHBOARD, EDITED, BASE]]);
     const base = sourceBundle.packages.find((p: any) => p.id === BASE);
     expect((base?.dashboards ?? []).map((d: any) => [d.name, d.label])).toEqual([[DASHBOARD, 'Pulse']]);
+  });
+
+  it('[#29903] source: the base\'s entry carries its object without the pair\'s extension, the pair\'s entry carries the extension', () => {
+    // CONTROL: the served object folds the extension in.
+    const served = answers.sourceServed.body?.data?.item ?? answers.sourceServed.body?.data;
+    expect(answers.sourceServed.status, JSON.stringify(answers.sourceServed.body)).toBe(200);
+    expect(Object.keys(served?.fields ?? {})).toContain(REGION);
+    expect(served?.fields?.title?.label).toBe(TITLE_EDITED);
+
+    const base = sourceBundle.packages.find((p: any) => p.id === BASE);
+    const object = (base?.objects ?? []).find((o: any) => o?.name === OBJECT);
+    expect(Object.keys(object?.fields ?? {}), JSON.stringify(object)).not.toContain(REGION);
+    expect(object?.fields?.title?.label).toBe('Title');
+    expect(base?.objectExtensions).toBeUndefined();
+    const pair = sourceBundle.packages.find((p: any) => p.id === PAIR);
+    expect(pair?.objects).toBeUndefined();
+    expect(pair?.objectExtensions).toEqual([EXTENSION]);
   });
 
   it('source: the connector travels with its `credentialRef`, and the secret it resolves to appears nowhere', () => {
@@ -233,6 +263,18 @@ describe('dogfood: the whole-deployment export round-trips onto a fresh runtime,
     expect(targetBundle.packages.map(inventory)).toEqual(sourceBundle.packages.map(inventory));
     const pair = targetBundle.packages.find((p: any) => p.id === PAIR);
     expect((pair?.dashboards ?? []).map((d: any) => [d.name, d.label, d.overrides?.package])).toEqual([[DASHBOARD, EDITED, BASE]]);
+  });
+
+  it('[#29903] target: the field is declared once, by the pair, and the served object carries it with the pair\'s label', () => {
+    expect(answers.targetServed.status, JSON.stringify(answers.targetServed.body)).toBe(200);
+    const served = answers.targetServed.body?.data?.item ?? answers.targetServed.body?.data;
+    expect(Object.keys(served?.fields ?? {})).toContain(REGION);
+    expect(served?.fields?.title?.label).toBe(TITLE_EDITED);
+    const declaring = (targetBundle?.packages ?? []).flatMap((p: any) => [
+      ...(p.objects ?? []).filter((o: any) => o?.fields?.[REGION]).map(() => `${p.id}:objects`),
+      ...(p.objectExtensions ?? []).filter((e: any) => e?.fields?.[REGION]).map(() => `${p.id}:objectExtensions`),
+    ]);
+    expect(declaring).toEqual([`${PAIR}:objectExtensions`]);
   });
 });
 
