@@ -222,8 +222,10 @@ describe('MessagingServicePlugin mounts the push channel while a push service is
             async update() { return {}; },
             async delete() { return {}; },
         });
+        const logger: Record<string, unknown> = { info() {}, warn() {}, error() {}, debug() {} };
+        logger.child = () => logger;
         const ctx = {
-            logger: { info() {}, warn() {}, error() {}, debug() {}, child: () => ctx.logger },
+            logger,
             registerService: (name: string, svc: unknown) => services.set(name, svc),
             getService: <T>(name: string): T => {
                 if (!services.has(name)) throw new Error(`service '${name}' not found`);
