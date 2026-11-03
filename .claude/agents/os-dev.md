@@ -35,7 +35,7 @@ model: opus
    - 同批 agents 共用一个 scratchpad 目录,自然命名的文件会被彼此静默覆盖。
 2. **卡 assignee 归 PM。** 派发原子对已把它设好;共享身份下该字段答不了是谁。
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
-   - 恒不写卡的 assignee(空也开工,报 `summary`);PR ⛔ 不带 `assignees`,人经席位交棒才见 PR。
+   - 恒不写卡的 assignee(空也开工,报 `summary`);PR ⛔ 不带 `assignees`(中继虽收),席位交棒才派。
    - 发现与他人在途工作重复,停下报 `blocked`。
    - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
