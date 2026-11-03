@@ -148,7 +148,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 | ROUTES (runtime failure) | Does NOT route (fatal either way) |
 |:--|:--|
-| 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter operand that evaluated to `null`; graph past the nesting ceiling; unscoped run |
+| 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter operand that evaluated to `null` or a non-value; graph past the nesting ceiling; unscoped run |
 
 > **Writing a `readonly` field? Set `runAs: 'system'`.** Under the default
 > `runAs: 'user'` the engine **strips** it from `create_record` / `update_record`

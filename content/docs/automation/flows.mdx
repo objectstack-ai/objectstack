@@ -1989,7 +1989,8 @@ succeed, **and** the fix is to edit metadata. In practice that is a missing
 required config key (a data node with no `objectName`, an `http` node with no
 `url`, a `subflow` or `map` with no `flowName`, a `connector_action` with no
 `connectorId`/`actionId`), a filter operand that evaluated to nothing (`null`),
-so the condition would have widened the query, a graph that recurses past the nesting
+so the condition would have widened the query, a filter operand that evaluated to
+something other than a value, a graph that recurses past the nesting
 ceiling, or a run that would execute unscoped.
 
 The split is deliberate. A dropped filter condition does not narrow a query, it
