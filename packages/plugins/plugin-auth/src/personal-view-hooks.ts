@@ -20,8 +20,13 @@
  *
  * **The owner is fixed when the view is saved.** An update that sends a
  * `user_id` other than the stored one is refused `403 PERMISSION_DENIED`, for
- * every caller but the system. The rule, and why the row scope alone does not
- * hold it, is `owner-fixed-rule.ts`'s, shared with `sys_user_preference`.
+ * every caller but the system, and the system includes app-authored
+ * automation elevated to it (a `runAs: 'system'` flow, a hook's
+ * `runAs: 'system'` api or `ctx.api.sudo()`, an action body's `ctx.api`; the
+ * family plugin-security's `flow-system-identity-write-refusal.ts` names),
+ * which can therefore hand a view to another owner. The rule, and why the row
+ * scope alone does not hold it, is `owner-fixed-rule.ts`'s, shared with
+ * `sys_user_preference`.
  *
  * Which view opens by default is not this object's: the reader's existing
  * per-object pin holds a view id (seat ruling 6587007982 on #29443).

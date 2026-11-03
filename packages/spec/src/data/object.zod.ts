@@ -2777,10 +2777,12 @@ function refuseDuplicateActionNames(objectName: unknown, actions: unknown, ctx: 
 /**
  * The key grammar of an object's field map: a field name is lowercase
  * snake_case. ONE schema, read by every record keyed by a field name of an
- * object — `ObjectSchema.fields` and `ObjectExtensionSchema.fieldPatches`
- * (#29366) — so a key the field map can never hold is refused where it is
- * written, never accepted as a patch that no field can match. Declared above
- * `ObjectSchemaBase` for the order reason the block below gives.
+ * object — `ObjectSchema.fields`, `ObjectExtensionSchema.fieldPatches`
+ * (#29366) and `ObjectExtensionSchema.fields` (#29523) — so a key the field
+ * map can never hold is refused where it is written, never accepted as a
+ * patch that no field can match or as a field the target's own map would
+ * refuse. Declared above `ObjectSchemaBase` for the order reason the block
+ * below gives.
  */
 const FieldNameKeySchema = z.string().regex(/^[a-z_][a-z0-9_]*$/, {
   message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
@@ -5035,11 +5037,33 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   extend: z.string().describe('Target object name (FQN) to extend'),
   
   /**
-   * Fields to merge into the target object (additive). `__proto__` is refused
-   * on the raw input, as on `ObjectSchema.fields`: zod's record parser skips
-   * it, so the save door would store a key the registered extension lacks.
+   * Fields to merge into the target object (additive). Each record key is a
+   * field name, judged by the field map's own key grammar
+   * ({@link FieldNameKeySchema}, as `ObjectSchema.fields`): the fields land in
+   * the target's field map, so a key that map would refuse is refused here,
+   * where it is written. `__proto__` is refused on the raw input, as on
+   * `ObjectSchema.fields`: zod's record parser skips it, so the save door
+   * would store a key the registered extension lacks.
    */
-  fields: refuseRecordProtoKey(z.record(z.string(), FieldSchema), 'fields').optional().describe('Fields to add/override'),
+  fields: refuseRecordProtoKey(z.record(FieldNameKeySchema, FieldSchema, {
+    // [#29523] Keyed by the field map's own key grammar: a key no field name
+    // can be (`Region Code`, `region-code`) is refused here, where it is
+    // written, instead of parsing and being merged into the target's map.
+    error: (issue) => {
+      if (issue.code === 'invalid_key') {
+        return `\`${String(issue.input)}\` cannot be a field name: an extension's \`fields\` is keyed by the ` +
+          'name of each field it adds to the extended object, lowercase snake_case such as `region_code` ' +
+          '(`region_code__c` in a customization package), the key grammar of an object\'s own `fields`, ' +
+          'never by its label.';
+      }
+      return undefined;
+    },
+  }), 'fields')
+    .optional()
+    .describe(
+      'Fields to add/override, keyed by field name (lowercase snake_case, the key grammar of an object\'s ' +
+      '`fields`).',
+    ),
 
   /**
    * [ADR-0146 D10, second rule] Per-field display patch of the target's own

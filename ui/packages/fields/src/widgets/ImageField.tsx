@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback, lazy, Suspense } from 'react';
 import { Button, EmptyValue } from '@object-ui/components';
 import { useUpload } from '@object-ui/providers';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { X, Image as ImageIcon, Crop as CropIcon, Loader2 } from 'lucide-react';
+import { X, Image as ImageIcon, Images, Camera, Crop as CropIcon, Loader2 } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 import { ImageLightbox } from './ImageLightbox.js';
@@ -27,6 +27,8 @@ import {
 import { fileValueForResubmit } from './file-refused.js';
 // The restricted state a file the reader may not open draws (objectui#12339).
 import { RestrictedFileAffordance } from './file-affordance.js';
+import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
+import { pickNativeImage, useNativeImagePickOffered } from './nativeImagePick.js';
 
 // Lazy-load the cropper so the dialog (canvas + crop logic) is not in the initial
 // ImageField bundle. Consumers that never crop pay zero cost.
@@ -72,6 +74,9 @@ export function ImageField({ value, onChange, field, readonly, onUploadingChange
   // The upload's own lifetime, which can outlast this widget — both upload
   // paths below take it (objectui#10180). See `useUploadingScopeHold`.
   const holdScope = useUploadingScopeHold();
+  // Inside the mobile shell, when it announces `pickImage`: "Take photo" and
+  // "Choose photo" through the shell's camera and library (`pickNative` below).
+  const nativePickOffered = useNativeImagePickOffered();
 
   // Derived value + memoized handlers must run before the readonly early return
   // so hook order stays stable across renders.
@@ -205,13 +210,13 @@ export function ImageField({ value, onChange, field, readonly, onUploadingChange
     );
   }
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = Array.from(e.target.files || []);
-    // Reset the input up front rather than in `finally`: a pick rejected below
-    // returns before the upload runs, and leaving the old value in place would
-    // stop the user re-picking the same name after shrinking the image.
-    // `selectedFiles` already holds the File objects, so clearing is safe.
-    if (inputRef.current) inputRef.current.value = '';
+  /**
+   * The one upload pipeline for picked images: the `<input type=file>` change
+   * below and the mobile shell's picker (`nativeImagePick`) both hand their
+   * `File`s here, so a shell photo is size-checked, uploaded and stored
+   * exactly as an input pick is.
+   */
+  const uploadPicked = async (selectedFiles: File[]) => {
     if (selectedFiles.length === 0) return;
 
     // Enforce the declared limit before anything touches the network. Partial
@@ -267,6 +272,20 @@ export function ImageField({ value, onChange, field, readonly, onUploadingChange
       releaseScope();
       setUploading(false);
     }
+  };
+
+  // The picked photo enters the same `uploadPicked` an input pick does.
+  const pickNative = (camera: boolean) => pickNativeImage(camera, t as TranslateFn).then(uploadPicked);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    // Reset the input up front rather than after the upload: a pick rejected
+    // in `uploadPicked` returns before the upload runs, and leaving the old
+    // value in place would stop the user re-picking the same name after
+    // shrinking the image. `selectedFiles` already holds the File objects, so
+    // clearing is safe.
+    if (inputRef.current) inputRef.current.value = '';
+    return uploadPicked(selectedFiles);
   };
 
   const handleRemove = (index: number) => {
@@ -364,6 +383,35 @@ export function ImageField({ value, onChange, field, readonly, onUploadingChange
               ? t('fields.image.addMore')
               : t('fields.image.upload')}
         </Button>
+
+        {nativePickOffered && (
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={PHONE_TOUCH_HEIGHT}
+              onClick={() => void pickNative(true)}
+              disabled={uploading}
+              data-testid="image-field-camera-button"
+            >
+              <Camera className="size-4 mr-2" />
+              {t('fields.file.takePhoto', { defaultValue: 'Take photo' })}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={PHONE_TOUCH_HEIGHT}
+              onClick={() => void pickNative(false)}
+              disabled={uploading}
+              data-testid="image-field-library-button"
+            >
+              <Images className="size-4 mr-2" />
+              {t('fields.file.choosePhoto', { defaultValue: 'Choose photo' })}
+            </Button>
+          </div>
+        )}
 
         {/* Oversize picks (objectui#4141) and failed uploads (objectui#10226).
             Same presentation as FileField's error row. */}

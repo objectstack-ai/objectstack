@@ -22,6 +22,10 @@
  * (`source.onChange`) and the item is not read-only, so an edit there is
  * saved by the pillar's autosave like any other. Without a buffer it shows
  * the item's effective body, read-only.
+ *
+ * objectstack#29693 — when the item header folds (the title would drop below
+ * its readable width), the five buttons leave the row and the same tools read
+ * as items of the header's ⋯ menu, opening the same sheets.
  */
 
 import * as React from 'react';
@@ -44,6 +48,7 @@ import { ReferencesPanel, useReferencesScan } from './ReferencesPanel.js';
 import { HistoryPanel } from './ResourceHistoryPage.js';
 import { AuditPanel } from './AuditPanel.js';
 import { JsonSourceEditor } from './JsonSourceEditor.js';
+import { useStudioItemHeaderFold, type StudioFoldedTool } from '../studio-design/StudioItemHeader.js';
 
 /** The tool a sheet holds. */
 export type StudioItemTool = 'layers' | 'references' | 'history' | 'audit' | 'source';
@@ -123,6 +128,31 @@ function StudioItemToolsFor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // objectstack#29693 — the tools' menu form, handed to the header's fold.
+  const fold = useStudioItemHeaderFold();
+  const setFoldedTools = fold?.setTools;
+  const refsCount = refs.state.status === 'loaded' ? refs.state.items.length : undefined;
+  React.useEffect(() => {
+    if (!setFoldedTools) return;
+    const tool = (id: StudioItemTool, label: string, icon: React.ElementType, count?: number): StudioFoldedTool => ({
+      id,
+      label,
+      icon,
+      count,
+      onSelect: () => setOpen(id),
+    });
+    setFoldedTools([
+      tool('layers', t('engine.edit.layers', locale), Layers3),
+      tool('references', t('engine.edit.references', locale), Link2, refsCount),
+      ...(canReadTrail
+        ? [tool('history', t('engine.edit.history', locale), History), tool('audit', t('engine.edit.auditTab', locale), ShieldCheck)]
+        : []),
+      tool('source', t('engine.edit.inspector.source', locale), FileCode2),
+    ]);
+    return () => setFoldedTools(null);
+  }, [setFoldedTools, canReadTrail, refsCount, locale]);
+  const folded = fold?.folded ?? false;
+
   const canRollback = !readOnly && canAuthor;
   const sourceEditable = !readOnly && !!source?.onChange;
   const close = (o: boolean) => {
@@ -181,27 +211,30 @@ function StudioItemToolsFor({
 
   return (
     <>
-      <div
-        role="group"
-        aria-label={t('engine.studio.itemTools.group', locale)}
-        data-testid="studio-item-tools"
-        className="flex shrink-0 items-center rounded-md border bg-background p-0.5"
-      >
-        {toolButton('layers', t('engine.edit.layers', locale), Layers3)}
-        {toolButton(
-          'references',
-          t('engine.edit.references', locale),
-          Link2,
-          refs.state.status === 'loaded' && refs.state.items.length > 0 ? (
-            <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-muted text-foreground text-[9px] leading-[14px] text-center font-medium border">
-              {refs.state.items.length}
-            </span>
-          ) : undefined,
-        )}
-        {canReadTrail && toolButton('history', t('engine.edit.history', locale), History)}
-        {canReadTrail && toolButton('audit', t('engine.edit.auditTab', locale), ShieldCheck)}
-        {toolButton('source', t('engine.edit.inspector.source', locale), FileCode2)}
-      </div>
+      {!folded && (
+        <div
+          role="group"
+          aria-label={t('engine.studio.itemTools.group', locale)}
+          data-testid="studio-item-tools"
+          data-studio-fold="tools"
+          className="flex shrink-0 items-center rounded-md border bg-background p-0.5"
+        >
+          {toolButton('layers', t('engine.edit.layers', locale), Layers3)}
+          {toolButton(
+            'references',
+            t('engine.edit.references', locale),
+            Link2,
+            refs.state.status === 'loaded' && refs.state.items.length > 0 ? (
+              <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-muted text-foreground text-[9px] leading-[14px] text-center font-medium border">
+                {refs.state.items.length}
+              </span>
+            ) : undefined,
+          )}
+          {canReadTrail && toolButton('history', t('engine.edit.history', locale), History)}
+          {canReadTrail && toolButton('audit', t('engine.edit.auditTab', locale), ShieldCheck)}
+          {toolButton('source', t('engine.edit.inspector.source', locale), FileCode2)}
+        </div>
+      )}
 
       {sheet('layers', t('engine.edit.layers', locale), <div className="flex-1 min-h-0 overflow-auto p-4">{layersBody}</div>)}
 
