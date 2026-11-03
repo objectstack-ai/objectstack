@@ -636,6 +636,8 @@
     "RedactedDatasourceConfig": "src/data/datasource-credential-redaction.ts#RedactedDatasourceConfig (interface)",
     "ReferenceIdValue": "src/data/field-value.zod.ts#ReferenceIdValue (type)",
     "ReferenceIdValueSchema": "src/data/field-value.zod.ts#ReferenceIdValueSchema (const)",
+    "ReferenceNameOnlyValue": "src/data/field-value.zod.ts#ReferenceNameOnlyValue (type)",
+    "ReferenceNameOnlyValueSchema": "src/data/field-value.zod.ts#ReferenceNameOnlyValueSchema (const)",
     "ReferenceResolution": "src/data/seed-loader.zod.ts#ReferenceResolution (type)",
     "ReferenceResolutionError": "src/data/seed-loader.zod.ts#ReferenceResolutionError (type)",
     "ReferenceResolutionErrorSchema": "src/data/seed-loader.zod.ts#ReferenceResolutionErrorSchema (const)",
