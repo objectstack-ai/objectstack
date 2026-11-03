@@ -3058,6 +3058,12 @@ const pt = {
       saved: "Preferência de idioma atualizada.",
       readOnly: "O idioma da sua conta é gerenciado pelo seu administrador.",
     },
+    appLock: {
+      title: "Bloqueio do app",
+      off: "Desativado",
+      onImmediately: "Ativado, bloqueia assim que você sai do app",
+      onAfter: "Ativado, bloqueia {{duration}} depois que você sai do app",
+    },
     password: {
       changeTitle: "Alterar senha",
       setTitle: "Definir senha local",

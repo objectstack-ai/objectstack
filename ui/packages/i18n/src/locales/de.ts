@@ -3000,6 +3000,12 @@ const de = {
       saved: "Spracheinstellung aktualisiert.",
       readOnly: "Die Sprache Ihres Kontos wird von Ihrer Administration verwaltet.",
     },
+    appLock: {
+      title: "App-Sperre",
+      off: "Aus",
+      onImmediately: "An, sperrt sofort, wenn Sie die App verlassen",
+      onAfter: "An, sperrt {{duration}} nach dem Verlassen der App",
+    },
     password: {
       changeTitle: "Passwort ändern",
       setTitle: "Lokales Passwort festlegen",

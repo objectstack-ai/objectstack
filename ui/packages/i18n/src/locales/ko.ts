@@ -3000,6 +3000,12 @@ const ko = {
       saved: "언어 설정을 업데이트했습니다.",
       readOnly: "이 계정의 언어는 관리자가 관리합니다.",
     },
+    appLock: {
+      title: "앱 잠금",
+      off: "꺼짐",
+      onImmediately: "켜짐: 앱을 나가면 바로 잠금",
+      onAfter: "켜짐: 앱을 나가고 {{duration}} 후 잠금",
+    },
     password: {
       changeTitle: "비밀번호 변경",
       setTitle: "로컬 비밀번호 설정",

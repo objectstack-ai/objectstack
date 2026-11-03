@@ -3586,6 +3586,12 @@ const en = {
       saved: 'Language preference updated.',
       readOnly: 'Your administrator manages the language for your account.',
     },
+    appLock: {
+      title: 'App lock',
+      off: 'Off',
+      onImmediately: 'On, locks as soon as you leave the app',
+      onAfter: 'On, locks {{duration}} after you leave the app',
+    },
     password: {
       changeTitle: 'Change Password',
       setTitle: 'Set Local Password',
