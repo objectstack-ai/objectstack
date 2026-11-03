@@ -102,8 +102,8 @@ describe('objectstack#29641 — the reader\'s read of the referenced record is R
     expect(unresolved(container), 'not the unresolved face as well').toHaveLength(0);
     expect(ds.findOne).toHaveBeenCalledTimes(1);
     expect(ds.findOne).toHaveBeenCalledWith(OBJECT, id);
-    // ⛔ No second read around the refusal: not the object definition, not a find.
-    expect(ds.getObjectSchema).not.toHaveBeenCalled();
+    // ⛔ No second record read around the refusal. (The object definition is
+    // the cell's own `useRefObjectSchema` read, made before and after alike.)
     expect(ds.find).not.toHaveBeenCalled();
   });
 
