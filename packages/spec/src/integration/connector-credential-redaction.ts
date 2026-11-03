@@ -72,12 +72,13 @@
  *     `providerConfig.spec` (`openapi`), and any other URL a provider keeps at
  *     an OBJECT depth of `providerConfig`; and the endpoints an instance-auth
  *     kind declares (`auth.tokenUrl`, `auth.authorizationUrl`, `auth.resource`)
- *     and any URL a kind declares later. The userinfo is judged on a string
- *     that, trimmed of its leading and trailing C0 control characters and
- *     spaces as a URL parser trims it, starts with `scheme://`, and is
- *     rewritten at that trimmed position; a credential query parameter is
- *     judged in any string. What a credential part is, and the walk that finds
- *     every string holding one, live in ONE place,
+ *     and any URL a kind declares later. A string is judged as a URL parser
+ *     reads it — trimmed of its leading and trailing C0 control characters
+ *     and spaces, with every ASCII tab, LF and CR deleted: the userinfo of an
+ *     authority that starts at `scheme://` or a scheme-relative `//`,
+ *     rewritten at the matching position of the authored string; and a
+ *     credential query parameter in any string. What a credential part is,
+ *     and the walk that finds every string holding one, live in ONE place,
  *     `./connector-url-credentials.ts`, which the write door's refinement
  *     runs too: an authored URL holding one is refused, so only a row stored
  *     before that refusal can carry one to this read.
@@ -187,7 +188,7 @@ export { CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES };
 /**
  * One URL with its userinfo and credential query parameters removed; the input
  * when there is none. Each half is the write door's own judgement applied: the
- * userinfo is removed where the write door judged it, on the trimmed span
+ * userinfo is removed where the write door judged it
  * ({@link connectorUrlWithoutUserinfo}), and the query pairs by the parse the
  * write door's `urlCredentialQueryParams` reads, in any string.
  */

@@ -397,9 +397,11 @@ export function redactableConfigKeys(driver: unknown): string[] {
  * The userinfo is located by the write door's own boundary parse
  * (`urlUserinfoSpan` in `driver/url-boundary.ts`, which `urlUserinfoPassword`
  * in `driver/common.zod.ts` reads too), so the read rewrites exactly what the
- * write refuses: the string is judged trimmed of its leading and trailing C0
- * control characters and spaces, as a URL parser reads it; a scheme-relative
- * `//` authority counts; the userinfo ends at the LAST `@` in the authority —
+ * write refuses: the string is judged as a URL parser reads it — trimmed of
+ * its leading and trailing C0 control characters and spaces, with every ASCII
+ * tab, LF and CR deleted — and rewritten at the matching offsets of the
+ * authored string; a scheme-relative `//` authority counts; the userinfo ends
+ * at the LAST `@` in the authority —
  * a lazier boundary stopping at the first `@` would split
  * `postgres://u:p@ss@host/db` after `p`, leave `ss@host` in place, and publish
  * a fragment of the password while looking redacted (such a URL is malformed —
@@ -415,10 +417,8 @@ export function redactableConfigKeys(driver: unknown): string[] {
  */
 export function redactUrlPassword(value: string): string {
   const span = urlUserinfoSpan(value);
-  if (span === undefined) return value;
-  const colon = value.indexOf(':', span.start);
-  if (colon === -1 || colon >= span.end) return value;
-  return `${value.slice(0, colon)}${value.slice(span.end)}`;
+  if (span === undefined || span.colon === -1) return value;
+  return `${value.slice(0, span.colon)}${value.slice(span.end)}`;
 }
 
 /**
@@ -430,9 +430,11 @@ export function redactUrlPassword(value: string): string {
  * `credentialQueryParamOf` (`driver/common.zod.ts`), so the two doors share
  * ONE boundary definition instead of the comment-level alignment the userinfo
  * pair needed while they lived in different packages. Consequences it
- * inherits: names match case-insensitively on the percent-decoded key, and an
- * EMPTY value carries no secret and is left in place (the query twin of
- * `user:@host`, which `redactUrlPassword` also leaves).
+ * inherits: every ASCII tab, LF and CR is deleted from a pair before it is
+ * read, as a URL parser deletes them; names match case-insensitively on the
+ * percent-decoded key; and an EMPTY value carries no secret and is left in
+ * place (the query twin of `user:@host`, which `redactUrlPassword` also
+ * leaves).
  *
  * The whole pair is removed rather than masked: a masked token would
  * round-trip through the wizard as a literal new credential and then be

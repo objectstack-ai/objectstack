@@ -25,10 +25,12 @@
  * ## The credential parts
  *
  *  - **the userinfo**, whole: `https://user:pass@host`, and `https://<token>@host`,
- *    the form several HTTP APIs read as a token. Judged on the string trimmed
- *    of its leading and trailing C0 control characters and spaces
- *    (`urlTrimmedBounds`, `data/driver/url-boundary.ts`) — where a URL parser
- *    reads it — when that trimmed string starts with `scheme://`;
+ *    the form several HTTP APIs read as a token. Located by `urlUserinfoSpan`
+ *    (`data/driver/url-boundary.ts`), the one userinfo grammar the datasource
+ *    doors read too: on the string as a URL parser reads it — trimmed of its
+ *    leading and trailing C0 control characters and spaces, with every ASCII
+ *    tab, LF and CR deleted — whose authority starts at `scheme://` or a
+ *    scheme-relative `//`;
  *  - **each credential query parameter** with a non-empty value, in ANY
  *    judged string, whether or not it starts with a scheme: the names in
  *    {@link CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES}, plus the
@@ -36,8 +38,9 @@
  *    `urlCredentialQueryParams` (`data/driver/common.zod.ts`), the single
  *    value-level parse the datasource doors run too, and a pair is judged by
  *    `credentialQueryParamOf` beside it: the query runs from the first `?` to
- *    the fragment, names match case-insensitively on the percent-decoded key,
- *    and an empty value carries nothing.
+ *    the fragment, every ASCII tab, LF and CR is deleted from a pair before it
+ *    is read, names match case-insensitively on the percent-decoded key, and
+ *    an empty value carries nothing.
  *
  * ## One traversal, two doors
  *
@@ -52,7 +55,7 @@
  */
 
 import { CREDENTIAL_URL_QUERY_PARAM_NAMES, urlCredentialQueryParams } from '../data/driver/common.zod';
-import { urlTrimmedBounds } from '../data/driver/url-boundary';
+import { urlUserinfoSpan } from '../data/driver/url-boundary';
 
 /**
  * The header and environment maps a provider sends upstream — withheld WHOLE by
@@ -96,28 +99,17 @@ export const CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES: readonly string[] = Obj
 ]);
 
 /**
- * `scheme://userinfo@` — the whole userinfo. Every class excludes `/?#`, so the
- * `@` must sit in the authority; the greedy class backtracks to the LAST `@`
- * before the path, the userinfo boundary RFC 3986 defines. Run on the trimmed
- * span only ({@link connectorUrlWithoutUserinfo}).
- */
-const URL_USERINFO_RE = /^([a-z][a-z0-9+.\-]*:\/\/)[^/?#]*@/i;
-
-/**
- * `value` with its userinfo removed, or `value` itself when it holds none —
- * the userinfo half's ONE judgement, which the write door asks (does this
- * change the value?) and the read redactor applies, so the read rewrites
- * exactly what the write refuses. The userinfo is judged on the span a URL
- * parser reads — `value` trimmed of its leading and trailing C0 control
- * characters and spaces (`urlTrimmedBounds`) — and removed there, every
- * other character of `value`, the surrounding ones included, kept byte for
- * byte.
+ * `value` with its whole userinfo and the `@` that ends it removed, or `value`
+ * itself when it holds none — the userinfo half's ONE judgement, which the
+ * write door asks (does this change the value?) and the read redactor applies,
+ * so the read rewrites exactly what the write refuses. The userinfo is located
+ * by `urlUserinfoSpan` on the string as a URL parser reads it, and removed at
+ * the matching offsets of `value`: every other character, the surrounding and
+ * the parser-deleted ones included, is kept byte for byte.
  */
 export function connectorUrlWithoutUserinfo(value: string): string {
-  const [start, end] = urlTrimmedBounds(value);
-  const url = value.slice(start, end);
-  const rewritten = url.replace(URL_USERINFO_RE, '$1');
-  return rewritten === url ? value : `${value.slice(0, start)}${rewritten}${value.slice(end)}`;
+  const span = urlUserinfoSpan(value);
+  return span === undefined ? value : `${value.slice(0, span.start)}${value.slice(span.end + 1)}`;
 }
 
 const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
@@ -149,7 +141,7 @@ export interface ConnectorUrlCredentialParts {
 
 /**
  * The credential parts `value` holds, or `undefined` when it holds none: the
- * userinfo on the trimmed span ({@link connectorUrlWithoutUserinfo}), and the
+ * userinfo ({@link connectorUrlWithoutUserinfo}), and the
  * credential query parameters in any string, scheme or none (see the module
  * note).
  */

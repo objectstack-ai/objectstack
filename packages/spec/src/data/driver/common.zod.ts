@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { urlUserinfoSpan } from './url-boundary';
+import { urlUserinfoSpan, withoutAsciiTabOrNewline } from './url-boundary';
 
 /**
  * Shared building blocks for the per-driver `datasource.config` shapes.
@@ -196,9 +196,10 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
  * userinfo boundary parse the read-path redactor (`redactUrlPassword` in this
  * package's `data/datasource-credential-redaction.ts`) rewrites at too, so the
  * write door refuses precisely the material the read door redacts: RFC 3986's
- * authority and last-`@` boundaries, read on the string trimmed of its
- * leading and trailing C0 control characters and spaces, as a URL parser
- * reads it (why WHATWG parsing itself is refused is on that parse).
+ * authority and last-`@` boundaries, read on the string as a URL parser reads
+ * it — trimmed of its leading and trailing C0 control characters and spaces,
+ * with every ASCII tab, LF and CR deleted — and the userinfo answered is that
+ * cleaned text (why WHATWG parsing itself is refused is on that parse).
  *
  * A string with no `//` (sqlite/turso `file:` paths, `:memory:`) has no
  * authority and answers `undefined`. The FIRST `:` inside the returned
@@ -206,8 +207,7 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
  * accessors, not here.
  */
 function urlUserinfo(value: string): string | undefined {
-  const span = urlUserinfoSpan(value);
-  return span === undefined ? undefined : value.slice(span.start, span.end);
+  return urlUserinfoSpan(value)?.userinfo;
 }
 
 /**
@@ -619,6 +619,9 @@ function decodeQueryKey(raw: string): string {
  * `URLSearchParams` — what `pg-connection-string` reads — draws the same
  * lines):
  *
+ *  - every ASCII tab, LF and CR is deleted from the pair before it is read,
+ *    as a URL parser deletes them from the whole URL (`url-boundary.ts`), so a
+ *    name is judged as the client reads it;
  *  - a pair with no `=`, or an empty value, carries NO secret (`?authToken=`
  *    is the query twin of `user:@host`, which #8082 accepts);
  *  - the key is percent-decoded before matching (`auth%54oken` IS `authToken`
@@ -630,9 +633,10 @@ export function credentialQueryParamOf(
   rawPair: string,
   params: readonly string[],
 ): string | undefined {
-  const splitIdx = rawPair.indexOf('=');
-  if (splitIdx < 0 || splitIdx === rawPair.length - 1) return undefined;
-  const key = decodeQueryKey(rawPair.slice(0, splitIdx)).toLowerCase();
+  const pair = withoutAsciiTabOrNewline(rawPair);
+  const splitIdx = pair.indexOf('=');
+  if (splitIdx < 0 || splitIdx === pair.length - 1) return undefined;
+  const key = decodeQueryKey(pair.slice(0, splitIdx)).toLowerCase();
   return params.find((param) => param.toLowerCase() === key);
 }
 
