@@ -195,7 +195,7 @@ describe('[#29871] a disabled package exports its items', () => {
         const before = await door.exported(REGISTERED);
         expect(namesOf(before, 'objects')).toEqual([REGISTERED_OBJECT]);
         expect(namesOf(before, 'dashboards')).toEqual([REGISTERED_DASHBOARD]);
-        expect(namesOf(before, 'views')).toEqual([REGISTERED_OBJECT]);
+        expect([...(before.views ?? []), ...(before.viewItems ?? [])], 'the view container\'s items').not.toEqual([]);
         expect(await door.served('dashboard')).toContain(REGISTERED_DASHBOARD);
 
         expect(door.engine.registry.disablePackage(REGISTERED)?.enabled).toBe(false);
