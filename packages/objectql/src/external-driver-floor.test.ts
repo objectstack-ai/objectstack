@@ -14,8 +14,10 @@ import { describe, it, expect } from 'vitest';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { ObjectQL } from './engine';
+import { EXTERNAL_ROW_CAP_CEILING } from '@objectstack/spec/data';
 import {
   EXTERNAL_ROW_CAP, ExternalReadRefusedError, ExternalRowCapExceededError, ExternalWriteRefusedError,
+  resolveExternalRowCap,
 } from './external-driver-errors.js';
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 import { isExternalDriverFloor, needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';
@@ -66,6 +68,7 @@ function makeEngine(opts: {
   schemaMode?: 'managed' | 'external' | 'validate-only';
   extra?: Record<string, unknown>;
   order?: 'driver-first' | 'def-first';
+  rowCap?: unknown;
 } = {}) {
   const engine = new ObjectQL();
   const remote = remoteDriver('tree', opts.rows ?? TREE_ROWS, opts.extra);
@@ -73,7 +76,7 @@ function makeEngine(opts: {
     name: 'tree',
     driver: opts.driverId ?? 'spike_tree',
     schemaMode: opts.schemaMode ?? 'external',
-    external: { allowWrites: true },
+    external: { allowWrites: true, ...(opts.rowCap !== undefined ? { rowCap: opts.rowCap as number } : {}) },
   };
   if (opts.order === 'def-first') {
     engine.registerDatasourceDef(def);
@@ -233,6 +236,62 @@ describe('[#27277] reads: the engine applies the query', () => {
     expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
     expect(err.kind).toBe('remote');
     expect(err.message).not.toContain('tree.internal');
+  });
+});
+
+describe('[#29762] the datasource\'s external.rowCap', () => {
+  const leaves = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `r${i}`, kind: 'leaf' }));
+
+  it('is the cap the floor sends and enforces, on every read', async () => {
+    const { engine, remote } = makeEngine({ rows: leaves(2500), rowCap: 2500 });
+    expect(await engine.count('tree_node')).toBe(2500);
+    expect(remote.sent.at(-1)!.limit).toBe(2501);
+    const page = await engine.find('tree_node', { orderBy: [{ field: 'id', order: 'asc' }], limit: 3, offset: 2000 });
+    expect(page).toHaveLength(3);
+  });
+
+  it('one row past it is refused 422, the refusal naming the cap and the key', async () => {
+    const { engine } = makeEngine({ rows: leaves(2501), rowCap: 2500 });
+    const err = await engine.find('tree_node', { limit: 5 }).then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(ExternalRowCapExceededError);
+    expect(err.code).toBe('EXTERNAL_ROW_CAP_EXCEEDED');
+    expect(err.status).toBe(422);
+    expect(err.details).toEqual({ datasource: 'tree', object: 'tree_node', cap: 2500 });
+    expect(err.message).toContain('external.rowCap');
+  });
+
+  it('a cap below the default is honoured too', async () => {
+    const { engine, remote } = makeEngine({ rows: leaves(11), rowCap: 10 });
+    const err = await engine.count('tree_node').then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(ExternalRowCapExceededError);
+    expect(remote.sent.at(-1)!.limit).toBe(11);
+  });
+
+  it('a redefinition applies to the next read without re-wrapping the driver', async () => {
+    const { engine, remote } = makeEngine({ rows: leaves(1500) });
+    const held = engine.getDriverByName('tree');
+    const before = await engine.count('tree_node').then(() => undefined, (e) => e);
+    expect(before).toBeInstanceOf(ExternalRowCapExceededError);
+    engine.registerDatasourceDef({ name: 'tree', driver: 'spike_tree', schemaMode: 'external', external: { rowCap: 2000 } });
+    expect(engine.getDriverByName('tree')).toBe(held);
+    expect(await engine.count('tree_node')).toBe(1500);
+    expect(remote.sent.at(-1)!.limit).toBe(2001);
+  });
+
+  it('a def that reached the engine unparsed: above the ceiling is held at it, anything else is the default', () => {
+    expect(resolveExternalRowCap(undefined)).toBe(EXTERNAL_ROW_CAP);
+    expect(resolveExternalRowCap(5000)).toBe(5000);
+    expect(resolveExternalRowCap(EXTERNAL_ROW_CAP_CEILING)).toBe(EXTERNAL_ROW_CAP_CEILING);
+    expect(resolveExternalRowCap(EXTERNAL_ROW_CAP_CEILING + 1)).toBe(EXTERNAL_ROW_CAP_CEILING);
+    for (const bad of [0, -5, 1.5, Number.NaN, '5000', null]) {
+      expect(resolveExternalRowCap(bad), String(bad)).toBe(EXTERNAL_ROW_CAP);
+    }
+  });
+
+  it('at the ceiling the refusal offers no higher cap', async () => {
+    const err = new ExternalRowCapExceededError('tree', 'tree_node', EXTERNAL_ROW_CAP_CEILING);
+    expect(err.message).not.toContain('external.rowCap');
+    expect(err.message).toContain('Narrow the filter');
   });
 });
 

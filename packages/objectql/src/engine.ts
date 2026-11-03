@@ -4733,6 +4733,12 @@ export interface DatasourceDef {
      * schema mode.
      */
     credentialsRef?: string;
+    /**
+     * [#29762] The datasource's plugin-driver row cap (`external.rowCap`).
+     * Read by the floor on every read (`resolveExternalRowCap`), so a
+     * redefinition takes effect without re-wrapping the driver.
+     */
+    rowCap?: number;
   };
 }
 
@@ -9941,6 +9947,9 @@ export class ObjectQL implements IObjectQLEngine {
       this.drivers.set(name, createExternalDriverFloor(current, {
         datasource: name,
         fieldsOf: (object) => this._registry.getObject(object)?.fields,
+        // [#29762] Read from the def held NOW, on every read: a redefinition
+        // that keeps the floor returns above without re-wrapping the driver.
+        rowCap: () => this.datasourceDefs.get(name)?.external?.rowCap,
         logger: this.logger,
       }));
       this.logger.info('Datasource served by a plugin driver: the engine applies each query in memory', {

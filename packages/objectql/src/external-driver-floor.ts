@@ -26,9 +26,11 @@
  * ## What it does
  *
  * - `find`, `findOne`, `count`: the driver is sent `where` and `orderBy` (it
- *   may push either down) and `limit` {@link EXTERNAL_ROW_CAP} + 1 — never
- *   `offset` or `fields`, which the engine applies after it filters. More than
- *   {@link EXTERNAL_ROW_CAP} rows back ⇒ {@link ExternalRowCapExceededError};
+ *   may push either down) and `limit` cap + 1 — never `offset` or `fields`,
+ *   which the engine applies after it filters. The cap is the datasource's
+ *   `external.rowCap` (#29762), else `EXTERNAL_ROW_CAP`, never above
+ *   `EXTERNAL_ROW_CAP_CEILING` ({@link resolveExternalRowCap}). More than
+ *   cap rows back ⇒ {@link ExternalRowCapExceededError};
  *   otherwise the engine applies the whole query to the rows
  *   (`applyDriverQueryInMemory`), so a driver that returned every row still
  *   answers the right subset. `findOne` is that read with `limit: 1`, `count`
@@ -66,11 +68,11 @@ import { declaredFieldClasses, declaredJsonStoredFields } from './having-filter.
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 import {
   EXTERNAL_READ_REFUSED_STATUSES,
-  EXTERNAL_ROW_CAP,
   EXTERNAL_WRITE_REFUSED_STATUSES,
   ExternalReadRefusedError,
   ExternalRowCapExceededError,
   ExternalWriteRefusedError,
+  resolveExternalRowCap,
   type ExternalWriteOperation,
 } from './external-driver-errors.js';
 
@@ -90,6 +92,12 @@ export interface ExternalDriverFloorHost {
   datasource: string;
   /** The object's declared `fields` record, for its comparand classes; `undefined` when unknown. */
   fieldsOf(object: string): unknown;
+  /**
+   * [#29762] The datasource's `external.rowCap` as the engine holds it NOW —
+   * asked on every read, read through {@link resolveExternalRowCap}. Absent
+   * (or answering `undefined`): the default cap.
+   */
+  rowCap?(): unknown;
   /** Where a remote failure's cause is written: the wire answer withholds it. */
   logger: { warn(message: string, meta?: Record<string, unknown>): void };
 }
@@ -191,12 +199,13 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
 
   const readCapped = async (object: string, query: DriverQuery | undefined, options: unknown) => {
     assertDriverWhereEvaluableInMemory(query?.where);
+    const cap = resolveExternalRowCap(host.rowCap?.());
     const routed = (query as { object?: unknown } | undefined)?.object;
     const sent = {
       ...(routed !== undefined ? { object: routed } : {}),
       ...(query?.where !== undefined ? { where: query.where } : {}),
       ...(query?.orderBy !== undefined ? { orderBy: query.orderBy } : {}),
-      limit: EXTERNAL_ROW_CAP + 1,
+      limit: cap + 1,
     } as DriverQuery;
     let rows: unknown;
     try {
@@ -211,7 +220,7 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
     if (!Array.isArray(rows)) {
       throw remoteFailure(object, 'find', new Error(`find answered ${typeof rows}, not an array of rows`));
     }
-    if (rows.length > EXTERNAL_ROW_CAP) throw new ExternalRowCapExceededError(host.datasource, object);
+    if (rows.length > cap) throw new ExternalRowCapExceededError(host.datasource, object, cap);
     return rows as Record<string, unknown>[];
   };
 
