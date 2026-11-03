@@ -1270,7 +1270,8 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + 'author did not write, on a draft save too: one `warning` with rule '
     + '`withheld-key-dropped` for each stored position it dropped because the '
     + 'type\'s read redactor withholds it and marks it not carried forward '
-    + '(a connector\'s undeclared `auth` keys, which no door accepts and nothing '
+    + '(a connector\'s undeclared `auth` keys and the undeclared keys of its '
+    + '`retryConfig`, which no door accepts and nothing '
     + 'reads). Its `path` names where the value sat at rest, in the same '
     + 'spelling (`connectors[0].auth.token`).',
   ),

@@ -33,6 +33,8 @@
  * `protocol.unknown-datasource-refusal.test.ts`, kept local, with a registry
  * that answers `getObject` over a mutable set of registered objects.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';

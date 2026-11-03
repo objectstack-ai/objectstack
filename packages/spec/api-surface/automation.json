@@ -179,6 +179,7 @@
     "FlowRegionArity (type)",
     "FlowRegionParsed (type)",
     "FlowRegionSchema (const)",
+    "FlowRegionShapeError (class)",
     "FlowRegionSlotDecl (interface)",
     "FlowRunGateSummary (type)",
     "FlowRunGateSummarySchema (const)",

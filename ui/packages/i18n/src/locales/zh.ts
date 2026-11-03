@@ -3080,6 +3080,12 @@ const zh = {
       saved: '语言偏好已更新。',
       readOnly: '您账户的语言由管理员管理。',
     },
+    appLock: {
+      title: "应用锁",
+      off: "已关闭",
+      onImmediately: "已开启，离开应用后立即锁定",
+      onAfter: "已开启，离开应用{{duration}}后锁定",
+    },
     password: {
       changeTitle: '修改密码',
       setTitle: '设置本地密码',
@@ -3438,6 +3444,7 @@ const zh = {
       draftedByMcp: '包含由 MCP 客户端起草的更改',
       detailChangedKeys: '其他变更：',
       detailNewKeys: '包含：',
+      detailNewItem: '发布后将新增此项。',
       generatedGroup: '平台生成（{{n}}）',
       confirmNote: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
       confirmNote_one: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
@@ -3488,6 +3495,9 @@ const zh = {
         email_template: '邮件模板 {{count}}',
         email_template_one: '邮件模板 {{count}}',
         email_template_other: '邮件模板 {{count}}',
+        object_extension: '对象扩展 {{count}}',
+        object_extension_one: '对象扩展 {{count}}',
+        object_extension_other: '对象扩展 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
@@ -4173,27 +4183,12 @@ const zh = {
     buyCredits: '购买额度包',
     upgradePlan: '升级方案',
   },
-  planTier: {
-    teamAndUp: '团队版起',
-  },
   environment: {
     setUpProduction: '创建你的生产环境',
-    addDevelopment: '新建开发环境',
-    developmentLocked: '开发环境 · {{tier}}',
     entitlement: {
       productionLimitTitle: '你已经有生产环境了',
       productionLimitBody:
         '每个组织只包含一个生产环境。如果还需要，可以新建一个组织，或者联系我们了解企业版方案。',
-      planLockedTitle: '开发环境是付费功能',
-      planLockedBody:
-        '{{plan}}包含一个生产环境。升级后即可添加开发环境 —— 先在开发环境里搭建，确认无误再发布到生产环境。',
-      limitTitle: '开发环境数量已达上限',
-      limitBody: '容量随 AI 席位增长。增加一个 AI 席位，或归档一个不再使用的开发环境来腾出名额。',
-      limitBodyWithCount:
-        '开发环境已使用 {{used}}/{{limit}} 个。容量随 AI 席位增长 —— 增加一个 AI 席位，或归档一个不再使用的开发环境来腾出名额。',
-      freePlan: '免费版',
-      namedPlan: '{{plan}} 版',
-      upgradeCta: '升级套餐',
       contactSalesCta: '联系销售',
     },
   },

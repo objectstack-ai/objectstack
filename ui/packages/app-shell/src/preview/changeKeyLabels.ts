@@ -17,13 +17,19 @@
  * A property the form declares no row for has no label: the drill-in shows its
  * key, as before.
  *
- * Not translated: the spec authors these forms in English, and the inspector's
- * own locale overlays live in the metadata-admin string table, which this
- * panel's EAGER graph must not carry (see `computeChangeDetail`).
+ * Translated as the inspector translates its rows (objectstack#29704): the
+ * form passes through the inspector's own locale overlay
+ * (`localizeMetadataForm`), and a row it leaves unlabelled reads the raw
+ * schema-field label `SchemaForm` falls back to (`translateSchemaFieldLabel`),
+ * then its prettified machine name. Both come from modules that carry no
+ * string table, so this panel's EAGER graph stays off the metadata-admin one
+ * (see `computeChangeDetail`).
  */
 
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { prettifyFieldName } from '../views/metadata-admin/field-source-label.js';
+import { localizeMetadataForm } from '../views/metadata-admin/metadata-form-i18n.js';
+import { translateSchemaFieldLabel } from '../views/metadata-admin/schema-field-label.js';
 
 interface FormRow {
   field: string;
@@ -35,11 +41,18 @@ function asRow(row: FormRow | string): FormRow {
   return typeof row === 'string' ? { field: row } : row;
 }
 
-/** Every top-level row of `type`'s form, across all of its sections. */
-function formRootRows(type: string): FormRow[] {
-  const form = Object.prototype.hasOwnProperty.call(METADATA_FORM_REGISTRY, type)
-    ? (METADATA_FORM_REGISTRY[type] as { sections?: ReadonlyArray<{ fields?: ReadonlyArray<FormRow | string> }> })
+type FormShape = { sections?: ReadonlyArray<{ fields?: ReadonlyArray<FormRow | string> }> };
+
+/**
+ * Every top-level row of `type`'s form, across all of its sections, with the
+ * inspector's overlay for `locale` applied (the same form object when it has
+ * none for that locale).
+ */
+function formRootRows(type: string, locale: string | undefined): FormRow[] {
+  const declared = Object.prototype.hasOwnProperty.call(METADATA_FORM_REGISTRY, type)
+    ? (METADATA_FORM_REGISTRY[type] as Record<string, unknown>)
     : undefined;
+  const form = localizeMetadataForm(declared, type, locale) as FormShape | undefined;
   return (form?.sections ?? []).flatMap((section) => (section.fields ?? []).map(asRow));
 }
 
@@ -50,9 +63,9 @@ function formRootRows(type: string): FormRow[] {
  * view form against that body (`draft.config`), so `config.KEY` is the form's
  * top-level `KEY` there.
  */
-function formRowAt(type: string, path: readonly string[]): FormRow | undefined {
+function formRowAt(type: string, path: readonly string[], locale: string | undefined): FormRow | undefined {
   const segments = type === 'view' && path[0] === 'config' && path.length > 1 ? path.slice(1) : path;
-  let rows: FormRow[] = formRootRows(type);
+  let rows: FormRow[] = formRootRows(type, locale);
   let row: FormRow | undefined;
   for (const segment of segments) {
     row = rows.find((r) => r.field === segment);
@@ -64,14 +77,17 @@ function formRowAt(type: string, path: readonly string[]): FormRow | undefined {
 
 /**
  * The label `type`'s form gives the property at dot path `key`, as its form
- * row shows it; `undefined` when the form has no row there.
+ * row shows it in `locale` (the spec's English when none is given);
+ * `undefined` when the form has no row there.
  */
-export function formKeyLabel(type: string, key: string): string | undefined {
+export function formKeyLabel(type: string, key: string, locale?: string): string | undefined {
   const path = key.split('.');
-  const row = formRowAt(type, path);
+  const row = formRowAt(type, path, locale);
   if (!row) return undefined;
   const declared = typeof row.label === 'string' ? row.label.trim() : '';
-  return declared !== '' ? declared : prettifyFieldName(path[path.length - 1]!);
+  if (declared !== '') return declared;
+  const last = path[path.length - 1]!;
+  return translateSchemaFieldLabel(last, undefined, locale) ?? prettifyFieldName(last);
 }
 
 /**

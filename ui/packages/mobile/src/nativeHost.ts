@@ -80,6 +80,16 @@ export interface NativeSafeArea {
   right: number;
 }
 
+/**
+ * What `getAppLock()` resolves: the shell's app-lock setting on this device,
+ * read-only. The setting changes only on the shell's native settings screen.
+ */
+export interface NativeAppLock {
+  enabled: boolean;
+  /** Seconds in the background before the app locks; `0` locks as soon as it leaves. */
+  timeoutSeconds: number;
+}
+
 /** Options of `scan()`. */
 export interface NativeScanOptions {
   /**
@@ -137,7 +147,9 @@ export type NativeHostMethod =
   | 'showConnectionSwitcher'
   | 'pickImage'
   | 'openFile'
-  | 'share';
+  | 'share'
+  | 'getAppLock'
+  | 'openAppLockSettings';
 
 /** `window.ObjectStackNative`, as the shell's bridge contract declares it. */
 export interface ObjectStackNative {
@@ -191,6 +203,18 @@ export interface ObjectStackNative {
   openFile?(file: NativeFile): Promise<null>;
   /** Open the OS share sheet. Optional: feature-detect with `has('share')`. */
   share?(content: NativeShareContent): Promise<null>;
+  /**
+   * Read the app-lock setting. Read-only: no bridge method changes the lock.
+   * Optional: a shell older than the app lock does not carry it, so
+   * feature-detect with `has('getAppLock')`.
+   */
+  getAppLock?(): Promise<NativeAppLock>;
+  /**
+   * Open the shell's native app-lock settings screen, where a change asks for
+   * biometrics. Resolves `null` once the screen is opened, not when it closes.
+   * Optional: feature-detect with `has('openAppLockSettings')`.
+   */
+  openAppLockSettings?(): Promise<null>;
 
   /**
    * Event: the Console has painted its own UI, which may be a loading
@@ -365,6 +389,18 @@ export async function nativeFileFromBlob(blob: Blob, name: string): Promise<Nati
     name,
     mime: mime || 'application/octet-stream',
   };
+}
+
+/** The shell's app-lock setting. No event announces a change, so read it again when the page is shown. */
+export function nativeGetAppLock(): Promise<NativeCallResult<NativeAppLock>> {
+  // `callNative` calls this only once it has seen the method is a function.
+  return callNative('getAppLock', (host) => host.getAppLock!());
+}
+
+/** Open the shell's native app-lock settings screen. The Console never changes the lock itself. */
+export function nativeOpenAppLockSettings(): Promise<NativeCallResult<null>> {
+  // `callNative` calls this only once it has seen the method is a function.
+  return callNative('openAppLockSettings', (host) => host.openAppLockSettings!());
 }
 
 // ── Events ──────────────────────────────────────────────────────────────────
