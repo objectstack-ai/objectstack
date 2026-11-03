@@ -40,9 +40,9 @@
  *
  * One member is not a transcription but DECLARED AHEAD OF ITS PRODUCER
  * (ADR-0049), its describe opening `[PLANNED — not yet served]` until the
- * change that serves it drops the marker: the `nav` arm of
- * `GetPackageCustomizationsResponseSchema.contributions` (#27928). Its own
- * docblock says what is not served yet.
+ * change that serves it drops the marker: `PackageExportBundleSchema`, the
+ * whole-deployment export (#28914). Its own docblock says what is not served
+ * yet.
  */
 
 import { z } from 'zod';
