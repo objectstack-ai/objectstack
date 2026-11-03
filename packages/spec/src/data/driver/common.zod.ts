@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { urlUserinfoSpan } from './url-boundary';
 
 /**
  * Shared building blocks for the per-driver `datasource.config` shapes.
@@ -187,23 +188,17 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
 
 /**
  * The userinfo component of a URL-ish string, or `undefined` when the string
- * carries none — the ONE boundary parse behind both userinfo accessors
- * ({@link urlUserinfoPassword}, {@link urlUserinfoUsername}), deliberately
- * unexported so no caller can depend on a third reading of the grammar.
+ * carries none — what both userinfo accessors ({@link urlUserinfoPassword},
+ * {@link urlUserinfoUsername}) split, deliberately unexported so no caller can
+ * depend on a third reading of the grammar.
  *
- * Deliberately NOT `new URL()`: real DSNs take forms WHATWG parsing rejects or
- * mangles (postgres/mongo multi-host `user:pass@h1:5432,h2:5432/db` throws
- * `ERR_INVALID_URL`, bare `:memory:`, `file:` paths), and a parse that throws
- * on the exact inputs it must judge would fail open. The boundaries below are
- * RFC 3986's, and match the read-path redactor (`redactUrlPassword` in this
- * package's `data/datasource-credential-redaction.ts`, moved from
- * `service-datasource` by #8300) so the write door refuses precisely the
- * material the read door redacts:
- *
- *  - the authority is what follows `//` (scheme-relative included), up to the
- *    first `/`, `?` or `#` — a `:` or `@` in a path or query is never userinfo;
- *  - userinfo ends at the LAST `@` in the authority (a malformed literal `@`
- *    inside a password must not decide how much of it goes unjudged).
+ * The boundaries are `urlUserinfoSpan`'s (`./url-boundary.ts`), the ONE
+ * userinfo boundary parse the read-path redactor (`redactUrlPassword` in this
+ * package's `data/datasource-credential-redaction.ts`) rewrites at too, so the
+ * write door refuses precisely the material the read door redacts: RFC 3986's
+ * authority and last-`@` boundaries, read on the string trimmed of its
+ * leading and trailing C0 control characters and spaces, as a URL parser
+ * reads it (why WHATWG parsing itself is refused is on that parse).
  *
  * A string with no `//` (sqlite/turso `file:` paths, `:memory:`) has no
  * authority and answers `undefined`. The FIRST `:` inside the returned
@@ -211,14 +206,8 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
  * accessors, not here.
  */
 function urlUserinfo(value: string): string | undefined {
-  const scheme = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.exec(value);
-  if (!scheme) return undefined;
-  const rest = value.slice(scheme[0].length);
-  const end = rest.search(/[/?#]/);
-  const authority = end === -1 ? rest : rest.slice(0, end);
-  const at = authority.lastIndexOf('@');
-  if (at === -1) return undefined;
-  return authority.slice(0, at);
+  const span = urlUserinfoSpan(value);
+  return span === undefined ? undefined : value.slice(span.start, span.end);
 }
 
 /**
