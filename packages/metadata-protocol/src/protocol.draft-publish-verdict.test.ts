@@ -1141,8 +1141,10 @@ describe('[#29696] a flow read judges a stored legacy D2 row in its D2-converted
     /** The legacy fixture with a config key no conversion rewrites and the parse refuses. */
     const withUndeclaredKey = (name: string, filterKey: 'filters' | 'filter') => {
         const flow = fetchFlow(name, filterKey);
-        flow.nodes[1] = { ...flow.nodes[1]!, config: { ...flow.nodes[1]!.config, not_a_config_key: true } } as typeof flow.nodes[number];
-        return flow;
+        return {
+            ...flow,
+            nodes: flow.nodes.map((n) => (n.id === 'fetch' ? { ...n, config: { ...n.config, not_a_config_key: true } } : n)),
+        };
     };
 
     async function seeded(body: { name: string }) {
