@@ -291,7 +291,11 @@ async function expectLedgerSwitchAlone(): Promise<void> {
   const ledger = await within(header()).findByTestId('auto-ledger-switch', undefined, { timeout: 8000 });
   expect(ledger).toHaveAttribute('aria-checked', 'true');
   expect(within(header()).getAllByRole('switch')).toEqual([ledger]);
-  expect(header()).not.toHaveTextContent(t('engine.studio.auto.enabled', 'en'));
+  // The definition switch's own mark is its enable/disable title. Its word is
+  // no longer one: since objectstack#29729 a switched-on flow reads "Switched
+  // on" in the Status pill and on the ledger switch too (one word per state).
+  const definitionTitle = t('engine.studio.auto.disableTitle', 'en');
+  expect([...header().querySelectorAll('[title]')].some((el) => el.getAttribute('title')?.includes(definitionTitle))).toBe(false);
 }
 
 describe('Customize a read-only base’s flow into its pair (objectstack#28570)', () => {
