@@ -220,11 +220,7 @@ function stampWriter(opCtx: any, userId: unknown): void {
 }
 
 export interface DelegatedAdminGateDeps {
-  /**
-   * ObjectQL engine handle: system-context reads for lookups and the delegated
-   * walk's pre-images; the organization branch reads its removal pre-image under
-   * the caller's own context ({@link DelegatedAdminGate.organizationTargets}).
-   */
+  /** ObjectQL engine handle (pre-images and lookups). */
   ql: any;
   /** Shared permission-set resolution (same path as the CRUD middleware). */
   resolveSets: (context: any) => Promise<PermissionSet[]>;
@@ -843,9 +839,6 @@ export class DelegatedAdminGate {
    * stays. A read refusal or a store fault propagates as raised: an outage is
    * neither an answer nor a refusal, and the by-id write door answers a caller
    * the read door refuses with that refusal.
-   *
-   * The organization branch only: the delegated walk reads its pre-image through
-   * {@link materializeTargets}.
    */
   private async organizationTargets(opCtx: any): Promise<Array<{ next: any | null; prev: any | null }>> {
     if (opCtx.operation === 'insert') return rowsOf(opCtx).map((r) => ({ next: r, prev: null }));
