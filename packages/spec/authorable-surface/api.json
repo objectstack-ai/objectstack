@@ -796,6 +796,7 @@
     "api/GetMetaItemLayeredResponse:_diagnostics",
     "api/GetMetaItemLayeredResponse:code",
     "api/GetMetaItemLayeredResponse:deletable",
+    "api/GetMetaItemLayeredResponse:draft",
     "api/GetMetaItemLayeredResponse:editable",
     "api/GetMetaItemLayeredResponse:effective",
     "api/GetMetaItemLayeredResponse:lock",
