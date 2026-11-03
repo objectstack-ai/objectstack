@@ -94,6 +94,15 @@ export {
 // (objectui#4109 / PR #4279), which is the "two readers of one prose contract"
 // shape #3367 / #3842 record. `./utils/appRoute` is the contract.
 export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './utils/index.js';
+// objectstack#29750 — the inbox's notification-link resolver, and the table of
+// console routes served outside an app. The console's native-shell navigate
+// listener and its unmatched-route guard host an app-relative push route
+// through the SAME resolver every inbox door uses, so a push tap and the inbox
+// row open the same screen; re-deriving either here would be a second reader
+// of one contract.
+export { resolveNotificationTarget } from './utils/index.js';
+export type { NotificationTarget } from './utils/index.js';
+export { CONSOLE_ROOT_SEGMENTS } from './utils/hostInConsolePath.js';
 // objectui#5178 — the Approval Center's timeline reads the same `via_override`
 // verdict the record page's approval panel does.
 export {
