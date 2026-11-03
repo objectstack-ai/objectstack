@@ -27,13 +27,23 @@
  *  - ⑤ the mail's language: the recipient's stored locale, then the
  *    deployment default — never the requester's browser language;
  *  - ⑥ a send that fails after the decision still answers the success (the
- *    accepted residual) and says so at error level.
+ *    accepted residual) and says so at error level;
+ *  - ⑦ a sign-up answers without waiting for any mail send, whether or not
+ *    the address already has an account: with `sendOnSignUp` off and on, both
+ *    kinds of address get the same answer while every send is still open, and
+ *    the mails still go out after the response; a verification send that fails
+ *    is logged on the server and answered like one that is sent; the
+ *    server-side sign-up call (no `Request`) still awaits its sends, and the
+ *    `/send-verification-email` resend still reports a send that failed.
+ *
+ * The mail of ①, ⑤ and ⑥ is sent after the response, so those cases wait for
+ * it to arrive before reading it.
  *
  * Real engine for the same reason the sibling file gives: the uniqueness probe
  * and the row the vendor finds both live below any double.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
@@ -246,7 +256,7 @@ describe('[#25060] ① an existing address gets the success shape plus the mail'
       const fresh = await signUp(manager, 'dave@corp.example');
       expect(fresh.status, `a new registrant was refused: ${await fresh.clone().text()}`).toBeLessThan(300);
       const freshShape = await shapeOf(fresh);
-      expect(email.sent.map((s) => s.template)).toEqual(['auth.verify_email']);
+      await vi.waitFor(() => expect(email.sent.map((s) => s.template)).toEqual(['auth.verify_email']));
       email.sent.length = 0;
       errors.length = 0;
       warnings.length = 0;
@@ -259,6 +269,10 @@ describe('[#25060] ① an existing address gets the success shape plus the mail'
       expect(existingShape).toEqual(freshShape);
       expect(existingShape.token).toBeNull();
       expect(existingShape.headerNames).not.toContain('set-cookie');
+
+      // The mail goes out after the response; everything below reads the
+      // state once it has.
+      await vi.waitFor(() => expect(email.sent).toHaveLength(1));
 
       // Nothing was written for the existing address: no row, no credential, no session.
       expect(inserts).toEqual([]);
@@ -301,7 +315,8 @@ describe('[#25060] ① an existing address gets the success shape plus the mail'
     const existing = await signUp(manager, EXISTING);
 
     expect(await shapeOf(existing)).toEqual(await shapeOf(fresh));
-    expect(email.sent.filter((s) => s.template === NOTICE).map((s) => s.to.address)).toEqual([EXISTING]);
+    await vi.waitFor(() =>
+      expect(email.sent.filter((s) => s.template === NOTICE).map((s) => s.to.address)).toEqual([EXISTING]));
   });
 });
 
@@ -330,7 +345,7 @@ describe('[#25060] ② no live transport keeps the refusal', () => {
     email.state.live = true;
     const live = await signUp(manager, EXISTING);
     expect(live.status, await live.clone().text()).toBeLessThan(300);
-    expect(email.sent.map((s) => s.template)).toEqual([NOTICE]);
+    await vi.waitFor(() => expect(email.sent.map((s) => s.template)).toEqual([NOTICE]));
     email.state.live = false;
     await expectRefused(await signUp(manager, EXISTING));
     expect(email.sent).toHaveLength(1);
@@ -391,7 +406,7 @@ describe('[#25060] ⑤ the mail is in the recipient\'s language', () => {
 
     await signUp(manager, EXISTING, { 'accept-language': 'es-ES,es;q=0.9' });
 
-    expect(email.sent.map((s) => [s.template, s.locale])).toEqual([[NOTICE, 'ja-JP']]);
+    await vi.waitFor(() => expect(email.sent.map((s) => [s.template, s.locale])).toEqual([[NOTICE, 'ja-JP']]));
   });
 
   it('with no stored locale it is the deployment default — never the requester\'s Accept-Language', async () => {
@@ -402,7 +417,8 @@ describe('[#25060] ⑤ the mail is in the recipient\'s language', () => {
 
     await signUp(manager, 'bob@corp.example', { 'accept-language': 'es-ES,es;q=0.9' });
 
-    expect(email.sent.map((s) => [s.template, s.to.address, s.locale])).toEqual([[NOTICE, 'bob@corp.example', 'zh-CN']]);
+    await vi.waitFor(() =>
+      expect(email.sent.map((s) => [s.template, s.to.address, s.locale])).toEqual([[NOTICE, 'bob@corp.example', 'zh-CN']]));
   });
 });
 
@@ -416,8 +432,139 @@ describe('[#25060] ⑥ a send that fails after the decision', () => {
     const res = await signUp(manager, EXISTING);
 
     expect(res.status, await res.clone().text()).toBeLessThan(300);
+    await vi.waitFor(() => expect(errors.filter((l) => l.includes('could NOT be sent'))).toHaveLength(1));
     expect(email.sent.map((s) => s.template)).toEqual([NOTICE]);
     const named = errors.filter((l) => l.includes('could NOT be sent'));
     expect(named, `logged: ${JSON.stringify(errors)}`).toHaveLength(1);
+  });
+});
+
+describe('⑦ a sign-up answers without waiting for any mail send, whether or not the address already has an account', () => {
+  const NEW = 'dave@corp.example';
+  const VERIFY = 'auth.verify_email';
+
+  /** A promise the case settles by hand. */
+  function deferred(): { promise: Promise<void>; resolve: () => void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  /**
+   * A live email service whose every send waits on `gate` and then answers
+   * `status()`; it records each send it settled, as `[template, address]`.
+   */
+  function gatedEmail(gate: () => Promise<void>, status: () => 'sent' | 'failed' = () => 'sent') {
+    const settled: Array<[string, string]> = [];
+    const service = {
+      async send() { return { id: 'e', status: 'sent' }; },
+      async sendTemplate(input: any) {
+        try {
+          await gate();
+          return status() === 'failed'
+            ? { id: 'e', status: 'failed', error: 'smtp refused (simulated)' }
+            : { id: 'e', status: 'sent' };
+        } finally {
+          settled.push([input.template, input.to.address]);
+        }
+      },
+      isConfigured: () => true,
+    };
+    return { settled, service };
+  }
+
+  const sorted = (pairs: ReadonlyArray<readonly [string, string]>) => pairs.map((p) => p.join(' ')).sort();
+
+  for (const [label, sendOnSignUp, mails] of [
+    ['sendOnSignUp off', false, [[NOTICE, EXISTING]]],
+    ['sendOnSignUp on', true, [[VERIFY, NEW], [NOTICE, EXISTING]]],
+  ] as const) {
+    it(`${label}: both kinds of address get the same answer while every send is still open, and the mail still goes out`, async () => {
+      const engine = await bootEngine();
+      const open = deferred();
+      const email = gatedEmail(() => open.promise);
+      const { errors, logger } = recordingLogger();
+      const manager = makeManager(engine, email, { ...OPEN, emailVerification: { sendOnSignUp }, logger });
+
+      const forNew = await signUp(manager, NEW);
+      const forExisting = await signUp(manager, EXISTING);
+
+      expect(forNew.status, await forNew.clone().text()).toBe(200);
+      expect(await shapeOf(forExisting)).toEqual(await shapeOf(forNew));
+      // Both answers arrived while every send was still open.
+      expect(email.settled).toEqual([]);
+
+      // The control: the mail still goes out, after the response.
+      open.resolve();
+      await vi.waitFor(() => expect(sorted(email.settled)).toEqual(sorted(mails)));
+      expect(errors, `logged: ${JSON.stringify(errors)}`).toEqual([]);
+    });
+  }
+
+  it('a verification send that fails is logged on the server at error, and the sign-up answers as one whose mail is sent', async () => {
+    const failingLog = recordingLogger();
+    const failing = makeManager(await bootEngine(), gatedEmail(async () => {}, () => 'failed'), {
+      ...OPEN,
+      emailVerification: { sendOnSignUp: true },
+      logger: failingLog.logger,
+    });
+    const sending = makeManager(await bootEngine(), gatedEmail(async () => {}), {
+      ...OPEN,
+      emailVerification: { sendOnSignUp: true },
+    });
+
+    const throughFailing = await signUp(failing, NEW);
+    const throughSending = await signUp(sending, NEW);
+
+    expect(await shapeOf(throughFailing)).toEqual(await shapeOf(throughSending));
+    await vi.waitFor(() => expect(failingLog.errors).toHaveLength(1));
+    expect(failingLog.errors[0]).toContain('verification email was not delivered');
+    expect(failingLog.errors[0]).toContain('smtp refused (simulated)');
+  });
+
+  it('the server-side sign-up call (no Request) still awaits its sends', async () => {
+    const engine = await bootEngine();
+    const email = gatedEmail(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    const manager = makeManager(engine, email, { ...OPEN, emailVerification: { sendOnSignUp: true } });
+    const api = (await manager.getApi()) as unknown as {
+      signUpEmail(input: { body: { email: string; password: string; name: string } }): Promise<unknown>;
+    };
+
+    await api.signUpEmail({ body: { email: NEW, password: PASSWORD, name: 'Someone' } });
+    await api.signUpEmail({ body: { email: EXISTING, password: PASSWORD, name: 'Someone' } });
+
+    expect(sorted(email.settled)).toEqual(sorted([[VERIFY, NEW], [NOTICE, EXISTING]]));
+  });
+
+  it('the /send-verification-email resend still awaits its send and reports one that failed', async () => {
+    // A deployment where a new sign-up is signed in at once, so the resend
+    // runs for the caller's own session.
+    const engine = await bootEngine();
+    let status: 'sent' | 'failed' = 'sent';
+    const email = gatedEmail(async () => {}, () => status);
+    const manager = makeManager(engine, email, { ...OPEN, emailAndPassword: { requireEmailVerification: false } });
+    const signedUp = await signUp(manager, NEW);
+    expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+    const cookie = signedUp.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+    const resend = () =>
+      manager.handleRequest(
+        new Request(`${AUTH}/send-verification-email`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: BASE, cookie },
+          body: JSON.stringify({ email: NEW }),
+        }),
+      );
+
+    const sent = await resend();
+    expect(sent.status, await sent.clone().text()).toBe(200);
+    expect(await sent.json()).toEqual({ status: true });
+    expect(email.settled).toEqual([[VERIFY, NEW]]);
+
+    status = 'failed';
+    const failed = await resend();
+    expect(failed.status, await failed.clone().text()).toBe(500);
+    expect(email.settled).toEqual([[VERIFY, NEW], [VERIFY, NEW]]);
   });
 });
