@@ -5,7 +5,9 @@
  * answer: a per-type read that fails for a type this runtime serves refuses the
  * export, naming the package and the type, instead of answering 200 without that
  * collection. Only a type the runtime does not serve (absent from its live type
- * vocabulary, `getMetaTypes`) is still skipped.
+ * vocabulary, `getMetaTypes`) is still skipped. The whole-deployment bundle,
+ * `GET /packages/export`, composes that export, so it refuses through the same
+ * producer, naming both, with no second check of its own.
  *
  * The protocol is a double and the door is the real dispatcher. The same throw
  * through the real protocol, on a real boot, is the dogfood file
@@ -32,7 +34,9 @@ const system = (): any => ({ request: {}, environmentId: 'platform', executionCo
 function make(protocol: any) {
     const registry = {
         getPackage: vi.fn((id: string) => ({ id, manifest: { id, name: id, version: '1.0.0' } })),
-        getAllPackages: vi.fn().mockReturnValue([]),
+        getAllPackages: vi.fn().mockReturnValue([
+            { id: PKG, source: 'authored', enabled: true, manifest: { id: PKG, name: PKG, version: '1.0.0' } },
+        ]),
     };
     const kernel: any = {
         context: {
@@ -62,6 +66,9 @@ function protocolWith(failing: string, thrown: unknown, served: string[] | null 
 
 const exportOf = async (protocol: any) =>
     (await make(protocol).handlePackages(`/${encodeURIComponent(PKG)}/export`, 'GET', undefined, {}, system())).response as any;
+
+const bundleOf = async (protocol: any) =>
+    (await make(protocol).handlePackages('/export', 'GET', undefined, {}, system())).response as any;
 
 const refusalOf = (response: any) => ({
     status: response?.status,
@@ -127,5 +134,34 @@ describe('[#29760] GET /packages/:id/export refuses on a failed read of a type t
         const response = await exportOf(protocol);
         expect(response?.status, JSON.stringify(response?.body)).toBe(200);
         expect(protocol.getMetaTypes).not.toHaveBeenCalled();
+    });
+});
+
+describe('[#29760] GET /packages/export refuses through the per-package export it composes', () => {
+    it('a failed read of a served type refuses the bundle with the read\'s status and code, naming the package and the type', async () => {
+        const thrown = Object.assign(new Error('metadata service unavailable'), { status: 503, code: 'SERVICE_UNAVAILABLE' });
+        const response = await bundleOf(protocolWith('dashboard', thrown));
+        expect(response?.status, JSON.stringify(response?.body)).not.toBe(200);
+        expect(response?.body?.data).toBeUndefined();
+        const refusal = refusalOf(response);
+        expect({ status: refusal.status, code: refusal.code }).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(refusal.message).toContain(`'${PKG}'`);
+        expect(refusal.message).toContain(`'dashboard'`);
+    });
+
+    it('an undeclared throw refuses the bundle 500, naming the package and the type', async () => {
+        const refusal = refusalOf(await bundleOf(protocolWith('dashboard', new Error('overlay read failed'))));
+        expect({ status: refusal.status, code: refusal.code }).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+        expect(refusal.message).toContain(`'${PKG}'`);
+        expect(refusal.message).toContain(`'dashboard'`);
+    });
+
+    it('CONTROL: a throwing read of a type the runtime does not serve leaves the bundle 200, the entry without it', async () => {
+        const response = await bundleOf(protocolWith('dashboard', new Error('no such type here'), ['object']));
+        expect(response?.status, JSON.stringify(response?.body)).toBe(200);
+        const [entry] = response.body.data.packages;
+        expect(entry.id).toBe(PKG);
+        expect(entry.objects.map((o: any) => o.name)).toEqual(['ledger_entry']);
+        expect(entry.dashboards).toBeUndefined();
     });
 });
