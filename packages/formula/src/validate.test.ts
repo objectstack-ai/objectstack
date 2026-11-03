@@ -771,18 +771,48 @@ describe('validateExpression (ADR-0032)', () => {
       expect(r.ok).toBe(false);
       expect(r.warnings).toHaveLength(0);
       expect(r.errors).toHaveLength(1);
-      expect(r.errors[0]).toMatchObject({
-        code: 'type-mismatch',
-        params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name', outcome: 'fail-closed' },
+      // [#29926] Its own code: the fail-closed sentence is not the warning's.
+      expect(r.errors[0]).toEqual({
+        source: 'record.name > 5',
+        message: expect.any(String),
+        code: 'type-mismatch-fail-closed',
+        params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name' },
       });
       expect(r.errors[0].message).not.toMatch(/evaluates to null/);
       const bool = validateExpression('predicate', 'record.is_active > 0', { ...schema, faultOutcome: 'fail-closed' });
-      expect(bool.errors.map((e) => e.code)).toEqual(['type-mismatch']);
+      expect(bool.errors.map((e) => e.code)).toEqual(['type-mismatch-fail-closed']);
       // The conversions the message names validate clean in this dialect.
       for (const fixed of ['size(record.name) > 5', 'double(record.name) > 5']) {
         const ok = validateExpression('predicate', fixed, { ...schema, faultOutcome: 'fail-closed' });
         expect([ok.errors, ok.warnings], fixed).toEqual([[], []]);
       }
+    });
+
+    // [#29926] The two other outcomes a caller can declare, each an error
+    // under its own code, worded for what that runtime does.
+    it('errors with the run-fails wording where the caller declares a flow condition (#29926)', () => {
+      const flat = { ...schema, scope: 'flattened' as const, faultOutcome: 'run-fails' as const };
+      const r = validateExpression('predicate', 'name > 5', flat);
+      expect(r.warnings).toHaveLength(0);
+      expect(r.errors.map((e) => [e.code, e.params])).toEqual([
+        ['type-mismatch-run-fails', { operands: 'string > int', operator: '>', held: 'text', reference: 'name' }],
+      ]);
+      expect(r.errors[0].message).toContain('fails the run');
+      expect(r.errors[0].message).toContain('the write that fired it still lands');
+      expect(r.errors[0].message).not.toMatch(/evaluates to null|is refused/);
+      for (const fixed of ['size(name) > 5', 'double(name) > 5']) {
+        const ok = validateExpression('predicate', fixed, flat);
+        expect([ok.errors, ok.warnings], fixed).toEqual([[], []]);
+      }
+    });
+
+    it('errors with the skipped-advisory wording where the caller declares fail-open (#29926)', () => {
+      const r = validateExpression('predicate', 'record.name > 5', { ...schema, faultOutcome: 'fail-open' });
+      expect(r.warnings).toHaveLength(0);
+      expect(r.errors.map((e) => e.code)).toEqual(['type-mismatch-fail-open']);
+      expect(r.errors[0].message).toContain('the write proceeds');
+      expect(r.errors[0].message).toContain('its advisory never fires');
+      expect(r.errors[0].message).not.toMatch(/evaluates to null|is refused/);
     });
 
     it('warns on a text field ordered against a number', () => {

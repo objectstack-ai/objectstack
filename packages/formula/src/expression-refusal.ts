@@ -57,6 +57,18 @@ export type CelFieldRole = Exclude<FieldRole, 'template'>;
  */
 export type ExpressionSourceKind = 'array' | 'object' | 'number' | 'boolean' | 'bigint' | 'symbol' | 'function';
 
+/**
+ * The params every `type-mismatch*` code interpolates: the CEL operand types,
+ * the `operator`, what the field holds, and the field as written when known.
+ * The four codes differ in the outcome their sentence states, never in params.
+ */
+interface TypeMismatchParams {
+  readonly operands: string;
+  readonly operator: string;
+  readonly held: 'text' | 'boolean';
+  readonly reference?: string;
+}
+
 /** Code → the params its message interpolates. The keys ARE the closed set. */
 export interface ExpressionRefusalParams {
   /** An envelope whose `source` is present but is not text. */
@@ -169,18 +181,30 @@ export interface ExpressionRefusalParams {
    */
   'date-duration-value': { readonly reference?: string };
   /**
-   * A text or boolean field used with an arithmetic or ordering `operator`
-   * against a number. A WARNING (the expression reads null) unless `outcome`
-   * is `'fail-closed'`: the site refuses the write it guards when the
-   * expression faults, and the verdict is an ERROR (#29904).
+   * WARNING, never an error: a text or boolean field used with an arithmetic
+   * or ordering `operator` against a number, at a site where a fault reads
+   * null (a formula field) or whose fault outcome the caller did not declare.
    */
-  'type-mismatch': {
-    readonly operands: string;
-    readonly operator: string;
-    readonly held: 'text' | 'boolean';
-    readonly reference?: string;
-    readonly outcome?: 'fail-closed';
-  };
+  'type-mismatch': TypeMismatchParams;
+  /**
+   * [#29926] ERROR: the same mismatch at a site that FAILS CLOSED — the
+   * expression faulting refuses the write (or aborts the operation a hook
+   * guards). Served as `type-mismatch` with `outcome: 'fail-closed'` by #29904
+   * until this code gave the sentence its own name.
+   */
+  'type-mismatch-fail-closed': TypeMismatchParams;
+  /**
+   * [#29926] ERROR: the same mismatch in a record-triggered flow's start or
+   * edge condition — the run fails at the condition, the write that fired it
+   * lands.
+   */
+  'type-mismatch-run-fails': TypeMismatchParams;
+  /**
+   * [#29926] ERROR: the same mismatch in an advisory (`warning` / `info`)
+   * validation rule — the rule is skipped, the write proceeds, and the
+   * advisory never fires.
+   */
+  'type-mismatch-fail-open': TypeMismatchParams;
   /**
    * WARNING, never an error: a bare identifier in a flattened condition that
    * is one typo away from a field. Absent `objectName` reads "the trigger object".
@@ -243,6 +267,9 @@ const CODE_TABLE = {
   'date-text-arithmetic': true,
   'date-duration-value': true,
   'type-mismatch': true,
+  'type-mismatch-fail-closed': true,
+  'type-mismatch-run-fails': true,
+  'type-mismatch-fail-open': true,
   'field-near-miss': true,
   'traversal-bare-and-traversed': true,
   'traversal-multi-hop': true,

@@ -113,8 +113,7 @@ describe('validate_expression MCP tool (#1928)', () => {
   it('errors on a text field ordered against a number at a validation site (#29904)', async () => {
     const r = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'record.title > 5', site: 'validation' });
     expect(r.ok).toBe(false);
-    expect(r.errors.map((e: any) => e.code)).toEqual(['type-mismatch']);
-    expect(r.errors[0].params.outcome).toBe('fail-closed');
+    expect(r.errors.map((e: any) => e.code)).toEqual(['type-mismatch-fail-closed']);
     expect(r.warnings).toHaveLength(0);
   });
 
@@ -122,8 +121,14 @@ describe('validate_expression MCP tool (#1928)', () => {
     const ok = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'stage == "won" && amount > 1000', site: 'flow_condition' });
     expect(ok.ok).toBe(true);
     expect(ok.warnings).toHaveLength(0);
-    const warn = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'title * 2 > 10', site: 'flow_condition' });
-    expect(warn.warnings.some((w: any) => /type mismatch/i.test(w.message))).toBe(true);
+    // [#29926] A flow condition fails the run on the fault, and the publish
+    // gate refuses the comparison on a record-triggered flow; the tool's
+    // `flow_condition` site answers what the gate will.
+    const bad = await validate(runtime, bridge, { objectName: 'crm_opportunity', expression: 'title * 2 > 10', site: 'flow_condition' });
+    expect(bad.ok).toBe(false);
+    expect(bad.warnings).toHaveLength(0);
+    expect(bad.errors.map((e: any) => e.code)).toEqual(['type-mismatch-run-fails']);
+    expect(bad.errors[0].message).toContain('fails the run');
   });
 
   it('errors clearly when the object does not exist', async () => {
