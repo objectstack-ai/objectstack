@@ -14,7 +14,8 @@
  *
  * Director batch #195 item 1, letter A (objectui#9511) made a record id a
  * `string` wherever METADATA names one, and extended it as "the same
- * principle" to `CommentEntry.recordId` / `MentionNotification.recordId`. The
+ * principle" to `CommentEntry.recordId` and to the `recordId` of a mention
+ * notification interface that has since been retired with its only reader. The
  * two below are runtime / API shapes that ruling did not name; carrying the
  * rule to them is the `domain:spec` seat's inheritance decision in the claim on
  * objectui#10078. Each carried the same id with the old `string | number`
